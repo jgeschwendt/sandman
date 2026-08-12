@@ -1,0 +1,23 @@
+{
+  "name": "sandman-sketch",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Locally-served Excalidraw wired to design/*.excalidraw for pair-drawing with Claude.",
+  "scripts": {
+    "build": "vite build && node scripts/copy-fonts.mjs",
+    "dev": "vite",
+    "serve": "node server.js",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.0.5",
+    "playwright": "1.62.1",
+    "vite": "8.2.0"
+  }
+}

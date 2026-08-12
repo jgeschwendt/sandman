@@ -1,0 +1,6 @@
+[exhaustiveness]
+# `.github` is CI wiring, `design` holds excalidraw scenes (documents), `docs`
+# is the plan (markdown + ui-styled page), `tools` is the vendored sketch
+# pair-drawing app — none is code reachable from the router; the same reason
+# orrery's excludes carry config/ and priv/.
+exclude = [".github", "_build", "deps", "design", "docs", "node_modules", "target", "tools"]

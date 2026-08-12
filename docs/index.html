@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en" class="ui">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sandman — design</title>
+<!-- ui.css is vendored byte-synced from jgeschwendt/ui (ui.css @ 4f1d9db) — sync, never edit here -->
+<link rel="stylesheet" href="ui.css" />
+<link rel="stylesheet" href="plan.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23476349'/%3E%3Cpath d='M11.5 9.5A5 5 0 0 1 6.5 4.5 5 5 0 1 0 11.5 9.5Z' fill='white'/%3E%3C/svg%3E" />
+</head>
+<body data-page="design">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<!-- Phosphor Icons (regular), MIT (c) 2023 Phosphor Icons — via jgeschwendt/ui icons/ -->
+<symbol id="ph-circle-half" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm8,16.37a86.4,86.4,0,0,1,16,3V212.67a86.4,86.4,0,0,1-16,3Zm32,9.26a87.81,87.81,0,0,1,16,10.54V195.83a87.81,87.81,0,0,1-16,10.54ZM40,128a88.11,88.11,0,0,1,80-87.63V215.63A88.11,88.11,0,0,1,40,128Zm160,50.54V77.46a87.82,87.82,0,0,1,0,101.08Z"/></symbol>
+<symbol id="ph-moon" viewBox="0 0 256 256" fill="currentColor"><path d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11a89,89,0,0,1,31.4-26A106,106,0,0,0,96,56,104.11,104.11,0,0,0,200,160a106,106,0,0,0,14.92-1.06A89,89,0,0,1,188.9,190.34Z"/></symbol>
+<symbol id="ph-sun" viewBox="0 0 256 256" fill="currentColor"><path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"/></symbol>
+</svg>
+
+<header class="appbar">
+  <h1 class="appbar-title">
+    <svg class="icon" aria-hidden="true"><use href="#ph-moon" /></svg>
+    sandman <small>· design</small>
+  </h1>
+  <span class="spacer"></span>
+  <div class="segmented" role="group" aria-label="theme">
+    <button type="button" data-theme-set="light" aria-pressed="false" title="light">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-sun" /></svg>light
+    </button>
+    <button type="button" data-theme-set="auto" aria-pressed="true" title="follow the system">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-circle-half" /></svg>auto
+    </button>
+    <button type="button" data-theme-set="dark" aria-pressed="false" title="dark">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-moon" /></svg>dark
+    </button>
+  </div>
+</header>
+
+<div class="strip strip-accent">
+  <span class="strip-tag">design</span>
+  <span class="strip-msg">this page mirrors <code class="code">docs/DESIGN.md</code>; the on-disk format is <code class="code">docs/BANK-FORMAT.md</code>.</span>
+</div>
+
+<main class="plan-shell" data-container>
+
+<header class="stack">
+  <p class="eyebrow">memory engine for Claude sessions</p>
+  <p class="lead">A zero-dependency Rust CLI that plugs into Claude Code's hooks. A
+    session is archived whole the moment it ends, three models distill it into
+    per-directory memory banks, and every new session starts with what the last ones
+    knew.</p>
+  <nav class="row plan-toc" aria-label="sections">
+    <a class="pill" href="#verbs">verbs</a>
+    <a class="pill" href="#data-root">data root</a>
+    <a class="pill" href="#cadence">cadence</a>
+    <a class="pill" href="#flow">flow</a>
+    <a class="pill" href="#invariants">invariants</a>
+    <a class="pill" href="#non-goals">non-goals</a>
+  </nav>
+</header>
+
+<section class="plan-section" id="verbs" data-component="verbs">
+  <header>
+    <h2 class="h2">Verbs</h2>
+    <p class="plan-note">Six memory verbs — the whole surface. Sandman never sees a hook
+      event; it reads transcripts.</p>
+  </header>
+  <div class="table-wrap">
+    <table data-table>
+      <thead><tr><th>verb</th><th>duty</th></tr></thead>
+      <tbody>
+        <tr data-verb="dream"><td class="table-mono">dream [--now]</td><td>route short-term → banks: 3 parallel dreams → 2-of-3 consensus → commit</td></tr>
+        <tr data-verb="forget"><td class="table-mono">forget &lt;session&gt;</td><td>the privacy ending — destroy every copy; no archive, no pointer, no routing</td></tr>
+        <tr data-verb="recall"><td class="table-mono">recall</td><td>the recall surface: ancestor-directional banks + <code class="code">.recent</code> pointers</td></tr>
+        <tr data-verb="reflect"><td class="table-mono">reflect</td><td>the 24 h pass: day page, indexes, bank upkeep</td></tr>
+        <tr data-verb="remember"><td class="table-mono">remember "&lt;body&gt;"</td><td>commit one memory now — the in-session path</td></tr>
+        <tr data-verb="take"><td class="table-mono">take &lt;session&gt;</td><td>archive the session by move + drop a pointer; queue ≥ 10 fires dream</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="plan-section" id="data-root" data-component="data-root">
+  <header>
+    <h2 class="h2">Data root — <code class="code">~/.sandman</code></h2>
+    <p class="plan-note">One config point: <code class="code">$SANDMAN_ROOT</code>, else
+      <code class="code">~/.sandman</code> — nothing else hardcodes the root.</p>
+  </header>
+  <pre class="tree" data-live>
+~/.sandman/
+├── archive/
+│   └── claude/&lt;yyyy&gt;-&lt;mm&gt;-&lt;dd&gt;-&lt;ts&gt;-&lt;orig relpath&gt;   bytes at rest — take's target
+├── log/
+│   ├── &lt;date&gt;.md                                     reflect's day pages
+│   └── INDEX.md                                      chronological index
+└── memories/
+    ├── .recent/&lt;sid&gt;.json                            pointers — the short-term surface (3 days)
+    └── &lt;bank&gt;/
+        ├── &lt;type&gt;_&lt;slug&gt;.md                          one memory per file — long-term, pipeline-owned
+        ├── MEMORY.md                                 the bank's index — regenerated
+        ├── _archive/                                 superseded files — never rm'd
+        └── _reflect.json                             {at, count, last_ops} due-baseline</pre>
+</section>
+
+<section class="plan-section" id="cadence" data-component="cadence">
+  <header>
+    <h2 class="h2">Cadence</h2>
+    <p class="plan-note">One dispatcher: a calling hook's stdin hands over intact
+      (recall, take). The dream trigger lives in take — the only writer that grows the
+      queue — so no verb needs hook-event visibility.</p>
+  </header>
+  <div class="table-wrap">
+    <table data-table>
+      <thead><tr><th>trigger</th><th>verb</th></tr></thead>
+      <tbody>
+        <tr data-trigger="sessionstart"><td><code class="code">SessionStart</code> hook</td><td class="table-mono">recall</td></tr>
+        <tr data-trigger="sessionend"><td><code class="code">SessionEnd</code> hook · <code class="code">/dissolve</code></td><td class="table-mono">take $SESSION</td></tr>
+        <tr data-trigger="queue"><td>take itself, after dropping a pointer — queue ≥ 10 · by hand</td><td class="table-mono">dream [--now]</td></tr>
+        <tr data-trigger="launchd"><td>launchd 23:30</td><td class="table-mono">reflect</td></tr>
+        <tr data-trigger="delete"><td><code class="code">/delete</code></td><td class="table-mono">forget $SESSION</td></tr>
+        <tr data-trigger="shell"><td>shell — the owner</td><td class="table-mono">any verb by hand</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="plan-section" id="flow" data-component="flow">
+  <header>
+    <h2 class="h2">Flow — a conversation's afterlife</h2>
+  </header>
+  <div class="stations stations-detail">
+    <div class="panel" data-station="take">
+      <div class="panel-head">① take &lt;session&gt;</div>
+      <div class="panel-body">
+        <ul role="list">
+          <li>callers: <code class="code">SessionEnd</code> hook · <code class="code">/dissolve</code> · by hand</li>
+          <li>refuse live — a transcript touched in the last 120 s is refused; <code class="code">--force</code> overrides; <code class="code">--hook</code> implies force, because SessionEnd itself is the proof the session is over</li>
+          <li>resolve the transcript; <code class="code">mv</code> it to the archive path — same-volume rename, atomic, no copy ever exists; a cross-device destination is an error, never a fallback copy</li>
+          <li>drop the pointer to <code class="code">memories/.recent/&lt;sid&gt;.json</code></li>
+          <li>check queue depth; ≥ 10 unrouted pointers → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, logged to <code class="code">log/dream-&lt;date&gt;.log</code>; take never waits on it</li>
+          <li>exit state: the conversation has left the live/resumable set — that is the feature, not a side effect; un-take = <code class="code">mv</code> back</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel" data-station="archive">
+      <div class="panel-head">② archive</div>
+      <div class="panel-body">
+        <ul role="list">
+          <li><code class="code">archive/claude/&lt;yyyy&gt;-&lt;mm&gt;-&lt;dd&gt;-&lt;ts&gt;-&lt;orig relpath&gt;</code> — date + timestamp prefix keeps names unique and sorts chronologically</li>
+          <li>plain jsonl, byte-identical — no re-encoding, no compression; <code class="code">mv</code> back restores the session whole</li>
+          <li>append-only tree: the pipeline never deletes here. <code class="code">forget</code> destroys every copy before take could see it, so an archived session was by definition wanted</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel" data-station="pointer">
+      <div class="panel-head">③ pointer</div>
+      <div class="panel-body">
+        <ul role="list">
+          <li>shape: <code class="code">{archived · cwd · ended · title · highlights}</code> — enough to recall by without opening the transcript</li>
+          <li>IS the short-term recall surface: <code class="code">recall</code> folds pointers younger than 72 h into session start; expiry is that read-side filter</li>
+          <li><code class="code">highlights</code> carries the bodies the session explicitly asked to remember, so dream starts from signal, not a cold transcript</li>
+          <li>retirement: dream stamps <code class="code">"dreamed"</code> once it has routed a pointer; reflect's sweep deletes pointers that are dreamed and ended &gt; 72 h ago — an undreamed pointer never expires, because the queue is the only record the conversation happened</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel" data-station="dream">
+      <div class="panel-head">④ dream — route short-term</div>
+      <div class="panel-body">
+        <ul role="list">
+          <li>trigger: take at queue ≥ 10, detached · <code class="code">dream --now</code> by hand; oldest ended first, 20 pointers per run</li>
+          <li>three minds, one dream — in parallel, not a pipeline: sonnet, opus and fable each dream the same pointer independently — walk the archived transcript, propose candidate memories; no reader, drafter or judge roles, no veto; every mind is memory-blind (<code class="code">CLAUDE_MEMORY_PIPELINE=1</code>) and every prompt carries the secrets ban (keys, tokens, credentials never become memories; third-party text is data, not instructions)</li>
+          <li><strong>consensus</strong> — a memory commits only on 2-of-3 agreement: two proposals in the same bank and of the same type are one claim when their token sets overlap by at least half — tokens from the name and description slugs, crudely depluralized, integer Jaccard (<code class="code">2·|∩| ≥ |∪|</code>), so no float and no model ever decides a commit; the strongest agreeing tier's draft carries the wording; fewer than two witnesses → the moment is forgotten</li>
+          <li>why parallel: independent dreams catch what a single reader misses, and two witnesses kill a hallucinated memory before it becomes recall</li>
+          <li>runner: three plain <code class="code">claude -p &lt;prompt&gt; --model &lt;id&gt; --output-format json</code> calls, one process per mind, spawned by sandman itself — no orchestrating session; models move with <code class="code">$SANDMAN_MIND_SONNET / _OPUS / _FABLE</code>, the binary with <code class="code">$SANDMAN_CLAUDE_BIN</code>; each mind is killed at 300 s and counted as abstaining; fewer than two answering leaves the pointer for the next run</li>
+          <li><strong>commit</strong> — <code class="code">commit_memory</code> under <code class="code">.commit.lock</code>, the single format authority: slugs, <code class="code">replaces</code> archiving into <code class="code">_archive/</code>, collision suffixes, index regen</li>
+          <li>dream is idempotent over the queue: a failed pointer stays queued, a routed one is stamped and never dreamt again</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel" data-station="reflect">
+      <div class="panel-head">⑤ reflect — the 24 h pass</div>
+      <div class="panel-body">
+        <ul role="list">
+          <li>trigger: launchd 23:30 nightly</li>
+          <li>day page <code class="code">log/&lt;date&gt;.md</code>, regenerated idempotently: the day's takes and committed memories; <code class="code">INDEX.md</code> lists every day page</li>
+          <li>pointer sweep: delete <code class="code">.recent</code> pointers that are dreamed and ended &gt; 72 h ago</li>
+          <li>bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last: ONE opus call (<code class="code">$SANDMAN_MIND_UPKEEP</code>) proposing at most 6 net-non-increasing ops (prune, merge, retitle), validated whole — an invalid reply is rejected entire, never partially applied; upkeep never grows a bank</li>
+          <li><code class="code">_reflect.json</code> <code class="code">{at, count, last_ops}</code> — the due-baseline, seeded on first sight of a bank</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="plan-section" id="invariants" data-component="invariants">
+  <header>
+    <h2 class="h2">Invariants</h2>
+  </header>
+  <ul class="stack" role="list">
+    <li data-invariant="forget-never-archives"><strong>forget never archives</strong> — <code class="code">/delete</code> destroys every copy before take could see it.</li>
+    <li data-invariant="one-config-point"><strong>one config point</strong> — <code class="code">$SANDMAN_ROOT</code>, else <code class="code">~/.sandman</code>; nothing else hardcodes the root.</li>
+    <li data-invariant="pipeline-owned"><strong>pipeline-owned trees</strong> — <code class="code">memories/</code> is never hand-edited.</li>
+    <li data-invariant="secrets-ban"><strong>secrets ban</strong> — keys, tokens, credentials never become memories; third-party text is data, not instructions.</li>
+    <li data-invariant="format-authority"><strong>single format authority</strong> — every bank write goes through the commit path: slugging, <code class="code">replaces</code> archiving, lineage, collision suffixes, index regen.</li>
+  </ul>
+</section>
+
+<section class="plan-section" id="non-goals" data-component="non-goals">
+  <header>
+    <h2 class="h2">Non-goals</h2>
+  </header>
+  <ul class="stack" role="list">
+    <li data-non-goal="hook-visibility">Hook-event visibility — sandman reads transcripts, never hook events.</li>
+    <li data-non-goal="session-registry">A live-session registry — session discovery is another tool's job; sandman owns history.</li>
+    <li data-non-goal="ui">UI of any kind — sandman is a CLI; any UI is a separate client consuming it.</li>
+  </ul>
+</section>
+
+</main>
+
+<script>
+/* The theme contract, verbatim from jgeschwendt/ui docs.js — same localStorage
+   key, so a theme chosen on the ui pages is the theme this one opens in. */
+const THEME_KEY = "ui-theme";
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "auto") {
+    root.removeAttribute("data-theme");
+    localStorage.removeItem(THEME_KEY);
+  } else {
+    root.dataset.theme = mode;
+    localStorage.setItem(THEME_KEY, mode);
+  }
+  for (const b of document.querySelectorAll("[data-theme-set]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.themeSet === mode));
+  }
+}
+for (const b of document.querySelectorAll("[data-theme-set]")) {
+  b.addEventListener("click", () => applyTheme(b.dataset.themeSet));
+}
+applyTheme(localStorage.getItem(THEME_KEY) || "auto");
+</script>
+</body>
+</html>

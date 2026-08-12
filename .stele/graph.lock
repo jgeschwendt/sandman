@@ -1,0 +1,95 @@
+{
+  "adrs": {},
+  "landmarks": {
+    "format-authority": {
+      "file": "src/lib.rs",
+      "line": 12,
+      "node": "src"
+    }
+  },
+  "nodes": {
+    "/": {
+      "budget": null,
+      "claims": [
+        {
+          "anchor": "lm:format-authority",
+          "enforced_by": null,
+          "id": "format-authority",
+          "kind": "invariant",
+          "resolved": "src/lib.rs:12",
+          "text": "single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen",
+          "verified": {
+            "digest": "08ffd34819365da145ab6536764117600151de2829cd6bf0649d21b860fe5c54",
+            "sha": "8d97a43a0ce70ae44ad2cd437d7d12cb62d49f5e"
+          }
+        },
+        {
+          "anchor": "README.md#sandman",
+          "enforced_by": null,
+          "id": "sandman",
+          "kind": "invariant",
+          "resolved": "README.md:1",
+          "text": "one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it",
+          "verified": {
+            "digest": null,
+            "sha": "8d97a43a0ce70ae44ad2cd437d7d12cb62d49f5e"
+          }
+        }
+      ],
+      "commands": {
+        "lint": "cargo clippy --all-targets -- -D warnings && cargo fmt --check",
+        "test": "cargo test"
+      },
+      "contains": [
+        "src",
+        "tests"
+      ],
+      "declared": {
+        "allow": [],
+        "decided_by": [],
+        "depends": []
+      },
+      "extracted": {
+        "imports": []
+      },
+      "id": "/",
+      "kind": "system",
+      "purpose": "sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes); a zero-dependency Rust CLI driven by Claude Code hooks and launchd."
+    },
+    "src": {
+      "budget": null,
+      "claims": [],
+      "commands": {},
+      "contains": [],
+      "declared": {
+        "allow": [],
+        "decided_by": [],
+        "depends": []
+      },
+      "extracted": {
+        "imports": []
+      },
+      "id": "src",
+      "kind": "container",
+      "purpose": "crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call"
+    },
+    "tests": {
+      "budget": null,
+      "claims": [],
+      "commands": {},
+      "contains": [],
+      "declared": {
+        "allow": [],
+        "decided_by": [],
+        "depends": []
+      },
+      "extracted": {
+        "imports": []
+      },
+      "id": "tests",
+      "kind": "container",
+      "purpose": "integration tests — `cli.rs` drives the built binary against a temp $HOME/$SANDMAN_ROOT; `real_banks.rs` round-trips the operator's live banks read-only (ignored by default, `cargo test -- --ignored`)"
+    }
+  },
+  "version": 1
+}

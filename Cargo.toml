@@ -1,0 +1,40 @@
+[package]
+name = "sandman-cli"
+version = "0.1.0"
+edition = "2024"
+description = "sandman — memory engine for Claude sessions: banks, extraction pipeline, reconcile pass"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "sandman"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sandman"
+path = "src/main.rs"
+
+[dependencies]
+
+# Maximalist opt-out (the house lint discipline, verbatim): turn on the whole
+# strict, *stable* set (clippy::pedantic), then opt out the few we disagree
+# with, each with a reason. `cargo clippy -- -D warnings` promotes all of this
+# to errors.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Inline `#[allow]`s must carry a reason — the `noInlineConfig` discipline.
+allow_attributes_without_reason = "warn"
+# --- opt-outs (with rationale) ---
+# `memory::memory_root`, `banks::banks`… repeating the module name reads fine here.
+module_name_repetitions = "allow"
+# ≈ eslint `max-lines-per-function: off`.
+too_many_lines = "allow"
+# We don't yet document every `Result`'s Err variant in prose.
+missing_errors_doc = "allow"
+# CLI dispatch handlers keep a uniform `Result` signature even when infallible.
+unnecessary_wraps = "allow"
+
+[profile.release]
+strip = true
