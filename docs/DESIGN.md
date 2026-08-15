@@ -46,7 +46,7 @@ One config point: `$SANDMAN_ROOT`, else `~/.sandman` — nothing else hardcodes 
 | `SessionStart` hook | `recall` |
 | `SessionEnd` hook · `/dissolve` | `take $SESSION` |
 | take itself, after dropping a pointer — queue ≥ 10 · by hand | `dream [--now]` |
-| launchd 23:30 | `reflect` |
+| nightly tick 23:30 | `reflect` |
 | `/delete` | `forget $SESSION` |
 | shell — the owner | any verb by hand |
 
@@ -124,7 +124,8 @@ hook-event visibility.
 
 ### ⑤ reflect — the 24 h pass
 
-- Trigger: launchd 23:30 nightly.
+- Trigger: a nightly tick at 23:30 — launchd, cron, or any scheduler; reflect is
+  idempotent, so a double-fire or an early run is harmless.
 - Day page `log/<date>.md`, regenerated idempotently: the day's takes and the day's
   committed memories. `INDEX.md` lists every day page.
 - Pointer sweep: delete `.recent` pointers that are dreamed and ended > 72 h ago.

@@ -116,7 +116,7 @@
         <tr data-trigger="sessionstart"><td><code class="code">SessionStart</code> hook</td><td class="table-mono">recall</td></tr>
         <tr data-trigger="sessionend"><td><code class="code">SessionEnd</code> hook · <code class="code">/dissolve</code></td><td class="table-mono">take $SESSION</td></tr>
         <tr data-trigger="queue"><td>take itself, after dropping a pointer — queue ≥ 10 · by hand</td><td class="table-mono">dream [--now]</td></tr>
-        <tr data-trigger="launchd"><td>launchd 23:30</td><td class="table-mono">reflect</td></tr>
+        <tr data-trigger="nightly"><td>nightly tick 23:30</td><td class="table-mono">reflect</td></tr>
         <tr data-trigger="delete"><td><code class="code">/delete</code></td><td class="table-mono">forget $SESSION</td></tr>
         <tr data-trigger="shell"><td>shell — the owner</td><td class="table-mono">any verb by hand</td></tr>
       </tbody>
@@ -181,7 +181,7 @@
       <div class="panel-head">⑤ reflect — the 24 h pass</div>
       <div class="panel-body">
         <ul role="list">
-          <li>trigger: launchd 23:30 nightly</li>
+          <li>trigger: a nightly tick at 23:30 — launchd, cron, or any scheduler; reflect is idempotent, so a double-fire or an early run is harmless</li>
           <li>day page <code class="code">log/&lt;date&gt;.md</code>, regenerated idempotently: the day's takes and committed memories; <code class="code">INDEX.md</code> lists every day page</li>
           <li>pointer sweep: delete <code class="code">.recent</code> pointers that are dreamed and ended &gt; 72 h ago</li>
           <li>bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last: ONE opus call (<code class="code">$SANDMAN_MIND_UPKEEP</code>) proposing at most 6 net-non-increasing ops (prune, merge, retitle), validated whole — an invalid reply is rejected entire, never partially applied; upkeep never grows a bank</li>

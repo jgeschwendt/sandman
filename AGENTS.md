@@ -2,7 +2,7 @@
 
 ```stele
 kind: system
-purpose: sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes); a zero-dependency Rust CLI driven by Claude Code hooks and launchd.
+purpose: sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes); a zero-dependency Rust CLI driven by Claude Code hooks and a nightly tick.
 commands:
   lint: cargo clippy --all-targets -- -D warnings && cargo fmt --check
   test: cargo test

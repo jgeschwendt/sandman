@@ -20,7 +20,7 @@
           "text": "single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen",
           "verified": {
             "digest": "08ffd34819365da145ab6536764117600151de2829cd6bf0649d21b860fe5c54",
-            "sha": "8d97a43a0ce70ae44ad2cd437d7d12cb62d49f5e"
+            "sha": "aa312813749194f679167f7d551c672ee1cbc193"
           }
         },
         {
@@ -32,7 +32,7 @@
           "text": "one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it",
           "verified": {
             "digest": null,
-            "sha": "8d97a43a0ce70ae44ad2cd437d7d12cb62d49f5e"
+            "sha": "aa312813749194f679167f7d551c672ee1cbc193"
           }
         }
       ],
@@ -54,7 +54,7 @@
       },
       "id": "/",
       "kind": "system",
-      "purpose": "sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes); a zero-dependency Rust CLI driven by Claude Code hooks and launchd."
+      "purpose": "sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes); a zero-dependency Rust CLI driven by Claude Code hooks and a nightly tick."
     },
     "src": {
       "budget": null,
