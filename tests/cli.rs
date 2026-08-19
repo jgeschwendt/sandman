@@ -436,6 +436,34 @@ fn recall_is_silent_with_nothing_to_say_and_for_the_pipeline() {
 }
 
 #[test]
+fn take_hook_stays_out_of_the_memory_pipeline() {
+    let machine = Machine::new("pipeline-guard");
+    machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"a dream mind's own session"}}"#,
+    ]);
+    let payload = format!(
+        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code"}}"#
+    );
+
+    // A dream mind's ending is not a session to keep — taking it would feed
+    // the queue that spawned the mind, recursively.
+    let guarded = machine.run_with(
+        &["take", "--hook"],
+        &payload,
+        &[("CLAUDE_MEMORY_PIPELINE", "1")],
+    );
+    assert_eq!(code(&guarded), 0, "{}", stderr(&guarded));
+    assert!(stdout(&guarded).is_empty());
+    assert!(stderr(&guarded).is_empty());
+
+    // The same ending outside the pipeline is taken as ever.
+    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
+}
+
+#[test]
 fn remember_stamps_the_session_from_the_environment() {
     let machine = Machine::new("remember-session");
     let output = machine.run_with(

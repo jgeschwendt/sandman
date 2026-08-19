@@ -198,6 +198,14 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
                 "take --hook reads the session from stdin".to_owned(),
             ));
         }
+        // A dream mind's own ending is not a session to keep: archiving it
+        // feeds the very queue that spawned it, and at depth the next take
+        // spawns another dream — the recursion that flooded the machine with
+        // claude processes on 2026-08-19. Recall already goes silent under
+        // this variable; take must too.
+        if env::var(PIPELINE_ENV).as_deref() == Ok("1") {
+            return Ok(());
+        }
         // SessionEnd itself is the proof the session is over — the hook fires
         // the instant the transcript's last line lands, which is exactly what
         // the by-hand live-window heuristic refuses. Hook mode implies force.
@@ -227,6 +235,15 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
     println!("{}", outcome.archived.display());
     if outcome.dream_due() {
         let root = paths::data_root()?;
+        // A held lock means a run is already draining the queue — starting
+        // another would only fork a process to watch it yield.
+        if dream::lock_held(&root) {
+            eprintln!(
+                "queue at {} — a dream is already running",
+                outcome.queue_depth
+            );
+            return Ok(());
+        }
         match spawn_dream(&root) {
             Ok(log) => eprintln!(
                 "queue at {} — dreaming in the background, logging to {}",

@@ -11,9 +11,10 @@
 //! pass exits 0 either way. Dream is idempotent over the queue.
 
 use std::ffi::OsString;
-use std::fs;
-use std::io::ErrorKind;
+use std::fs::{self, OpenOptions};
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::process;
 use std::thread;
 use std::time::Duration;
 
@@ -37,6 +38,81 @@ pub const POINTERS_PER_RUN: usize = 20;
 pub const RESPONDERS_MIN: usize = 2;
 /// The pointer key dream stamps once it has routed a pointer.
 pub const DREAMED_KEY: &str = "dreamed";
+/// A lock older than this belongs to a run that died holding it. A live run
+/// routes at most [`POINTERS_PER_RUN`] pointers and finishes well inside the
+/// window.
+const LOCK_STALE: Duration = Duration::from_secs(2 * 60 * 60);
+
+/// One dream at a time. Take fires on every session ending, so with a deep
+/// queue every ending would otherwise start another run over the same
+/// pointers — concurrent runs commit the same claims as collision-suffixed
+/// duplicates and multiply model calls without bound (2026-08-19).
+struct Lock {
+    path: PathBuf,
+}
+
+impl Lock {
+    /// The lock, or `None` while another live run holds it. A stale holder is
+    /// swept and the acquire retried once.
+    fn acquire(data_root: &Path) -> Result<Option<Self>> {
+        Self::acquire_with(data_root, LOCK_STALE)
+    }
+
+    /// [`Self::acquire`] with the staleness window as a seam for tests.
+    fn acquire_with(data_root: &Path, older_than: Duration) -> Result<Option<Self>> {
+        // A root that does not exist yet is still an empty queue to drain.
+        fs::create_dir_all(data_root).map_err(|source| Error::io(data_root, source))?;
+        let path = lock_path(data_root);
+        for _ in 0..2 {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut file) => {
+                    let _ = write!(file, "{}", process::id());
+                    return Ok(Some(Self { path }));
+                }
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                    if !stale(&path, older_than) {
+                        return Ok(None);
+                    }
+                    if let Err(source) = fs::remove_file(&path) {
+                        // Lost the sweep to a concurrent acquirer: theirs now.
+                        if source.kind() == ErrorKind::NotFound {
+                            continue;
+                        }
+                        return Err(Error::io(&path, source));
+                    }
+                }
+                Err(source) => return Err(Error::io(&path, source)),
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn lock_path(data_root: &Path) -> PathBuf {
+    data_root.join("dream.lock")
+}
+
+fn stale(path: &Path, older_than: Duration) -> bool {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .is_some_and(|age| age > older_than)
+}
+
+/// Whether a live run holds the lock — for spawn sites that would otherwise
+/// start a redundant process just to have it yield here.
+#[must_use]
+pub fn lock_held(data_root: &Path) -> bool {
+    let path = lock_path(data_root);
+    path.exists() && !stale(&path, LOCK_STALE)
+}
 
 /// How dream reaches the minds. Held apart from the pass so a test can point
 /// the binary at a stub and shorten the timeout without touching the
@@ -74,8 +150,13 @@ pub struct Outcome {
     pub skipped: usize,
 }
 
-/// Route every undreamed pointer, oldest ending first.
+/// Route every undreamed pointer, oldest ending first. Yields empty when
+/// another run already holds the queue.
 pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome> {
+    let Some(_lock) = Lock::acquire(data_root)? else {
+        eprintln!("dream: yielding — another run holds the lock");
+        return Ok(Outcome::default());
+    };
     let pointers = pending(data_root)?;
     let log = paths::run_log(data_root, "dream", Timestamp::now()?);
     let mut outcome = Outcome::default();
@@ -553,7 +634,10 @@ fn unfence(text: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Options, banks_for, dream, object, pending, proposals};
+    use super::{
+        DREAMED_KEY, Lock, Options, Outcome, banks_for, dream, lock_held, lock_path, object,
+        pending, proposals,
+    };
     use crate::memory::MemoryType;
     use crate::mind;
     use crate::testutil::TempDir;
@@ -765,6 +849,55 @@ mod tests {
         format!(
             "{{\"proposals\":[{{\"bank\":\"{bank}\",\"type\":\"project\",\"name\":\"{name}\",\"description\":\"how recall reaches a finished session\",\"body\":\"{body}\"}}]}}"
         )
+    }
+
+    /// Minds must never be consulted by the yielding run, so the binary is a
+    /// name that would fail loudly if it were.
+    fn options_that_must_not_run() -> Options {
+        Options {
+            binary: std::ffi::OsString::from("claude-must-not-run"),
+            minds: mind::trio(),
+            timeout: Duration::from_secs(1),
+        }
+    }
+
+    #[test]
+    fn a_held_lock_makes_a_run_yield_untouched() {
+        let scratch = Scratch::new("dream-lock-held");
+        let pointer = scratch.queue(SID, "2026-08-11T12:00:00Z");
+        fs::write(lock_path(&scratch.root), "held").expect("lock");
+
+        let outcome = dream(&scratch.root, &scratch.home, &options_that_must_not_run())
+            .expect("a held lock is a clean yield, not an error");
+        assert_eq!(outcome, Outcome::default());
+        assert!(lock_held(&scratch.root), "the holder keeps its lock");
+        let raw = fs::read_to_string(&pointer).expect("pointer");
+        assert!(!raw.contains(DREAMED_KEY), "the pointer is the holder's");
+    }
+
+    #[test]
+    fn the_lock_is_released_when_the_run_finishes() {
+        let scratch = Scratch::new("dream-lock-release");
+        fs::create_dir_all(&scratch.root).expect("root");
+
+        let outcome = dream(&scratch.root, &scratch.home, &options_that_must_not_run())
+            .expect("an empty queue is a clean run");
+        assert_eq!(outcome, Outcome::default());
+        assert!(!lock_path(&scratch.root).exists());
+    }
+
+    #[test]
+    fn a_stale_lock_is_swept_and_taken_over() {
+        let scratch = Scratch::new("dream-lock-stale");
+        fs::create_dir_all(&scratch.root).expect("root");
+        fs::write(lock_path(&scratch.root), "dead").expect("stale lock");
+        std::thread::sleep(Duration::from_millis(10));
+
+        let lock = Lock::acquire_with(&scratch.root, Duration::ZERO)
+            .expect("acquire")
+            .expect("a dead holder's lock is taken over");
+        drop(lock);
+        assert!(!lock_path(&scratch.root).exists());
     }
 
     #[cfg(unix)]
