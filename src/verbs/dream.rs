@@ -25,7 +25,7 @@ use crate::consensus::{self, Proposal};
 use crate::error::{Error, Result};
 use crate::json::{self, Value};
 use crate::memory::MemoryType;
-use crate::mind::{self, Abstained, Ask, Mind, Tier};
+use crate::mind::{self, Abstained, Ask, Keep, Mind, Tier};
 use crate::paths;
 use crate::time::Timestamp;
 use crate::transcript;
@@ -38,6 +38,9 @@ pub const POINTERS_PER_RUN: usize = 20;
 pub const RESPONDERS_MIN: usize = 2;
 /// The pointer key dream stamps once it has routed a pointer.
 pub const DREAMED_KEY: &str = "dreamed";
+/// Where a kept transcript files when its pointer names no Claude Code
+/// project to file it under.
+pub const ORPHANS_DIR_NAME: &str = "orphans";
 /// A lock older than this belongs to a run that died holding it. A live run
 /// routes at most [`POINTERS_PER_RUN`] pointers and finishes well inside the
 /// window.
@@ -114,6 +117,21 @@ pub fn lock_held(data_root: &Path) -> bool {
     path.exists() && !stale(&path, LOCK_STALE)
 }
 
+/// The two roots a kept mind transcript travels between: Claude Code writes
+/// it under `projects`, dream moves it under `dream`.
+///
+/// The pair is one setting because half of it is useless — a projects tree
+/// with nowhere to move to leaves the junk sessions behind, and a destination
+/// with no source never fills.
+#[derive(Clone, Debug)]
+pub struct Transcripts {
+    /// `<root>/.dream` — the minds' working directory, and the root every
+    /// kept transcript lands under.
+    pub dream: PathBuf,
+    /// `~/.claude/projects` — where Claude Code writes a mind's transcript.
+    pub projects: PathBuf,
+}
+
 /// How dream reaches the minds. Held apart from the pass so a test can point
 /// the binary at a stub and shorten the timeout without touching the
 /// environment.
@@ -125,16 +143,24 @@ pub struct Options {
     pub minds: Vec<Mind>,
     /// How long each mind may take.
     pub timeout: Duration,
+    /// Where each mind's own transcript is kept. `None` persists none of
+    /// them, which is what a test that does not care about them wants.
+    pub transcripts: Option<Transcripts>,
 }
 
 impl Options {
-    /// The production configuration: binary and models from the environment.
+    /// The production configuration: binary and models from the environment,
+    /// transcripts kept under the roots the dispatcher resolved.
     #[must_use]
-    pub fn from_env() -> Self {
+    pub fn from_env(data_root: &Path, claude_root: &Path) -> Self {
         Self {
             binary: mind::claude_bin(),
             minds: mind::trio(),
             timeout: mind::TIMEOUT_DEFAULT,
+            transcripts: Some(Transcripts {
+                dream: paths::dream_dir(data_root),
+                projects: paths::claude_projects_dir(claude_root),
+            }),
         }
     }
 }
@@ -169,7 +195,7 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
         let mut notes: Vec<String> = Vec::new();
         let mut voices: Vec<(Tier, Proposal)> = Vec::new();
         let mut responders = 0_usize;
-        for (tier, reply) in consult(options, &prompt) {
+        for (tier, reply) in consult(options, keep_for(options, &pointer).as_ref(), &prompt) {
             let read = match reply {
                 Ok(text) => proposals(&text, &keys),
                 Err(abstained) => Err(abstained.as_str().to_owned()),
@@ -486,8 +512,37 @@ Reply with ONLY this JSON object — no prose, no code fence:
 
 // ─── the replies ──────────────────────────────────────────────────────────
 
+/// Where this pointer's minds leave their transcripts. `None` keeps none.
+///
+/// Every mind reading one pointer files under the same session it read, so a
+/// later evaluation can put the three side by side.
+fn keep_for(options: &Options, pointer: &Pointer) -> Option<Keep> {
+    let transcripts = options.transcripts.as_ref()?;
+    let lane = claude_slug(pointer).unwrap_or_else(|| ORPHANS_DIR_NAME.to_owned());
+    Some(Keep {
+        cwd: transcripts.dream.clone(),
+        into: transcripts.dream.join(lane),
+        projects: transcripts.projects.clone(),
+    })
+}
+
+/// The Claude Code project slug the session ran under, read back out of the
+/// archive name `take` built: `<date>-<HHMMSS>-projects-<slug>-<sid>.jsonl`.
+/// `None` for a pointer that names no archive, or one whose name predates the
+/// layout — those file under [`ORPHANS_DIR_NAME`].
+fn claude_slug(pointer: &Pointer) -> Option<String> {
+    let name = pointer.archived.as_deref()?.file_name()?.to_str()?;
+    let flattened = name.strip_suffix(".jsonl")?.split_once("-projects-")?.1;
+    let slug = flattened.strip_suffix(&format!("-{}", pointer.sid))?;
+    (!slug.is_empty()).then(|| slug.to_owned())
+}
+
 /// Ask every mind the same question, at the same time.
-fn consult(options: &Options, prompt: &str) -> Vec<(Tier, std::result::Result<String, Abstained>)> {
+fn consult(
+    options: &Options,
+    keep: Option<&Keep>,
+    prompt: &str,
+) -> Vec<(Tier, std::result::Result<String, Abstained>)> {
     thread::scope(|scope| {
         let handles: Vec<_> = options
             .minds
@@ -495,6 +550,7 @@ fn consult(options: &Options, prompt: &str) -> Vec<(Tier, std::result::Result<St
             .map(|mind| {
                 let request = Ask {
                     binary: options.binary.clone(),
+                    keep: keep.cloned(),
                     model: mind.model.clone(),
                     prompt: prompt.to_owned(),
                     timeout: options.timeout,
@@ -648,6 +704,8 @@ mod tests {
 
     const BANK: &str = "-Users-you-code";
     const SID: &str = "aaaabbbb-cccc-dddd-eeee-ffff00001111";
+    /// The Claude Code project the fabricated sessions ran under.
+    const SLUG: &str = "-Users-you-code";
 
     #[test]
     fn the_object_scan_survives_fences_and_chatter() {
@@ -770,7 +828,8 @@ mod tests {
         fn queue(&self, sid: &str, ended: &str) -> PathBuf {
             let archive = crate::paths::archive_claude_dir(&self.root);
             fs::create_dir_all(&archive).expect("archive dir");
-            let archived = archive.join(format!("2026-08-11-120000-{sid}.jsonl"));
+            // The name `take` builds — the claude project slug is in it.
+            let archived = archive.join(format!("2026-08-11-120000-projects-{SLUG}-{sid}.jsonl"));
             fs::write(
                 &archived,
                 format!(
@@ -810,12 +869,26 @@ mod tests {
                 fs::write(replies_dir.join(format!("{model}.json")), wrapper.render())
                     .expect("canned reply");
             }
+            // The stub stands in for Claude Code's own transcript write, so a
+            // kept run has something to relocate — including a failing one,
+            // which writes before it exits 7.
             crate::testutil::stub_script(
                 &self.home,
                 "claude",
                 &format!(
-                    "model=\"\"\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in --model) model=\"$2\"; shift 2;; *) shift;; esac\ndone\nfile=\"{}/$model.json\"\n[ -f \"$file\" ] || exit 7\ncat \"$file\"\n",
-                    replies_dir.display()
+                    concat!(
+                        "model=\"\"\nsid=\"\"\n",
+                        "while [ $# -gt 0 ]; do case \"$1\" in --model) model=\"$2\"; shift 2;; --session-id) sid=\"$2\"; shift 2;; *) shift;; esac; done\n",
+                        "if [ -n \"$sid\" ]; then\n",
+                        "  mkdir -p \"{projects}/-a-slug\"\n",
+                        "  printf '%s\\n' \"$model\" > \"{projects}/-a-slug/$sid.jsonl\"\n",
+                        "fi\n",
+                        "file=\"{replies}/$model.json\"\n",
+                        "[ -f \"$file\" ] || exit 7\n",
+                        "cat \"$file\"\n",
+                    ),
+                    projects = self.projects().display(),
+                    replies = replies_dir.display(),
                 ),
             )
         }
@@ -825,7 +898,16 @@ mod tests {
                 binary: self.stub(replies).into(),
                 minds: mind::trio(),
                 timeout: Duration::from_secs(20),
+                transcripts: Some(super::Transcripts {
+                    dream: crate::paths::dream_dir(&self.root),
+                    projects: self.projects(),
+                }),
             }
+        }
+
+        /// The fabricated Claude Code projects tree the stub writes into.
+        fn projects(&self) -> PathBuf {
+            self.home.join(".claude").join("projects")
         }
     }
 
@@ -858,6 +940,7 @@ mod tests {
             binary: std::ffi::OsString::from("claude-must-not-run"),
             minds: mind::trio(),
             timeout: Duration::from_secs(1),
+            transcripts: None,
         }
     }
 
@@ -964,6 +1047,74 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_claude_project_is_read_back_out_of_the_archive_name() {
+        let slug = |archived: &str, sid: &str| {
+            super::claude_slug(&super::Pointer {
+                archived: Some(PathBuf::from(archived)),
+                cwd: None,
+                ended: Timestamp::from_unix_seconds(0),
+                ended_iso: String::new(),
+                highlights: Vec::new(),
+                path: PathBuf::new(),
+                sid: sid.to_owned(),
+                title: String::new(),
+                value: crate::json::Value::Object(Vec::new()),
+            })
+        };
+        assert_eq!(
+            slug(
+                "/data/archive/claude/2026-08-19-205555-projects--Users-you-code-sid-1.jsonl",
+                "sid-1"
+            ),
+            Some("-Users-you-code".to_owned())
+        );
+        // A name from before the archive layout, and a pointer with no
+        // archive at all, both file under `orphans`.
+        assert_eq!(
+            slug("/data/archive/claude/2026-08-11-120000-sid.jsonl", "sid"),
+            None
+        );
+        assert_eq!(
+            slug(
+                "/data/archive/claude/2026-08-11-120000-projects--Users-you-other.jsonl",
+                "sid"
+            ),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn every_minds_transcript_is_kept_under_the_sessions_claude_project() {
+        let scratch = Scratch::new("dream-keep");
+        scratch.queue(SID, "2026-08-11T12:00:00Z");
+        let bank = scratch.bank_key();
+        // Two answer, one exits 7 — every outcome still leaves a transcript.
+        let options = scratch.options(&[
+            ("claude-sonnet-5", &reply(&bank, "a claim", "s")),
+            ("claude-fable-5", &reply(&bank, "a claim", "f")),
+        ]);
+
+        dream(&scratch.root, &scratch.home, &options).expect("dream");
+
+        let kept = crate::paths::dream_dir(&scratch.root).join(SLUG);
+        let names: Vec<PathBuf> = fs::read_dir(&kept)
+            .expect("kept dir")
+            .map(|entry| entry.expect("entry").path())
+            .collect();
+        assert_eq!(names.len(), 3, "{names:?}");
+        assert!(
+            names.iter().all(|name| name
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")),
+            "{names:?}"
+        );
+        // Nothing was left in the projects tree for a later `take` to find —
+        // not even the emptied slug directory.
+        assert!(!scratch.projects().join("-a-slug").exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn one_lone_mind_commits_nothing_but_the_pointer_is_still_routed() {
@@ -1047,6 +1198,7 @@ mod tests {
             binary: binary.into(),
             minds: mind::trio(),
             timeout: Duration::from_secs(5),
+            transcripts: None,
         };
 
         let started = std::time::Instant::now();
@@ -1104,6 +1256,7 @@ mod tests {
             binary: "/nonexistent/claude".into(),
             minds: mind::trio(),
             timeout: Duration::from_secs(1),
+            transcripts: None,
         };
         assert_eq!(
             dream(&scratch.root, &scratch.home, &options).expect("dream"),

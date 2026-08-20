@@ -571,6 +571,9 @@ fn upkeep(
     let listing = listing(bank)?;
     let request = Ask {
         binary: options.binary.clone(),
+        // Upkeep reads a bank listing, not a session: there is nothing in its
+        // transcript a later pass would evaluate.
+        keep: None,
         model: options.mind.model.clone(),
         prompt: upkeep_prompt(key, &listing),
         timeout: options.timeout,

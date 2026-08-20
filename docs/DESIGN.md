@@ -23,6 +23,7 @@ transcripts.
 
 ```
 ~/.sandman/
+├── .dream/<claude project>/<session-id>.jsonl        dream mind transcripts — kept to evaluate
 ├── archive/
 │   └── claude/<yyyy>-<mm>-<dd>-<ts>-<orig relpath>   bytes at rest — take's target
 ├── log/
@@ -117,6 +118,15 @@ hook-event visibility.
   binary with `$SANDMAN_CLAUDE_BIN`; each mind is killed at 300 s and counted as
   abstaining. Fewer than two minds answering leaves the pointer untouched for the next
   run.
+- **Kept transcripts** — each mind runs in `<root>/.dream` under a generated
+  `--session-id`, and the transcript Claude Code writes is moved to
+  `<root>/.dream/<claude project>/<session-id>.jsonl` — the claude project being the one
+  the dreamt session ran in, read back out of its archive name (`orphans` when the
+  pointer names none). The move runs on every outcome, answer, failure or timeout kill,
+  because all three leave a transcript; it is best effort and never changes what a mind
+  is counted as. What a mind read and how it reasoned is then evaluable on its own,
+  which is the whole reason to keep it. Reflect's upkeep call is not persisted
+  (`--no-session-persistence`): it reads a bank listing, not a session.
 - **commit** — `commit_memory` under `.commit.lock`, the single format authority:
   slugs, `replaces` archiving into `_archive/`, collision suffixes, index regen.
 - Dream is idempotent over the queue: a failed pointer stays queued, a routed one is

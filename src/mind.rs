@@ -9,14 +9,24 @@
 //! `recall` exits), reads nothing from stdin, and is killed at the timeout —
 //! a mind that does not answer in time abstains, and the pass carries on with
 //! the ones that did.
+//!
+//! A mind's own transcript is either kept or never written: [`Keep`] pins the
+//! session id and relocates the file the run leaves behind; without it the run
+//! is not persisted at all. Nothing in between — an unclaimed transcript is
+//! junk in `~/.claude/projects`, one session per mind per pointer.
 
+use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fmt;
+use std::fmt::{self, Write as _};
+use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::json::{self, Value};
 
@@ -186,11 +196,30 @@ impl fmt::Display for Abstained {
     }
 }
 
+/// Where a mind's own transcript is kept.
+///
+/// Claude Code writes a persisted run to `<projects>/<slug of the working
+/// directory>/<session id>.jsonl`, so the run is pinned from both ends: the
+/// working directory decides which subdirectory it lands in, the session id
+/// decides the file name, and the file is moved to [`Self::into`] once the
+/// child is done.
+#[derive(Clone, Debug)]
+pub struct Keep {
+    /// The directory the child runs in.
+    pub cwd: PathBuf,
+    /// The directory the finished transcript is moved to.
+    pub into: PathBuf,
+    /// Claude Code's projects directory, where the transcript is written.
+    pub projects: PathBuf,
+}
+
 /// One question for one mind.
 #[derive(Clone, Debug)]
 pub struct Ask {
     /// The `claude` binary to run.
     pub binary: OsString,
+    /// Where to keep the run's own transcript. `None` discards it.
+    pub keep: Option<Keep>,
     /// The model id.
     pub model: String,
     /// The whole prompt — passed as an argument, never on stdin.
@@ -202,13 +231,75 @@ pub struct Ask {
 /// Ask one mind and read its reply text.
 ///
 /// The child is `claude -p <prompt> --model <model> --output-format json`
-/// with `CLAUDE_MEMORY_PIPELINE=1` and no stdin. Every failure is an
-/// [`Abstained`], never an error: a dream survives a mind that does not
-/// answer.
+/// with `CLAUDE_MEMORY_PIPELINE=1` and no stdin. What it does with its own
+/// transcript is [`Ask::keep`]'s business, and there are exactly two answers:
+///
+/// - `Some` — the run is pinned to a generated session id and to
+///   [`Keep::cwd`], and the transcript Claude Code wrote is moved to
+///   [`Keep::into`] as `<session id>.jsonl` so it can be evaluated later. The
+///   move is best effort and runs on every outcome — an answer, a non-zero
+///   exit, a timeout kill — because all three leave a transcript behind. It
+///   never changes what this function returns.
+/// - `None` — `--no-session-persistence`: nothing is written at all. A mind's
+///   run is not a conversation to keep unless somebody claimed it, and an
+///   unclaimed one is junk in `~/.claude/projects`, one session per mind per
+///   pointer. The pipeline env guard on `take` only stops it being re-queued,
+///   not written.
+///
+/// Every failure is an [`Abstained`], never an error: a dream survives a mind
+/// that does not answer.
 pub fn ask(request: &Ask) -> Result<String, Abstained> {
-    let mut child = spawn(request)
+    let session = request.keep.as_ref().and_then(prepare);
+    let mut child = spawn(request, session.as_deref())
         .map_err(|source| Abstained::Spawn(format!("{}: {source}", display(&request.binary))))?;
-    run(request, &mut child)
+    let answer = run(request, &mut child);
+    if let (Some(keep), Some(session)) = (request.keep.as_ref(), session.as_deref()) {
+        relocate(keep, session);
+    }
+    answer
+}
+
+/// The session id a kept run is pinned to, or `None` to fall back to a run
+/// that persists nothing. A working directory that cannot be created is not
+/// worth failing an ask over.
+fn prepare(keep: &Keep) -> Option<String> {
+    fs::create_dir_all(&keep.cwd).ok()?;
+    Some(session_id())
+}
+
+/// Move a finished mind's transcript out of Claude Code's projects tree.
+///
+/// Silent throughout: a transcript that was never written, or will not move,
+/// costs the pass nothing.
+fn relocate(keep: &Keep, session: &str) {
+    let name = format!("{session}.jsonl");
+    let Some(source) = transcript(&keep.projects, &name) else {
+        return;
+    };
+    if fs::create_dir_all(&keep.into).is_err() {
+        return;
+    }
+    let target = keep.into.join(&name);
+    let moved = fs::rename(&source, &target).is_ok()
+        // A projects tree on another volume cannot be renamed across.
+        || (fs::copy(&source, &target).is_ok() && fs::remove_file(&source).is_ok());
+    if moved {
+        // The slug directory the move emptied; `remove_dir` refuses a
+        // non-empty one, so a directory with anyone else's sessions stays.
+        if let Some(parent) = source.parent() {
+            let _ = fs::remove_dir(parent);
+        }
+    }
+}
+
+/// `<projects>/<any one project>/<name>`, if it is there. Which project slug
+/// Claude Code chose is its own business, so every immediate subdirectory is
+/// a candidate.
+fn transcript(projects: &Path, name: &str) -> Option<PathBuf> {
+    fs::read_dir(projects).ok()?.flatten().find_map(|entry| {
+        let path = entry.path().join(name);
+        path.is_file().then_some(path)
+    })
 }
 
 /// `ETXTBSY` on Linux: exec of a just-written executable fails while any
@@ -217,23 +308,11 @@ pub fn ask(request: &Ask) -> Result<String, Abstained> {
 /// stubs here, never an installed `claude` — and the window is transient, so
 /// the spawn is retried briefly (the same remedy cargo applies to its own
 /// just-built artifacts).
-fn spawn(request: &Ask) -> io::Result<std::process::Child> {
+fn spawn(request: &Ask, session: Option<&str>) -> io::Result<std::process::Child> {
     const ETXTBSY: i32 = 26;
     let mut tries = 0;
     loop {
-        let attempt = Command::new(&request.binary)
-            .arg("-p")
-            .arg(&request.prompt)
-            .arg("--model")
-            .arg(&request.model)
-            .arg("--output-format")
-            .arg("json")
-            .env(PIPELINE_ENV, "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        match attempt {
+        match command(request, session).spawn() {
             Err(error) if error.raw_os_error() == Some(ETXTBSY) && tries < 40 => {
                 tries += 1;
                 thread::sleep(Duration::from_millis(5));
@@ -241,6 +320,89 @@ fn spawn(request: &Ask) -> io::Result<std::process::Child> {
             other => return other,
         }
     }
+}
+
+/// The child, built fresh per spawn attempt.
+fn command(request: &Ask, session: Option<&str>) -> Command {
+    let mut command = Command::new(&request.binary);
+    command
+        .arg("-p")
+        .arg(&request.prompt)
+        .arg("--model")
+        .arg(&request.model)
+        .arg("--output-format")
+        .arg("json");
+    match (session, request.keep.as_ref()) {
+        (Some(session), Some(keep)) => {
+            command
+                .arg("--session-id")
+                .arg(session)
+                .current_dir(&keep.cwd);
+        }
+        _ => {
+            command.arg("--no-session-persistence");
+        }
+    }
+    command
+        .env(PIPELINE_ENV, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
+/// A fresh uuid-v4 for `--session-id`, which is the name the transcript is
+/// then found under. Format only — nothing here needs it to be unguessable,
+/// only unique against the other minds in the pass.
+fn session_id() -> String {
+    uuid(entropy())
+}
+
+/// 16 bytes as a uuid-v4: the version and variant nibbles are stamped in, the
+/// rest is rendered 8-4-4-4-12 in lowercase hex.
+fn uuid(mut bytes: [u8; 16]) -> String {
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let mut out = String::with_capacity(36);
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            out.push('-');
+        }
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+/// 16 bytes for a session id, `/dev/urandom` first.
+fn entropy() -> [u8; 16] {
+    let mut bytes = [0_u8; 16];
+    if let Ok(mut source) = fs::File::open("/dev/urandom")
+        && source.read_exact(&mut bytes).is_ok()
+    {
+        return bytes;
+    }
+    seeded()
+}
+
+/// 16 bytes derived from the clock, the process and a counter — enough to
+/// keep the minds of one pass apart when `/dev/urandom` cannot be read.
+fn seeded() -> [u8; 16] {
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
+    let seed = (
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos()),
+        u128::from(std::process::id()),
+        u128::from(SERIAL.fetch_add(1, Ordering::Relaxed)),
+    );
+    let mut bytes = [0_u8; 16];
+    for (half, chunk) in bytes.chunks_mut(8).enumerate() {
+        let mut hasher = DefaultHasher::new();
+        seed.hash(&mut hasher);
+        half.hash(&mut hasher);
+        chunk.copy_from_slice(&hasher.finish().to_le_bytes());
+    }
+    bytes
 }
 
 /// Drive a spawned mind to its reply, timeout included.
@@ -357,8 +519,11 @@ fn display(binary: &OsStr) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Abstained, Ask, TIMEOUT_DEFAULT, Tier, ask, reply, trio, upkeep};
+    use super::{
+        Abstained, Ask, Keep, TIMEOUT_DEFAULT, Tier, ask, reply, session_id, trio, upkeep,
+    };
     use crate::testutil::TempDir;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     #[test]
@@ -424,6 +589,7 @@ mod tests {
     fn a_binary_that_is_not_there_is_an_abstention() {
         let request = Ask {
             binary: "/nonexistent/sandman-test-claude".into(),
+            keep: None,
             model: "claude-sonnet-5".to_owned(),
             prompt: "hello".to_owned(),
             timeout: TIMEOUT_DEFAULT,
@@ -438,6 +604,7 @@ mod tests {
         let stub = crate::testutil::stub_script(temp.path(), "slow", "sleep 30\n");
         let request = Ask {
             binary: stub.into(),
+            keep: None,
             model: "claude-sonnet-5".to_owned(),
             prompt: "hello".to_owned(),
             timeout: Duration::from_millis(150),
@@ -458,6 +625,7 @@ mod tests {
         );
         let request = Ask {
             binary: stub.into(),
+            keep: None,
             model: "claude-fable-5".to_owned(),
             prompt: "hello".to_owned(),
             timeout: Duration::from_secs(30),
@@ -472,6 +640,7 @@ mod tests {
         let stub = crate::testutil::stub_script(temp.path(), "boom", "echo broke >&2\nexit 3\n");
         let request = Ask {
             binary: stub.into(),
+            keep: None,
             model: "claude-opus-5".to_owned(),
             prompt: "hello".to_owned(),
             timeout: Duration::from_secs(30),
@@ -480,5 +649,123 @@ mod tests {
             Err(Abstained::Failed(detail)) => assert!(detail.contains("exit 3"), "{detail}"),
             other => panic!("expected Failed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_session_id_is_a_uuid_v4() {
+        for id in [session_id(), super::uuid(super::seeded())] {
+            assert_eq!(id.len(), 36, "{id}");
+            let groups: Vec<&str> = id.split('-').collect();
+            assert_eq!(
+                groups.iter().map(|group| group.len()).collect::<Vec<_>>(),
+                [8, 4, 4, 4, 12],
+                "{id}"
+            );
+            assert!(
+                groups.iter().all(|group| group
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())),
+                "{id}"
+            );
+            // Version 4, variant 10xx.
+            assert_eq!(&groups[2][0..1], "4", "{id}");
+            assert!(matches!(&groups[3][0..1], "8" | "9" | "a" | "b"), "{id}");
+        }
+        assert_ne!(session_id(), session_id());
+    }
+
+    /// A stub that writes the transcript Claude Code would have written, into
+    /// the project subdirectory it would have chosen.
+    #[cfg(unix)]
+    fn keeping_stub(dir: &std::path::Path, projects: &std::path::Path, tail: &str) -> PathBuf {
+        crate::testutil::stub_script(
+            dir,
+            "keeper",
+            &format!(
+                concat!(
+                    "sid=\"\"\n",
+                    "while [ $# -gt 0 ]; do case \"$1\" in --session-id) sid=\"$2\"; shift 2;; *) shift;; esac; done\n",
+                    "mkdir -p \"{projects}/-a-slug\"\n",
+                    "pwd > \"{projects}/../ran-in\"\n",
+                    "printf 'the mind said things\\n' > \"{projects}/-a-slug/$sid.jsonl\"\n",
+                    "{tail}",
+                ),
+                projects = projects.display(),
+                tail = tail,
+            ),
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_minds_transcript_is_moved_out_of_the_projects_tree() {
+        let temp = TempDir::new("mind-keep");
+        let projects = temp.path().join("projects");
+        let keep = Keep {
+            cwd: temp.path().join("dream-cwd"),
+            into: temp.path().join("kept").join("-Users-you"),
+            projects: projects.clone(),
+        };
+        let stub = keeping_stub(
+            temp.path(),
+            &projects,
+            "printf '%s' '{\"type\":\"result\",\"is_error\":false,\"result\":\"OK\"}'\n",
+        );
+        let request = Ask {
+            binary: stub.into(),
+            keep: Some(keep.clone()),
+            model: "claude-sonnet-5".to_owned(),
+            prompt: "hello".to_owned(),
+            timeout: Duration::from_secs(30),
+        };
+
+        assert_eq!(ask(&request), Ok("OK".to_owned()));
+        // The child ran where the keep said, so the slug is sandman's to know.
+        let ran_in = std::fs::read_to_string(temp.path().join("ran-in")).expect("cwd");
+        assert!(
+            std::path::Path::new(ran_in.trim()).ends_with("dream-cwd"),
+            "{ran_in}"
+        );
+        // Exactly one transcript, under `into`, and nothing left behind.
+        let kept: Vec<PathBuf> = std::fs::read_dir(&keep.into)
+            .expect("kept dir")
+            .map(|entry| entry.expect("entry").path())
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(
+            kept[0].extension().and_then(std::ffi::OsStr::to_str),
+            Some("jsonl")
+        );
+        assert!(
+            !projects.join("-a-slug").exists(),
+            "the move empties the slug directory, and the empty shell goes too"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_mind_that_fails_still_leaves_its_transcript() {
+        let temp = TempDir::new("mind-keep-failure");
+        let projects = temp.path().join("projects");
+        let keep = Keep {
+            cwd: temp.path().join("dream-cwd"),
+            into: temp.path().join("kept").join("orphans"),
+            projects: projects.clone(),
+        };
+        let stub = keeping_stub(temp.path(), &projects, "exit 3\n");
+        let request = Ask {
+            binary: stub.into(),
+            keep: Some(keep.clone()),
+            model: "claude-opus-5".to_owned(),
+            prompt: "hello".to_owned(),
+            timeout: Duration::from_secs(30),
+        };
+
+        assert!(matches!(ask(&request), Err(Abstained::Failed(_))));
+        assert_eq!(
+            std::fs::read_dir(&keep.into).expect("kept dir").count(),
+            1,
+            "a failed run still wrote a transcript"
+        );
     }
 }

@@ -70,7 +70,8 @@ usage: sandman <verb> [args]
       a memory commits on 2-of-3 agreement. Take spawns this at queue depth
       10; --now is documentation, both forms behave the same. Models move with
       $SANDMAN_MIND_SONNET / _OPUS / _FABLE, the binary with
-      $SANDMAN_CLAUDE_BIN.
+      $SANDMAN_CLAUDE_BIN. Each mind's own transcript is kept at
+      <root>/.dream/<claude project>/<session-id>.jsonl.
 
   reflect
       The 24 h pass: the day page and log index, the pointer sweep (dreamt and
@@ -304,11 +305,9 @@ fn dream_verb(args: &[String]) -> Result<(), Failure> {
             }
         }
     }
-    let outcome = dream::dream(
-        &paths::data_root()?,
-        &paths::home()?,
-        &dream::Options::from_env(),
-    )?;
+    let data_root = paths::data_root()?;
+    let options = dream::Options::from_env(&data_root, &paths::claude_root()?);
+    let outcome = dream::dream(&data_root, &paths::home()?, &options)?;
     for path in &outcome.committed {
         println!("{}", path.display());
     }

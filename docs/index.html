@@ -88,6 +88,7 @@
   </header>
   <pre class="tree" data-live>
 ~/.sandman/
+├── .dream/&lt;claude project&gt;/&lt;session-id&gt;.jsonl        dream mind transcripts — kept to evaluate
 ├── archive/
 │   └── claude/&lt;yyyy&gt;-&lt;mm&gt;-&lt;dd&gt;-&lt;ts&gt;-&lt;orig relpath&gt;   bytes at rest — take's target
 ├── log/
@@ -172,6 +173,7 @@
           <li><strong>consensus</strong> — a memory commits only on 2-of-3 agreement: two proposals in the same bank and of the same type are one claim when their token sets overlap by at least half — tokens from the name and description slugs, crudely depluralized, integer Jaccard (<code class="code">2·|∩| ≥ |∪|</code>), so no float and no model ever decides a commit; the strongest agreeing tier's draft carries the wording; fewer than two witnesses → the moment is forgotten</li>
           <li>why parallel: independent dreams catch what a single reader misses, and two witnesses kill a hallucinated memory before it becomes recall</li>
           <li>runner: three plain <code class="code">claude -p &lt;prompt&gt; --model &lt;id&gt; --output-format json</code> calls, one process per mind, spawned by sandman itself — no orchestrating session; models move with <code class="code">$SANDMAN_MIND_SONNET / _OPUS / _FABLE</code>, the binary with <code class="code">$SANDMAN_CLAUDE_BIN</code>; each mind is killed at 300 s and counted as abstaining; fewer than two answering leaves the pointer for the next run</li>
+          <li><strong>kept transcripts</strong> — each mind runs in <code class="code">&lt;root&gt;/.dream</code> under a generated <code class="code">--session-id</code>, and the transcript Claude Code writes is moved to <code class="code">&lt;root&gt;/.dream/&lt;claude project&gt;/&lt;session-id&gt;.jsonl</code> — the claude project read back out of the dreamt session's archive name (<code class="code">orphans</code> when the pointer names none); the move runs on every outcome (answer, failure, timeout kill), is best effort, and never changes what a mind is counted as; reflect's upkeep call is not persisted (<code class="code">--no-session-persistence</code>)</li>
           <li><strong>commit</strong> — <code class="code">commit_memory</code> under <code class="code">.commit.lock</code>, the single format authority: slugs, <code class="code">replaces</code> archiving into <code class="code">_archive/</code>, collision suffixes, index regen</li>
           <li>dream is idempotent over the queue: a failed pointer stays queued, a routed one is stamped and never dreamt again</li>
         </ul>

@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 const SID: &str = "aaaabbbb-cccc-dddd-eeee-ffff00001111";
+/// The Claude Code project the fabricated sessions run under.
+const PROJECT: &str = "-Users-you-code";
 
 /// A fabricated machine: `$HOME` with `.claude` and `.sandman` inside it.
 struct Machine {
@@ -39,11 +41,12 @@ impl Machine {
         self.home.join(".sandman")
     }
 
+    fn projects(&self) -> PathBuf {
+        self.home.join(".claude").join("projects")
+    }
+
     fn project(&self) -> PathBuf {
-        self.home
-            .join(".claude")
-            .join("projects")
-            .join("-Users-you-code")
+        self.projects().join(PROJECT)
     }
 
     /// Seed a transcript, aged out of the live window.
@@ -176,7 +179,8 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
     let machine = Machine::new("dream-minds");
     let archived = machine.root().join("archive").join("claude");
     fs::create_dir_all(&archived).expect("archive dir");
-    let transcript = archived.join("2026-08-11-120000-sid.jsonl");
+    // The name `take` builds: the claude project slug the minds file under.
+    let transcript = archived.join(format!("2026-08-11-120000-projects-{PROJECT}-{SID}.jsonl"));
     fs::write(
         &transcript,
         format!(
@@ -211,9 +215,12 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
         "claude",
         &format!(
             concat!(
-                "model=\"\"\n",
-                "while [ $# -gt 0 ]; do case \"$1\" in --model) model=\"$2\"; shift 2;; *) shift;; esac; done\n",
-                "echo \"$model $CLAUDE_MEMORY_PIPELINE\" >> \"{seen}\"\n",
+                "model=\"\"\nsid=\"\"\n",
+                "while [ $# -gt 0 ]; do case \"$1\" in --model) model=\"$2\"; shift 2;; --session-id) sid=\"$2\"; shift 2;; *) shift;; esac; done\n",
+                "echo \"$model $CLAUDE_MEMORY_PIPELINE $(pwd)\" >> \"{seen}\"\n",
+                // Stand in for Claude Code's own transcript write.
+                "mkdir -p \"{projects}/-a-slug\"\n",
+                "printf '%s\\n' \"$model\" > \"{projects}/-a-slug/$sid.jsonl\"\n",
                 "case \"$model\" in\n",
                 "  mind-sonnet) result='{sonnet}' ;;\n",
                 "  mind-fable) result='{fable}' ;;\n",
@@ -221,6 +228,7 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
                 "esac\n",
                 "printf '{{\"type\":\"result\",\"is_error\":false,\"result\":\"%s\"}}' \"$result\"\n",
             ),
+            projects = machine.projects().display(),
             seen = seen.display(),
             sonnet = proposal("the recent pointers are the short term surface", "sonnet"),
             fable = proposal("the recent pointers are a short term surface", "fable"),
@@ -239,14 +247,39 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
     );
     assert_eq!(code(&output), 0, "{}", stderr(&output));
 
-    // The overrides were honoured, and every mind ran memory-blind.
-    let mut models: Vec<String> = fs::read_to_string(&seen)
-        .expect("model log")
+    // The overrides were honoured, every mind ran memory-blind, and every one
+    // of them ran in `<root>/.dream` so its transcript lands somewhere known.
+    let log = fs::read_to_string(&seen).expect("model log");
+    let mut models: Vec<&str> = log
         .lines()
-        .map(ToOwned::to_owned)
+        .map(|line| line.split_whitespace().next().expect("a model"))
         .collect();
-    models.sort();
-    assert_eq!(models, ["mind-fable 1", "mind-opus 1", "mind-sonnet 1"]);
+    models.sort_unstable();
+    assert_eq!(models, ["mind-fable", "mind-opus", "mind-sonnet"]);
+    for line in log.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(fields[1], "1", "{line}");
+        assert!(fields[2].ends_with("/.dream"), "{line}");
+    }
+
+    // Each mind's transcript was moved out of the projects tree and filed
+    // under the claude project the dreamt session ran in.
+    let kept = machine.root().join(".dream").join(PROJECT);
+    let names: Vec<PathBuf> = fs::read_dir(&kept)
+        .expect("kept transcripts")
+        .map(|entry| entry.expect("entry").path())
+        .collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    assert!(
+        names.iter().all(|name| name
+            .extension()
+            .is_some_and(|extension| extension == "jsonl")),
+        "{names:?}"
+    );
+    assert!(
+        !machine.projects().join("-a-slug").exists(),
+        "a mind's transcript, or the slug directory it emptied, was left in the projects tree"
+    );
 
     // The strongest agreeing tier's wording carried into the bank.
     let committed: Vec<PathBuf> = stdout(&output).lines().map(PathBuf::from).collect();

@@ -16,12 +16,21 @@ purpose: crate source — lib + `sandman` bin; `commit.rs` is the format authori
 | `error.rs` `time.rs` | typed errors; UTC timestamps, both directions |
 | `hook.rs` `transcript.rs` | SessionStart/SessionEnd payloads; locating session files, digesting a transcript, extracting the conversation a mind reads |
 | `json.rs` (private) | JSON for our own shapes only — pointers, hook payloads, model replies; why `[dependencies]` is empty |
-| `mind.rs` | the runner seam — one `claude -p … --output-format json` process per mind, killed at the timeout, every failure an abstention |
-| `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the `log/` tree |
+| `mind.rs` | the runner seam — one `claude -p … --output-format json` process per mind, killed at the timeout, every failure an abstention; `Ask::keep` decides whether the run's own transcript is kept or never written |
+| `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the `log/` and `.dream/` trees |
 | `verbs/` | `dream` `forget` `recall` `reflect` `remember` `take` — each takes its roots as arguments, never the environment |
 
 `recall.rs` is a port of `~/.claude/hooks/memory-recall.js`; its header comment
 lists what changed and why.
+
+A dream mind's own transcript is kept at
+`<root>/.dream/<claude project>/<session-id>.jsonl` — the run is pinned to a
+generated `--session-id` and to `<root>/.dream` as its working directory, and
+the file Claude Code wrote is moved there on every outcome, answer or failure
+or timeout kill. The claude project is the one the dreamt session ran in, read
+back out of its archive name; `orphans` when the pointer names none. Reflect's
+upkeep call keeps `--no-session-persistence`: it reads a bank listing, not a
+session, so there is nothing in its transcript to evaluate.
 
 Models and the binary are environment-configurable (`$SANDMAN_MIND_SONNET` /
 `_OPUS` / `_FABLE` / `_UPKEEP`, `$SANDMAN_CLAUDE_BIN`). Unit tests cannot set

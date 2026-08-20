@@ -26,6 +26,8 @@ pub const ARCHIVE_DIR_NAME: &str = "archive";
 pub const ARCHIVE_CLAUDE_DIR_NAME: &str = "claude";
 /// Reflect's day pages and their index.
 pub const LOG_DIR_NAME: &str = "log";
+/// Kept dream mind transcripts live under `<root>/.dream/`.
+pub const DREAM_DIR_NAME: &str = ".dream";
 
 /// `$HOME`, or a typed error.
 pub fn home() -> Result<PathBuf> {
@@ -46,6 +48,19 @@ pub fn data_root() -> Result<PathBuf> {
 /// Claude Code's state directory — where transcripts are found.
 pub fn claude_root() -> Result<PathBuf> {
     Ok(home()?.join(CLAUDE_DIR_NAME))
+}
+
+/// `<claude root>/projects` — one directory of transcripts per project.
+#[must_use]
+pub fn claude_projects_dir(claude_root: &Path) -> PathBuf {
+    claude_root.join(PROJECTS_DIR_NAME)
+}
+
+/// `<root>/.dream` — where a dream mind's own transcript is kept, and the
+/// directory the minds are run in so Claude Code writes it somewhere known.
+#[must_use]
+pub fn dream_dir(data_root: &Path) -> PathBuf {
+    data_root.join(DREAM_DIR_NAME)
 }
 
 /// `<root>/memories/.recent` — the pointer queue.
@@ -88,7 +103,9 @@ pub fn tildify(path: &Path, home: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{archive_claude_dir, log_dir, recent_dir, run_log, tildify};
+    use super::{
+        archive_claude_dir, claude_projects_dir, dream_dir, log_dir, recent_dir, run_log, tildify,
+    };
     use crate::time::Timestamp;
     use std::path::Path;
 
@@ -97,7 +114,12 @@ mod tests {
         let root = Path::new("/data");
         assert_eq!(recent_dir(root), Path::new("/data/memories/.recent"));
         assert_eq!(archive_claude_dir(root), Path::new("/data/archive/claude"));
+        assert_eq!(dream_dir(root), Path::new("/data/.dream"));
         assert_eq!(log_dir(root), Path::new("/data/log"));
+        assert_eq!(
+            claude_projects_dir(Path::new("/Users/you/.claude")),
+            Path::new("/Users/you/.claude/projects")
+        );
         assert_eq!(
             run_log(root, "dream", Timestamp::from_unix_seconds(1_786_018_297)),
             Path::new("/data/log/dream-2026-08-06.log")
