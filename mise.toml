@@ -2,6 +2,8 @@
 # against the pedantic set, and a newer clippy carries lints the pinned one
 # doesn't — an unpinned toolchain turns every rust release into lint breakage.
 [tools]
+# lefthook runs the pre-push gate (lefthook.toml); `lefthook install` wires it.
+lefthook = "2.1.10"
 # node runs tools/sketch (server.js + one-time dist build).
 node = "24.14.0"
 rust = "1.94.0"
