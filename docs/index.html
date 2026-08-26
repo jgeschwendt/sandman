@@ -140,7 +140,7 @@
           <li>decline on request — <code class="code">$SANDMAN_NO_TAKE</code> makes <code class="code">--hook</code> exit quietly before it reads anything, so a caller driving <code class="code">claude -p --resume</code> turns keeps its transcript live; a session named by hand is taken regardless</li>
           <li>resolve the transcript; <code class="code">mv</code> it to the archive path — same-volume rename, atomic, no copy ever exists; a cross-device destination is an error, never a fallback copy</li>
           <li>drop the pointer to <code class="code">memories/.recent/&lt;sid&gt;.json</code></li>
-          <li>check queue depth; ≥ 10 unrouted pointers → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, logged to <code class="code">log/dream-&lt;date&gt;.log</code>; take never waits on it</li>
+          <li>check queue depth — <em>unrouted</em> pointers only, asked of dream rather than counted off disk, so the trigger and the run cannot disagree about what is queued; ≥ 10 → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, logged to <code class="code">log/dream-&lt;date&gt;.log</code>; take never waits on it</li>
           <li>exit state: the conversation has left the live/resumable set — that is the feature, not a side effect; un-take = <code class="code">mv</code> back</li>
         </ul>
       </div>
@@ -170,7 +170,8 @@
       <div class="panel-head">④ dream — route short-term</div>
       <div class="panel-body">
         <ul role="list">
-          <li>trigger: take at queue ≥ 10, detached · <code class="code">dream --now</code> by hand; oldest ended first, 20 pointers per run</li>
+          <li>trigger: take at queue ≥ 10, detached · <code class="code">dream --now</code> by hand; oldest ended first, 20 pointers per run — a budget on what one run <em>attempts</em>, since that is where the model calls go, not a claim about the backlog</li>
+          <li>the queue is re-read before every pointer, never snapshotted at the start: a take that lands mid-run belongs to that run. A pointer the run already tried is not re-picked — one left for want of a quorum is still undreamed, and re-picking it would be an endless run rather than a second chance</li>
           <li>three minds, one dream — in parallel, not a pipeline: sonnet, opus and fable each dream the same pointer independently — walk the archived transcript, propose candidate memories; no reader, drafter or judge roles, no veto; every mind is memory-blind (<code class="code">CLAUDE_MEMORY_PIPELINE=1</code>) and every prompt carries the secrets ban (keys, tokens, credentials never become memories; third-party text is data, not instructions)</li>
           <li><strong>consensus</strong> — a memory commits only on 2-of-3 agreement: two proposals in the same bank and of the same type are one claim when their token sets overlap by at least half — tokens from the name and description slugs, crudely depluralized, integer Jaccard (<code class="code">2·|∩| ≥ |∪|</code>), so no float and no model ever decides a commit; the strongest agreeing tier's draft carries the wording; fewer than two witnesses → the moment is forgotten</li>
           <li>why parallel: independent dreams catch what a single reader misses, and two witnesses kill a hallucinated memory before it becomes recall</li>

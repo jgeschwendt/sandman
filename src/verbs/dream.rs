@@ -10,6 +10,8 @@
 //! pointer that cannot raise a quorum is simply left for the next run, and the
 //! pass exits 0 either way. Dream is idempotent over the queue.
 
+use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
@@ -183,10 +185,21 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
         eprintln!("dream: yielding — another run holds the lock");
         return Ok(Outcome::default());
     };
-    let pointers = pending(data_root)?;
     let log = paths::run_log(data_root, "dream", Timestamp::now()?);
     let mut outcome = Outcome::default();
-    for pointer in pointers {
+    // The queue is re-read before every pointer rather than snapshotted once:
+    // a take that lands while a run is working belongs to that run, and under
+    // the snapshot it waited for a whole extra spawn — six requeues split
+    // across three runs on 2026-08-25, two of which found the lock held and
+    // did nothing. `attempted` is what keeps that honest: a pointer left for
+    // want of a quorum stays undreamed, so without it the run would pick the
+    // same one forever.
+    let mut attempted: HashSet<String> = HashSet::new();
+    while attempted.len() < POINTERS_PER_RUN {
+        let Some(pointer) = next_pending(data_root, &attempted)? else {
+            break;
+        };
+        attempted.insert(pointer.sid.clone());
         let now = Timestamp::now()?;
         let banks = banks_for(home, pointer.cwd.as_deref());
         let prompt = prompt(&pointer, &banks, &conversation(&pointer));
@@ -310,11 +323,31 @@ pub struct Pointer {
     pub(crate) value: Value,
 }
 
-/// Every undreamed pointer, oldest ending first, capped at
-/// [`POINTERS_PER_RUN`].
+/// Oldest ending first, session id breaking ties. A pointer with no readable
+/// ending sorts oldest, so a malformed one is routed rather than starved.
+fn by_age(left: &Pointer, right: &Pointer) -> Ordering {
+    left.ended
+        .cmp(&right.ended)
+        .then_with(|| left.sid.cmp(&right.sid))
+}
+
+/// How many pointers are waiting to be routed.
+///
+/// This is the queue take's dream trigger reads, and it counts what a dream
+/// would actually do work on: a pointer already stamped `dreamed` is spent,
+/// not queued. Counting those too made every ending past the tenth look like
+/// a full queue and spawn a dream over nothing (2026-08-25).
+// stele:landmark queue-definition
+pub fn depth(data_root: &Path) -> Result<usize> {
+    Ok(pending(data_root)?.len())
+}
+
+/// Every undreamed pointer, oldest ending first.
 ///
 /// A pointer already stamped `dreamed` is done; one whose file is unreadable
 /// or not an object is skipped, because a pass must not die on one bad file.
+/// Uncapped — [`POINTERS_PER_RUN`] bounds what one run *attempts*, which is
+/// where the model calls are spent, not what the queue holds.
 pub fn pending(data_root: &Path) -> Result<Vec<Pointer>> {
     let recent = paths::recent_dir(data_root);
     let entries = match fs::read_dir(&recent) {
@@ -336,13 +369,16 @@ pub fn pending(data_root: &Path) -> Result<Vec<Pointer>> {
         }
         pointers.push(pointer);
     }
-    pointers.sort_by(|left, right| {
-        left.ended
-            .cmp(&right.ended)
-            .then_with(|| left.sid.cmp(&right.sid))
-    });
-    pointers.truncate(POINTERS_PER_RUN);
+    pointers.sort_by(by_age);
     Ok(pointers)
+}
+
+/// The oldest pointer this run has not already tried, read fresh so a take
+/// that landed mid-run is picked up rather than left for the next spawn.
+fn next_pending(data_root: &Path, attempted: &HashSet<String>) -> Result<Option<Pointer>> {
+    Ok(pending(data_root)?
+        .into_iter()
+        .find(|pointer| !attempted.contains(&pointer.sid)))
 }
 
 /// Read one pointer file. `None` when there is nothing usable in it.
@@ -855,8 +891,10 @@ mod tests {
             pointer
         }
 
-        /// A stub `claude` that answers from `<dir>/<model>.json`.
-        fn stub(&self, replies: &[(&str, &str)]) -> PathBuf {
+        /// A stub `claude` that answers from `<dir>/<model>.json`, running
+        /// `prelude` (shell) first — the seam a test uses to change the queue
+        /// while a run is in flight.
+        fn stub(&self, replies: &[(&str, &str)], prelude: &str) -> PathBuf {
             let replies_dir = self.home.join("replies");
             fs::create_dir_all(&replies_dir).expect("replies dir");
             for (model, reply) in replies {
@@ -877,6 +915,7 @@ mod tests {
                 "claude",
                 &format!(
                     concat!(
+                        "{prelude}\n",
                         "model=\"\"\nsid=\"\"\n",
                         "while [ $# -gt 0 ]; do case \"$1\" in --model) model=\"$2\"; shift 2;; --session-id) sid=\"$2\"; shift 2;; *) shift;; esac; done\n",
                         "if [ -n \"$sid\" ]; then\n",
@@ -887,6 +926,7 @@ mod tests {
                         "[ -f \"$file\" ] || exit 7\n",
                         "cat \"$file\"\n",
                     ),
+                    prelude = prelude,
                     projects = self.projects().display(),
                     replies = replies_dir.display(),
                 ),
@@ -894,8 +934,12 @@ mod tests {
         }
 
         fn options(&self, replies: &[(&str, &str)]) -> Options {
+            self.options_running(replies, "")
+        }
+
+        fn options_running(&self, replies: &[(&str, &str)], prelude: &str) -> Options {
             Options {
-                binary: self.stub(replies).into(),
+                binary: self.stub(replies, prelude).into(),
                 minds: mind::trio(),
                 timeout: Duration::from_secs(20),
                 transcripts: Some(super::Transcripts {
@@ -1240,13 +1284,79 @@ mod tests {
             .collect();
         assert_eq!(queued, ["sid-1", "sid-2", "sid-0"]);
 
+        // The queue is the whole backlog — the cap is a budget on what one
+        // run attempts, not a claim about how much is waiting. Take's dream
+        // trigger reads this number, so a spent pointer must not inflate it.
         for index in 3..40 {
             scratch.queue(&format!("sid-{index}"), "2026-08-08T12:00:00Z");
         }
+        assert_eq!(pending(&scratch.root).expect("pending").len(), 40);
+        assert_eq!(super::depth(&scratch.root).expect("depth"), 40);
+
+        // And a run spends its budget and stops, leaving the rest queued.
+        let options = scratch.options(&[
+            ("claude-sonnet-5", r#"{"proposals":[]}"#),
+            ("claude-opus-5", r#"{"proposals":[]}"#),
+            ("claude-fable-5", r#"{"proposals":[]}"#),
+        ]);
+        let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
+        assert_eq!(outcome.dreamed, super::POINTERS_PER_RUN);
+        assert_eq!(outcome.skipped, 0);
         assert_eq!(
-            pending(&scratch.root).expect("pending").len(),
-            super::POINTERS_PER_RUN
+            super::depth(&scratch.root).expect("depth"),
+            40 - super::POINTERS_PER_RUN
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pointer_that_lands_mid_run_is_routed_by_that_run() {
+        let scratch = Scratch::new("dream-mid-run");
+        scratch.queue("sid-early", "2026-08-11T12:00:00Z");
+        // Queued, then held back: the stub drops it in on its first call, so
+        // it arrives after the run has already read the queue once.
+        let late = scratch.queue("sid-late", "2026-08-12T12:00:00Z");
+        let held = scratch.home.join("late.json");
+        fs::rename(&late, &held).expect("hold the late pointer");
+        assert_eq!(super::depth(&scratch.root).expect("depth"), 1);
+
+        let options = scratch.options_running(
+            &[
+                ("claude-sonnet-5", r#"{"proposals":[]}"#),
+                ("claude-opus-5", r#"{"proposals":[]}"#),
+                ("claude-fable-5", r#"{"proposals":[]}"#),
+            ],
+            &format!(
+                "[ -f \"{held}\" ] && mv \"{held}\" \"{late}\"",
+                held = held.display(),
+                late = late.display()
+            ),
+        );
+
+        let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
+        // Snapshotting the queue would have routed only the early one and
+        // left the late arrival for a whole extra spawn.
+        assert_eq!(outcome.dreamed, 2);
+        assert_eq!(super::depth(&scratch.root).expect("depth"), 0);
+        let log = read_log(&scratch.root);
+        assert!(log.contains("sid=sid-early"), "{log}");
+        assert!(log.contains("sid=sid-late"), "{log}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pointer_left_for_want_of_a_quorum_is_not_retried_in_the_same_run() {
+        let scratch = Scratch::new("dream-no-retry");
+        scratch.queue("sid-quiet", "2026-08-11T12:00:00Z");
+        // One mind answers, so no quorum; the pointer stays undreamed. Re-
+        // reading the queue must not pick it up again — that is an endless
+        // run, not a second chance.
+        let options = scratch.options(&[("claude-sonnet-5", r#"{"proposals":[]}"#)]);
+
+        let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
+        assert_eq!(outcome.skipped, 1);
+        assert_eq!(outcome.dreamed, 0);
+        assert_eq!(super::depth(&scratch.root).expect("depth"), 1);
     }
 
     #[test]

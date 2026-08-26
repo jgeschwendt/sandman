@@ -3,6 +3,13 @@
 ```stele
 kind: container
 purpose: crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call
+invariants:
+  - claim: >-
+      dream owns what "queued" means — every reader of the queue goes through `dream::depth`
+      / `dream::pending`, which count only undreamed pointers; nothing counts `.recent/*.json`
+      off disk for itself. Take's dream trigger drifted from the run this way: spent pointers
+      inflated the depth, so every ending past the tenth spawned a dream with nothing to route
+    anchor: lm:queue-definition
 hazards:
   - claim: >-
       a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code

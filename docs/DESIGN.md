@@ -77,7 +77,9 @@ hook-event visibility.
 - Resolve the transcript; `mv` it to the archive path — same-volume rename, atomic, no
   copy ever exists. A cross-device destination is an error, never a fallback copy.
 - Drop the pointer to `memories/.recent/<sid>.json`.
-- Check queue depth; ≥ 10 unrouted pointers → spawn `<self> dream`, fully detached,
+- Check queue depth — *unrouted* pointers only, asked of dream rather than counted
+  off disk, so the trigger and the run cannot disagree about what is queued;
+  ≥ 10 → spawn `<self> dream`, fully detached,
   stdout+stderr appended to `log/dream-<date>.log`; take never waits on it.
 - Exit state: the conversation has left the live/resumable set — that is the feature,
   not a side effect. Un-take = `mv` back.
@@ -107,7 +109,12 @@ hook-event visibility.
 ### ④ dream — route short-term
 
 - Trigger: take at queue ≥ 10, detached · `dream --now` by hand; both forms behave
-  identically. Oldest `ended` first, 20 pointers per run.
+  identically. Oldest `ended` first, 20 pointers per run — a budget on what one run
+  *attempts*, since that is where the model calls go, not a claim about the backlog.
+- The queue is re-read before every pointer, never snapshotted at the start: a take
+  that lands mid-run belongs to that run. A pointer the run already tried is not
+  re-picked — one left for want of a quorum is still undreamed, and re-picking it
+  would be an endless run rather than a second chance.
 - Three minds, one dream — in parallel, not a pipeline. Sonnet, opus and fable each
   dream the same pointer independently: walk the archived transcript, propose candidate
   memories (type, lane, body). No reader, drafter or judge roles — no one holds a veto.

@@ -199,21 +199,14 @@ pub fn pointer(archived: &Path, ended: Timestamp, digest: &Digest, session_id: &
 }
 
 /// How many pointers are waiting to be dreamt.
+///
+/// Dream owns what "waiting" means — a pointer it has already stamped is
+/// spent, not queued — and take asks rather than counting files, because the
+/// two answers drifting apart is the whole bug: counting spent pointers too
+/// made every ending past the tenth read as a full queue and spawn a dream
+/// with nothing to route (2026-08-25).
 pub fn queue_depth(data_root: &Path) -> Result<usize> {
-    let recent = paths::recent_dir(data_root);
-    let entries = match fs::read_dir(&recent) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
-        Err(error) => return Err(Error::io(&recent, error)),
-    };
-    let mut count = 0;
-    for entry in entries {
-        let entry = entry.map_err(|error| Error::io(&recent, error))?;
-        if entry.path().extension().is_some_and(|ext| ext == "json") {
-            count += 1;
-        }
-    }
-    Ok(count)
+    crate::verbs::dream::depth(data_root)
 }
 
 #[cfg(test)]
@@ -402,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn the_queue_depth_counts_only_pointers() {
+    fn the_queue_depth_counts_only_undreamed_pointers() {
         let fixture = Fixture::new("take-queue");
         assert_eq!(queue_depth(&fixture.root).expect("empty root"), 0);
         let recent = fixture.root.join("memories").join(".recent");
@@ -411,6 +404,15 @@ mod tests {
             fs::write(recent.join(format!("sid-{index}.json")), "{}\n").expect("pointer");
         }
         fs::write(recent.join("notes.txt"), "not a pointer").expect("stray");
+        // A pointer dream has already routed is spent, not queued: counting
+        // it would make the next ending spawn a dream over nothing.
+        for index in 0..30 {
+            fs::write(
+                recent.join(format!("spent-{index}.json")),
+                "{\"dreamed\":\"2026-08-11T12:00:00Z\"}\n",
+            )
+            .expect("dreamed pointer");
+        }
         assert_eq!(queue_depth(&fixture.root).expect("count"), 12);
 
         fixture.seed(&transcript_lines());
