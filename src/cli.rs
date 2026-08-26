@@ -31,6 +31,10 @@ const EXIT_USAGE: u8 = 2;
 const PIPELINE_ENV: &str = "CLAUDE_MEMORY_PIPELINE";
 /// Claude Code names the running session here.
 const SESSION_ENV: &str = "CLAUDE_SESSION_ID";
+/// Set by a caller that drives `claude -p --resume` turns: each turn ends the
+/// session it resumes, and the take would move the transcript out from under
+/// the next one.
+const NO_TAKE_ENV: &str = "SANDMAN_NO_TAKE";
 
 /// The whole surface, in one screen.
 const USAGE: &str = "\
@@ -47,7 +51,11 @@ usage: sandman <verb> [args]
   take --hook            (SessionEnd payload on stdin; implies --force)
       Archive the session by move, then drop its .recent pointer. --hook reads
       a SessionEnd payload on stdin and exits quietly when it names no session,
-      or names one whose files forget already destroyed.
+      names one whose files forget already destroyed, or carries
+      reason=resume — which Claude Code fires on the session it is adopting,
+      a beginning wearing an ending's name. Set $SANDMAN_NO_TAKE to decline
+      quietly — for machine-driven resume turns that must not count as
+      endings; a session named by hand is taken regardless.
       A transcript touched in the last 120 s is refused as live — a heuristic,
       since the last line is written at the end of a turn, not of a session;
       --force takes it anyway.
@@ -199,6 +207,13 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
                 "take --hook reads the session from stdin".to_owned(),
             ));
         }
+        // A resume turn ends the session it borrowed. Taking it would move the
+        // transcript out of the live set mid-conversation, leaving the next
+        // turn nothing to resume — so the caller driving those turns declares
+        // that its endings are not endings, and the hook declines.
+        if env::var_os(NO_TAKE_ENV).is_some_and(|value| !value.is_empty()) {
+            return Ok(());
+        }
         // A dream mind's own ending is not a session to keep: archiving it
         // feeds the very queue that spawned it, and at depth the next take
         // spawns another dream — the recursion that flooded the machine with
@@ -207,12 +222,26 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
         if env::var(PIPELINE_ENV).as_deref() == Ok("1") {
             return Ok(());
         }
-        // SessionEnd itself is the proof the session is over — the hook fires
-        // the instant the transcript's last line lands, which is exactly what
-        // the by-hand live-window heuristic refuses. Hook mode implies force.
+        // SessionEnd is the proof the session is over — the hook fires the
+        // instant the transcript's last line lands, which is exactly what the
+        // by-hand live-window heuristic refuses. Hook mode implies force.
         force = true;
+        let ending = hook::session_end(&stdin()?)?;
+        // …with one exception, and it is the whole reason the payload's
+        // `reason` is read at all: Claude Code fires `SessionEnd` with
+        // `reason: "resume"` on the session it is *adopting*, at the moment of
+        // adoption. Forcing there moves the transcript out from under a
+        // conversation that is about to append to it — Claude Code then
+        // recreates the file, the next ending takes that live fragment too,
+        // and the pointer ends up naming a stub while the real conversation
+        // sits orphaned in the archive (observed across twelve sessions on
+        // 2026-08-25). A beginning is not an ending; decline it.
+        // stele:landmark resume-is-not-an-ending
+        if ending.is_resume() {
+            return Ok(());
+        }
         // A payload with no session is a session with nothing to take.
-        match hook::session_end(&stdin()?)?.session_id {
+        match ending.session_id {
             Some(session_id) => session_id,
             None => return Ok(()),
         }

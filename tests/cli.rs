@@ -497,6 +497,86 @@ fn take_hook_stays_out_of_the_memory_pipeline() {
 }
 
 #[test]
+fn take_hook_declines_a_resume_because_a_resume_is_a_beginning() {
+    let machine = Machine::new("resume-guard");
+    let source = machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"the session being adopted"}}"#,
+    ]);
+    let payload = |reason: &str| {
+        format!(
+            r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"{reason}"}}"#
+        )
+    };
+
+    // Claude Code fires this on the session it is adopting. Taking it would
+    // move the transcript out from under the turn about to append to it.
+    let declined = machine.run_with_stdin(&["take", "--hook"], &payload("resume"));
+    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    assert!(stdout(&declined).is_empty());
+    assert!(stderr(&declined).is_empty());
+    assert!(source.is_file(), "the transcript stays in the live set");
+    assert!(!machine.root().exists(), "and nothing is written");
+
+    // Every other reason is an ending, taken as ever.
+    for reason in ["clear", "logout", "other", "prompt_input_exit"] {
+        let source = machine.transcript(&[
+            r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+            r#"{"type":"user","message":{"content":"an ending"}}"#,
+        ]);
+        let taken = machine.run_with_stdin(&["take", "--hook"], &payload(reason));
+        assert_eq!(code(&taken), 0, "{reason}: {}", stderr(&taken));
+        assert!(PathBuf::from(stdout(&taken).trim()).is_file(), "{reason}");
+        assert!(!source.exists(), "{reason}");
+    }
+
+    // Named by hand, a resume is still a take — the guard is the hook's.
+    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"by hand"}}"#]);
+    let by_hand = machine.run(&["take", SID]);
+    assert_eq!(code(&by_hand), 0, "{}", stderr(&by_hand));
+    assert!(!source.exists());
+}
+
+#[test]
+fn take_hook_declines_when_the_caller_says_this_is_not_an_ending() {
+    let machine = Machine::new("no-take-guard");
+    let source = machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"a resume turn's ending"}}"#,
+    ]);
+    let payload = format!(
+        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code"}}"#
+    );
+
+    // A driven resume turn ends the session it borrowed; the transcript has to
+    // stay live for the next one.
+    let declined = machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "1")]);
+    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    assert!(stdout(&declined).is_empty());
+    assert!(stderr(&declined).is_empty());
+    assert!(source.is_file());
+    assert!(!machine.root().exists());
+
+    // Any value declines.
+    let declined = machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "yes")]);
+    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    assert!(source.is_file());
+
+    // A session named by hand means it, guard or not.
+    let by_hand = machine.run_with(&["take", SID], "", &[("SANDMAN_NO_TAKE", "1")]);
+    assert_eq!(code(&by_hand), 0, "{}", stderr(&by_hand));
+    assert!(!source.exists());
+    assert!(PathBuf::from(stdout(&by_hand).trim()).is_file());
+
+    // Set-but-empty is not set: the ending is an ending again.
+    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"a real ending"}}"#]);
+    let taken = machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "")]);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(!source.exists());
+    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
+}
+
+#[test]
 fn remember_stamps_the_session_from_the_environment() {
     let machine = Machine::new("remember-session");
     let output = machine.run_with(

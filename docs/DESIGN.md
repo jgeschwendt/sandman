@@ -63,6 +63,17 @@ hook-event visibility.
 - Refuse live — a transcript touched in the last 120 s is refused; `--force` overrides.
   The heuristic guards by-hand takes; `--hook` implies force, because `SessionEnd`
   itself is the proof the session is over.
+- Decline a resume — `SessionEnd` carries `reason` ∈ {`clear`, `logout`, `other`,
+  `prompt_input_exit`, `resume`}, and `resume` is not an ending: Claude Code fires it on
+  the session it is *adopting*, at the moment of adoption. Forcing there moves the
+  transcript out from under the turn about to append to it; Claude Code recreates the
+  file, the next ending takes that live fragment too, and the pointer ends up naming a
+  stub while the whole conversation sits orphaned in the archive. `--hook` exits quietly
+  on `resume`; every other reason, and a payload with no reason at all, is an ending.
+- Decline on request — `$SANDMAN_NO_TAKE` makes `--hook` exit quietly before it reads
+  anything, so a caller driving `claude -p --resume` turns keeps its transcript live
+  (those turns end with `reason: "other"` — the process really does exit, so the reason
+  cannot carry the decision); a session named by hand is taken regardless.
 - Resolve the transcript; `mv` it to the archive path — same-volume rename, atomic, no
   copy ever exists. A cross-device destination is an error, never a fallback copy.
 - Drop the pointer to `memories/.recent/<sid>.json`.

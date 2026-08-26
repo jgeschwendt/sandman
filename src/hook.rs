@@ -1,22 +1,42 @@
 //! Claude Code hook payloads — the two sandman is called with.
 //!
-//! `SessionEnd` hands `take` a session, `SessionStart` hands `recall` a
-//! working directory. Both payloads carry fields sandman does not use, and
-//! both will grow more: unknown fields are ignored by construction, and a
-//! field of the wrong type reads as absent rather than as a failure.
+//! `SessionEnd` hands `take` a session and why it ended, `SessionStart` hands
+//! `recall` a working directory. Both payloads carry fields sandman does not
+//! use, and both will grow more: unknown fields are ignored by construction,
+//! and a field of the wrong type reads as absent rather than as a failure.
 
 use std::path::PathBuf;
 
 use crate::error::{Error, Result};
 use crate::json::{self, Value};
 
+/// The one `SessionEnd` reason that is not an ending.
+///
+/// Claude Code fires it on the session it is *adopting*, at the moment it is
+/// adopted — `if (adoptedSessionId) sessionEnd(adoptedSessionId, "resume", …)`
+/// in 2.1.246. The conversation is beginning, not over, and its transcript has
+/// to stay where the resumed turn will append to it.
+pub const RESUME_REASON: &str = "resume";
+
 /// What sandman needs out of a `SessionEnd` payload.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SessionEnd {
     /// The session's working directory, when the payload names one.
     pub cwd: Option<PathBuf>,
+    /// Why the session ended — `clear` · `logout` · `other` ·
+    /// `prompt_input_exit` · `resume`. Absent in payloads that predate the
+    /// field, which read as an ordinary ending.
+    pub reason: Option<String>,
     /// The session to take. Absent means there is nothing to do.
     pub session_id: Option<String>,
+}
+
+impl SessionEnd {
+    /// Whether this payload is a resume wearing an ending's name.
+    #[must_use]
+    pub fn is_resume(&self) -> bool {
+        self.reason.as_deref() == Some(RESUME_REASON)
+    }
 }
 
 /// What sandman needs out of a `SessionStart` payload.
@@ -31,6 +51,7 @@ pub fn session_end(payload: &str) -> Result<SessionEnd> {
     let value = read(payload)?;
     Ok(SessionEnd {
         cwd: text(&value, "cwd").map(PathBuf::from),
+        reason: text(&value, "reason"),
         session_id: text(&value, "session_id"),
     })
 }
@@ -94,6 +115,34 @@ mod tests {
         let parsed = session_end(payload).expect("parse");
         assert_eq!(parsed.session_id.as_deref(), Some("aaaabbbb"));
         assert_eq!(parsed.cwd, Some(PathBuf::from("/Users/you/code")));
+        // A payload from before the field, and every ordinary ending, is not
+        // a resume.
+        assert_eq!(parsed.reason, None);
+        assert!(!parsed.is_resume());
+    }
+
+    #[test]
+    fn only_the_resume_reason_reads_as_a_beginning() {
+        let read = |reason: &str| {
+            session_end(&format!(
+                r#"{{"session_id":"abc","hook_event_name":"SessionEnd","reason":"{reason}"}}"#
+            ))
+            .expect("parse")
+        };
+        for reason in ["clear", "logout", "other", "prompt_input_exit"] {
+            let parsed = read(reason);
+            assert_eq!(parsed.reason.as_deref(), Some(reason));
+            assert!(!parsed.is_resume(), "{reason} is an ending");
+        }
+        let resumed = read(super::RESUME_REASON);
+        assert_eq!(resumed.reason.as_deref(), Some("resume"));
+        assert!(resumed.is_resume());
+        // A reason of the wrong type reads as absent, never as a resume.
+        assert!(
+            !session_end(r#"{"session_id":"abc","reason":7}"#)
+                .expect("parse")
+                .is_resume()
+        );
     }
 
     #[test]

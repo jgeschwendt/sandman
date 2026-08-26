@@ -5,6 +5,11 @@
       "file": "src/lib.rs",
       "line": 12,
       "node": "src"
+    },
+    "resume-is-not-an-ending": {
+      "file": "src/cli.rs",
+      "line": 239,
+      "node": "src"
     }
   },
   "nodes": {
@@ -20,7 +25,7 @@
           "text": "single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen",
           "verified": {
             "digest": "08ffd34819365da145ab6536764117600151de2829cd6bf0649d21b860fe5c54",
-            "sha": "b2a50e1d6d1a83dc229dfcca9ab33f4522de217a"
+            "sha": "a8e5506119a4abb38826026eea39d33703397d30"
           }
         },
         {
@@ -32,7 +37,7 @@
           "text": "one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it",
           "verified": {
             "digest": null,
-            "sha": "b2a50e1d6d1a83dc229dfcca9ab33f4522de217a"
+            "sha": "a8e5506119a4abb38826026eea39d33703397d30"
           }
         }
       ],
@@ -58,7 +63,20 @@
     },
     "src": {
       "budget": null,
-      "claims": [],
+      "claims": [
+        {
+          "anchor": "lm:resume-is-not-an-ending",
+          "enforced_by": null,
+          "id": "resume-is-not-an-ending",
+          "kind": "hazard",
+          "resolved": "src/cli.rs:239",
+          "text": "a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive",
+          "verified": {
+            "digest": "b218a3e87abd3b063ee685def6dd325328e1455eb28571085a2891c4adc81b8e",
+            "sha": "a8e5506119a4abb38826026eea39d33703397d30"
+          }
+        }
+      ],
       "commands": {},
       "contains": [],
       "declared": {
