@@ -27,6 +27,21 @@
 //! Each field is slugged on its own, which also means each is cut at
 //! [`slug::SLUG_MAX_CHARS`] — a long description contributes only its first
 //! sixty characters.
+//!
+//! Sameness is transitive, and a group is a connected component of it — not a
+//! greedy pass that measures every later voice against one draft. Widening the
+//! tokens only half-fixed the deploy day: the three wordings above meet in a
+//! chain, and a draft-only compare keeps whichever links the draft happens to
+//! miss. Each of those leftovers then draws its own witnesses, several of the
+//! resulting groups clear [`QUORUM`], and every one of them commits. That is
+//! what the banks show — one fact minted three to eleven times out of a single
+//! dream, once per `minds=` combination that reached quorum, re-minted under
+//! `_2` collision suffixes on later runs (2026-08-19, 2026-08-26).
+//!
+//! The cost is over-merging: a long enough chain of near-identical wordings
+//! collapses into one commit even where its ends share nothing. That is the
+//! trade taken deliberately. One memory stating a claim a little off is a
+//! correction; five stating it five ways is a bank nobody can read.
 
 use crate::memory::MemoryType;
 use crate::mind::Tier;
@@ -90,8 +105,9 @@ impl Group {
 ///
 /// Deterministic by construction: the voices are first put in a total order
 /// that does not depend on how they arrived (strongest tier first, then the
-/// proposal's own text), and grouping is then a single greedy pass. Strongest
-/// first is also what makes the first member of a group its draft.
+/// proposal's own text), and the groups are the connected components of
+/// [`same_claim`] over that order. Strongest first is also what makes the
+/// first member of a component its draft.
 #[must_use]
 pub fn group(voices: Vec<(Tier, Proposal)>) -> Vec<Group> {
     let mut voices: Vec<Voice> = voices
@@ -114,37 +130,66 @@ pub fn group(voices: Vec<(Tier, Proposal)>) -> Vec<Group> {
             .then_with(|| left.proposal.body.cmp(&right.proposal.body))
     });
 
-    let mut groups: Vec<Building> = Vec::new();
-    for voice in voices {
-        let joined = groups.iter_mut().find(|group| {
-            group.draft.bank == voice.proposal.bank
-                && group.draft.kind == voice.proposal.kind
-                && same_claim(&group.tokens, &voice.tokens)
-        });
-        match joined {
-            Some(group) => {
-                if !group.tiers.contains(&voice.tier) {
-                    group.tiers.push(voice.tier);
-                }
+    // Every pair, so a voice that meets no draft but meets a later member is
+    // still pulled in. The trio makes this a handful of comparisons.
+    let mut components: Vec<usize> = (0..voices.len()).collect();
+    for right in 0..voices.len() {
+        for left in 0..right {
+            if voices[left].proposal.bank == voices[right].proposal.bank
+                && voices[left].proposal.kind == voices[right].proposal.kind
+                && same_claim(&voices[left].tokens, &voices[right].tokens)
+            {
+                merge(&mut components, left, right);
             }
-            None => groups.push(Building {
-                draft: voice.proposal,
-                tiers: vec![voice.tier],
-                tokens: voice.tokens,
-            }),
         }
     }
+    let roots: Vec<usize> = (0..voices.len())
+        .map(|index| root(&mut components, index))
+        .collect();
 
-    groups
-        .into_iter()
-        .map(|mut group| {
-            group.tiers.sort_unstable();
-            Group {
-                draft: group.draft,
-                tiers: group.tiers,
+    // One group per component, in the order the component's first — and so
+    // strongest — voice comes in the total order.
+    let mut groups: Vec<Group> = Vec::new();
+    let mut placed: Vec<(usize, usize)> = Vec::new();
+    for (voice, component) in voices.into_iter().zip(roots) {
+        if let Some((_, at)) = placed.iter().find(|(seen, _)| *seen == component) {
+            let group = &mut groups[*at];
+            if !group.tiers.contains(&voice.tier) {
+                group.tiers.push(voice.tier);
             }
-        })
-        .collect()
+        } else {
+            placed.push((component, groups.len()));
+            groups.push(Group {
+                draft: voice.proposal,
+                tiers: vec![voice.tier],
+            });
+        }
+    }
+    for group in &mut groups {
+        group.tiers.sort_unstable();
+    }
+    groups
+}
+
+/// The component `index` belongs to, flattening the path it was reached by.
+fn root(components: &mut [usize], index: usize) -> usize {
+    let mut index = index;
+    while components[index] != index {
+        components[index] = components[components[index]];
+        index = components[index];
+    }
+    index
+}
+
+/// Put `left` and `right` in one component. The lower index wins, so the
+/// component is named by its first voice in the total order.
+fn merge(components: &mut [usize], left: usize, right: usize) {
+    let (left, right) = (root(components, left), root(components, right));
+    if left < right {
+        components[right] = left;
+    } else {
+        components[left] = right;
+    }
 }
 
 /// One proposal from one mind, with its tokens precomputed.
@@ -154,18 +199,6 @@ struct Voice {
     /// Which mind proposed it.
     tier: Tier,
     /// The name's and description's tokens, sorted and deduplicated.
-    tokens: Vec<String>,
-}
-
-/// A group under construction: its draft is the first voice that landed in it,
-/// which is the strongest tier's by the sort above.
-struct Building {
-    /// The wording that carries.
-    draft: Proposal,
-    /// The distinct minds so far.
-    tiers: Vec<Tier>,
-    /// The draft's tokens — every later voice is compared against these, so
-    /// membership never depends on the order the rest arrived in.
     tokens: Vec<String>,
 }
 
@@ -517,5 +550,135 @@ mod tests {
             }
         }
         assert_eq!(permutations, 24);
+    }
+
+    /// The fan-out: one fact about the dream lock, worded three ways that meet
+    /// only in a chain — sonnet's and fable's have the lock and the dream in
+    /// common and nothing else, and only opus's middle wording touches both.
+    fn the_dream_lock() -> Vec<(Tier, Proposal)> {
+        vec![
+            (
+                Tier::Sonnet,
+                described("dream lock", "one dream runs at a time", "s"),
+            ),
+            (
+                Tier::Opus,
+                described(
+                    "one dream at a time",
+                    "the lock keeps one dream running",
+                    "o",
+                ),
+            ),
+            (
+                Tier::Fable,
+                described("keep the running dream", "the lock keeps it running", "f"),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_chain_of_wordings_is_one_claim_and_not_one_group_per_link() {
+        let claims: Vec<Vec<String>> = the_dream_lock()
+            .iter()
+            .map(|(_, proposal)| claim_tokens(&proposal.name, &proposal.description))
+            .collect();
+        // The chain the greedy pass could not follow: the ends meet the
+        // middle and never each other.
+        assert!(same_claim(&claims[0], &claims[1]));
+        assert!(same_claim(&claims[1], &claims[2]));
+        assert!(!same_claim(&claims[0], &claims[2]));
+
+        let groups = group(the_dream_lock());
+        assert_eq!(groups.len(), 1, "one fact, one group, got {groups:?}");
+        assert!(groups[0].agreed());
+        assert_eq!(groups[0].tiers, [Tier::Sonnet, Tier::Opus, Tier::Fable]);
+        assert_eq!(groups[0].draft.body, "f");
+    }
+
+    /// Opus wording the chain's far end a second time is what turned the split
+    /// into duplicate memories rather than a dropped one: comparing against
+    /// fable's draft alone, sonnet's wording started a group of its own, opus's
+    /// copy of it raised that group to quorum, and one fact committed twice —
+    /// once as `minds=opus,fable`, once as `minds=sonnet,opus`.
+    fn the_dream_lock_worded_four_times() -> Vec<(Tier, Proposal)> {
+        let mut voices = the_dream_lock();
+        voices.push((
+            Tier::Opus,
+            described("dream lock", "one dream runs at a time", "o2"),
+        ));
+        voices
+    }
+
+    #[test]
+    fn one_fact_commits_once_however_many_wordings_reach_it() {
+        let groups = group(the_dream_lock_worded_four_times());
+        assert_eq!(groups.len(), 1, "one fact, one commit, got {groups:?}");
+        assert!(groups[0].agreed());
+        assert_eq!(groups[0].tiers, [Tier::Sonnet, Tier::Opus, Tier::Fable]);
+        assert_eq!(groups[0].minds(), "sonnet,opus,fable");
+        assert_eq!(groups[0].draft.body, "f");
+    }
+
+    #[test]
+    fn a_chain_is_closed_the_same_way_in_any_order() {
+        let voices = the_dream_lock_worded_four_times();
+        let expected = group(voices.clone());
+        let mut permutations = 0;
+        for a in 0..4 {
+            for b in 0..4 {
+                for c in 0..4 {
+                    for d in 0..4 {
+                        let indexes = [a, b, c, d];
+                        let mut seen = indexes;
+                        seen.sort_unstable();
+                        if seen != [0, 1, 2, 3] {
+                            continue;
+                        }
+                        permutations += 1;
+                        let shuffled: Vec<_> =
+                            indexes.iter().map(|index| voices[*index].clone()).collect();
+                        assert_eq!(group(shuffled), expected, "for {indexes:?}");
+                    }
+                }
+            }
+        }
+        assert_eq!(permutations, 24);
+    }
+
+    #[test]
+    fn transitivity_stops_where_the_claims_genuinely_differ() {
+        let groups = group(vec![
+            (
+                Tier::Sonnet,
+                described("dream lock", "one dream runs at a time", "s"),
+            ),
+            (
+                Tier::Opus,
+                described("dream lock", "one dream runs at a time", "o"),
+            ),
+            (
+                Tier::Sonnet,
+                described(
+                    "stele graph lock",
+                    "the pre push gate rebuilds the lock",
+                    "s2",
+                ),
+            ),
+            (
+                Tier::Fable,
+                described(
+                    "stele graph lock",
+                    "the pre push gate rebuilds the lock",
+                    "f",
+                ),
+            ),
+        ]);
+        // Two claims sharing one token are two claims, quorum apiece.
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        assert!(groups.iter().all(Group::agreed));
+        assert_eq!(groups[0].draft.name, "stele graph lock");
+        assert_eq!(groups[0].tiers, [Tier::Sonnet, Tier::Fable]);
+        assert_eq!(groups[1].draft.name, "dream lock");
+        assert_eq!(groups[1].tiers, [Tier::Sonnet, Tier::Opus]);
     }
 }

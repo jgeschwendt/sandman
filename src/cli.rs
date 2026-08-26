@@ -341,10 +341,12 @@ fn dream_verb(args: &[String]) -> Result<(), Failure> {
         println!("{}", path.display());
     }
     eprintln!(
-        "dreamt {} pointer(s), {} left for want of a quorum, {} memories committed",
+        "dreamt {} pointer(s), {} left for want of a quorum, {} memories committed, \
+{} already held",
         outcome.dreamed,
         outcome.skipped,
-        outcome.committed.len()
+        outcome.committed.len(),
+        outcome.deduped
     );
     Ok(())
 }

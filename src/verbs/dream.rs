@@ -26,7 +26,7 @@ use crate::commit::{CommitRequest, commit_memory};
 use crate::consensus::{self, Proposal};
 use crate::error::{Error, Result};
 use crate::json::{self, Value};
-use crate::memory::MemoryType;
+use crate::memory::{MemoryFile, MemoryType};
 use crate::mind::{self, Abstained, Ask, Keep, Mind, Tier};
 use crate::paths;
 use crate::time::Timestamp;
@@ -172,6 +172,8 @@ impl Options {
 pub struct Outcome {
     /// Every memory committed, in commit order.
     pub committed: Vec<PathBuf>,
+    /// How many agreed claims the target bank already held.
+    pub deduped: usize,
     /// How many pointers were routed and stamped.
     pub dreamed: usize,
     /// How many were left for the next run for want of a quorum.
@@ -247,10 +249,16 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
 
         let groups = consensus::group(voices);
         let mut committed: Vec<String> = Vec::new();
+        let mut deduped: Vec<String> = Vec::new();
         let mut votes: Vec<String> = Vec::new();
         for group in &groups {
             votes.push(format!("{}={}", group.draft.name, group.tiers.len()));
             if !group.agreed() {
+                continue;
+            }
+            if let Some(held) = already_held(data_root, &group.draft) {
+                outcome.deduped += 1;
+                deduped.push(held);
                 continue;
             }
             let request = CommitRequest {
@@ -276,25 +284,66 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
         atomic::append_line(
             &log,
             &format!(
-                "{} dream sid={} minds={} groups={} votes={} committed={}",
+                "{} dream sid={} minds={} groups={} votes={} committed={} deduped={}",
                 now.iso8601(),
                 pointer.sid,
                 notes.join(" "),
                 groups.len(),
-                if votes.is_empty() {
-                    "-".to_owned()
-                } else {
-                    votes.join(",")
-                },
-                if committed.is_empty() {
-                    "-".to_owned()
-                } else {
-                    committed.join(",")
-                }
+                joined(&votes),
+                joined(&committed),
+                joined(&deduped)
             ),
         )?;
     }
     Ok(outcome)
+}
+
+/// A log field's list, or `-` when it is empty.
+fn joined(items: &[String]) -> String {
+    if items.is_empty() {
+        "-".to_owned()
+    } else {
+        items.join(",")
+    }
+}
+
+/// The live memory already making the draft's claim, if the bank holds one.
+///
+/// A dream re-reads a conversation the banks may already carry the memories
+/// of, and consensus only ever looks at the minds — so without this every
+/// re-derivation lands again beside the original under a `_2` suffix, the
+/// corrected and the retired ones included. The claim is compared by
+/// [`consensus::same_claim`], the rule the voices were grouped by, so a
+/// memory agrees with itself.
+///
+/// Only the bank's live top-level files count: `_archive/` is lineage, and a
+/// claim retired there is one the bank decided against rather than one to
+/// match. A match skips the commit and is never a `replaces` — a re-derived
+/// wording must not overwrite what a person curated.
+fn already_held(data_root: &Path, draft: &Proposal) -> Option<String> {
+    let bank = Bank::in_data_root(data_root, &draft.bank);
+    // A bank that does not exist yet holds nothing.
+    let filenames = bank.memory_filenames().ok()?;
+    let claim = consensus::claim_tokens(&draft.name, &draft.description);
+    filenames.into_iter().find(|filename| {
+        // An unreadable memory is not a match; a run is not where that is
+        // fixed, and aborting over it would strand the whole pointer.
+        let Ok(memory) = MemoryFile::read(&bank.dir().join(filename)) else {
+            return false;
+        };
+        let kind = memory
+            .frontmatter
+            .get("type")
+            .and_then(|kind| kind.parse::<MemoryType>().ok());
+        kind == Some(draft.kind)
+            && consensus::same_claim(
+                &claim,
+                &consensus::claim_tokens(
+                    memory.name().unwrap_or_default(),
+                    memory.description().unwrap_or_default(),
+                ),
+            )
+    })
 }
 
 // ─── the queue ────────────────────────────────────────────────────────────
@@ -977,6 +1026,46 @@ mod tests {
         )
     }
 
+    /// A reply carrying more than one proposal — `(name, description, body)`
+    /// apiece, so a test can put two claims in one mind's mouth.
+    fn reply_all(bank: &str, proposals: &[(&str, &str, &str)]) -> String {
+        let items: Vec<String> = proposals
+            .iter()
+            .map(|(name, description, body)| {
+                format!(
+                    "{{\"bank\":\"{bank}\",\"type\":\"project\",\"name\":\"{name}\",\"description\":\"{description}\",\"body\":\"{body}\"}}"
+                )
+            })
+            .collect();
+        format!("{{\"proposals\":[{}]}}", items.join(","))
+    }
+
+    /// Commit one memory into the scratch bank the way an earlier dream or a
+    /// `remember` would have — the live claim a re-derivation must not remint.
+    fn hold(scratch: &Scratch, name: &str, description: &str) -> String {
+        crate::commit::commit_memory(
+            &scratch.root,
+            &scratch.bank_key(),
+            crate::commit::CommitRequest {
+                body: "the claim, as the bank already carries it".to_owned(),
+                description: description.to_owned(),
+                kind: MemoryType::Project,
+                name: name.to_owned(),
+                replaces: None,
+                source: "remember · earlier".to_owned(),
+            },
+        )
+        .expect("seed the bank")
+        .filename
+    }
+
+    /// Every live memory filename in the scratch bank.
+    fn held(scratch: &Scratch) -> Vec<String> {
+        crate::bank::Bank::in_data_root(&scratch.root, &scratch.bank_key())
+            .memory_filenames()
+            .expect("list the bank")
+    }
+
     /// Minds must never be consulted by the yielding run, so the binary is a
     /// name that would fail loudly if it were.
     fn options_that_must_not_run() -> Options {
@@ -1089,6 +1178,102 @@ mod tests {
             log.contains("committed=project_the_queue_is_a_recall_surface.md"),
             "{log}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_claim_the_bank_already_holds_is_skipped_not_reminted() {
+        let scratch = Scratch::new("dream-dedupe");
+        let pointer = scratch.queue(SID, "2026-08-11T12:00:00Z");
+        let bank = scratch.bank_key();
+        let existing = hold(
+            &scratch,
+            "the queue is the recall surface",
+            "how recall reaches a finished session",
+        );
+        let options = scratch.options(&[
+            (
+                "claude-sonnet-5",
+                &reply(&bank, "the queue is the recall surface", "sonnet's body"),
+            ),
+            (
+                "claude-fable-5",
+                &reply(&bank, "the queue is a recall surface", "fable's body"),
+            ),
+            ("claude-opus-5", r#"{"proposals":[]}"#),
+        ]);
+
+        let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
+        // The pointer is spent either way — a claim already held is routed,
+        // not left for a run that would re-derive it all over again.
+        assert_eq!(outcome.dreamed, 1);
+        assert_eq!(outcome.deduped, 1);
+        assert!(outcome.committed.is_empty());
+        assert_eq!(held(&scratch), std::slice::from_ref(&existing), "no twin");
+        // And the curated wording is untouched: this is a skip, never a
+        // `replaces`.
+        let kept = fs::read_to_string(
+            crate::bank::Bank::in_data_root(&scratch.root, &bank)
+                .dir()
+                .join(&existing),
+        )
+        .expect("the held memory");
+        assert!(kept.contains("source: remember · earlier"), "{kept}");
+        assert!(!kept.contains("fable's body"), "{kept}");
+
+        let stamped = fs::read_to_string(&pointer).expect("pointer");
+        assert!(stamped.contains(DREAMED_KEY), "{stamped}");
+        let log = read_log(&scratch.root);
+        assert!(log.contains("groups=1"), "{log}");
+        assert!(log.contains("committed=-"), "{log}");
+        assert!(log.contains(&format!("deduped={existing}")), "{log}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_held_claim_does_not_stop_the_run_committing_a_new_one() {
+        let scratch = Scratch::new("dream-dedupe-partial");
+        scratch.queue(SID, "2026-08-11T12:00:00Z");
+        let bank = scratch.bank_key();
+        let existing = hold(
+            &scratch,
+            "the queue is the recall surface",
+            "how recall reaches a finished session",
+        );
+        let both = |wording: &str, body: &str| {
+            reply_all(
+                &bank,
+                &[
+                    (wording, "how recall reaches a finished session", body),
+                    (
+                        "the pre push gate runs stele check",
+                        "what the pre push hook checks",
+                        body,
+                    ),
+                ],
+            )
+        };
+        let options = scratch.options(&[
+            (
+                "claude-sonnet-5",
+                &both("the queue is the recall surface", "s"),
+            ),
+            (
+                "claude-fable-5",
+                &both("the queue is a recall surface", "f"),
+            ),
+            ("claude-opus-5", r#"{"proposals":[]}"#),
+        ]);
+
+        let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
+        assert_eq!(outcome.deduped, 1);
+        assert_eq!(outcome.committed.len(), 1);
+        let fresh = "project_the_pre_push_gate_runs_stele_check.md";
+        assert_eq!(held(&scratch), [fresh.to_owned(), existing.clone()]);
+        let log = read_log(&scratch.root);
+        assert!(log.contains("groups=2"), "{log}");
+        assert!(log.contains(&format!("committed={fresh}")), "{log}");
+        assert!(log.contains(&format!("deduped={existing}")), "{log}");
     }
 
     #[test]

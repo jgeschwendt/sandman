@@ -28,7 +28,7 @@ hazards:
 | `atomic.rs` `lock.rs` | tmp→rename writes, log appends; the data root's `.commit.lock` |
 | `bank.rs` `commit.rs` `memory.rs` `slug.rs` | the format authority — bank keys, index regen, frontmatter, naming |
 | `cli.rs` | the dispatcher: parsing, exit codes (0 ran · 1 failed · 2 command line), the usage screen, take's detached dream spawn |
-| `consensus.rs` | 2-of-3 — deterministic claim grouping by name-slug Jaccard; no model, no wording rewrite |
+| `consensus.rs` | 2-of-3 — deterministic claim grouping: connected components of a name-and-description-slug Jaccard; no model, no wording rewrite |
 | `error.rs` `time.rs` | typed errors; UTC timestamps, both directions |
 | `hook.rs` `transcript.rs` | SessionStart/SessionEnd payloads; locating session files, digesting a transcript, extracting the conversation a mind reads |
 | `json.rs` (private) | JSON for our own shapes only — pointers, hook payloads, model replies; why `[dependencies]` is empty |

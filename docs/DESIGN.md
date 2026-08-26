@@ -125,8 +125,16 @@ hook-event visibility.
   bank and of the same type are one claim when their token sets overlap by at least
   half — tokens come from the name and description slugs, crudely depluralized, and the
   test is integer Jaccard (`2·|∩| ≥ |∪|`), so no float and no model ever decides a
-  commit. The agreeing draft from the strongest tier carries the wording. Fewer than
-  two witnesses → the moment is forgotten.
+  commit. Sameness is transitive and a group is a connected component of it: a chain of
+  wordings whose two ends never meet is one claim and one commit, not one commit per
+  link. Over-merging near-identical wordings is the accepted side of that trade. The
+  agreeing draft from the strongest tier carries the wording. Fewer than two witnesses
+  → the moment is forgotten.
+- **dedupe** — an agreed claim the target bank already holds is skipped rather than
+  committed: the same Jaccard test, run against every live memory of that type in the
+  bank (`_archive/` is lineage and never matches). The skip is counted and named in the
+  log line (`deduped=<filename>`), and is never a `replaces` — a dream re-deriving what
+  it read must not overwrite the curated memory already stating it.
 - Why parallel: independent dreams catch what a single reader misses, and two
   witnesses kill a hallucinated memory before it becomes recall.
 - Runner: three plain `claude -p <prompt> --model <id> --output-format json` calls,
