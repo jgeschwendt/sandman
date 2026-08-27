@@ -17,6 +17,7 @@ pub mod cli;
 pub mod consensus;
 pub mod error;
 pub mod hook;
+pub mod journal;
 pub mod lock;
 pub mod memory;
 pub mod mind;

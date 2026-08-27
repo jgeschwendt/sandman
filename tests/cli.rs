@@ -62,6 +62,36 @@ impl Machine {
         path
     }
 
+    /// Whether the take left nothing behind — no archive, no pointer.
+    ///
+    /// Not the same as an untouched data root any more: a decline writes its
+    /// reason to the journal, which is the whole point of the journal.
+    fn took_nothing(&self) -> bool {
+        !self.root().join("archive").exists() && !self.root().join("memories").exists()
+    }
+
+    /// Today's journal for `verb`, or empty when the verb wrote none.
+    fn journal(&self, verb: &str) -> String {
+        let dir = self.root().join("log");
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return String::new();
+        };
+        let mut logs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&format!("{verb}-")))
+                    && path.extension().is_some_and(|kind| kind == "log")
+            })
+            .collect();
+        logs.sort();
+        logs.into_iter()
+            .filter_map(|path| fs::read_to_string(path).ok())
+            .collect()
+    }
+
     /// Seed a background job directory, carrying `state` when it has one.
     fn job(&self, short: &str, state: Option<&str>) -> PathBuf {
         let dir = self.home.join(".claude").join("jobs").join(short);
@@ -526,7 +556,7 @@ fn take_hook_declines_a_resume_because_a_resume_is_a_beginning() {
     assert!(stdout(&declined).is_empty());
     assert!(stderr(&declined).is_empty());
     assert!(source.is_file(), "the transcript stays in the live set");
-    assert!(!machine.root().exists(), "and nothing is written");
+    assert!(machine.took_nothing(), "and nothing is taken");
 
     // Every other reason is an ending, taken as ever.
     for reason in ["clear", "logout", "other", "prompt_input_exit"] {
@@ -572,7 +602,7 @@ fn take_hook_declines_a_session_a_live_job_still_names() {
     assert!(stdout(&declined).is_empty());
     assert!(stderr(&declined).is_empty());
     assert!(source.is_file(), "the transcript stays in the live set");
-    assert!(!machine.root().exists(), "and nothing is written");
+    assert!(machine.took_nothing(), "and nothing is taken");
 
     // A job naming somebody else's session is not this session's job.
     machine.job("33334444", Some(r#"{"sessionId":"99990000-dead"}"#));
@@ -598,6 +628,140 @@ fn take_hook_declines_a_session_a_live_job_still_names() {
 }
 
 #[test]
+fn the_journal_records_what_the_hook_decided_either_way() {
+    let machine = Machine::new("journal-take");
+    let source = machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"a backgrounded conversation"}}"#,
+    ]);
+    let payload = format!(
+        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"other"}}"#
+    );
+    let job = machine.job(
+        "11112222",
+        Some(&format!(r#"{{"sessionId":"{SID}","state":"done"}}"#)),
+    );
+
+    // A decline says what it declined and which job stopped it — the two facts
+    // the 2026-08-26 incident had to be reconstructed from daemon.log.
+    let declined = machine.run_with_stdin(&["take", "--hook"], &payload);
+    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    assert!(stdout(&declined).is_empty(), "the hook is still quiet");
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!(
+            "hook session={SID} reason=other cwd=/Users/you/code"
+        )),
+        "{log}"
+    );
+    assert!(
+        log.contains(&format!("declined live-job session={SID} job=11112222")),
+        "{log}"
+    );
+    // Every entry is one stamped, pid-carrying line.
+    for line in log.lines() {
+        assert!(
+            line.contains(&format!(" pid={} ", line_pid(line))),
+            "{line}"
+        );
+        assert!(line.starts_with("20"), "{line}");
+    }
+    assert_eq!(log.lines().count(), 2, "{log}");
+
+    // The take that does happen says so, with the size that tells a whole
+    // conversation from a recreated stub.
+    fs::remove_dir_all(&job).expect("delete the job");
+    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(!source.exists());
+    let archived = PathBuf::from(stdout(&taken).trim());
+    let bytes = fs::metadata(&archived).expect("stat").len();
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!(
+            "took session={SID} from-hook=true forced=true archived={} bytes={bytes} queue=1",
+            archived.display()
+        )),
+        "{log}"
+    );
+    assert_eq!(log.lines().count(), 4, "{log}");
+}
+
+/// The pid a journal line carries, for asserting the shape without hardcoding
+/// the child process's id.
+fn line_pid(line: &str) -> &str {
+    line.split(" pid=")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .expect("a pid")
+}
+
+#[test]
+fn the_journal_records_what_recall_primed_a_session_with() {
+    let machine = Machine::new("journal-recall");
+    let payload =
+        r#"{"hook_event_name":"SessionStart","cwd":"/Users/you/code","source":"startup"}"#;
+
+    // An empty root recalls nothing — and says so, so a session that started
+    // cold is distinguishable from a hook that never fired.
+    let silent = machine.run_with_stdin(&["recall", "--hook"], payload);
+    assert_eq!(code(&silent), 0, "{}", stderr(&silent));
+    assert!(stdout(&silent).is_empty());
+    let log = machine.journal("recall");
+    assert!(log.contains("hook cwd=/Users/you/code"), "{log}");
+    assert!(log.contains("silent nothing-to-recall"), "{log}");
+
+    // With something to say, the line carries the shape and never the content.
+    let taken = machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"the secret body"}}"#,
+    ]);
+    assert_eq!(code(&machine.run(&["take", SID])), 0);
+    assert!(!taken.exists());
+
+    let recalled = machine.run_with_stdin(&["recall", "--hook"], payload);
+    assert_eq!(code(&recalled), 0, "{}", stderr(&recalled));
+    let log = machine.journal("recall");
+    assert!(log.contains("recalled cwd=/Users/you/code"), "{log}");
+    assert!(log.contains("pointers=1"), "{log}");
+    assert!(log.contains("budget=9000"), "{log}");
+    // The payload said it; the journal must not.
+    assert!(stdout(&recalled).contains("the secret body"));
+    assert!(!log.contains("the secret body"), "{log}");
+}
+
+#[test]
+fn forget_is_the_one_verb_that_leaves_no_line() {
+    let machine = Machine::new("journal-forget");
+    machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"to be destroyed"}}"#,
+    ]);
+    assert_eq!(code(&machine.run(&["take", SID])), 0);
+    let before = machine.journal("take");
+    assert!(before.contains(&format!("took session={SID}")), "{before}");
+
+    // The privacy ending writes nothing, anywhere: not its own log, and not a
+    // line into take's naming the session it just destroyed.
+    let forgotten = machine.run(&["forget", SID]);
+    assert_eq!(code(&forgotten), 0, "{}", stderr(&forgotten));
+    assert!(!stdout(&forgotten).is_empty(), "it destroyed something");
+    assert_eq!(
+        machine.journal("take").lines().count(),
+        before.lines().count(),
+        "forget added a line to take's journal"
+    );
+    assert!(machine.journal("forget").is_empty());
+    let logs: Vec<String> = fs::read_dir(machine.root().join("log"))
+        .expect("log dir")
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str().map(ToOwned::to_owned))
+        .filter(|name| name.contains("forget"))
+        .collect();
+    assert!(logs.is_empty(), "{logs:?}");
+}
+
+#[test]
 fn take_hook_declines_when_the_caller_says_this_is_not_an_ending() {
     let machine = Machine::new("no-take-guard");
     let source = machine.transcript(&[
@@ -615,7 +779,7 @@ fn take_hook_declines_when_the_caller_says_this_is_not_an_ending() {
     assert!(stdout(&declined).is_empty());
     assert!(stderr(&declined).is_empty());
     assert!(source.is_file());
-    assert!(!machine.root().exists());
+    assert!(machine.took_nothing());
 
     // Any value declines.
     let declined = machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "yes")]);

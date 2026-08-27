@@ -30,6 +30,10 @@ pub const QUEUE_DEPTH_DUE: usize = 10;
 pub struct TakeOutcome {
     /// Where the transcript now lives.
     pub archived: PathBuf,
+    /// How big it was, in bytes, as it went into the archive. A conversation's
+    /// size is the one number that says at a glance whether a take caught the
+    /// whole thing or a recreated stub.
+    pub archived_bytes: usize,
     /// Where the subagent directory now lives, when the session had one.
     pub archived_directory: Option<PathBuf>,
     /// How many pointers are queued after this one.
@@ -65,6 +69,11 @@ pub fn take(
     if !force {
         let idle = now.unix_seconds() - ended.unix_seconds();
         if idle < LIVE_WINDOW_SECONDS {
+            crate::journal::note(
+                data_root,
+                "take",
+                &format!("refused live session={session_id} idle={idle}s"),
+            );
             return Err(Error::refused(format!(
                 "{session_id} looks live — {} touched {idle}s ago (under {LIVE_WINDOW_SECONDS}s); pass --force to take it anyway",
                 source.display()
@@ -98,13 +107,14 @@ pub fn take(
 
     Ok(TakeOutcome {
         archived,
+        archived_bytes: text.len(),
         archived_directory,
         queue_depth,
         pointer,
     })
 }
 
-/// Whether a background job still names `session_id` as its own.
+/// The background job that still names `session_id`, by its short id.
 ///
 /// Claude Code's daemon retires a background worker that has sat idle and done
 /// for about an hour, and the retired process's exit fires `SessionEnd` with
@@ -120,15 +130,19 @@ pub fn take(
 /// Every uncertainty reads as "no job": an absent or unreadable jobs
 /// directory, an entry that is not a job, a `state.json` that is missing or
 /// will not parse, a field of the wrong type. The guard declines only what it
-/// can point at.
+/// can point at — and it hands back which job it was pointing at, because a
+/// decline nobody can trace to a job is the invisibility that made the
+/// original incident a forensics exercise.
 #[must_use]
-pub fn names_live_job(claude_root: &Path, session_id: &str) -> bool {
-    let Ok(entries) = fs::read_dir(paths::claude_jobs_dir(claude_root)) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
+pub fn live_job(claude_root: &Path, session_id: &str) -> Option<String> {
+    let entries = fs::read_dir(paths::claude_jobs_dir(claude_root)).ok()?;
+    entries.flatten().find_map(|entry| {
         let job = entry.path();
-        job.is_dir() && job_names(&job.join("state.json"), session_id)
+        if job.is_dir() && job_names(&job.join("state.json"), session_id) {
+            entry.file_name().to_str().map(ToOwned::to_owned)
+        } else {
+            None
+        }
     })
 }
 
@@ -253,7 +267,7 @@ pub fn queue_depth(data_root: &Path) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{archive_name, classify_rename, names_live_job, queue_depth, take};
+    use super::{archive_name, classify_rename, live_job, queue_depth, take};
     use crate::error::Error;
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
@@ -356,6 +370,12 @@ mod tests {
         assert_eq!(stamp[3].len(), 6);
         assert!(stamp[3].bytes().all(|byte| byte.is_ascii_digit()));
 
+        // The recorded size is the archived file's own.
+        assert_eq!(
+            u64::try_from(outcome.archived_bytes).expect("a size"),
+            fs::metadata(&outcome.archived).expect("stat").len()
+        );
+
         let directory = outcome
             .archived_directory
             .clone()
@@ -420,9 +440,20 @@ mod tests {
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
-        // Refused means untouched.
+        // Refused means untouched — but the refusal is on the record, so a
+        // take that never happened can still be explained afterwards.
         assert!(source.is_file());
         assert!(!fixture.root.join("archive").exists());
+        let journal = fs::read_to_string(crate::paths::run_log(
+            &fixture.root,
+            "take",
+            crate::time::Timestamp::now().expect("clock"),
+        ))
+        .expect("the take journal");
+        assert!(
+            journal.contains(&format!("refused live session={SID} idle=")),
+            "{journal}"
+        );
 
         let outcome = take(&fixture.root, &fixture.claude, SID, true).expect("forced take");
         assert!(!source.exists());
@@ -476,15 +507,16 @@ mod tests {
     fn a_job_directory_still_naming_the_session_reports_it_live() {
         let fixture = Fixture::new("take-jobs");
         // No jobs directory at all: nothing to be named by.
-        assert!(!names_live_job(&fixture.claude, SID));
+        assert_eq!(live_job(&fixture.claude, SID), None);
 
         fixture.job(
             "11112222",
             Some(&format!(r#"{{"sessionId":"{SID}","state":"done"}}"#)),
         );
-        assert!(names_live_job(&fixture.claude, SID));
+        // The job is named back, so the decline can say which one it was.
+        assert_eq!(live_job(&fixture.claude, SID).as_deref(), Some("11112222"));
         // A jobs directory full of other people's sessions is not a match.
-        assert!(!names_live_job(&fixture.claude, "no-such-session"));
+        assert_eq!(live_job(&fixture.claude, "no-such-session"), None);
     }
 
     #[test]
@@ -496,7 +528,7 @@ mod tests {
         fixture.job("77778888", Some(r#"{"cwd":"/tmp"}"#)); // neither field
         // The jobs directory carries files as well as jobs.
         fs::write(fixture.claude.join("jobs").join("pins.json"), "[]").expect("pins");
-        assert!(!names_live_job(&fixture.claude, SID));
+        assert_eq!(live_job(&fixture.claude, SID), None);
 
         // …and the one job that does name it still answers, past all of them —
         // here by the id the next turn would resume, not the one it ran under.
@@ -506,7 +538,7 @@ mod tests {
                 r#"{{"resumeSessionId":"{SID}","sessionId":"99990000-dead-beef-0000-000000000000"}}"#
             )),
         );
-        assert!(names_live_job(&fixture.claude, SID));
+        assert_eq!(live_job(&fixture.claude, SID).as_deref(), Some("99990000"));
     }
 
     #[test]

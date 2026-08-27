@@ -41,16 +41,47 @@ const HEADER: &str = concat!(
     "referenced files for full bodies):\n\n",
 );
 
+/// What a recall composed, in shape rather than content.
+///
+/// The journal reports these and never the payload: from one line the operator
+/// can tell what a session was primed with — how many banks answered, how much
+/// they carried, whether the budget bit — without the log becoming a second
+/// copy of the memories themselves.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Recalled {
+    /// How many banks in the cwd's chain contributed a section.
+    pub banks: usize,
+    /// How many memories those banks carried, at whatever rendering survived.
+    pub memories: usize,
+    /// How many `.recent` pointers were listed.
+    pub pointers: usize,
+    /// The payload. Empty means there was nothing to recall.
+    pub text: String,
+}
+
 /// Compose the recall payload for `cwd`. Empty means nothing to recall.
 #[must_use]
 pub fn recall(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> String {
+    compose(data_root, home, cwd, now).text
+}
+
+/// Compose, and report the shape of what was composed.
+#[must_use]
+pub fn compose(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> Recalled {
+    let recent = recent_sessions(data_root, now);
     let sections = Sections {
         chronological: chronological(data_root, home),
         graph: graph_sections(data_root, home, cwd),
-        recent: recent_sessions(data_root, now),
+        pointers: recent.as_ref().map_or(0, |(_, count)| *count),
+        recent: recent.map(|(section, _)| section),
         tools: tools(data_root, home),
     };
-    sections.compose()
+    Recalled {
+        banks: sections.graph.len(),
+        memories: sections.graph.iter().map(|section| section.memories).sum(),
+        pointers: sections.pointers,
+        text: sections.compose(),
+    }
 }
 
 /// One bank's section, in both renderings.
@@ -59,6 +90,8 @@ struct GraphSection {
     full: String,
     /// One line per memory — the degraded form.
     index: String,
+    /// How many memories the bank contributed, at either rendering.
+    memories: usize,
 }
 
 /// Everything recall could say, before the budget has its say.
@@ -67,6 +100,8 @@ struct Sections {
     chronological: Option<String>,
     /// The cwd's bank, then its ancestors.
     graph: Vec<GraphSection>,
+    /// How many pointers [`Self::recent`] lists.
+    pointers: usize,
     /// Pointers from the last three days.
     recent: Option<String>,
     /// The tool/skill surface.
@@ -443,6 +478,7 @@ fn graph_sections(data_root: &Path, home: &Path, cwd: &Path) -> Vec<GraphSection
                     "## Long-term index · {label} · {where_from}\n{}",
                     index.join("\n")
                 ),
+                memories: memories.len(),
             })
         })
         .collect()
@@ -462,8 +498,8 @@ struct Pointer {
     title: String,
 }
 
-/// Pointers younger than [`POINTER_HOURS`], newest first.
-fn recent_sessions(data_root: &Path, now: Timestamp) -> Option<String> {
+/// Pointers younger than [`POINTER_HOURS`], newest first, and how many.
+fn recent_sessions(data_root: &Path, now: Timestamp) -> Option<(String, usize)> {
     let dir = paths::recent_dir(data_root);
     let cutoff = now.unix_seconds() - POINTER_HOURS * 3600;
     let mut pointers: Vec<Pointer> = fs::read_dir(&dir)
@@ -507,7 +543,10 @@ fn recent_sessions(data_root: &Path, now: Timestamp) -> Option<String> {
             )
         })
         .collect();
-    Some(format!("## Recent sessions (3 days)\n{}", lines.join("\n")))
+    Some((
+        format!("## Recent sessions (3 days)\n{}", lines.join("\n")),
+        lines.len(),
+    ))
 }
 
 // ─── surface · chronological and tools ────────────────────────────────────

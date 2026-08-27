@@ -16,8 +16,10 @@ use std::str::FromStr;
 
 use crate::error::Error;
 use crate::hook;
+use crate::journal;
 use crate::memory::MemoryType;
 use crate::paths;
+use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 use crate::verbs::{dream, forget, recall, reflect, remember, take};
 
@@ -35,6 +37,12 @@ const SESSION_ENV: &str = "CLAUDE_SESSION_ID";
 /// session it resumes, and the take would move the transcript out from under
 /// the next one.
 const NO_TAKE_ENV: &str = "SANDMAN_NO_TAKE";
+
+/// What a journal line shows for a field the payload did not carry.
+const NONE: &str = "none";
+/// How much of an unparseable payload the journal keeps. Enough to see what
+/// arrived; not so much that one bad hook fills the day's log.
+const PAYLOAD_CHARS: usize = 2_000;
 
 /// The whole surface, in one screen.
 const USAGE: &str = "\
@@ -88,6 +96,11 @@ usage: sandman <verb> [args]
       The 24 h pass: the day page and log index, the pointer sweep (dreamt and
       older than 72 h), and one gated opus upkeep call per grown bank
       ($SANDMAN_MIND_UPKEEP).
+
+Every verb journals its decisions — one line each, stamped and carrying the
+writing pid — to <root>/log/<verb>-<date>.log, so a hook that declined can
+still be explained afterwards. forget alone is silent, deliberately: a line
+naming the session it destroyed would be the trace it promises not to leave.
 
 Data root: $SANDMAN_ROOT, else ~/.sandman. Transcripts: ~/.claude/projects/.
 Logs: <root>/log/<verb>-<date>.log.";
@@ -178,7 +191,23 @@ fn remember_verb(args: &[String]) -> Result<(), Failure> {
     request.body = body;
     request.session_id = env::var(SESSION_ENV).ok();
 
-    let outcome = remember::remember(&paths::data_root()?, request)?;
+    let data_root = paths::data_root()?;
+    let outcome = remember::remember(&data_root, request)?;
+    // Read the bank and the type back off what the commit path wrote, rather
+    // than restating its defaults here. Never the body: a memory belongs in
+    // its bank, not doubled into the day's log.
+    let bank = outcome
+        .path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or(NONE);
+    let kind = outcome.filename.split('_').next().unwrap_or(NONE);
+    note(
+        Some(&data_root),
+        "remember",
+        &format!("wrote {} bank={bank} type={kind}", outcome.path.display()),
+    );
     println!("{}", outcome.path.display());
     Ok(())
 }
@@ -204,6 +233,23 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
         }
     }
 
+    let journal = paths::data_root().ok();
+    let result = take_run(journal.as_deref(), from_hook, force, session_id);
+    // A hook has no terminal to fail into: without this line the only trace of
+    // a broken take is the exit code Claude Code discards.
+    if from_hook && let Err(Failure::Error(error)) = &result {
+        note(journal.as_deref(), "take", &format!("error: {error}"));
+    }
+    result
+}
+
+/// The whole of `take` once the command line is understood.
+fn take_run(
+    journal: Option<&Path>,
+    from_hook: bool,
+    mut force: bool,
+    session_id: Option<String>,
+) -> Result<(), Failure> {
     let session_id = if from_hook {
         if session_id.is_some() {
             return Err(Failure::Usage(
@@ -215,6 +261,7 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
         // turn nothing to resume — so the caller driving those turns declares
         // that its endings are not endings, and the hook declines.
         if env::var_os(NO_TAKE_ENV).is_some_and(|value| !value.is_empty()) {
+            note(journal, "take", "declined no-take-env");
             return Ok(());
         }
         // A dream mind's own ending is not a session to keep: archiving it
@@ -223,13 +270,45 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
         // claude processes on 2026-08-19. Recall already goes silent under
         // this variable; take must too.
         if env::var(PIPELINE_ENV).as_deref() == Ok("1") {
+            // One line per dream turn. They are rare, and the alternative is a
+            // silence indistinguishable from the hook never having run.
+            note(journal, "take", "declined pipeline");
             return Ok(());
         }
         // SessionEnd is the proof the session is over — the hook fires the
         // instant the transcript's last line lands, which is exactly what the
         // by-hand live-window heuristic refuses. Hook mode implies force.
         force = true;
-        let ending = hook::session_end(&stdin()?)?;
+        let payload = stdin()?;
+        let ending = match hook::session_end(&payload) {
+            Ok(ending) => ending,
+            Err(error) => {
+                // The payload is the evidence, and a hook that cannot be
+                // parsed is exactly the case nobody can reconstruct later.
+                note(
+                    journal,
+                    "take",
+                    &format!(
+                        "hook payload unparseable: {error} payload={}",
+                        truncate_chars(payload.trim(), PAYLOAD_CHARS)
+                    ),
+                );
+                return Err(Failure::Error(error));
+            }
+        };
+        note(
+            journal,
+            "take",
+            &format!(
+                "hook session={} reason={} cwd={}",
+                ending.session_id.as_deref().unwrap_or(NONE),
+                ending.reason.as_deref().unwrap_or(NONE),
+                ending
+                    .cwd
+                    .as_deref()
+                    .map_or_else(|| NONE.to_owned(), |cwd| cwd.display().to_string())
+            ),
+        );
         // …with one exception, and it is the whole reason the payload's
         // `reason` is read at all: Claude Code fires `SessionEnd` with
         // `reason: "resume"` on the session it is *adopting*, at the moment of
@@ -241,10 +320,19 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
         // 2026-08-25). A beginning is not an ending; decline it.
         // stele:landmark resume-is-not-an-ending
         if ending.is_resume() {
+            note(
+                journal,
+                "take",
+                &format!(
+                    "declined resume session={}",
+                    ending.session_id.as_deref().unwrap_or(NONE)
+                ),
+            );
             return Ok(());
         }
         // A payload with no session is a session with nothing to take.
         let Some(session_id) = ending.session_id else {
+            note(journal, "take", "declined no-session");
             return Ok(());
         };
         // Nor is a retirement. The daemon retires a background worker that has
@@ -253,7 +341,12 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
         // session says the conversation is resumable and will be resumed. The
         // guard is the hook's alone: a session named by hand is taken on the
         // operator's word, job or no job.
-        if take::names_live_job(&paths::claude_root()?, &session_id) {
+        if let Some(job) = take::live_job(&paths::claude_root()?, &session_id) {
+            note(
+                journal,
+                "take",
+                &format!("declined live-job session={session_id} job={job}"),
+            );
             return Ok(());
         }
         session_id
@@ -261,44 +354,97 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
         session_id.ok_or_else(|| Failure::Usage("take needs a session id".to_owned()))?
     };
 
-    let outcome = match take::take(
-        &paths::data_root()?,
-        &paths::claude_root()?,
-        &session_id,
-        force,
-    ) {
+    let data_root = paths::data_root()?;
+    let outcome = match take::take(&data_root, &paths::claude_root()?, &session_id, force) {
         Ok(outcome) => outcome,
         // `forget` destroys every copy before the session ends, so the hook
         // that follows it finds nothing — the designed sequence, not a fault.
         // Asked for by hand, a missing transcript is still an error.
-        Err(Error::NotFound { .. }) if from_hook => return Ok(()),
+        Err(Error::NotFound { .. }) if from_hook => {
+            note(
+                journal,
+                "take",
+                &format!("declined forgotten session={session_id}"),
+            );
+            return Ok(());
+        }
         Err(error) => return Err(Failure::Error(error)),
     };
+    let directory = outcome
+        .archived_directory
+        .as_ref()
+        .map_or_else(String::new, |directory| {
+            format!(" directory={}", directory.display())
+        });
+    note(
+        journal,
+        "take",
+        &format!(
+            "took session={session_id} from-hook={from_hook} forced={force} archived={} bytes={} queue={}{directory}",
+            outcome.archived.display(),
+            outcome.archived_bytes,
+            outcome.queue_depth
+        ),
+    );
+
     println!("{}", outcome.archived.display());
     if outcome.dream_due() {
-        let root = paths::data_root()?;
         // A held lock means a run is already draining the queue — starting
         // another would only fork a process to watch it yield.
-        if dream::lock_held(&root) {
+        if dream::lock_held(&data_root) {
+            note(
+                journal,
+                "take",
+                &format!("dream held queue={}", outcome.queue_depth),
+            );
             eprintln!(
                 "queue at {} — a dream is already running",
                 outcome.queue_depth
             );
             return Ok(());
         }
-        match spawn_dream(&root) {
-            Ok(log) => eprintln!(
-                "queue at {} — dreaming in the background, logging to {}",
-                outcome.queue_depth,
-                log.display()
-            ),
-            Err(error) => eprintln!(
-                "queue at {} — dream could not be spawned: {error}",
-                outcome.queue_depth
-            ),
+        match spawn_dream(&data_root) {
+            Ok(log) => {
+                note(
+                    journal,
+                    "take",
+                    &format!(
+                        "dream spawned queue={} log={}",
+                        outcome.queue_depth,
+                        log.display()
+                    ),
+                );
+                eprintln!(
+                    "queue at {} — dreaming in the background, logging to {}",
+                    outcome.queue_depth,
+                    log.display()
+                );
+            }
+            Err(error) => {
+                note(
+                    journal,
+                    "take",
+                    &format!("dream spawn-failed queue={}: {error}", outcome.queue_depth),
+                );
+                eprintln!(
+                    "queue at {} — dream could not be spawned: {error}",
+                    outcome.queue_depth
+                );
+            }
         }
     }
     Ok(())
+}
+
+/// Journal one line, when a data root could be resolved to write it under.
+///
+/// The journal must never be why a verb failed — least of all a decline, whose
+/// whole contract is to exit quietly — so a root that would not resolve simply
+/// means no line, never an error.
+fn note(data_root: Option<&Path>, verb: &str, line: &str) {
+    if let Some(data_root) = data_root {
+        journal::note(data_root, verb, line);
+    }
 }
 
 /// Start `sandman dream` and walk away.
@@ -407,30 +553,86 @@ fn recall_verb(args: &[String]) -> Result<(), Failure> {
             }
         }
     }
+    let journal = paths::data_root().ok();
+    let result = recall_run(journal.as_deref(), from_hook, cwd);
+    if from_hook && let Err(Failure::Error(error)) = &result {
+        note(journal.as_deref(), "recall", &format!("error: {error}"));
+    }
+    result
+}
+
+/// The whole of `recall` once the command line is understood.
+fn recall_run(
+    journal: Option<&Path>,
+    from_hook: bool,
+    mut cwd: Option<PathBuf>,
+) -> Result<(), Failure> {
     if env::var(PIPELINE_ENV).as_deref() == Ok("1") {
+        note(journal, "recall", "declined pipeline");
         return Ok(());
     }
     if from_hook && cwd.is_none() {
-        cwd = hook::session_start(&stdin()?)?.cwd;
+        let payload = stdin()?;
+        cwd = match hook::session_start(&payload) {
+            Ok(start) => start.cwd,
+            Err(error) => {
+                note(
+                    journal,
+                    "recall",
+                    &format!(
+                        "hook payload unparseable: {error} payload={}",
+                        truncate_chars(payload.trim(), PAYLOAD_CHARS)
+                    ),
+                );
+                return Err(Failure::Error(error));
+            }
+        };
+    }
+    if from_hook {
+        note(
+            journal,
+            "recall",
+            &format!(
+                "hook cwd={}",
+                cwd.as_deref()
+                    .map_or_else(|| NONE.to_owned(), |cwd| cwd.display().to_string())
+            ),
+        );
     }
     let cwd = match cwd {
         Some(cwd) => cwd,
         None => env::current_dir().map_err(|source| Error::io(".", source))?,
     };
 
-    let text = recall::recall(
+    let composed = recall::compose(
         &paths::data_root()?,
         &paths::home()?,
         &cwd,
         Timestamp::now()?,
     );
-    if text.is_empty() {
+    if composed.text.is_empty() {
+        note(journal, "recall", "silent nothing-to-recall");
         return Ok(());
     }
+    // The shape of the priming, never its content: a log that quoted the
+    // memories back would be a second copy of the banks.
+    note(
+        journal,
+        "recall",
+        &format!(
+            "recalled cwd={} banks={} memories={} pointers={} bytes={} budget={}",
+            cwd.display(),
+            composed.banks,
+            composed.memories,
+            composed.pointers,
+            composed.text.len(),
+            recall::BUDGET_CHARS
+        ),
+    );
     if from_hook {
-        println!("{}", hook::session_start_reply(&text));
+        println!("{}", hook::session_start_reply(&composed.text));
     } else {
-        println!("{text}");
+        println!("{}", composed.text);
     }
     Ok(())
 }
@@ -454,6 +656,10 @@ fn forget_verb(args: &[String]) -> Result<(), Failure> {
     let session_id =
         session_id.ok_or_else(|| Failure::Usage("forget needs a session id".to_owned()))?;
 
+    // Deliberately unjournaled, and it must stay that way. Every other verb
+    // writes what it decided to <root>/log; this one destroys every copy of a
+    // session, and a line naming the session it destroyed would be precisely
+    // the pointer the verb exists to remove.
     for path in forget::forget(&paths::data_root()?, &paths::claude_root()?, &session_id)? {
         println!("{}", path.display());
     }
