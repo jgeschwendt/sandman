@@ -16,6 +16,8 @@ pub const ROOT_ENV: &str = "SANDMAN_ROOT";
 pub const ROOT_DIR_NAME: &str = ".sandman";
 /// Claude Code's state directory, under `$HOME`.
 pub const CLAUDE_DIR_NAME: &str = ".claude";
+/// Claude Code's background-job records, one directory per job.
+pub const JOBS_DIR_NAME: &str = "jobs";
 /// Where Claude Code keeps one directory of transcripts per project.
 pub const PROJECTS_DIR_NAME: &str = "projects";
 /// Session pointers — the short-term recall surface.
@@ -48,6 +50,13 @@ pub fn data_root() -> Result<PathBuf> {
 /// Claude Code's state directory — where transcripts are found.
 pub fn claude_root() -> Result<PathBuf> {
     Ok(home()?.join(CLAUDE_DIR_NAME))
+}
+
+/// `<claude root>/jobs` — one directory per background job, for as long as the
+/// job is the operator's to resume.
+#[must_use]
+pub fn claude_jobs_dir(claude_root: &Path) -> PathBuf {
+    claude_root.join(JOBS_DIR_NAME)
 }
 
 /// `<claude root>/projects` — one directory of transcripts per project.
@@ -104,7 +113,8 @@ pub fn tildify(path: &Path, home: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_claude_dir, claude_projects_dir, dream_dir, log_dir, recent_dir, run_log, tildify,
+        archive_claude_dir, claude_jobs_dir, claude_projects_dir, dream_dir, log_dir, recent_dir,
+        run_log, tildify,
     };
     use crate::time::Timestamp;
     use std::path::Path;
@@ -116,6 +126,10 @@ mod tests {
         assert_eq!(archive_claude_dir(root), Path::new("/data/archive/claude"));
         assert_eq!(dream_dir(root), Path::new("/data/.dream"));
         assert_eq!(log_dir(root), Path::new("/data/log"));
+        assert_eq!(
+            claude_jobs_dir(Path::new("/Users/you/.claude")),
+            Path::new("/Users/you/.claude/jobs")
+        );
         assert_eq!(
             claude_projects_dir(Path::new("/Users/you/.claude")),
             Path::new("/Users/you/.claude/projects")

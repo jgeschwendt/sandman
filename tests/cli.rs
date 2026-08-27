@@ -62,6 +62,16 @@ impl Machine {
         path
     }
 
+    /// Seed a background job directory, carrying `state` when it has one.
+    fn job(&self, short: &str, state: Option<&str>) -> PathBuf {
+        let dir = self.home.join(".claude").join("jobs").join(short);
+        fs::create_dir_all(&dir).expect("job dir");
+        if let Some(state) = state {
+            fs::write(dir.join("state.json"), state).expect("job state");
+        }
+        dir
+    }
+
     /// An executable `/bin/sh` script under the fabricated home. This is how
     /// the tests stand in for `claude`: no test ever runs the real one.
     fn script(&self, name: &str, body: &str) -> PathBuf {
@@ -535,6 +545,56 @@ fn take_hook_declines_a_resume_because_a_resume_is_a_beginning() {
     let by_hand = machine.run(&["take", SID]);
     assert_eq!(code(&by_hand), 0, "{}", stderr(&by_hand));
     assert!(!source.exists());
+}
+
+#[test]
+fn take_hook_declines_a_session_a_live_job_still_names() {
+    let machine = Machine::new("job-guard");
+    let source = machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"a backgrounded conversation"}}"#,
+    ]);
+    let payload = format!(
+        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"other"}}"#
+    );
+    let job = machine.job(
+        "11112222",
+        Some(&format!(
+            r#"{{"sessionId":"{SID}","resumeSessionId":"{SID}","state":"done"}}"#
+        )),
+    );
+
+    // The daemon retires an idle worker and its exit fires SessionEnd like any
+    // other ending — but the job still names the session, so the conversation
+    // is resumable and will be resumed. A retirement is not an ending.
+    let declined = machine.run_with_stdin(&["take", "--hook"], &payload);
+    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    assert!(stdout(&declined).is_empty());
+    assert!(stderr(&declined).is_empty());
+    assert!(source.is_file(), "the transcript stays in the live set");
+    assert!(!machine.root().exists(), "and nothing is written");
+
+    // A job naming somebody else's session is not this session's job.
+    machine.job("33334444", Some(r#"{"sessionId":"99990000-dead"}"#));
+    let declined = machine.run_with_stdin(&["take", "--hook"], &payload);
+    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    assert!(source.is_file());
+
+    // Named by hand, a backgrounded session is still a take — the guard is the
+    // hook's, and --force reaches past it as it reaches past the live window.
+    let by_hand = machine.run(&["take", SID, "--force"]);
+    assert_eq!(code(&by_hand), 0, "{}", stderr(&by_hand));
+    assert!(!source.exists(), "the job dir never blocks a take by hand");
+    assert!(PathBuf::from(stdout(&by_hand).trim()).is_file());
+    assert!(job.is_dir(), "and the job itself is left alone");
+
+    // Delete the job and the ending is an ending again.
+    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"a real ending"}}"#]);
+    fs::remove_dir_all(&job).expect("delete the job");
+    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(!source.exists());
+    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
 }
 
 #[test]

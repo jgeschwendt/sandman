@@ -53,9 +53,12 @@ usage: sandman <verb> [args]
       a SessionEnd payload on stdin and exits quietly when it names no session,
       names one whose files forget already destroyed, or carries
       reason=resume — which Claude Code fires on the session it is adopting,
-      a beginning wearing an ending's name. Set $SANDMAN_NO_TAKE to decline
-      quietly — for machine-driven resume turns that must not count as
-      endings; a session named by hand is taken regardless.
+      a beginning wearing an ending's name. It also exits quietly when a live
+      background job under ~/.claude/jobs still names the session: the daemon
+      retires idle workers, and a worker's exit is not the conversation's end.
+      Set $SANDMAN_NO_TAKE to decline quietly — for machine-driven resume
+      turns that must not count as endings; a session named by hand is taken
+      regardless.
       A transcript touched in the last 120 s is refused as live — a heuristic,
       since the last line is written at the end of a turn, not of a session;
       --force takes it anyway.
@@ -241,10 +244,19 @@ fn take_verb(args: &[String]) -> Result<(), Failure> {
             return Ok(());
         }
         // A payload with no session is a session with nothing to take.
-        match ending.session_id {
-            Some(session_id) => session_id,
-            None => return Ok(()),
+        let Some(session_id) = ending.session_id else {
+            return Ok(());
+        };
+        // Nor is a retirement. The daemon retires a background worker that has
+        // sat idle and done, and the retired process's exit fires SessionEnd
+        // with an ordinary reason — but a job directory still naming the
+        // session says the conversation is resumable and will be resumed. The
+        // guard is the hook's alone: a session named by hand is taken on the
+        // operator's word, job or no job.
+        if take::names_live_job(&paths::claude_root()?, &session_id) {
+            return Ok(());
         }
+        session_id
     } else {
         session_id.ok_or_else(|| Failure::Usage("take needs a session id".to_owned()))?
     };

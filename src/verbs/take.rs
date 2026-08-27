@@ -12,7 +12,7 @@ use std::time::UNIX_EPOCH;
 
 use crate::atomic;
 use crate::error::{Error, Result};
-use crate::json::Value;
+use crate::json::{self, Value};
 use crate::paths;
 use crate::time::Timestamp;
 use crate::transcript::{self, Digest};
@@ -102,6 +102,48 @@ pub fn take(
         queue_depth,
         pointer,
     })
+}
+
+/// Whether a background job still names `session_id` as its own.
+///
+/// Claude Code's daemon retires a background worker that has sat idle and done
+/// for about an hour, and the retired process's exit fires `SessionEnd` with
+/// an ordinary reason. That ending belongs to the worker, not to the
+/// conversation: the job stays in the operator's list and is routinely picked
+/// up again days later. The job's directory under `~/.claude/jobs` is the
+/// proof — it outlives every worker and disappears only when the operator
+/// deletes the job — so a session any `state.json` still names is one the take
+/// has no business moving. Taken anyway, it pulled a 3.8 MB live conversation
+/// out from under its own job and then took three recreated stubs as the
+/// daemon re-settled (2026-08-26).
+///
+/// Every uncertainty reads as "no job": an absent or unreadable jobs
+/// directory, an entry that is not a job, a `state.json` that is missing or
+/// will not parse, a field of the wrong type. The guard declines only what it
+/// can point at.
+#[must_use]
+pub fn names_live_job(claude_root: &Path, session_id: &str) -> bool {
+    let Ok(entries) = fs::read_dir(paths::claude_jobs_dir(claude_root)) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let job = entry.path();
+        job.is_dir() && job_names(&job.join("state.json"), session_id)
+    })
+}
+
+/// Whether one job's state names `session_id` — as the session it ran, or as
+/// the one the next turn would resume. They are usually the same id.
+fn job_names(state: &Path, session_id: &str) -> bool {
+    let Ok(text) = fs::read_to_string(state) else {
+        return false;
+    };
+    let Ok(value) = json::parse(&text) else {
+        return false;
+    };
+    ["resumeSessionId", "sessionId"]
+        .into_iter()
+        .any(|key| value.get(key).and_then(Value::as_str) == Some(session_id))
 }
 
 /// `<yyyy>-<mm>-<dd>-<HHMMSS>-<path under ~/.claude, `/` → `-`>`.
@@ -211,7 +253,7 @@ pub fn queue_depth(data_root: &Path) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{archive_name, classify_rename, queue_depth, take};
+    use super::{archive_name, classify_rename, names_live_job, queue_depth, take};
     use crate::error::Error;
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
@@ -252,6 +294,15 @@ mod tests {
             fs::write(&path, format!("{}\n", lines.join("\n"))).expect("write transcript");
             Self::age(&path, 3600);
             path
+        }
+
+        /// Seed a background job directory, carrying `state` when it has one.
+        fn job(&self, short: &str, state: Option<&str>) {
+            let dir = self.claude.join("jobs").join(short);
+            fs::create_dir_all(&dir).expect("job dir");
+            if let Some(state) = state {
+                fs::write(dir.join("state.json"), state).expect("write job state");
+            }
         }
 
         fn age(path: &Path, seconds: u64) {
@@ -419,6 +470,43 @@ mod tests {
         let outcome = take(&fixture.root, &fixture.claude, SID, false).expect("take");
         assert_eq!(outcome.queue_depth, 13);
         assert!(outcome.dream_due());
+    }
+
+    #[test]
+    fn a_job_directory_still_naming_the_session_reports_it_live() {
+        let fixture = Fixture::new("take-jobs");
+        // No jobs directory at all: nothing to be named by.
+        assert!(!names_live_job(&fixture.claude, SID));
+
+        fixture.job(
+            "11112222",
+            Some(&format!(r#"{{"sessionId":"{SID}","state":"done"}}"#)),
+        );
+        assert!(names_live_job(&fixture.claude, SID));
+        // A jobs directory full of other people's sessions is not a match.
+        assert!(!names_live_job(&fixture.claude, "no-such-session"));
+    }
+
+    #[test]
+    fn an_unreadable_job_is_skipped_rather_than_believed() {
+        let fixture = Fixture::new("take-jobs-partial");
+        fixture.job("00000000", Some(r#"{"sessionId":"#)); // malformed
+        fixture.job("33334444", None); // no state at all
+        fixture.job("55556666", Some(r#"{"sessionId":42}"#)); // wrong type
+        fixture.job("77778888", Some(r#"{"cwd":"/tmp"}"#)); // neither field
+        // The jobs directory carries files as well as jobs.
+        fs::write(fixture.claude.join("jobs").join("pins.json"), "[]").expect("pins");
+        assert!(!names_live_job(&fixture.claude, SID));
+
+        // …and the one job that does name it still answers, past all of them —
+        // here by the id the next turn would resume, not the one it ran under.
+        fixture.job(
+            "99990000",
+            Some(&format!(
+                r#"{{"resumeSessionId":"{SID}","sessionId":"99990000-dead-beef-0000-000000000000"}}"#
+            )),
+        );
+        assert!(names_live_job(&fixture.claude, SID));
     }
 
     #[test]
