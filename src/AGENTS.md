@@ -45,8 +45,8 @@ generated `--session-id` and to `<root>/.dream` as its working directory, and
 the file Claude Code wrote is moved there on every outcome, answer or failure
 or timeout kill. The claude project is the one the dreamt session ran in, read
 back out of its archive name; `orphans` when the pointer names none. Reflect's
-upkeep call keeps `--no-session-persistence`: it reads a bank listing, not a
-session, so there is nothing in its transcript to evaluate.
+upkeep calls keep `--no-session-persistence`: they read a bank listing, not a
+session, so there is nothing in their transcripts to evaluate.
 
 Models and the binary are environment-configurable (`$SANDMAN_MIND_SONNET` /
 `_OPUS` / `_FABLE` / `_UPKEEP`, `$SANDMAN_CLAUDE_BIN`). Unit tests cannot set

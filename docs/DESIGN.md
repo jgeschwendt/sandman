@@ -151,8 +151,8 @@ hook-event visibility.
   pointer names none). The move runs on every outcome, answer, failure or timeout kill,
   because all three leave a transcript; it is best effort and never changes what a mind
   is counted as. What a mind read and how it reasoned is then evaluable on its own,
-  which is the whole reason to keep it. Reflect's upkeep call is not persisted
-  (`--no-session-persistence`): it reads a bank listing, not a session.
+  which is the whole reason to keep it. Reflect's upkeep calls are not persisted
+  (`--no-session-persistence`): they read a bank listing, not a session.
 - **commit** — `commit_memory` under `.commit.lock`, the single format authority:
   slugs, `replaces` archiving into `_archive/`, collision suffixes, index regen.
 - Dream is idempotent over the queue: a failed pointer stays queued, a routed one is
@@ -165,10 +165,22 @@ hook-event visibility.
 - Day page `log/<date>.md`, regenerated idempotently: the day's takes and the day's
   committed memories. `INDEX.md` lists every day page.
 - Pointer sweep: delete `.recent` pointers that are dreamed and ended > 72 h ago.
-- Bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last: ONE opus call
+- Bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last: ONE opus planning call
   (`$SANDMAN_MIND_UPKEEP`) proposing at most 6 net-non-increasing ops (prune, merge,
   retitle), validated whole — an invalid reply is rejected entire, never partially
   applied. Upkeep never grows a bank.
+- **Conflict guard** — every listed file is fingerprinted as the listing is read, and
+  each operation is re-checked against those fingerprints immediately before it runs. A
+  file that was edited, is gone, or was never listed skips its operation, and the log
+  line carries `conflicts=<n>` and the files: a plan is only ever applied to the bank it
+  was drawn against. Ops are file-disjoint, so a skip never invalidates its siblings.
+- **Merges are written twice** — the planning mind sees three lines of each body, so a
+  merge's `body` is a draft and is never committed. Each merge gets a second call of its
+  own carrying the sources whole, and that body is the one that reaches disk; an
+  abstention or an unusable reply skips the merge and leaves its memories alone. The
+  merged memory is committed with `replaces` naming the member with the earliest
+  `created:` — the claim keeps the day it was first made — and every other member is
+  archived.
 - `_reflect.json` `{at, count, last_ops}` — the due-baseline, seeded on first sight of
   a bank.
 
