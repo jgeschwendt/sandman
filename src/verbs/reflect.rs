@@ -94,6 +94,9 @@ pub struct Outcome {
     pub banks: Vec<String>,
     /// The day page that was written.
     pub day_page: PathBuf,
+    /// How many banks' upkeep gate fired this pass — the calls made, not the
+    /// operations they applied.
+    pub due: usize,
     /// The log index that was regenerated.
     pub index: PathBuf,
     /// How many pointers the sweep deleted.
@@ -106,7 +109,7 @@ pub fn reflect(data_root: &Path, now: Timestamp, options: &Options) -> Result<Ou
     let day_page = write_day_page(data_root, day)?;
     let index = write_log_index(data_root)?;
     let swept = sweep(data_root, now)?;
-    let (banks, applied) = upkeep_all(data_root, now, options)?;
+    let (banks, applied, due) = upkeep_all(data_root, now, options)?;
     // Upkeep is the one step that changes memories after the day page was
     // rendered, so its work is folded back in rather than waiting a day.
     if applied > 0 {
@@ -116,6 +119,7 @@ pub fn reflect(data_root: &Path, now: Timestamp, options: &Options) -> Result<Ou
     Ok(Outcome {
         banks,
         day_page,
+        due,
         index,
         swept,
     })
@@ -522,18 +526,24 @@ fn write_baseline(path: &Path, baseline: Baseline) -> Result<()> {
 
 /// Run upkeep over every bank: one log line each, and how many operations
 /// were applied across all of them.
-fn upkeep_all(data_root: &Path, now: Timestamp, options: &Options) -> Result<(Vec<String>, usize)> {
+fn upkeep_all(
+    data_root: &Path,
+    now: Timestamp,
+    options: &Options,
+) -> Result<(Vec<String>, usize, usize)> {
     let log = paths::run_log(data_root, "reflect", now);
     let mut lines = Vec::new();
     let mut applied = 0;
+    let mut due = 0;
     for (key, dir) in banks(data_root) {
-        let (note, ops) = upkeep_bank(data_root, &key, &Bank::at(&dir), now, options)?;
+        let (note, ops, fired) = upkeep_bank(data_root, &key, &Bank::at(&dir), now, options)?;
         applied += ops;
+        due += usize::from(fired);
         let line = format!("{} reflect bank={key} {note}", now.iso8601());
         atomic::append_line(&log, &line)?;
         lines.push(line);
     }
-    Ok((lines, applied))
+    Ok((lines, applied, due))
 }
 
 /// One bank: seed it, skip it, or rework it.
@@ -543,7 +553,7 @@ fn upkeep_bank(
     bank: &Bank,
     now: Timestamp,
     options: &Options,
-) -> Result<(String, usize)> {
+) -> Result<(String, usize, bool)> {
     let count = bank.memory_filenames().map(|names| names.len())?;
     let baseline_path = bank.dir().join(BASELINE_FILE_NAME);
     let Some(baseline) = read_baseline(&baseline_path) else {
@@ -557,7 +567,7 @@ fn upkeep_bank(
                 last_ops: 0,
             },
         )?;
-        return Ok((format!("count={count} seeded"), 0));
+        return Ok((format!("count={count} seeded"), 0, false));
     };
     let grown = count >= baseline.count + UPKEEP_GROWTH;
     let settled = now.unix_seconds() - baseline.at.unix_seconds() >= UPKEEP_HOURS * 3600;
@@ -568,9 +578,10 @@ fn upkeep_bank(
                 baseline.last_ops
             ),
             0,
+            false,
         ));
     }
-    upkeep(data_root, key, bank, now, options, count)
+    upkeep(data_root, key, bank, now, options, count).map(|(note, ops)| (note, ops, true))
 }
 
 /// One upkeep call over one due bank, and its application.
@@ -1400,6 +1411,7 @@ mod tests {
         let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
         assert_eq!(outcome.banks.len(), 1);
         assert!(outcome.banks[0].contains("seeded"), "{:?}", outcome.banks);
+        assert_eq!(outcome.due, 0);
         let baseline = read_baseline(&scratch.baseline_path()).expect("baseline");
         assert_eq!(baseline.count, 7);
         assert_eq!(baseline.last_ops, 0);
@@ -1429,6 +1441,7 @@ mod tests {
         let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
         assert!(outcome.banks[0].contains("due=no"), "{:?}", outcome.banks);
         assert!(outcome.banks[0].contains("settled=false"));
+        assert_eq!(outcome.due, 0);
 
         // Long enough ago, but only four files new.
         write_baseline(
@@ -1507,6 +1520,7 @@ mod tests {
             "{:?}",
             outcome.banks
         );
+        assert_eq!(outcome.due, 1);
         let baseline = read_baseline(&scratch.baseline_path()).expect("baseline");
         assert_eq!(baseline.at, Scratch::now());
         assert_eq!(baseline.count, 7);
