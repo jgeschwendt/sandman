@@ -26,6 +26,7 @@ pub mod slug;
 pub mod time;
 pub mod transcript;
 pub mod verbs;
+pub mod version;
 
 mod atomic;
 mod json;

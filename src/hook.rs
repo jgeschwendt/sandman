@@ -44,6 +44,10 @@ impl SessionEnd {
 pub struct SessionStart {
     /// The session's working directory, when the payload names one.
     pub cwd: Option<PathBuf>,
+    /// The session being primed. It is the only handle that ties a recall to
+    /// the conversation it went into — and to the `take` line that same id
+    /// writes when the conversation ends.
+    pub session_id: Option<String>,
 }
 
 /// Read a `SessionEnd` payload.
@@ -61,6 +65,7 @@ pub fn session_start(payload: &str) -> Result<SessionStart> {
     let value = read(payload)?;
     Ok(SessionStart {
         cwd: text(&value, "cwd").map(PathBuf::from),
+        session_id: text(&value, "session_id"),
     })
 }
 
@@ -182,14 +187,22 @@ mod tests {
     }
 
     #[test]
-    fn a_session_start_payload_yields_the_cwd() {
+    fn a_session_start_payload_yields_the_cwd_and_the_session() {
+        let parsed =
+            session_start(r#"{"cwd":"/Users/you","session_id":"aaaabbbb","source":"startup"}"#)
+                .expect("parse");
+        assert_eq!(parsed.cwd, Some(PathBuf::from("/Users/you")));
+        assert_eq!(parsed.session_id.as_deref(), Some("aaaabbbb"));
+        // Both fields are optional, and a wrong-typed one reads as absent.
+        let empty = session_start("{}").expect("parse");
+        assert_eq!(empty.cwd, None);
+        assert_eq!(empty.session_id, None);
         assert_eq!(
-            session_start(r#"{"cwd":"/Users/you","source":"startup"}"#)
+            session_start(r#"{"session_id":7}"#)
                 .expect("parse")
-                .cwd,
-            Some(PathBuf::from("/Users/you"))
+                .session_id,
+            None
         );
-        assert_eq!(session_start("{}").expect("parse").cwd, None);
     }
 
     #[test]

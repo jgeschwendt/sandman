@@ -24,12 +24,16 @@ use std::process;
 
 use crate::paths;
 use crate::time::Timestamp;
+use crate::version::VERSION;
 
 /// Append one line to the day's log for `verb`.
 ///
 /// The entry is stamped and carries the writing process id: `pid=` is what
 /// ties a decision here to the same process in Claude Code's `daemon.log`,
-/// which is the correlation the 2026-08-26 forensics had to do by hand.
+/// which is the correlation the 2026-08-26 forensics had to do by hand. It
+/// carries `v=` for the same reason one step further out — the installed
+/// binary is routinely a build behind the tree, and a line whose behaviour
+/// looks wrong is only explicable against the code that actually wrote it.
 /// Newlines inside `line` are folded to spaces — one entry is one line, so
 /// the log stays greppable however the payload that produced it was shaped.
 pub fn note(data_root: &Path, verb: &str, line: &str) {
@@ -42,7 +46,7 @@ fn try_note(data_root: &Path, verb: &str, line: &str) -> Option<()> {
     let path = paths::run_log(data_root, verb, now);
     fs::create_dir_all(path.parent()?).ok()?;
     let entry = format!(
-        "{} pid={} {}\n",
+        "{} pid={} v={VERSION} {}\n",
         now.iso8601(),
         process::id(),
         line.replace(['\n', '\r'], " ")
@@ -102,6 +106,12 @@ mod tests {
         assert!(text.ends_with(" declined resume session=abc\n"), "{text}");
         assert!(
             text.contains(&format!(" pid={} ", std::process::id())),
+            "{text}"
+        );
+        // …and the build that wrote it, so a line can be read against the code
+        // that produced it rather than against whatever is checked out now.
+        assert!(
+            text.contains(&format!(" v={} ", crate::version::VERSION)),
             "{text}"
         );
         // The line opens with the ISO stamp, and it reads back as one.

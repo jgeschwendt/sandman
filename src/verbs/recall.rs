@@ -49,14 +49,43 @@ const HEADER: &str = concat!(
 /// copy of the memories themselves.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Recalled {
-    /// How many banks in the cwd's chain contributed a section.
-    pub banks: usize,
+    /// One entry per bank in the cwd's chain that contributed a section.
+    pub banks: Vec<RecalledBank>,
     /// How many memories those banks carried, at whatever rendering survived.
     pub memories: usize,
     /// How many `.recent` pointers were listed.
     pub pointers: usize,
     /// The payload. Empty means there was nothing to recall.
     pub text: String,
+    /// What the budget took away on the path to that payload.
+    pub trimmed: Trimmed,
+}
+
+/// One bank, as it reached the session.
+///
+/// The filenames are the identities a later question needs: "was that rule in
+/// front of the session that broke this?" is answerable from the journal only
+/// if the journal named the files, and naming them is not quoting them.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RecalledBank {
+    /// Whether the budget cut the bank back to index lines.
+    pub degraded: bool,
+    /// The bank's key.
+    pub key: String,
+    /// Its memory files, in the order they were rendered.
+    pub memories: Vec<String>,
+}
+
+/// What the budget loop did — the honest half of the `budget=` field.
+///
+/// A payload that fits and a payload that was cut down to fit report the same
+/// size, and only this tells them apart.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Trimmed {
+    /// How many banks ended at their index rendering rather than their bodies.
+    pub banks_dropped: usize,
+    /// The optional surfaces that did not survive, in the order they went.
+    pub sections: Vec<&'static str>,
 }
 
 /// Compose the recall payload for `cwd`. Empty means nothing to recall.
@@ -76,20 +105,38 @@ pub fn compose(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> Rec
         recent: recent.map(|(section, _)| section),
         tools: tools(data_root, home),
     };
+    let (text, budget) = sections.compose();
     Recalled {
-        banks: sections.graph.len(),
+        banks: sections
+            .graph
+            .iter()
+            .zip(&budget.graph)
+            .map(|(section, full)| RecalledBank {
+                degraded: !full,
+                key: section.key.clone(),
+                memories: section.files.clone(),
+            })
+            .collect(),
         memories: sections.graph.iter().map(|section| section.memories).sum(),
         pointers: sections.pointers,
-        text: sections.compose(),
+        trimmed: Trimmed {
+            banks_dropped: budget.graph.iter().filter(|full| !**full).count(),
+            sections: sections.dropped(&budget),
+        },
+        text,
     }
 }
 
 /// One bank's section, in both renderings.
 struct GraphSection {
+    /// Its memory files, in the order they were rendered.
+    files: Vec<String>,
     /// Bodies for the types that carry behavioral rules.
     full: String,
     /// One line per memory — the degraded form.
     index: String,
+    /// The bank's key.
+    key: String,
     /// How many memories the bank contributed, at either rendering.
     memories: usize,
 }
@@ -121,8 +168,26 @@ struct Budget {
 }
 
 impl Sections {
+    /// The optional surfaces that had content and did not make it in, in the
+    /// order the budget went after them.
+    fn dropped(&self, budget: &Budget) -> Vec<&'static str> {
+        [
+            (Surface::Tools, self.tools.is_some()),
+            (Surface::Chronological, self.chronological.is_some()),
+            (Surface::Recent, self.recent.is_some()),
+        ]
+        .into_iter()
+        .filter(|(surface, had)| *had && !surface.get(budget))
+        .map(|(surface, _)| surface.name())
+        .collect()
+    }
+
     /// Render, then trim cheapest-surface-first until the payload fits.
-    fn compose(&self) -> String {
+    ///
+    /// The budget it settled on comes back with the text: what was cut is not
+    /// recoverable from the payload, and it is exactly what the journal has to
+    /// say for `budget=` to mean anything.
+    fn compose(&self) -> (String, Budget) {
         let mut budget = Budget {
             chronological: self.chronological.is_some(),
             graph: vec![true; self.graph.len()],
@@ -167,7 +232,7 @@ impl Sections {
             }
         }
 
-        truncate_chars(&text, BUDGET_CHARS).to_owned()
+        (truncate_chars(&text, BUDGET_CHARS).to_owned(), budget)
     }
 
     /// The payload at this budget.
@@ -209,6 +274,15 @@ enum Surface {
 }
 
 impl Surface {
+    /// What the journal calls it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Chronological => "chronological",
+            Self::Recent => "recent",
+            Self::Tools => "tools",
+        }
+    }
+
     /// Whether the surface is currently in.
     fn get(self, budget: &Budget) -> bool {
         match self {
@@ -473,11 +547,13 @@ fn graph_sections(data_root: &Path, home: &Path, cwd: &Path) -> Vec<GraphSection
                 })
                 .collect();
             Some(GraphSection {
+                files: memories.iter().map(|memory| memory.file.clone()).collect(),
                 full: format!("## Long-term · {label} · {where_from}\n{}", full.join("\n")),
                 index: format!(
                     "## Long-term index · {label} · {where_from}\n{}",
                     index.join("\n")
                 ),
+                key: bank.clone(),
                 memories: memories.len(),
             })
         })
@@ -619,7 +695,7 @@ fn strip_comments(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{BUDGET_CHARS, recall, split_frontmatter, strip_comments};
+    use super::{BUDGET_CHARS, Recalled, compose, recall, split_frontmatter, strip_comments};
     use crate::bank::Bank;
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
@@ -698,6 +774,15 @@ mod tests {
 
         fn recall(&self) -> String {
             recall(
+                &self.path,
+                &self.home,
+                &self.cwd,
+                Timestamp::from_unix_seconds(NOW),
+            )
+        }
+
+        fn compose(&self) -> Recalled {
+            compose(
                 &self.path,
                 &self.home,
                 &self.cwd,
@@ -930,7 +1015,8 @@ mod tests {
         root.log_index("- a day page\n");
         root.tools("- a tool line\n");
 
-        let text = root.recall();
+        let composed = root.compose();
+        let text = &composed.text;
         assert!(text.chars().count() <= BUDGET_CHARS);
         // The only bank is at its floor…
         assert!(text.contains("## Long-term index · this directory's bank"));
@@ -939,6 +1025,14 @@ mod tests {
         assert!(text.contains("## Recent sessions (3 days)"));
         assert!(text.contains("## Chronological"));
         assert!(text.contains("## Tool index"));
+        // And the report says exactly that: one bank degraded, nothing left
+        // out in the end — the reinstatement is not a trim.
+        assert_eq!(composed.trimmed.banks_dropped, 1);
+        assert!(composed.trimmed.sections.is_empty(), "{composed:?}");
+        assert_eq!(composed.banks.len(), 1);
+        assert!(composed.banks[0].degraded);
+        assert_eq!(composed.banks[0].key, root.bank());
+        assert_eq!(composed.banks[0].memories, ["user_huge.md"]);
     }
 
     #[test]
@@ -960,7 +1054,8 @@ mod tests {
         root.log_index("- a day page\n");
         root.tools("- a tool line\n");
 
-        let text = root.recall();
+        let composed = root.compose();
+        let text = &composed.text;
         assert!(text.chars().count() <= BUDGET_CHARS);
         // The graph never reached its floor, so nothing is reinstated: the
         // cwd bank keeps its bodies and the cheap surfaces stay trimmed.
@@ -970,6 +1065,44 @@ mod tests {
         assert!(!text.contains("## Recent sessions"));
         assert!(!text.contains("## Chronological"));
         assert!(!text.contains("## Tool index"));
+        // The report names all three, in the order the budget went after them,
+        // and the one bank that had to give up its bodies.
+        assert_eq!(
+            composed.trimmed.sections,
+            ["tools", "chronological", "recent"]
+        );
+        assert_eq!(composed.trimmed.banks_dropped, 1);
+        assert!(!composed.banks[0].degraded, "the cwd bank kept its bodies");
+        assert!(composed.banks[1].degraded, "the ancestor gave them up");
+    }
+
+    #[test]
+    fn a_payload_that_fits_reports_nothing_trimmed_and_names_its_memories() {
+        let root = Root::new("recall-untrimmed");
+        root.memory(
+            &root.bank(),
+            "user_here.md",
+            "name: here\ndescription: d\ntype: user\n",
+            "a short body\n",
+        );
+        root.memory(
+            &root.bank(),
+            "reference_there.md",
+            "name: there\ndescription: d\ntype: reference\n",
+            "another short body\n",
+        );
+        root.pointer("sid-fresh", "2026-08-06T09:00:00Z", "the fresh one", "/a");
+
+        let composed = root.compose();
+        assert_eq!(composed.trimmed, super::Trimmed::default());
+        assert_eq!(composed.memories, 2);
+        assert_eq!(composed.pointers, 1);
+        // Named, never quoted: the filenames are here and the bodies are not.
+        assert_eq!(composed.banks.len(), 1);
+        assert_eq!(
+            composed.banks[0].memories,
+            ["user_here.md", "reference_there.md"]
+        );
     }
 
     #[test]

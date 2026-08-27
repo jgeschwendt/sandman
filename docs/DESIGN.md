@@ -28,6 +28,7 @@ transcripts.
 │   └── claude/<yyyy>-<mm>-<dd>-<ts>-<orig relpath>   bytes at rest — take's target
 ├── log/
 │   ├── <date>.md                                     reflect's day pages
+│   ├── <verb>-<date>.log                             the journal — one line per decision
 │   └── INDEX.md                                      chronological index
 └── memories/
     ├── .recent/<sid>.json                            pointers — the short-term surface (3 days)
@@ -183,6 +184,39 @@ hook-event visibility.
   archived.
 - `_reflect.json` `{at, count, last_ops}` — the due-baseline, seeded on first sight of
   a bank.
+
+## Observability — the journal
+
+Every verb but one writes what it *decided* to `log/<verb>-<date>.log`: one line per
+decision, never a transcript of the run. Hook-driven verbs decide and exit, and until
+the journal existed a `take --hook` that declined said nothing at all — the 2026-08-26
+mid-conversation archive had to be reconstructed out of Claude Code's own `daemon.log`.
+
+- Line shape — `<ISO> pid=<n> v=<version>-<commit> <verdict> <key>=<value>…`. `pid=` is
+  what ties a decision to the same process in `daemon.log`; `v=` names the build that
+  wrote it, since the installed binary is routinely a commit behind the tree and
+  `-dirty` means the commit alone does not describe it (`sandman version` prints the
+  same stamp). Newlines in a payload fold to spaces: one entry is always one greppable
+  line.
+- Shape, never content — `recall` reports how many banks answered, which memory files
+  each put in front of the session (`recalled-bank`), what the budget trimmed and how
+  long composing took. It never logs a body: a log that quoted the memories back would
+  be a second copy of the banks.
+- Honest units — `chars=` is reported against `budget=` in the characters the budget is
+  actually spent in, and `trimmed=`/`banks_dropped=` say what it cost to fit, which a
+  size alone cannot.
+- Best effort by construction — every error is swallowed, there is no result to ignore,
+  and a verb behaves identically whether its line landed or not. A journal that could
+  fail would be a new way for a session edge to break.
+- Day pages are the *narrative* record — what happened; the journal is the *decision*
+  record — why a verb did or did not act. `reflect` keeps both in `log/`: one line per
+  bank and one run line (`reflect done banks=… due=… swept=… ms=…`). `dream` appends
+  its detached run's stdout and stderr to `log/dream-<date>.log`.
+
+**`forget` is deliberately unjournaled — an accepted forensic hole.** It is sandman's
+privacy ending, and a line naming the session it destroyed would be exactly the trace
+the verb promises not to leave. The cost is real and is the point: a forget cannot be
+reconstructed afterwards, by anyone, including its operator.
 
 ## Invariants
 

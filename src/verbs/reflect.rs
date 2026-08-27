@@ -621,6 +621,12 @@ fn upkeep(
     let mut skipped = 0;
     let mut moved: Vec<String> = Vec::new();
     let mut abstained: Vec<String> = Vec::new();
+    // A merge is the one operation that consumes memories, and the merged
+    // memory's `source:` is the only other place its inputs are named — a
+    // field inside a file inside the bank, which is not something the log can
+    // be grepped for. Mirror them here so "what became of that memory?" is one
+    // `rg` over `<root>/log`, the question the journal exists to answer.
+    let mut merged: Vec<String> = Vec::new();
     for op in &ops {
         // Guarded on both sides of `resolved`: once so a merge whose files
         // have already moved never costs a call, and again on the far side,
@@ -642,6 +648,11 @@ fn upkeep(
             abstained.extend(files_of(op));
             continue;
         };
+        // The resolved op, not the proposed one: what reaches disk is what the
+        // second call settled on, and that is what the line must name.
+        if let Op::Merge { files, .. } = &ready {
+            merged.push(files.join("+"));
+        }
         apply(data_root, key, bank, now, &ready)?;
         applied += 1;
     }
@@ -668,6 +679,9 @@ fn upkeep(
     }
     if !abstained.is_empty() {
         let _ = write!(note, " merge-abstain({})", abstained.join(", "));
+    }
+    if !merged.is_empty() {
+        let _ = write!(note, " merged({})", merged.join(", "));
     }
     Ok((note, applied))
 }
@@ -1745,6 +1759,20 @@ mod tests {
             "{:?}",
             outcome.banks
         );
+        // The consumed files are named in the line, so a memory that vanished
+        // into a merge is findable by one `rg` over the log rather than by
+        // opening every `source:` in the bank.
+        assert!(
+            outcome.banks[0].contains(&format!(
+                "merged({}+{}+{})",
+                members[0], members[1], members[2]
+            )),
+            "{:?}",
+            outcome.banks
+        );
+        assert!(scratch.log().contains("merged("), "{}", scratch.log());
+        // The bank was due, and the run counted it.
+        assert_eq!(outcome.due, 1);
 
         // The merged memory dates from the earliest member, not from today.
         let bank = scratch.bank();

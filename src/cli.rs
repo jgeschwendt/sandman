@@ -8,11 +8,13 @@
 //! verb below it takes them as arguments.
 
 use std::env;
+use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::str::FromStr;
+use std::time::Instant;
 
 use crate::error::Error;
 use crate::hook;
@@ -22,6 +24,7 @@ use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 use crate::verbs::{dream, forget, recall, reflect, remember, take};
+use crate::version::VERSION;
 
 /// A failure that ran a verb badly.
 const EXIT_ERROR: u8 = 1;
@@ -38,6 +41,12 @@ const SESSION_ENV: &str = "CLAUDE_SESSION_ID";
 /// the next one.
 const NO_TAKE_ENV: &str = "SANDMAN_NO_TAKE";
 
+/// How much of a bank's memory list one journal line keeps, before the rest
+/// becomes a count. A bank of a hundred files must not be a hundred-file line.
+const BANK_CHARS: usize = 2_000;
+/// What a journal line shows for a field with nothing to report — distinct
+/// from [`NONE`], which is a field the payload could have carried and did not.
+const EMPTY: &str = "-";
 /// What a journal line shows for a field the payload did not carry.
 const NONE: &str = "none";
 /// How much of an unparseable payload the journal keeps. Enough to see what
@@ -97,10 +106,16 @@ usage: sandman <verb> [args]
       older than 72 h), and one gated opus upkeep call per grown bank
       ($SANDMAN_MIND_UPKEEP).
 
+  version
+      The crate version and the commit it was built from — the same stamp
+      every journal line carries as v=, so a line can be read against the
+      build that wrote it rather than whatever is checked out now.
+
 Every verb journals its decisions — one line each, stamped and carrying the
-writing pid — to <root>/log/<verb>-<date>.log, so a hook that declined can
-still be explained afterwards. forget alone is silent, deliberately: a line
-naming the session it destroyed would be the trace it promises not to leave.
+writing pid and build — to <root>/log/<verb>-<date>.log, so a hook that
+declined can still be explained afterwards. forget alone is silent,
+deliberately: a line naming the session it destroyed would be the trace it
+promises not to leave.
 
 Data root: $SANDMAN_ROOT, else ~/.sandman. Transcripts: ~/.claude/projects/.
 Logs: <root>/log/<verb>-<date>.log.";
@@ -153,6 +168,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
         "take" => take_verb(rest),
+        "version" => version_verb(rest),
         other => Err(Failure::Usage(format!("unknown verb `{other}`"))),
     }
 }
@@ -351,7 +367,27 @@ fn take_run(
         }
         session_id
     } else {
-        session_id.ok_or_else(|| Failure::Usage("take needs a session id".to_owned()))?
+        let session_id =
+            session_id.ok_or_else(|| Failure::Usage("take needs a session id".to_owned()))?;
+        // The job guard above is the hook's alone, and stays that way: a
+        // session named by hand is taken on the operator's word. But the take
+        // that pulled a live conversation out from under its own job was a
+        // by-hand one, and the only thing that made it unreconstructable was
+        // that nothing recorded the guard would have fired. So it is recorded,
+        // before the take rather than after — a take that panics or is killed
+        // mid-move still leaves the marker that explains what it was doing.
+        let guard = paths::claude_root()
+            .ok()
+            .and_then(|claude_root| take::live_job(&claude_root, &session_id));
+        note(
+            journal,
+            "take",
+            &format!(
+                "by-hand session={session_id} guard={}",
+                guard.as_deref().unwrap_or(EMPTY)
+            ),
+        );
+        session_id
     };
 
     let data_root = paths::data_root()?;
@@ -520,11 +556,40 @@ fn reflect_verb(args: &[String]) -> Result<(), Failure> {
             ))),
         };
     }
-    let outcome = reflect::reflect(
+    // The pass already writes one line per bank. What it had no line for is
+    // the run: a nightly tick that died halfway through left a log ending in
+    // an ordinary bank line, indistinguishable from one that finished.
+    let journal = paths::data_root().ok();
+    let started = Instant::now();
+    let outcome = match reflect::reflect(
         &paths::data_root()?,
         Timestamp::now()?,
         &reflect::Options::from_env(),
-    )?;
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            note(
+                journal.as_deref(),
+                "reflect",
+                &format!(
+                    "reflect error ms={}: {error}",
+                    started.elapsed().as_millis()
+                ),
+            );
+            return Err(Failure::Error(error));
+        }
+    };
+    note(
+        journal.as_deref(),
+        "reflect",
+        &format!(
+            "reflect done banks={} due={} swept={} ms={}",
+            outcome.banks.len(),
+            outcome.due,
+            outcome.swept,
+            started.elapsed().as_millis()
+        ),
+    );
     println!("{}", outcome.day_page.display());
     println!("{}", outcome.index.display());
     eprintln!(
@@ -571,10 +636,18 @@ fn recall_run(
         note(journal, "recall", "declined pipeline");
         return Ok(());
     }
+    // The session the payload names is the only handle that ties this priming
+    // to the conversation it went into — and to the `take` line the same id
+    // writes when that conversation ends. A recall asked for by hand primes
+    // nothing and names nobody, so it carries none.
+    let mut session: Option<String> = None;
     if from_hook && cwd.is_none() {
         let payload = stdin()?;
         cwd = match hook::session_start(&payload) {
-            Ok(start) => start.cwd,
+            Ok(start) => {
+                session = start.session_id;
+                start.cwd
+            }
             Err(error) => {
                 note(
                     journal,
@@ -588,12 +661,13 @@ fn recall_run(
             }
         };
     }
+    let session = session.as_deref().unwrap_or(NONE);
     if from_hook {
         note(
             journal,
             "recall",
             &format!(
-                "hook cwd={}",
+                "hook session={session} cwd={}",
                 cwd.as_deref()
                     .map_or_else(|| NONE.to_owned(), |cwd| cwd.display().to_string())
             ),
@@ -604,36 +678,98 @@ fn recall_run(
         None => env::current_dir().map_err(|source| Error::io(".", source))?,
     };
 
+    // Recall runs in front of every session start, so what it costs is a cost
+    // the operator pays per session and can otherwise only guess at.
+    let started = Instant::now();
     let composed = recall::compose(
         &paths::data_root()?,
         &paths::home()?,
         &cwd,
         Timestamp::now()?,
     );
+    let elapsed = started.elapsed().as_millis();
     if composed.text.is_empty() {
         note(journal, "recall", "silent nothing-to-recall");
         return Ok(());
     }
     // The shape of the priming, never its content: a log that quoted the
-    // memories back would be a second copy of the banks.
+    // memories back would be a second copy of the banks. `chars=` against
+    // `budget=` is the one comparison worth making, so both are in the unit
+    // the budget is actually spent in — `trimmed=` and `banks_dropped=` say
+    // what it cost to get there, which a size alone cannot.
+    let trimmed = if composed.trimmed.sections.is_empty() {
+        EMPTY.to_owned()
+    } else {
+        composed.trimmed.sections.join(",")
+    };
     note(
         journal,
         "recall",
         &format!(
-            "recalled cwd={} banks={} memories={} pointers={} bytes={} budget={}",
+            "recalled cwd={} session={session} banks={} memories={} pointers={} \
+chars={} budget={} trimmed={trimmed} banks_dropped={} ms={elapsed}",
             cwd.display(),
-            composed.banks,
+            composed.banks.len(),
             composed.memories,
             composed.pointers,
-            composed.text.len(),
-            recall::BUDGET_CHARS
+            composed.text.chars().count(),
+            recall::BUDGET_CHARS,
+            composed.trimmed.banks_dropped,
         ),
     );
+    // One line per bank, naming the files that went in. Identities, not
+    // bodies: "was that rule in front of the session that broke this?" is a
+    // question the shape line cannot answer and this one can.
+    for bank in &composed.banks {
+        note(
+            journal,
+            "recall",
+            &format!(
+                "recalled-bank session={session} bank={} memories={}",
+                bank.key,
+                bank_memories(&bank.memories)
+            ),
+        );
+    }
     if from_hook {
         println!("{}", hook::session_start_reply(&composed.text));
     } else {
         println!("{}", composed.text);
     }
+    Ok(())
+}
+
+/// A bank's memory filenames, cut to one line's worth.
+///
+/// Whole or not at all would make a large bank's line unreadable and a small
+/// bank's line perfect; a count for the tail keeps both honest, and the cut is
+/// visible rather than silent.
+fn bank_memories(files: &[String]) -> String {
+    let mut listed = String::new();
+    for (index, file) in files.iter().enumerate() {
+        let separator = if index == 0 { "" } else { "," };
+        if listed.chars().count() + separator.len() + file.chars().count() > BANK_CHARS {
+            let _ = write!(listed, "…+{}", files.len() - index);
+            break;
+        }
+        listed.push_str(separator);
+        listed.push_str(file);
+    }
+    listed
+}
+
+/// `version`.
+fn version_verb(args: &[String]) -> Result<(), Failure> {
+    if let Some(arg) = args.first() {
+        return match arg.as_str() {
+            "-h" | "--help" => help(),
+            option if option.starts_with("--") => Err(unknown_option(option)),
+            positional => Err(Failure::Usage(format!(
+                "version takes no arguments, got `{positional}`"
+            ))),
+        };
+    }
+    println!("{VERSION}");
     Ok(())
 }
 

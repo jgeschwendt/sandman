@@ -167,9 +167,36 @@ fn the_usage_screen_lists_the_verbs() {
     let machine = Machine::new("usage");
     let output = machine.run(&["--help"]);
     assert_eq!(code(&output), 0);
-    for verb in ["remember", "take", "recall", "forget", "dream", "reflect"] {
+    for verb in [
+        "dream", "forget", "recall", "reflect", "remember", "take", "version",
+    ] {
         assert!(stdout(&output).contains(verb), "usage omits {verb}");
     }
+}
+
+#[test]
+fn version_prints_the_stamp_every_journal_line_carries() {
+    let machine = Machine::new("version");
+    let output = machine.run(&["version"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let stamp = stdout(&output).trim().to_owned();
+    // `<crate version>-<build>`, one field with no spaces in it — the shape
+    // the journal's `v=` depends on.
+    assert!(
+        stamp.starts_with(&format!("{}-", env!("CARGO_PKG_VERSION"))),
+        "{stamp}"
+    );
+    assert!(!stamp.contains(' '), "{stamp}");
+
+    // And it is the same string a line carries, so a line found in the log a
+    // month later names a build that can be checked out.
+    machine.transcript(&[r#"{"type":"user","message":{"content":"a session"}}"#]);
+    assert_eq!(code(&machine.run(&["take", SID])), 0);
+    let log = machine.journal("take");
+    assert!(log.contains(&format!(" v={stamp} ")), "{log}");
+
+    // It takes no arguments.
+    assert_eq!(code(&machine.run(&["version", "extra"])), 2);
 }
 
 #[test]
@@ -687,6 +714,53 @@ fn the_journal_records_what_the_hook_decided_either_way() {
     assert_eq!(log.lines().count(), 4, "{log}");
 }
 
+#[test]
+fn a_take_by_hand_leaves_the_marker_the_guard_would_have_left() {
+    let machine = Machine::new("journal-by-hand");
+    let source = machine.transcript(&[
+        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
+        r#"{"type":"user","message":{"content":"a backgrounded conversation"}}"#,
+    ]);
+    let job = machine.job(
+        "11112222",
+        Some(&format!(r#"{{"sessionId":"{SID}","state":"done"}}"#)),
+    );
+
+    // The guard is the hook's and stays that way — the take happens. But the
+    // line records that a job named the session, which is the fact the
+    // 2026-08-26 incident had no record of.
+    let taken = machine.run(&["take", SID, "--force"]);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(!source.exists(), "the job never blocks a take by hand");
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!("by-hand session={SID} guard=11112222")),
+        "{log}"
+    );
+    // …and it is written before the take, so a take that dies mid-move still
+    // explains what it was doing.
+    let by_hand = log.find("by-hand").expect("the marker");
+    let took = log.find("took session=").expect("the take");
+    assert!(by_hand < took, "{log}");
+
+    // With no job naming it, the marker says so rather than going missing:
+    // a take with no line is indistinguishable from a take that never ran.
+    fs::remove_dir_all(&job).expect("delete the job");
+    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"unguarded"}}"#]);
+    assert_eq!(code(&machine.run(&["take", SID, "--force"])), 0);
+    assert!(!source.exists());
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!("by-hand session={SID} guard=-")),
+        "{log}"
+    );
+
+    // A hook take is not a by-hand take, and never claims to be. Matched on
+    // the field, not the word: the fabricated home's own path carries the
+    // label, and it lands in every `archived=`.
+    assert_eq!(log.matches(" by-hand session=").count(), 2, "{log}");
+}
+
 /// The pid a journal line carries, for asserting the shape without hardcoding
 /// the child process's id.
 fn line_pid(line: &str) -> &str {
@@ -699,16 +773,21 @@ fn line_pid(line: &str) -> &str {
 #[test]
 fn the_journal_records_what_recall_primed_a_session_with() {
     let machine = Machine::new("journal-recall");
-    let payload =
-        r#"{"hook_event_name":"SessionStart","cwd":"/Users/you/code","source":"startup"}"#;
+    let started = "22223333-4444-5555-6666-777788889999";
+    let payload = format!(
+        r#"{{"hook_event_name":"SessionStart","cwd":"/Users/you/code","session_id":"{started}","source":"startup"}}"#
+    );
 
     // An empty root recalls nothing — and says so, so a session that started
     // cold is distinguishable from a hook that never fired.
-    let silent = machine.run_with_stdin(&["recall", "--hook"], payload);
+    let silent = machine.run_with_stdin(&["recall", "--hook"], &payload);
     assert_eq!(code(&silent), 0, "{}", stderr(&silent));
     assert!(stdout(&silent).is_empty());
     let log = machine.journal("recall");
-    assert!(log.contains("hook cwd=/Users/you/code"), "{log}");
+    assert!(
+        log.contains(&format!("hook session={started} cwd=/Users/you/code")),
+        "{log}"
+    );
     assert!(log.contains("silent nothing-to-recall"), "{log}");
 
     // With something to say, the line carries the shape and never the content.
@@ -719,15 +798,97 @@ fn the_journal_records_what_recall_primed_a_session_with() {
     assert_eq!(code(&machine.run(&["take", SID])), 0);
     assert!(!taken.exists());
 
-    let recalled = machine.run_with_stdin(&["recall", "--hook"], payload);
+    let recalled = machine.run_with_stdin(&["recall", "--hook"], &payload);
     assert_eq!(code(&recalled), 0, "{}", stderr(&recalled));
     let log = machine.journal("recall");
     assert!(log.contains("recalled cwd=/Users/you/code"), "{log}");
     assert!(log.contains("pointers=1"), "{log}");
     assert!(log.contains("budget=9000"), "{log}");
+    // The session the priming went into — the handle that ties this line to
+    // the `take` line the same id writes when the conversation ends.
+    assert!(
+        log.contains(&format!("recalled cwd=/Users/you/code session={started}")),
+        "{log}"
+    );
+    // `chars=` not `bytes=`: the budget is spent in characters, and a line
+    // that reported one against the other compared nothing.
+    let line = log
+        .lines()
+        .find(|line| line.contains("recalled cwd="))
+        .expect("the recalled line");
+    let chars: usize = field(line, "chars").parse().expect("a char count");
+    assert!(chars > 0 && chars <= 9_000, "{line}");
+    // Nothing was trimmed here, and it says so rather than staying silent.
+    assert_eq!(field(line, "trimmed"), "-", "{line}");
+    assert_eq!(field(line, "banks_dropped"), "0", "{line}");
+    // Composing was timed, so the per-session cost is not a guess.
+    assert!(field(line, "ms").parse::<u128>().is_ok(), "{line}");
     // The payload said it; the journal must not.
     assert!(stdout(&recalled).contains("the secret body"));
     assert!(!log.contains("the secret body"), "{log}");
+}
+
+/// The value of one `key=value` field on a journal line.
+fn field<'a>(line: &'a str, key: &str) -> &'a str {
+    line.split(&format!(" {key}="))
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .unwrap_or_else(|| panic!("no {key}= on {line}"))
+}
+
+#[test]
+fn the_journal_names_the_memories_each_bank_put_in_front_of_a_session() {
+    let machine = Machine::new("journal-recall-banks");
+    let started = "22223333-4444-5555-6666-777788889999";
+    let payload = format!(
+        r#"{{"hook_event_name":"SessionStart","cwd":"/Users/you/code","session_id":"{started}","source":"startup"}}"#
+    );
+    let remembered = machine.run(&[
+        "remember",
+        "the rule that was in front of the session",
+        "--type",
+        "user",
+        "--name",
+        "the standing rule",
+        "--cwd",
+        "/Users/you/code",
+    ]);
+    assert_eq!(code(&remembered), 0, "{}", stderr(&remembered));
+    let committed = PathBuf::from(stdout(&remembered).trim().to_owned());
+    let filename = committed
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("a filename")
+        .to_owned();
+    let bank = committed
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .expect("a bank")
+        .to_owned();
+
+    let recalled = machine.run_with_stdin(&["recall", "--hook"], &payload);
+    assert_eq!(code(&recalled), 0, "{}", stderr(&recalled));
+    let log = machine.journal("recall");
+    // Identities, not bodies: which files went in is answerable afterwards,
+    // and what they said is still only in the bank.
+    assert!(
+        log.contains(&format!(
+            "recalled-bank session={started} bank={bank} memories={filename}"
+        )),
+        "{log}"
+    );
+    assert!(!log.contains("the rule that was in front"), "{log}");
+    // One line per bank that answered, and the shape line agrees with them.
+    let banks: usize = field(
+        log.lines()
+            .find(|line| line.contains("recalled cwd="))
+            .expect("the recalled line"),
+        "banks",
+    )
+    .parse()
+    .expect("a bank count");
+    assert_eq!(log.matches("recalled-bank ").count(), banks, "{log}");
 }
 
 #[test]
