@@ -166,7 +166,9 @@ hook-event visibility.
 - Day page `log/<date>.md`, regenerated idempotently: the day's takes and the day's
   committed memories. `INDEX.md` lists every day page.
 - Pointer sweep: delete `.recent` pointers that are dreamed and ended > 72 h ago.
-- Bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last: ONE opus planning call
+- Bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last, OR the previous pass
+  spent every operation it was allowed (a backlog is old inventory already judged worth
+  reworking, so it is due on sight): ONE opus planning call
   (`$SANDMAN_MIND_UPKEEP`) proposing at most 6 net-non-increasing ops (prune, merge,
   retitle), validated whole — an invalid reply is rejected entire, never partially
   applied. Upkeep never grows a bank.

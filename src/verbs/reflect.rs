@@ -6,7 +6,9 @@
 //! than a duplicate. The two destructive steps are both gated and both
 //! conservative — a pointer is only swept once it has been dreamt *and* aged
 //! out, and a bank is only reworked when it has grown and had a day to
-//! settle.
+//! settle, or when the pass before it spent every operation it was allowed:
+//! that backlog is old inventory already judged worth reworking, so it is due
+//! on sight.
 //!
 //! Upkeep is the one place a model is asked to change memories that already
 //! exist. It gets one planning call, at most six operations, and every reply
@@ -52,9 +54,13 @@ use crate::verbs::dream::{self, DREAMED_KEY};
 pub const SWEEP_HOURS: i64 = 72;
 /// A bank must have grown by this many files since its baseline to be due.
 pub const UPKEEP_GROWTH: usize = 5;
-/// …and this many hours must have passed since the last pass over it.
+/// …and this many hours must have passed since the last pass over it. The
+/// wait is there to give new memories a day before anything merges them, so
+/// it holds growth and not a backlog, which is not new.
 pub const UPKEEP_HOURS: i64 = 20;
-/// The most operations one upkeep call may propose.
+/// The most operations one upkeep call may propose. A pass that spends them
+/// all plainly left work behind, and that backlog keeps the bank due on its
+/// own until a pass comes in under the ceiling.
 pub const UPKEEP_MAX_OPS: usize = 6;
 /// Day-page descriptions are cut here.
 pub const DESCRIPTION_MAX_CHARS: usize = 100;
@@ -571,10 +577,17 @@ fn upkeep_bank(
     };
     let grown = count >= baseline.count + UPKEEP_GROWTH;
     let settled = now.unix_seconds() - baseline.at.unix_seconds() >= UPKEEP_HOURS * 3600;
-    if !(grown && settled) {
+    // A pass that spent every operation it had left work behind: memories it
+    // already judged worth reworking and could not reach inside one bounded
+    // call. That backlog is due on sight — the settle wait is for memories
+    // that are new, and a backlog is the opposite. It converges on its own,
+    // since the first pass to come in under the ceiling puts the bank back on
+    // the growth gate.
+    let backlog = baseline.last_ops >= UPKEEP_MAX_OPS;
+    if !((grown && settled) || backlog) {
         return Ok((
             format!(
-                "count={count} due=no grown={grown} settled={settled} last_ops={}",
+                "count={count} due=no grown={grown} settled={settled} backlog={backlog} last_ops={}",
                 baseline.last_ops
             ),
             0,
@@ -1493,6 +1506,51 @@ mod tests {
                 .at,
             day_ago
         );
+    }
+
+    #[test]
+    fn a_backlog_keeps_a_bank_due_without_growth_or_a_settled_day() {
+        let scratch = Scratch::new("reflect-backlog");
+        for index in 0..7 {
+            scratch.seed(&format!("memory {index}"), "d", "b");
+        }
+        let hour_ago = Timestamp::from_unix_seconds(NOW - 3600);
+
+        // Nothing new and no day passed, but the last pass spent every
+        // operation it was allowed: due anyway. The mind cannot be reached, so
+        // it abstains and the baseline is left where it stands.
+        write_baseline(
+            &scratch.baseline_path(),
+            Baseline {
+                at: hour_ago,
+                count: 7,
+                last_ops: UPKEEP_MAX_OPS,
+            },
+        )
+        .expect("baseline");
+        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        assert!(outcome.banks[0].contains("abstain("), "{:?}", outcome.banks);
+        assert_eq!(outcome.due, 1);
+
+        // One operation under the ceiling is not a backlog: the bank is back
+        // on the growth gate, and the note says so.
+        write_baseline(
+            &scratch.baseline_path(),
+            Baseline {
+                at: hour_ago,
+                count: 7,
+                last_ops: UPKEEP_MAX_OPS - 1,
+            },
+        )
+        .expect("baseline");
+        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        assert!(outcome.banks[0].contains("due=no"), "{:?}", outcome.banks);
+        assert!(
+            outcome.banks[0].contains("backlog=false"),
+            "{:?}",
+            outcome.banks
+        );
+        assert_eq!(outcome.due, 0);
     }
 
     /// Make the bank due: seven files, a baseline a day old.
