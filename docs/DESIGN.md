@@ -203,8 +203,9 @@ mid-conversation archive had to be reconstructed out of Claude Code's own `daemo
   long composing took. It never logs a body: a log that quoted the memories back would
   be a second copy of the banks.
 - Honest units — `chars=` is reported against `budget=` in the characters the budget is
-  actually spent in, and `trimmed=`/`banks_dropped=` say what it cost to fit, which a
-  size alone cannot.
+  actually spent in, and `trimmed=`/`banks_degraded=`/`cut_lines=` say what it cost to
+  fit, which a size alone cannot; each `recalled-bank` line carries `rendering=` — `full`
+  or `index` — naming the form its memories arrived in.
 - Best effort by construction — every error is swallowed, there is no result to ignore,
   and a verb behaves identically whether its line landed or not. A journal that could
   fail would be a new way for a session edge to break.

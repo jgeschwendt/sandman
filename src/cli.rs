@@ -695,8 +695,8 @@ fn recall_run(
     // The shape of the priming, never its content: a log that quoted the
     // memories back would be a second copy of the banks. `chars=` against
     // `budget=` is the one comparison worth making, so both are in the unit
-    // the budget is actually spent in — `trimmed=` and `banks_dropped=` say
-    // what it cost to get there, which a size alone cannot.
+    // the budget is actually spent in — `trimmed=`, `banks_degraded=` and
+    // `cut_lines=` say what it cost to get there, which a size alone cannot.
     let trimmed = if composed.trimmed.sections.is_empty() {
         EMPTY.to_owned()
     } else {
@@ -707,14 +707,15 @@ fn recall_run(
         "recall",
         &format!(
             "recalled cwd={} session={session} banks={} memories={} pointers={} \
-chars={} budget={} trimmed={trimmed} banks_dropped={} ms={elapsed}",
+chars={} budget={} trimmed={trimmed} banks_degraded={} cut_lines={} ms={elapsed}",
             cwd.display(),
             composed.banks.len(),
             composed.memories,
             composed.pointers,
             composed.text.chars().count(),
             recall::BUDGET_CHARS,
-            composed.trimmed.banks_dropped,
+            composed.trimmed.banks_degraded,
+            composed.trimmed.ceiling_lines,
         ),
     );
     // One line per bank, naming the files that went in. Identities, not
@@ -725,9 +726,10 @@ chars={} budget={} trimmed={trimmed} banks_dropped={} ms={elapsed}",
             journal,
             "recall",
             &format!(
-                "recalled-bank session={session} bank={} memories={}",
+                "recalled-bank session={session} bank={} memories={} rendering={}",
                 bank.key,
-                bank_memories(&bank.memories)
+                bank_memories(&bank.memories),
+                if bank.degraded { "index" } else { "full" }
             ),
         );
     }

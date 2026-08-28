@@ -21,6 +21,8 @@ use crate::time::Timestamp;
 /// Hook output is capped by Claude Code at 10,000 characters; the surfaces
 /// share this much of it.
 pub const BUDGET_CHARS: usize = 9_000;
+/// Index-line descriptions are cut here.
+const INDEX_DESCRIPTION_CHARS: usize = 160;
 /// How many day-page lines the chronological surface carries.
 const LOG_INDEX_LINES: usize = 5;
 /// Pointers older than this are not short-term any more.
@@ -83,7 +85,11 @@ pub struct RecalledBank {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Trimmed {
     /// How many banks ended at their index rendering rather than their bodies.
-    pub banks_dropped: usize,
+    pub banks_degraded: usize,
+    /// How many rendered lines the ceiling cut took off the end. Zero is the
+    /// ordinary case; anything else means the payload was still over with every
+    /// surface at its floor, and nothing but this says how much never arrived.
+    pub ceiling_lines: usize,
     /// The optional surfaces that did not survive, in the order they went.
     pub sections: Vec<&'static str>,
 }
@@ -105,7 +111,7 @@ pub fn compose(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> Rec
         recent: recent.map(|(section, _)| section),
         tools: tools(data_root, home),
     };
-    let (text, budget) = sections.compose();
+    let (text, budget, ceiling_lines) = sections.compose();
     Recalled {
         banks: sections
             .graph
@@ -120,7 +126,8 @@ pub fn compose(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> Rec
         memories: sections.graph.iter().map(|section| section.memories).sum(),
         pointers: sections.pointers,
         trimmed: Trimmed {
-            banks_dropped: budget.graph.iter().filter(|full| !**full).count(),
+            banks_degraded: budget.graph.iter().filter(|full| !**full).count(),
+            ceiling_lines,
             sections: sections.dropped(&budget),
         },
         text,
@@ -184,10 +191,11 @@ impl Sections {
 
     /// Render, then trim cheapest-surface-first until the payload fits.
     ///
-    /// The budget it settled on comes back with the text: what was cut is not
-    /// recoverable from the payload, and it is exactly what the journal has to
-    /// say for `budget=` to mean anything.
-    fn compose(&self) -> (String, Budget) {
+    /// The budget it settled on comes back with the text, along with the lines
+    /// the ceiling cut took: what was cut is not recoverable from the payload,
+    /// and it is exactly what the journal has to say for `budget=` to mean
+    /// anything.
+    fn compose(&self) -> (String, Budget, usize) {
         let mut budget = Budget {
             chronological: self.chronological.is_some(),
             graph: vec![true; self.graph.len()],
@@ -232,7 +240,23 @@ impl Sections {
             }
         }
 
-        (truncate_chars(&text, BUDGET_CHARS).to_owned(), budget)
+        // Over even with everything at its floor, so the tail has to go. It
+        // goes a whole line at a time: an index entry cut mid-word is a pointer
+        // that names no file, worse to a session than an entry it never saw.
+        // Only a single line longer than the entire budget has no boundary to
+        // fall back to, and there the blunt cut still beats an empty payload.
+        if !over(&text) {
+            return (text, budget, 0);
+        }
+        let lines = text.lines().count();
+        let cut = truncate_chars(&text, BUDGET_CHARS);
+        let bounded = cut.rfind('\n').map_or("", |end| &cut[..end]);
+        let kept = if bounded.chars().count() <= HEADER.chars().count() {
+            cut
+        } else {
+            bounded
+        };
+        (kept.to_owned(), budget, lines - kept.lines().count())
     }
 
     /// The payload at this budget.
@@ -335,10 +359,21 @@ impl Memory {
     }
 
     /// The one-line form, with the file to read for the rest.
+    ///
+    /// The description is cut to a line's worth here rather than left to the
+    /// payload's ceiling: descriptions run as long as whole bodies, and a
+    /// handful of those would crowd a hundred short memories out of an index
+    /// that exists precisely to name them all.
     fn index(&self, bank: &str) -> String {
+        let description = truncate_chars(&self.description, INDEX_DESCRIPTION_CHARS);
+        let ellipsis = if description.len() < self.description.len() {
+            "…"
+        } else {
+            ""
+        };
         format!(
-            "- {} ({}) — {}  [{bank}/{}]",
-            self.name, self.kind, self.description, self.file
+            "- {} ({}) — {description}{ellipsis}  [{bank}/{}]",
+            self.name, self.kind, self.file
         )
     }
 
@@ -695,7 +730,10 @@ fn strip_comments(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{BUDGET_CHARS, Recalled, compose, recall, split_frontmatter, strip_comments};
+    use super::{
+        BUDGET_CHARS, INDEX_DESCRIPTION_CHARS, Recalled, compose, recall, split_frontmatter,
+        strip_comments,
+    };
     use crate::bank::Bank;
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
@@ -1027,7 +1065,7 @@ mod tests {
         assert!(text.contains("## Tool index"));
         // And the report says exactly that: one bank degraded, nothing left
         // out in the end — the reinstatement is not a trim.
-        assert_eq!(composed.trimmed.banks_dropped, 1);
+        assert_eq!(composed.trimmed.banks_degraded, 1);
         assert!(composed.trimmed.sections.is_empty(), "{composed:?}");
         assert_eq!(composed.banks.len(), 1);
         assert!(composed.banks[0].degraded);
@@ -1071,7 +1109,7 @@ mod tests {
             composed.trimmed.sections,
             ["tools", "chronological", "recent"]
         );
-        assert_eq!(composed.trimmed.banks_dropped, 1);
+        assert_eq!(composed.trimmed.banks_degraded, 1);
         assert!(!composed.banks[0].degraded, "the cwd bank kept its bodies");
         assert!(composed.banks[1].degraded, "the ancestor gave them up");
     }
@@ -1108,16 +1146,66 @@ mod tests {
     #[test]
     fn a_bank_too_large_for_any_budget_is_cut_at_the_ceiling() {
         let root = Root::new("recall-ceiling");
+        // Many short memories, not one long one: the index rendering is the
+        // floor, and enough entries overflow it however short each line is.
+        for index in 0..200 {
+            root.memory(
+                &root.bank(),
+                &format!("user_{index:03}.md"),
+                &format!(
+                    "name: memory {index:03}\ndescription: {}\ntype: user\n",
+                    "d".repeat(150)
+                ),
+                &format!("{}\n", "b".repeat(150)),
+            );
+        }
+
+        let composed = root.compose();
+        let text = &composed.text;
+        assert!(text.chars().count() <= BUDGET_CHARS);
+        // The last thing a session reads is a whole entry — a pointer it can
+        // follow — and never the front half of one.
+        let last = text.lines().next_back().expect("a last line");
+        assert!(last.starts_with("- "), "{last}");
+        assert!(last.ends_with(']'), "{last}");
+        assert!(composed.trimmed.ceiling_lines > 0, "{composed:?}");
+    }
+
+    #[test]
+    fn an_index_description_longer_than_its_cap_ends_in_an_ellipsis() {
+        let root = Root::new("recall-index-description");
+        let capped = "d".repeat(INDEX_DESCRIPTION_CHARS);
+        let overlong = "e".repeat(INDEX_DESCRIPTION_CHARS + 40);
+        // reference renders as an index line even at full budget.
         root.memory(
             &root.bank(),
-            "user_huge.md",
-            &format!(
-                "name: huge\ndescription: {}\ntype: user\n",
-                "d".repeat(BUDGET_CHARS * 2)
-            ),
-            &format!("{}\n", "y".repeat(BUDGET_CHARS * 2)),
+            "reference_capped.md",
+            &format!("name: capped\ndescription: {capped}\ntype: reference\n"),
+            "a short body\n",
         );
-        assert_eq!(root.recall().chars().count(), BUDGET_CHARS);
+        root.memory(
+            &root.bank(),
+            "reference_overlong.md",
+            &format!("name: overlong\ndescription: {overlong}\ntype: reference\n"),
+            "a short body\n",
+        );
+
+        let text = root.recall();
+        assert!(
+            text.contains(&format!("- capped (reference) — {capped}  [")),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "- overlong (reference) — {}…  [",
+                "e".repeat(INDEX_DESCRIPTION_CHARS)
+            )),
+            "{text}"
+        );
+        assert!(
+            !text.contains(&"e".repeat(INDEX_DESCRIPTION_CHARS + 1)),
+            "{text}"
+        );
     }
 
     #[test]

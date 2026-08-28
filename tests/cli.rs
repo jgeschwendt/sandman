@@ -820,7 +820,7 @@ fn the_journal_records_what_recall_primed_a_session_with() {
     assert!(chars > 0 && chars <= 9_000, "{line}");
     // Nothing was trimmed here, and it says so rather than staying silent.
     assert_eq!(field(line, "trimmed"), "-", "{line}");
-    assert_eq!(field(line, "banks_dropped"), "0", "{line}");
+    assert_eq!(field(line, "banks_degraded"), "0", "{line}");
     // Composing was timed, so the per-session cost is not a guess.
     assert!(field(line, "ms").parse::<u128>().is_ok(), "{line}");
     // The payload said it; the journal must not.
