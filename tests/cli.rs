@@ -556,6 +556,29 @@ fn take_hook_stays_out_of_the_memory_pipeline() {
     assert_eq!(code(&guarded), 0, "{}", stderr(&guarded));
     assert!(stdout(&guarded).is_empty());
     assert!(stderr(&guarded).is_empty());
+    // The decline names its session: a line nobody can tie to a conversation
+    // is a line no later reclaim can act on.
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!("declined pipeline session={SID}")),
+        "{log}"
+    );
+
+    // A payload that will not parse declines just as quietly, under the bare
+    // form — the dream turn must never fail its own hook.
+    let malformed = machine.run_with(
+        &["take", "--hook"],
+        "{not json",
+        &[("CLAUDE_MEMORY_PIPELINE", "1")],
+    );
+    assert_eq!(code(&malformed), 0, "{}", stderr(&malformed));
+    assert!(stdout(&malformed).is_empty());
+    assert!(stderr(&malformed).is_empty());
+    let log = machine.journal("take");
+    assert!(
+        log.lines().any(|line| line.ends_with("declined pipeline")),
+        "{log}"
+    );
 
     // The same ending outside the pipeline is taken as ever.
     let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
@@ -652,6 +675,61 @@ fn take_hook_declines_a_session_a_live_job_still_names() {
     assert_eq!(code(&taken), 0, "{}", stderr(&taken));
     assert!(!source.exists());
     assert!(PathBuf::from(stdout(&taken).trim()).is_file());
+}
+
+#[test]
+fn take_hook_takes_past_a_job_that_has_moved_on_or_been_cleared() {
+    const SUCCESSOR: &str = "0ddf70a8-1111-2222-3333-444455556666";
+
+    let machine = Machine::new("job-guard-moved-on");
+    let payload = |reason: &str| {
+        format!(
+            r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"{reason}"}}"#
+        )
+    };
+
+    // A `/clear` inside a backgrounded conversation ended this session and the
+    // job carried on under the successor, leaving the old id behind in
+    // `sessionId`. The job speaks for what it would resume, not for what it
+    // has left: this ending is an ending.
+    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"cleared away"}}"#]);
+    let job = machine.job(
+        "11112222",
+        Some(&format!(
+            r#"{{"sessionId":"{SID}","resumeSessionId":"{SUCCESSOR}","state":"running"}}"#
+        )),
+    );
+    let taken = machine.run_with_stdin(&["take", "--hook"], &payload("other"));
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(!source.exists());
+    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
+    assert!(job.is_dir(), "the job itself is left alone");
+
+    // And a `/clear` reaches past the guard even while the job still names the
+    // session both ways: the operator wiped the conversation, so no worker can
+    // be behind the ending and nothing will append to the transcript again.
+    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"wiped"}}"#]);
+    fs::write(
+        job.join("state.json"),
+        format!(r#"{{"sessionId":"{SID}","resumeSessionId":"{SID}","state":"running"}}"#),
+    )
+    .expect("rewrite the job state");
+    let cleared = machine.run_with_stdin(&["take", "--hook"], &payload("clear"));
+    assert_eq!(code(&cleared), 0, "{}", stderr(&cleared));
+    assert!(!source.exists());
+    assert!(PathBuf::from(stdout(&cleared).trim()).is_file());
+
+    // The same job, an ordinary ending: the guard is back in force.
+    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"still live"}}"#]);
+    let declined = machine.run_with_stdin(&["take", "--hook"], &payload("other"));
+    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    assert!(stdout(&declined).is_empty());
+    assert!(source.is_file(), "the transcript stays in the live set");
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!("declined live-job session={SID} job=11112222")),
+        "{log}"
+    );
 }
 
 #[test]

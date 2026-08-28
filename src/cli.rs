@@ -41,6 +41,10 @@ const SESSION_ENV: &str = "CLAUDE_SESSION_ID";
 /// the next one.
 const NO_TAKE_ENV: &str = "SANDMAN_NO_TAKE";
 
+/// The `SessionEnd` reason an operator is behind: `/clear` wipes the
+/// conversation, so the transcript it ends can never be appended to again.
+const CLEAR_REASON: &str = "clear";
+
 /// How much of a bank's memory list one journal line keeps, before the rest
 /// becomes a count. A bank of a hundred files must not be a hundred-file line.
 const BANK_CHARS: usize = 2_000;
@@ -71,8 +75,11 @@ usage: sandman <verb> [args]
       names one whose files forget already destroyed, or carries
       reason=resume — which Claude Code fires on the session it is adopting,
       a beginning wearing an ending's name. It also exits quietly when a live
-      background job under ~/.claude/jobs still names the session: the daemon
+      background job under ~/.claude/jobs would resume the session: the daemon
       retires idle workers, and a worker's exit is not the conversation's end.
+      A job that has moved on speaks only for the session it would resume, and
+      reason=clear reaches past that guard — an operator's wipe ends the
+      transcript for good.
       Set $SANDMAN_NO_TAKE to decline quietly — for machine-driven resume
       turns that must not count as endings; a session named by hand is taken
       regardless.
@@ -287,8 +294,24 @@ fn take_run(
         // this variable; take must too.
         if env::var(PIPELINE_ENV).as_deref() == Ok("1") {
             // One line per dream turn. They are rare, and the alternative is a
-            // silence indistinguishable from the hook never having run.
-            note(journal, "take", "declined pipeline");
+            // silence indistinguishable from the hook never having run. The
+            // payload is read here only for the id it names: a decline that
+            // cannot be tied to a session is a decline no later reclaim can
+            // account for. A payload that will not read still declines
+            // quietly — under this variable there is nothing to take either
+            // way, and a dream turn must never fail its own hook.
+            let named = stdin()
+                .ok()
+                .and_then(|payload| hook::session_end(&payload).ok())
+                .and_then(|ending| ending.session_id);
+            note(
+                journal,
+                "take",
+                &named.map_or_else(
+                    || "declined pipeline".to_owned(),
+                    |session_id| format!("declined pipeline session={session_id}"),
+                ),
+            );
             return Ok(());
         }
         // SessionEnd is the proof the session is over — the hook fires the
@@ -346,6 +369,12 @@ fn take_run(
             );
             return Ok(());
         }
+        // An operator wiping the conversation is the one ending no worker can
+        // be behind: `/clear` closes the transcript for good, and the job it
+        // may have run under carries on under a new session id. Read before
+        // the id is taken out of the payload, because the job guard below is
+        // the only thing it turns off.
+        let cleared = ending.reason.as_deref() == Some(CLEAR_REASON);
         // A payload with no session is a session with nothing to take.
         let Some(session_id) = ending.session_id else {
             note(journal, "take", "declined no-session");
@@ -356,8 +385,12 @@ fn take_run(
         // with an ordinary reason — but a job directory still naming the
         // session says the conversation is resumable and will be resumed. The
         // guard is the hook's alone: a session named by hand is taken on the
-        // operator's word, job or no job.
-        if let Some(job) = take::live_job(&paths::claude_root()?, &session_id) {
+        // operator's word, job or no job — and a `/clear` reaches past it for
+        // the same reason. The operator wiped the conversation: the transcript
+        // is definitively over, no retiring worker can have fired that ending,
+        // and the job — if the clear happened inside one — has already moved
+        // to a new session id (2026-08-28).
+        if !cleared && let Some(job) = take::live_job(&paths::claude_root()?, &session_id) {
             note(
                 journal,
                 "take",

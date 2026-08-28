@@ -127,6 +127,15 @@ pub fn take(
 /// out from under its own job and then took three recreated stubs as the
 /// daemon re-settled (2026-08-26).
 ///
+/// The proof holds only for the session the job would resume next. A `/clear`
+/// inside a backgrounded conversation ends that session and starts a fresh
+/// one: the job carries on under the new id, and its `state.json` is left
+/// naming the cleared session in `sessionId` while `resumeSessionId` has
+/// already moved to the successor. That stale name protected a conversation
+/// the job will never touch again — a 1.8 MB transcript sat untaken behind it
+/// (2026-08-28) — so a job speaks for the id it would resume, and for the one
+/// it ran only when it names no other.
+///
 /// Every uncertainty reads as "no job": an absent or unreadable jobs
 /// directory, an entry that is not a job, a `state.json` that is missing or
 /// will not parse, a field of the wrong type. The guard declines only what it
@@ -146,8 +155,12 @@ pub fn live_job(claude_root: &Path, session_id: &str) -> Option<String> {
     })
 }
 
-/// Whether one job's state names `session_id` — as the session it ran, or as
-/// the one the next turn would resume. They are usually the same id.
+/// Whether one job's state names `session_id` as the session the next turn
+/// would resume — `resumeSessionId` when the state carries one, and otherwise
+/// the `sessionId` it ran under. They are usually the same id.
+///
+/// When they differ, only `resumeSessionId` counts: the job has moved on, and
+/// the id it left behind names a conversation that is closed forever.
 fn job_names(state: &Path, session_id: &str) -> bool {
     let Ok(text) = fs::read_to_string(state) else {
         return false;
@@ -155,9 +168,11 @@ fn job_names(state: &Path, session_id: &str) -> bool {
     let Ok(value) = json::parse(&text) else {
         return false;
     };
-    ["resumeSessionId", "sessionId"]
-        .into_iter()
-        .any(|key| value.get(key).and_then(Value::as_str) == Some(session_id))
+    let named = |key| value.get(key).and_then(Value::as_str);
+    named("resumeSessionId").map_or_else(
+        || named("sessionId") == Some(session_id),
+        |resume| resume == session_id,
+    )
 }
 
 /// `<yyyy>-<mm>-<dd>-<HHMMSS>-<path under ~/.claude, `/` → `-`>`.
@@ -539,6 +554,47 @@ mod tests {
             )),
         );
         assert_eq!(live_job(&fixture.claude, SID).as_deref(), Some("99990000"));
+    }
+
+    #[test]
+    fn a_job_protects_only_the_session_it_would_still_resume() {
+        const SUCCESSOR: &str = "0ddf70a8-1111-2222-3333-444455556666";
+
+        // A `/clear` ended the session the job ran under and the job carried on
+        // under the successor. The stale `sessionId` is a name, not a claim:
+        // nothing will ever append to that transcript again.
+        let moved = Fixture::new("take-jobs-moved-on");
+        moved.job(
+            "11112222",
+            Some(&format!(
+                r#"{{"sessionId":"{SID}","resumeSessionId":"{SUCCESSOR}","state":"running"}}"#
+            )),
+        );
+        assert_eq!(live_job(&moved.claude, SID), None);
+        // …and the successor is the one the job speaks for.
+        assert_eq!(
+            live_job(&moved.claude, SUCCESSOR).as_deref(),
+            Some("11112222")
+        );
+
+        // With no `resumeSessionId` at all, the session it ran is the session
+        // it would resume.
+        let ran = Fixture::new("take-jobs-ran");
+        ran.job(
+            "22223333",
+            Some(&format!(r#"{{"sessionId":"{SID}","state":"done"}}"#)),
+        );
+        assert_eq!(live_job(&ran.claude, SID).as_deref(), Some("22223333"));
+
+        // The ordinary case: both fields are the one id, and it is protected.
+        let same = Fixture::new("take-jobs-same");
+        same.job(
+            "33334444",
+            Some(&format!(
+                r#"{{"sessionId":"{SID}","resumeSessionId":"{SID}"}}"#
+            )),
+        );
+        assert_eq!(live_job(&same.claude, SID).as_deref(), Some("33334444"));
     }
 
     #[test]
