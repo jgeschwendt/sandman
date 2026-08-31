@@ -18,9 +18,9 @@ invariants:
 | where | what |
 | --- | --- |
 | design/ | excalidraw scenes — `sandman-v0` is the design wireframe |
-| docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored byte-synced from jgeschwendt/ui @ 4f1d9db); `docs/serve.py` (:7875); visor wrap: `visor -p 9002 7875` (:9002) |
+| docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875) |
 | src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's day page, sweep and bank upkeep |
-| tools/sketch/ | pair-drawing excalidraw over design/ — `tools/sketch/run.sh` (:7873); visor wrap: `visor -p 9001 7873` (:9001) |
+| tools/sketch/ | pair-drawing excalidraw over design/ — `tools/sketch/run.sh` (:7873) |
 
 The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 

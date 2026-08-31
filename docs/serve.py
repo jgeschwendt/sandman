@@ -3,12 +3,11 @@
 
 Adapted from jgeschwendt/ui serve.py (@ 4f1d9db) — same three corrections a dev
 server owes a wrapper: HTTP/1.1 keep-alive, a threaded handler, and no
-Content-Security-Policy, so visor's injected script is never silently blocked.
+Content-Security-Policy, so a proxy's injected script is never silently blocked.
 
     docs/serve.py              # http://127.0.0.1:7875/
     docs/serve.py --port 4321
-    visor -p 9002 7875         # wrap the running server
-    visor -- docs/serve.py     # or let visor own the port ($PORT wins over 7875)
+    PORT=4321 docs/serve.py    # $PORT wins over the default, for a wrapping proxy
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ class Server(ThreadingHTTPServer):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="serve sandman's docs/ over HTTP")
-    ap.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1 — loopback, like visor)")
+    ap.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1 — loopback only)")
     ap.add_argument("--port", type=int, default=None, help=f"bind port (default: $PORT, else {DEFAULT_PORT})")
     args = ap.parse_args()
 
