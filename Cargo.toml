@@ -3,7 +3,12 @@ name = "sandman-cli"
 version = "0.1.0"
 edition = "2024"
 description = "sandman — memory engine for Claude sessions: banks, extraction pipeline, reconcile pass"
-license-file = "LICENSE.md"
+# SPDX id, not `license-file`: crates.io, docs.rs and dependency scanners read
+# `license` and ignore `license-file`, and cargo warns when both are set. The
+# text still ships — cargo packages LICENSE* on its own.
+license = "PolyForm-Noncommercial-1.0.0"
+readme = "README.md"
+repository = "https://github.com/jgeschwendt/sandman"
 
 [lib]
 name = "sandman"
