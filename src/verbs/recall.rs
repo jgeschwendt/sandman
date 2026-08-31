@@ -570,29 +570,45 @@ fn graph_sections(data_root: &Path, home: &Path, cwd: &Path) -> Vec<GraphSection
                     _ => memory.index(&bank),
                 })
                 .collect();
-            // Degraded, a pinned memory keeps its body above the index lines.
-            let index: Vec<String> = memories
-                .iter()
-                .map(|memory| {
-                    if memory.recall == "pin" {
-                        memory.full()
-                    } else {
-                        memory.index(&bank)
-                    }
-                })
-                .collect();
             Some(GraphSection {
                 files: memories.iter().map(|memory| memory.file.clone()).collect(),
                 full: format!("## Long-term · {label} · {where_from}\n{}", full.join("\n")),
                 index: format!(
                     "## Long-term index · {label} · {where_from}\n{}",
-                    index.join("\n")
+                    index_lines(&memories, &bank)
                 ),
                 key: bank.clone(),
                 memories: memories.len(),
             })
         })
         .collect()
+}
+
+/// A bank at its floor: one line per memory, except a pinned one, which keeps
+/// its body.
+fn index_lines(memories: &[Memory], bank: &str) -> String {
+    memories
+        .iter()
+        .map(|memory| {
+            if memory.recall == "pin" {
+                memory.full()
+            } else {
+                memory.index(bank)
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+/// What the bank at `dir` costs a recall once the budget has cut it back to
+/// [`index_lines`] — the floor it cannot go under while it still says anything.
+///
+/// Upkeep quotes this to the mind reworking the bank. `MEMORY.md` would be the
+/// easier number and the wrong one: it counts memories recall mutes and carries
+/// none of the type and pointer text recall pays for.
+#[must_use]
+pub fn index_chars(dir: &Path, bank: &str) -> usize {
+    index_lines(&bank_memories(dir), bank).chars().count()
 }
 
 // ─── surface · short-term (the pointers) ──────────────────────────────────

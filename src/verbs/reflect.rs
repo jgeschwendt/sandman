@@ -48,6 +48,7 @@ use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 use crate::transcript::one_line;
 use crate::verbs::dream::{self, DREAMED_KEY};
+use crate::verbs::recall::{self, BUDGET_CHARS};
 
 /// A dreamt pointer older than this is swept. An undreamed one never expires:
 /// the queue is the only record that the conversation happened.
@@ -613,7 +614,7 @@ fn upkeep(
         // transcript a later pass would evaluate.
         keep: None,
         model: options.mind.model.clone(),
-        prompt: upkeep_prompt(key, &listing),
+        prompt: upkeep_prompt(key, recall::index_chars(bank.dir(), key), &listing),
         timeout: options.timeout,
     };
     // An abstention leaves the baseline where it is, so the bank is due again
@@ -827,11 +828,20 @@ fn read_body(reply: &str) -> Option<String> {
 }
 
 /// The upkeep prompt.
+///
+/// `index_chars` is what the bank costs a recall at its floor — the constraint
+/// it is actually up against, and the one thing a listing of its files cannot
+/// show the mind reading them.
 #[must_use]
-pub fn upkeep_prompt(key: &str, listing: &str) -> String {
+pub fn upkeep_prompt(key: &str, index_chars: usize, listing: &str) -> String {
     format!(
         "You are keeping one Claude memory bank sharp. Below is every memory in the bank \
 `{key}`.
+
+This bank is consumed as an index — one line per memory, name and description — sharing \
+a recall budget of {BUDGET_CHARS} characters with everything else recall says. This \
+bank's index runs {index_chars} characters today. A description is index cost, not \
+documentation: tighter descriptions and fewer memories are what fit.
 
 Propose AT MOST {UPKEEP_MAX_OPS} upkeep operations. Upkeep never grows a bank — every \
 operation must leave it the same size or smaller:
@@ -843,7 +853,8 @@ never committed: the merged body is written afterwards from the full text of the
 you name. Name the grouping and title it well; that is the part of a merge only you can \
 see.
 - `retitle` — give a memory a truer name and description. Its body is kept as it \
-stands.
+stands. A name that reads as a truncated sentence, ends mid-word, or embeds a date is \
+wrong on sight — retitle it.
 
 An empty list is a fine answer, and the right one for a bank that is already sharp. \
 Never invent a filename: every `file` must appear verbatim below, and no file may \
@@ -1120,8 +1131,8 @@ fn file_name(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Baseline, Day, Op, Options, UPKEEP_MAX_OPS, day_page, read_baseline, read_ops, reflect,
-        write_baseline,
+        BUDGET_CHARS, Baseline, Day, Op, Options, UPKEEP_MAX_OPS, day_page, read_baseline,
+        read_ops, reflect, upkeep_prompt, write_baseline,
     };
     use crate::bank::Bank;
     use crate::commit::{CommitRequest, commit_memory};
@@ -1428,6 +1439,26 @@ mod tests {
     }
 
     // ─── upkeep ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn the_upkeep_prompt_names_the_budget_and_what_this_bank_spends_of_it() {
+        let prompt = upkeep_prompt(BANK, 4_321, "### user_a.md\nname: a\n");
+        assert!(
+            prompt.contains(
+                "A name that reads as a truncated sentence, ends mid-word, or embeds a date \
+is wrong on sight — retitle it."
+            ),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains(&format!("budget of {BUDGET_CHARS} characters")),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("index runs 4321 characters today"),
+            "{prompt}"
+        );
+    }
 
     #[test]
     fn a_bank_seen_for_the_first_time_is_seeded_not_reworked() {
