@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CaptureUpdateAction, Excalidraw, MainMenu, restore } from "@excalidraw/excalidraw";
+import {
+  CaptureUpdateAction,
+  Excalidraw,
+  MainMenu,
+  restore,
+  sceneCoordsToViewportCoords,
+  viewportCoordsToSceneCoords,
+} from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import {
   POLL_MS,
@@ -38,6 +45,56 @@ function importScene(scene) {
     viewBackgroundColor: scene?.appState?.viewBackgroundColor ?? "#ffffff",
   };
 }
+
+// ─── visor canvas anchor ──────────────────────────────────────────────────────
+
+const LABEL_MAX = 60; // enough for the thread snippet in visor's panel
+
+/** What visor shows as the thread's snippet: the shape's own text, its bound label, else its type. */
+function labelFor(element, elements) {
+  const bound = element.boundElements?.find((b) => b.type === "text");
+  const text = element.text ?? (bound && elements.find((el) => el.id === bound.id)?.text);
+  return text?.trim().slice(0, LABEL_MAX) || element.type;
+}
+
+/**
+ * Visor pins comment threads to the drawn scene rather than to the canvas box: it hands us a click
+ * and takes back an opaque anchor, then re-asks that anchor for viewport coords on every repaint —
+ * so a pin rides pan, zoom and the shape itself. Both halves read `window.excalidrawAPI` at call
+ * time, never at definition time: visor probes long before Excalidraw has mounted.
+ */
+window.__visorCanvas = {
+  anchor(canvas, clientX, clientY) {
+    const a = window.excalidrawAPI;
+    if (!a) return null;
+    const { x, y } = viewportCoordsToSceneCoords({ clientX, clientY }, a.getAppState());
+    const elements = a.getSceneElements(); // already non-deleted; array order *is* z-order
+    // Topmost first, so walk front-to-back. Bounds are axis-aligned — rotation is ignored because
+    // these are wireframes, where being a few pixels off a tilted box still lands on the box.
+    const hit = [...elements]
+      .reverse()
+      .find((el) => x >= el.x && x <= el.x + el.width && y >= el.y && y <= el.y + el.height);
+    // x/y are the fallback: they still place the pin once the anchored element is deleted.
+    return {
+      v: 1,
+      elementId: hit?.id ?? null,
+      dx: hit ? x - hit.x : 0,
+      dy: hit ? y - hit.y : 0,
+      x,
+      y,
+      label: hit ? labelFor(hit, elements) : null,
+    };
+  },
+
+  locate(canvas, payload) {
+    const a = window.excalidrawAPI;
+    if (!a || typeof payload?.x !== "number" || typeof payload.y !== "number") return null;
+    const el = payload.elementId && a.getSceneElements().find((e) => e.id === payload.elementId);
+    const sceneX = el ? el.x + payload.dx : payload.x;
+    const sceneY = el ? el.y + payload.dy : payload.y;
+    return sceneCoordsToViewportCoords({ sceneX, sceneY }, a.getAppState());
+  },
+};
 
 export default function App() {
   const [name, setName] = useState(initialName);
@@ -236,6 +293,11 @@ export default function App() {
   }, [applyRemote, name, raiseConflict]);
 
   const onChange = useCallback(() => {
+    // Ahead of every guard below: Excalidraw fires this on scroll and zoom too, and a scene we
+    // pulled in from disk moves shapes just as a stroke does — visor must reproject its pins for
+    // all of it. The guards are about *saving*, which none of those cases wants. Coalescing is
+    // visor's job (one rAF per burst), so there is nothing to throttle here.
+    window.dispatchEvent(new CustomEvent("visor:canvas-changed"));
     if (applying.current || savedSig.current === null) return;
     const snap = snapshot();
     if (!snap) return;
