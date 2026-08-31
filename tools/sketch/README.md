@@ -17,11 +17,11 @@ tools/sketch/run.sh            # serves the pre-built dist/ — no npm needed
 open http://127.0.0.1:7873/
 ```
 
-Through visor (a local reverse proxy that adds an on-page comment rail), from the
-repo root — 9001, because 9000 is taken on my machine:
+Behind a local reverse proxy that adds an on-page comment rail, from the repo root — the proxy
+fronts 7873 on a port of its own:
 
 ```sh
-visor -p 9001 7873             # writes .visor/ into cwd (gitignored)
+<proxy> -p 9001 7873           # proxy scratch lands in cwd; keep it gitignored
 open http://127.0.0.1:9001/
 ```
 
