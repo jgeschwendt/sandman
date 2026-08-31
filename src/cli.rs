@@ -80,6 +80,10 @@ usage: sandman <verb> [args]
       A job that has moved on speaks only for the session it would resume, and
       reason=clear reaches past that guard — an operator's wipe ends the
       transcript for good.
+      A live-job decline is a debt, not a dead end: the owed take is written to
+      <root>/pending-takes/<sid>.json, and every later take — and every reflect,
+      for the stretches with no session endings — retries it once the job is
+      gone, never forced.
       Set $SANDMAN_NO_TAKE to decline quietly — for machine-driven resume
       turns that must not count as endings; a session named by hand is taken
       regardless.
@@ -378,7 +382,7 @@ fn take_run(
         // A payload with no session is a session with nothing to take.
         let Some(session_id) = ending.session_id else {
             note(journal, "take", "declined no-session");
-            return Ok(());
+            return drained(journal);
         };
         // Nor is a retirement. The daemon retires a background worker that has
         // sat idle and done, and the retired process's exit fires SessionEnd
@@ -396,7 +400,14 @@ fn take_run(
                 "take",
                 &format!("declined live-job session={session_id} job={job}"),
             );
-            return Ok(());
+            // The decline is right and it is not the end of the matter: the
+            // job outlives every worker, and when the operator deletes it
+            // nothing fires a second `SessionEnd`. Left at the decline, a
+            // transcript sat in the live set for 22 h behind a job that no
+            // longer existed (2026-08-30), so the owed take is written down
+            // and every later take — and reflect — retries it.
+            remember_pending(journal, &session_id, &job);
+            return drained(journal);
         }
         session_id
     } else {
@@ -435,7 +446,7 @@ fn take_run(
                 "take",
                 &format!("declined forgotten session={session_id}"),
             );
-            return Ok(());
+            return drained(journal);
         }
         Err(error) => return Err(Failure::Error(error)),
     };
@@ -470,7 +481,7 @@ fn take_run(
                 "queue at {} — a dream is already running",
                 outcome.queue_depth
             );
-            return Ok(());
+            return drained(journal);
         }
         match spawn_dream(&data_root) {
             Ok(log) => {
@@ -501,6 +512,49 @@ fn take_run(
                 );
             }
         }
+    }
+    drained(journal)
+}
+
+/// Write down a take a live job deferred, so a later one can settle it.
+///
+/// Best-effort, like the journal itself: a decline's contract is to exit
+/// quietly, and a ledger that could fail the hook would be a new way for a
+/// session edge to break. Recorded or not, the attempt leaves a line.
+fn remember_pending(journal: Option<&Path>, session_id: &str, job: &str) {
+    let Some(data_root) = journal else {
+        return;
+    };
+    match Timestamp::now().and_then(|now| take::remember_pending(data_root, session_id, job, now)) {
+        Ok(_) => note(
+            journal,
+            "take",
+            &format!("pending session={session_id} job={job}"),
+        ),
+        Err(error) => note(
+            journal,
+            "take",
+            &format!("pending unrecorded session={session_id}: {error}"),
+        ),
+    }
+}
+
+/// Settle the takes a live job deferred, then answer for the run.
+///
+/// Every ending that reaches the end of `take_run` passes through here — the
+/// take that happened, and the declines that are still endings. The three
+/// that do not are the two quiet ones (`$SANDMAN_NO_TAKE`, the pipeline: a
+/// resume turn and a dream mind must not archive bystanders) and `resume`,
+/// which is a beginning and should do nothing at all.
+///
+/// A drain never fails the verb: a named take that succeeded stays a success
+/// however the ledger went, so the roots are resolved leniently and the drain
+/// itself hands back outcomes rather than a result.
+fn drained(journal: Option<&Path>) -> Result<(), Failure> {
+    if let Some(data_root) = journal
+        && let Ok(claude_root) = paths::claude_root()
+    {
+        take::drain_pending(data_root, &claude_root);
     }
     Ok(())
 }
@@ -596,6 +650,7 @@ fn reflect_verb(args: &[String]) -> Result<(), Failure> {
     let started = Instant::now();
     let outcome = match reflect::reflect(
         &paths::data_root()?,
+        &paths::claude_root()?,
         Timestamp::now()?,
         &reflect::Options::from_env(),
     ) {

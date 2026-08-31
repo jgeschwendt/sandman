@@ -5,6 +5,7 @@
 //! rename is ever used — a copy would leave the session both taken and live,
 //! so a cross-device destination is an error, not a fallback.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -69,9 +70,8 @@ pub fn take(
     if !force {
         let idle = now.unix_seconds() - ended.unix_seconds();
         if idle < LIVE_WINDOW_SECONDS {
-            crate::journal::note(
+            note(
                 data_root,
-                "take",
                 &format!("refused live session={session_id} idle={idle}s"),
             );
             return Err(Error::refused(format!(
@@ -173,6 +173,188 @@ fn job_names(state: &Path, session_id: &str) -> bool {
         || named("sessionId") == Some(session_id),
         |resume| resume == session_id,
     )
+}
+
+/// What one drained ledger entry came to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Drained {
+    /// Nothing left to take — the session was archived or forgotten by other
+    /// means since the decline — so the entry went with it.
+    Dropped {
+        /// The session the entry named.
+        session: String,
+    },
+    /// The take did not go through and the entry stays for a later drain.
+    Kept {
+        /// The session the entry named.
+        session: String,
+        /// What the take said, for the journal.
+        why: String,
+    },
+    /// The job is gone and the owed take happened.
+    Reclaimed {
+        /// What the take did.
+        outcome: TakeOutcome,
+        /// The session that was reclaimed.
+        session: String,
+    },
+    /// The ledger file itself would not read; it stays in place as evidence.
+    Unreadable {
+        /// The entry that could not be read.
+        entry: PathBuf,
+        /// What reading it said.
+        why: String,
+    },
+}
+
+/// Record that `session_id`'s take is owed, because `job` would resume it.
+///
+/// The job guard is right to decline, and until this ledger the decline was
+/// also the end of the matter: nothing ever went back for the transcript once
+/// the operator deleted the job, so session 09901667 sat in Claude Code's live
+/// set for 22 h behind a job that no longer existed and was taken by hand
+/// (2026-08-30). A decline is a debt now — one file per session, settled by
+/// whichever take or reflect next finds the job gone.
+pub fn remember_pending(
+    data_root: &Path,
+    session_id: &str,
+    job: &str,
+    now: Timestamp,
+) -> Result<PathBuf> {
+    transcript::check_session_id(session_id)?;
+    let dir = paths::pending_takes_dir(data_root);
+    fs::create_dir_all(&dir).map_err(|error| Error::io(&dir, error))?;
+    let path = paths::pending_take(data_root, session_id);
+    let entry = Value::Object(vec![
+        ("declined".to_owned(), Value::string(now.iso8601())),
+        ("job".to_owned(), Value::string(job)),
+        ("session".to_owned(), Value::string(session_id)),
+    ]);
+    atomic::write(&path, &format!("{}\n", entry.render()))?;
+    Ok(path)
+}
+
+/// Retry every owed take whose job has since been retired.
+///
+/// Nothing here can fail the caller: a drain runs alongside a named take and
+/// alongside reflect's pass, and neither has any business failing because a
+/// session nobody asked about would not move. One bad entry is journalled and
+/// stepped over, and the rest of the ledger is still drained.
+///
+/// `force` is never passed. The live window is exactly the guard wanted here:
+/// a session whose job was deleted may well have been resumed by hand and be
+/// mid-conversation, and that conversation's own `SessionEnd` will take it —
+/// at which point a later drain finds nothing and drops the stale entry.
+#[allow(
+    clippy::must_use_candidate,
+    reason = "the journal is the record of a drain; the report is for callers that want one"
+)]
+pub fn drain_pending(data_root: &Path, claude_root: &Path) -> Vec<Drained> {
+    let mut drained = Vec::new();
+    // No ledger, or one that will not list, is nothing owed: the drain is a
+    // backstop, and a backstop that reports its own absence is noise.
+    let Ok(listing) = fs::read_dir(paths::pending_takes_dir(data_root)) else {
+        return drained;
+    };
+    let mut entries: Vec<PathBuf> = listing
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension() == Some(OsStr::new("json")) && path.is_file())
+        .collect();
+    // By session id: an arbitrary order, but a stable one — a drain that goes
+    // wrong halfway through goes wrong the same way twice.
+    entries.sort();
+
+    for entry in entries {
+        let session = match pending_session(&entry) {
+            Ok(session) => session,
+            Err(error) => {
+                let why = error.to_string();
+                note(data_root, &format!("pending unreadable {why}"));
+                drained.push(Drained::Unreadable { entry, why });
+                continue;
+            }
+        };
+        // Still the job's to resume. Nothing is owed yet and nothing is
+        // journalled: this is the common case, once per take per pending
+        // session, and a line for it would bury the ones that matter.
+        if live_job(claude_root, &session).is_some() {
+            continue;
+        }
+        match take(data_root, claude_root, &session, false) {
+            Ok(outcome) => {
+                clear_pending(data_root, &entry);
+                note(
+                    data_root,
+                    &format!(
+                        "reclaimed session={session} archived={} bytes={} queue={}",
+                        outcome.archived.display(),
+                        outcome.archived_bytes,
+                        outcome.queue_depth
+                    ),
+                );
+                drained.push(Drained::Reclaimed { outcome, session });
+            }
+            // Taken or forgotten by other means since the decline — the debt
+            // is settled, whoever settled it.
+            Err(Error::NotFound { .. }) => {
+                clear_pending(data_root, &entry);
+                note(
+                    data_root,
+                    &format!("pending dropped session={session} gone"),
+                );
+                drained.push(Drained::Dropped { session });
+            }
+            Err(error) => {
+                let why = error.to_string();
+                note(data_root, &format!("pending kept session={session}: {why}"));
+                drained.push(Drained::Kept { session, why });
+            }
+        }
+    }
+    drained
+}
+
+/// The session one ledger entry names.
+///
+/// Every uncertainty reads as "cannot say", and a "cannot say" is left on
+/// disk: the entry is the only record that a take is owed, so a file that
+/// will not read, will not parse, or names nothing usable is evidence to keep
+/// rather than a debt to guess at or delete.
+fn pending_session(entry: &Path) -> Result<String> {
+    let text = fs::read_to_string(entry).map_err(|error| Error::io(entry, error))?;
+    let value = json::parse(&text).map_err(|error| Error::Json {
+        path: Some(entry.to_path_buf()),
+        message: error.to_string(),
+    })?;
+    let session = value
+        .get("session")
+        .and_then(Value::as_str)
+        .filter(|session| transcript::check_session_id(session).is_ok())
+        .ok_or_else(|| Error::Json {
+            path: Some(entry.to_path_buf()),
+            message: "names no usable session".to_owned(),
+        })?;
+    Ok(session.to_owned())
+}
+
+/// Clear one settled ledger entry.
+///
+/// A removal that will not happen is journalled and otherwise tolerated: the
+/// take it recorded has already happened, and the next drain finds the
+/// transcript gone and drops the entry then.
+fn clear_pending(data_root: &Path, entry: &Path) {
+    if let Err(error) = fs::remove_file(entry) {
+        note(
+            data_root,
+            &format!("pending stuck entry={}: {error}", entry.display()),
+        );
+    }
+}
+
+/// Journal one line under `take`.
+fn note(data_root: &Path, line: &str) {
+    crate::journal::note(data_root, "take", line);
 }
 
 /// `<yyyy>-<mm>-<dd>-<HHMMSS>-<path under ~/.claude, `/` → `-`>`.
@@ -282,7 +464,10 @@ pub fn queue_depth(data_root: &Path) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{archive_name, classify_rename, live_job, queue_depth, take};
+    use super::{
+        Drained, archive_name, classify_rename, drain_pending, live_job, queue_depth,
+        remember_pending, take,
+    };
     use crate::error::Error;
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
@@ -319,10 +504,20 @@ mod tests {
 
         /// Seed a transcript and back-date it out of the live window.
         fn seed(&self, lines: &[&str]) -> PathBuf {
-            let path = self.project().join(format!("{SID}.jsonl"));
+            self.seed_session(SID, lines)
+        }
+
+        /// The same, for a session other than the fixture's default.
+        fn seed_session(&self, session: &str, lines: &[&str]) -> PathBuf {
+            let path = self.project().join(format!("{session}.jsonl"));
             fs::write(&path, format!("{}\n", lines.join("\n"))).expect("write transcript");
             Self::age(&path, 3600);
             path
+        }
+
+        /// Delete a background job, the way the operator does.
+        fn retire(&self, short: &str) {
+            fs::remove_dir_all(self.claude.join("jobs").join(short)).expect("retire the job");
         }
 
         /// Seed a background job directory, carrying `state` when it has one.
@@ -595,6 +790,233 @@ mod tests {
             )),
         );
         assert_eq!(live_job(&same.claude, SID).as_deref(), Some("33334444"));
+    }
+
+    /// The take journal, or empty when nothing wrote one.
+    fn journal(root: &Path) -> String {
+        fs::read_to_string(crate::paths::run_log(
+            root,
+            "take",
+            Timestamp::now().expect("clock"),
+        ))
+        .unwrap_or_default()
+    }
+
+    /// Write a ledger entry the way a decline does.
+    fn pend(root: &Path, session: &str, job: &str) -> PathBuf {
+        remember_pending(root, session, job, Timestamp::now().expect("clock")).expect("pend")
+    }
+
+    #[test]
+    fn a_deferred_take_is_written_down_and_settled_once_the_job_is_gone() {
+        let fixture = Fixture::new("take-pending-reclaim");
+        let source = fixture.seed(&transcript_lines());
+        fixture.job(
+            "11112222",
+            Some(&format!(r#"{{"sessionId":"{SID}","state":"done"}}"#)),
+        );
+
+        let entry = pend(&fixture.root, SID, "11112222");
+        assert_eq!(entry, crate::paths::pending_take(&fixture.root, SID));
+        let written = fs::read_to_string(&entry).expect("read the entry");
+        assert!(written.ends_with('\n'), "{written}");
+        assert!(written.contains(r#""job":"11112222""#), "{written}");
+        assert!(
+            written.contains(&format!(r#""session":"{SID}""#)),
+            "{written}"
+        );
+        let declined = written
+            .split(r#""declined":""#)
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect("declined");
+        assert_eq!(
+            Timestamp::parse_iso8601(declined).map(Timestamp::iso8601),
+            Some(declined.to_owned())
+        );
+
+        // While the job lives there is nothing owed yet, and nothing said.
+        assert_eq!(drain_pending(&fixture.root, &fixture.claude), Vec::new());
+        assert!(entry.is_file());
+        assert!(source.is_file(), "the transcript stays in the live set");
+        assert!(journal(&fixture.root).is_empty());
+
+        // The operator deletes the job — the moment nothing else notices.
+        fixture.retire("11112222");
+        let drained = drain_pending(&fixture.root, &fixture.claude);
+        let [Drained::Reclaimed { outcome, session }] = drained.as_slice() else {
+            panic!("expected one reclaim, got {drained:?}");
+        };
+        assert_eq!(session, SID);
+        assert!(!source.exists(), "the take is the move");
+        assert!(outcome.archived.is_file());
+        assert!(outcome.pointer.is_file());
+        assert!(!entry.exists(), "a settled debt leaves the ledger");
+        let journal = journal(&fixture.root);
+        assert!(
+            journal.contains(&format!(
+                "reclaimed session={SID} archived={} bytes={} queue={}",
+                outcome.archived.display(),
+                outcome.archived_bytes,
+                outcome.queue_depth
+            )),
+            "{journal}"
+        );
+    }
+
+    #[test]
+    fn a_pending_session_with_nothing_left_to_take_is_dropped() {
+        let fixture = Fixture::new("take-pending-gone");
+        // No transcript at all: taken or forgotten by other means since the
+        // decline. The debt is settled, whoever settled it.
+        let entry = pend(&fixture.root, SID, "11112222");
+        let drained = drain_pending(&fixture.root, &fixture.claude);
+        assert_eq!(
+            drained,
+            vec![Drained::Dropped {
+                session: SID.to_owned()
+            }]
+        );
+        assert!(!entry.exists());
+        let journal = journal(&fixture.root);
+        assert!(
+            journal.contains(&format!("pending dropped session={SID} gone")),
+            "{journal}"
+        );
+    }
+
+    #[test]
+    fn a_pending_session_touched_inside_the_live_window_is_kept_never_forced() {
+        let fixture = Fixture::new("take-pending-live");
+        // The job was deleted and the operator resumed the conversation by
+        // hand: it is mid-turn, and its own SessionEnd is what should take it.
+        let source = fixture.seed(&transcript_lines());
+        Fixture::age(&source, 5);
+        let entry = pend(&fixture.root, SID, "11112222");
+
+        let drained = drain_pending(&fixture.root, &fixture.claude);
+        let [Drained::Kept { session, why }] = drained.as_slice() else {
+            panic!("expected one kept entry, got {drained:?}");
+        };
+        assert_eq!(session, SID);
+        assert!(why.contains("looks live"), "{why}");
+        assert!(source.is_file(), "the conversation is left alone");
+        assert!(entry.is_file(), "and the debt is still owed");
+        let journal = journal(&fixture.root);
+        assert!(
+            journal.contains(&format!("pending kept session={SID}:")),
+            "{journal}"
+        );
+
+        // Aged out, the same drain settles it — and the stale entry a
+        // hand-resumed session's own ending would leave is dropped next time.
+        Fixture::age(&source, 3600);
+        assert!(matches!(
+            drain_pending(&fixture.root, &fixture.claude).as_slice(),
+            [Drained::Reclaimed { .. }]
+        ));
+        assert!(!entry.exists());
+    }
+
+    #[test]
+    fn a_ledger_entry_that_will_not_read_is_evidence_and_stays() {
+        let fixture = Fixture::new("take-pending-unreadable");
+        let dir = crate::paths::pending_takes_dir(&fixture.root);
+        fs::create_dir_all(&dir).expect("ledger dir");
+        let malformed = dir.join("aaaa-1111.json");
+        fs::write(&malformed, r#"{"session":"#).expect("malformed entry");
+        let nameless = dir.join("bbbb-2222.json");
+        fs::write(&nameless, r#"{"job":"11112222"}"#).expect("nameless entry");
+        let hostile = dir.join("cccc-3333.json");
+        fs::write(&hostile, r#"{"session":"../escape"}"#).expect("hostile entry");
+        // The ledger directory carries files that are not entries.
+        fs::write(dir.join("notes.txt"), "not an entry").expect("stray");
+
+        let drained = drain_pending(&fixture.root, &fixture.claude);
+        assert_eq!(drained.len(), 3, "{drained:?}");
+        assert!(
+            drained
+                .iter()
+                .all(|outcome| matches!(outcome, Drained::Unreadable { .. })),
+            "{drained:?}"
+        );
+        for entry in [&hostile, &malformed, &nameless] {
+            assert!(entry.is_file(), "{}", entry.display());
+        }
+        let journal = journal(&fixture.root);
+        assert_eq!(
+            journal
+                .lines()
+                .filter(|line| line.contains("pending unreadable "))
+                .count(),
+            3,
+            "{journal}"
+        );
+        assert!(
+            journal.contains(&format!(
+                "pending unreadable {}: names no usable session",
+                hostile.display()
+            )),
+            "{journal}"
+        );
+    }
+
+    #[test]
+    fn a_hostile_session_id_never_reaches_the_ledger() {
+        let fixture = Fixture::new("take-pending-hostile");
+        assert!(matches!(
+            remember_pending(
+                &fixture.root,
+                "../escape",
+                "11112222",
+                Timestamp::now().expect("clock")
+            ),
+            Err(Error::InvalidInput { .. })
+        ));
+        assert!(!crate::paths::pending_takes_dir(&fixture.root).exists());
+    }
+
+    #[test]
+    fn a_drain_settles_what_it_can_and_steps_over_the_rest() {
+        const OTHER: &str = "bbbbcccc-dddd-eeee-ffff-000011112222";
+        const WORKING: &str = "ccccdddd-eeee-ffff-0000-111122223333";
+
+        let fixture = Fixture::new("take-pending-mixed");
+        // One whose job still lives, one still live in itself, one ready.
+        fixture.job(
+            "11112222",
+            Some(&format!(r#"{{"sessionId":"{OTHER}","state":"running"}}"#)),
+        );
+        fixture.seed_session(OTHER, &transcript_lines());
+        let working = fixture.seed_session(WORKING, &transcript_lines());
+        Fixture::age(&working, 5);
+        let ready = fixture.seed(&transcript_lines());
+        for (session, job) in [
+            (OTHER, "11112222"),
+            (SID, "33334444"),
+            (WORKING, "55556666"),
+        ] {
+            pend(&fixture.root, session, job);
+        }
+
+        let drained = drain_pending(&fixture.root, &fixture.claude);
+        // The entry whose job still lives is not in the report at all — it is
+        // the common case, and a line for it every take would bury the rest.
+        assert_eq!(drained.len(), 2, "{drained:?}");
+        assert!(
+            matches!(
+                drained.as_slice(),
+                [Drained::Reclaimed { .. }, Drained::Kept { .. }]
+            ),
+            "{drained:?}"
+        );
+        assert!(!ready.exists(), "the one that could be taken was");
+        assert!(working.is_file(), "the live one was not");
+        assert!(
+            crate::paths::pending_take(&fixture.root, OTHER).is_file(),
+            "the job's own session is still owed"
+        );
+        assert!(!crate::paths::pending_take(&fixture.root, SID).exists());
     }
 
     #[test]

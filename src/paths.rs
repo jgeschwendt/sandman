@@ -30,6 +30,9 @@ pub const ARCHIVE_CLAUDE_DIR_NAME: &str = "claude";
 pub const LOG_DIR_NAME: &str = "log";
 /// Kept dream mind transcripts live under `<root>/.dream/`.
 pub const DREAM_DIR_NAME: &str = ".dream";
+/// Takes a live background job deferred — one file per session, cleared when
+/// the take finally happens.
+pub const PENDING_TAKES_DIR_NAME: &str = "pending-takes";
 
 /// `$HOME`, or a typed error.
 pub fn home() -> Result<PathBuf> {
@@ -70,6 +73,21 @@ pub fn claude_projects_dir(claude_root: &Path) -> PathBuf {
 #[must_use]
 pub fn dream_dir(data_root: &Path) -> PathBuf {
     data_root.join(DREAM_DIR_NAME)
+}
+
+/// `<root>/pending-takes` — the ledger of takes a live job deferred.
+#[must_use]
+pub fn pending_takes_dir(data_root: &Path) -> PathBuf {
+    data_root.join(PENDING_TAKES_DIR_NAME)
+}
+
+/// `<root>/pending-takes/<sid>.json` — one session's owed take.
+///
+/// One file per session, named by it: a session declined twice is one debt,
+/// not two, and the entry is findable by the id every other log line carries.
+#[must_use]
+pub fn pending_take(data_root: &Path, session_id: &str) -> PathBuf {
+    pending_takes_dir(data_root).join(format!("{session_id}.json"))
 }
 
 /// `<root>/memories/.recent` — the pointer queue.
@@ -113,8 +131,8 @@ pub fn tildify(path: &Path, home: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_claude_dir, claude_jobs_dir, claude_projects_dir, dream_dir, log_dir, recent_dir,
-        run_log, tildify,
+        archive_claude_dir, claude_jobs_dir, claude_projects_dir, dream_dir, log_dir, pending_take,
+        pending_takes_dir, recent_dir, run_log, tildify,
     };
     use crate::time::Timestamp;
     use std::path::Path;
@@ -126,6 +144,11 @@ mod tests {
         assert_eq!(archive_claude_dir(root), Path::new("/data/archive/claude"));
         assert_eq!(dream_dir(root), Path::new("/data/.dream"));
         assert_eq!(log_dir(root), Path::new("/data/log"));
+        assert_eq!(pending_takes_dir(root), Path::new("/data/pending-takes"));
+        assert_eq!(
+            pending_take(root, "aaaabbbb-cccc"),
+            Path::new("/data/pending-takes/aaaabbbb-cccc.json")
+        );
         assert_eq!(
             claude_jobs_dir(Path::new("/Users/you/.claude")),
             Path::new("/Users/you/.claude/jobs")

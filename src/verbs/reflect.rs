@@ -49,6 +49,7 @@ use crate::time::Timestamp;
 use crate::transcript::one_line;
 use crate::verbs::dream::{self, DREAMED_KEY};
 use crate::verbs::recall::{self, BUDGET_CHARS};
+use crate::verbs::take;
 
 /// A dreamt pointer older than this is swept. An undreamed one never expires:
 /// the queue is the only record that the conversation happened.
@@ -111,7 +112,20 @@ pub struct Outcome {
 }
 
 /// Run the pass for the day `now` falls in (UTC).
-pub fn reflect(data_root: &Path, now: Timestamp, options: &Options) -> Result<Outcome> {
+///
+/// The pass opens by draining the pending-take ledger, and `claude_root` is
+/// here for that: a decline behind a live background job is retried by the
+/// next take, and a machine with no session endings for a stretch has no next
+/// take. Reflect is the only thing that runs anyway, so it is the backstop.
+/// It runs first because the day page is rendered from what is on disk — a
+/// take reclaimed now belongs on today's page, not tomorrow's.
+pub fn reflect(
+    data_root: &Path,
+    claude_root: &Path,
+    now: Timestamp,
+    options: &Options,
+) -> Result<Outcome> {
+    take::drain_pending(data_root, claude_root);
     let day = Day::of(now);
     let day_page = write_day_page(data_root, day)?;
     let index = write_log_index(data_root)?;
@@ -1153,6 +1167,7 @@ mod tests {
 
     struct Scratch {
         _temp: TempDir,
+        claude: PathBuf,
         home: PathBuf,
         root: PathBuf,
     }
@@ -1165,6 +1180,7 @@ mod tests {
             fs::create_dir_all(&root).expect("root");
             Self {
                 _temp: temp,
+                claude: home.join(".claude"),
                 home,
                 root,
             }
@@ -1345,7 +1361,13 @@ mod tests {
             "2026-08-10T11:00:00Z",
         );
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert_eq!(
             outcome.day_page,
             crate::paths::log_dir(&scratch.root).join("2026-08-12.md")
@@ -1365,7 +1387,13 @@ mod tests {
         );
 
         // Regenerating changes nothing.
-        reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("second reflect");
+        reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("second reflect");
         assert_eq!(read(&outcome.day_page), page);
 
         let index = read(&outcome.index);
@@ -1378,7 +1406,13 @@ mod tests {
     #[test]
     fn a_day_with_nothing_in_it_is_a_bare_heading() {
         let scratch = Scratch::new("reflect-empty-day");
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert_eq!(read(&outcome.day_page), "# 2026-08-12\n");
         assert_eq!(
             read(&outcome.index),
@@ -1405,7 +1439,13 @@ mod tests {
         fs::write(dir.join("notes.md"), "# notes\n").expect("notes");
         fs::write(dir.join("dream-2026-08-10.log"), "line\n").expect("log");
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert_eq!(
             read(&outcome.index),
             concat!(
@@ -1430,7 +1470,13 @@ mod tests {
         // Routed but young: kept.
         let young = scratch.pointer("young", &hours(1), Some(dreamt));
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert_eq!(outcome.swept, 1);
         assert!(!gone.exists());
         assert!(boundary.exists());
@@ -1466,7 +1512,13 @@ is wrong on sight — retitle it."
         for index in 0..7 {
             scratch.seed(&format!("memory {index}"), "d", "b");
         }
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert_eq!(outcome.banks.len(), 1);
         assert!(outcome.banks[0].contains("seeded"), "{:?}", outcome.banks);
         assert_eq!(outcome.due, 0);
@@ -1496,7 +1548,13 @@ is wrong on sight — retitle it."
             },
         )
         .expect("baseline");
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert!(outcome.banks[0].contains("due=no"), "{:?}", outcome.banks);
         assert!(outcome.banks[0].contains("settled=false"));
         assert_eq!(outcome.due, 0);
@@ -1511,7 +1569,13 @@ is wrong on sight — retitle it."
             },
         )
         .expect("baseline");
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert!(
             outcome.banks[0].contains("grown=false"),
             "{:?}",
@@ -1528,7 +1592,13 @@ is wrong on sight — retitle it."
             },
         )
         .expect("baseline");
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert!(outcome.banks[0].contains("abstain("), "{:?}", outcome.banks);
         // An abstention leaves the baseline alone: due again tomorrow.
         assert_eq!(
@@ -1559,7 +1629,13 @@ is wrong on sight — retitle it."
             },
         )
         .expect("baseline");
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert!(outcome.banks[0].contains("abstain("), "{:?}", outcome.banks);
         assert_eq!(outcome.due, 1);
 
@@ -1574,7 +1650,13 @@ is wrong on sight — retitle it."
             },
         )
         .expect("baseline");
-        let outcome = reflect(&scratch.root, Scratch::now(), &Scratch::silent()).expect("reflect");
+        let outcome = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        )
+        .expect("reflect");
         assert!(outcome.banks[0].contains("due=no"), "{:?}", outcome.banks);
         assert!(
             outcome.banks[0].contains("backlog=false"),
@@ -1614,6 +1696,7 @@ is wrong on sight — retitle it."
         make_due(&scratch);
         let outcome = reflect(
             &scratch.root,
+            &scratch.claude,
             Scratch::now(),
             &scratch.options(r#"{"ops":[]}"#),
         )
@@ -1651,7 +1734,8 @@ is wrong on sight — retitle it."
         let (options, _) =
             scratch.replies(&[&reply, r#"{"body":"the body the merge ask wrote"}"#], "");
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &options).expect("reflect");
+        let outcome =
+            reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
         assert!(
             outcome.banks[0].contains("ops=3 applied=3 conflicts=0"),
             "{:?}",
@@ -1739,7 +1823,8 @@ is wrong on sight — retitle it."
             ),
         );
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &options).expect("reflect");
+        let outcome =
+            reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
         assert!(
             outcome.banks[0].contains("ops=2 applied=1 conflicts=1"),
             "{:?}",
@@ -1784,7 +1869,8 @@ is wrong on sight — retitle it."
             ),
         );
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &options).expect("reflect");
+        let outcome =
+            reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
         assert!(
             outcome.banks[0].contains("ops=1 applied=0 conflicts=1"),
             "{:?}",
@@ -1842,7 +1928,8 @@ is wrong on sight — retitle it."
         let (options, _) =
             scratch.replies(&[&reply, r#"{"body":"every fact all three made"}"#], "");
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &options).expect("reflect");
+        let outcome =
+            reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
         assert!(
             outcome.banks[0].contains("ops=1 applied=1 conflicts=0"),
             "{:?}",
@@ -1934,7 +2021,7 @@ is wrong on sight — retitle it."
         );
         let (options, asked) = scratch.replies(&[&reply, r#"{"body":"both facts"}"#], "");
 
-        reflect(&scratch.root, Scratch::now(), &options).expect("reflect");
+        reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
 
         // The planning ask sees three lines of each body…
         let planning = read(&asked.join("asked-1"));
@@ -1962,7 +2049,8 @@ is wrong on sight — retitle it."
         // Only the planning ask is answered; the merge ask exits non-zero.
         let (options, _) = scratch.replies(&[&reply], "");
 
-        let outcome = reflect(&scratch.root, Scratch::now(), &options).expect("reflect");
+        let outcome =
+            reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
         assert!(
             outcome.banks[0].contains("ops=2 applied=1 conflicts=0"),
             "{:?}",
@@ -2012,7 +2100,13 @@ is wrong on sight — retitle it."
             "{{\"ops\":[{{\"op\":\"prune\",\"file\":\"{}\"}}]}}",
             files[0]
         );
-        reflect(&scratch.root, Scratch::now(), &scratch.options(&reply)).expect("reflect");
+        reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &scratch.options(&reply),
+        )
+        .expect("reflect");
         let index = read(&scratch.bank().index_path());
         assert!(!index.contains(&files[0]), "{index}");
         assert_eq!(
@@ -2062,8 +2156,13 @@ is wrong on sight — retitle it."
             (r#"{"operations":[]}"#.to_owned(), "no-ops"),
         ];
         for (reply, expected) in cases {
-            let outcome =
-                reflect(&scratch.root, Scratch::now(), &scratch.options(&reply)).expect("reflect");
+            let outcome = reflect(
+                &scratch.root,
+                &scratch.claude,
+                Scratch::now(),
+                &scratch.options(&reply),
+            )
+            .expect("reflect");
             assert!(
                 outcome.banks[0].contains(&format!("rejected({expected}")),
                 "{reply} → {:?}",

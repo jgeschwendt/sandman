@@ -51,9 +51,14 @@ impl Machine {
 
     /// Seed a transcript, aged out of the live window.
     fn transcript(&self, lines: &[&str]) -> PathBuf {
+        self.transcript_for(SID, lines)
+    }
+
+    /// The same, for a session other than the default one.
+    fn transcript_for(&self, session: &str, lines: &[&str]) -> PathBuf {
         let project = self.project();
         fs::create_dir_all(&project).expect("project dir");
-        let path = project.join(format!("{SID}.jsonl"));
+        let path = project.join(format!("{session}.jsonl"));
         fs::write(&path, format!("{}\n", lines.join("\n"))).expect("transcript");
         fs::File::open(&path)
             .expect("open")
@@ -90,6 +95,25 @@ impl Machine {
         logs.into_iter()
             .filter_map(|path| fs::read_to_string(path).ok())
             .collect()
+    }
+
+    /// One session's pending-take ledger entry.
+    fn pending(&self, session: &str) -> PathBuf {
+        self.root()
+            .join("pending-takes")
+            .join(format!("{session}.json"))
+    }
+
+    /// Write a ledger entry by hand — the on-disk shape a decline leaves.
+    fn pend(&self, session: &str, job: &str) -> PathBuf {
+        let path = self.pending(session);
+        fs::create_dir_all(path.parent().expect("ledger dir")).expect("ledger dir");
+        fs::write(
+            &path,
+            format!(r#"{{"declined":"2026-08-30T02:00:00Z","job":"{job}","session":"{session}"}}"#),
+        )
+        .expect("ledger entry");
+        path
     }
 
     /// Seed a background job directory, carrying `state` when it has one.
@@ -763,6 +787,12 @@ fn the_journal_records_what_the_hook_decided_either_way() {
         log.contains(&format!("declined live-job session={SID} job=11112222")),
         "{log}"
     );
+    // …and that the take is owed rather than abandoned.
+    assert!(
+        log.contains(&format!("pending session={SID} job=11112222")),
+        "{log}"
+    );
+    assert!(machine.pending(SID).is_file());
     // Every entry is one stamped, pid-carrying line.
     for line in log.lines() {
         assert!(
@@ -771,7 +801,7 @@ fn the_journal_records_what_the_hook_decided_either_way() {
         );
         assert!(line.starts_with("20"), "{line}");
     }
-    assert_eq!(log.lines().count(), 2, "{log}");
+    assert_eq!(log.lines().count(), 3, "{log}");
 
     // The take that does happen says so, with the size that tells a whole
     // conversation from a recreated stub.
@@ -789,7 +819,14 @@ fn the_journal_records_what_the_hook_decided_either_way() {
         )),
         "{log}"
     );
-    assert_eq!(log.lines().count(), 4, "{log}");
+    // The named take settled the debt on its way past, and the drain that
+    // follows it says so rather than leaving an entry nobody will clear.
+    assert!(
+        log.contains(&format!("pending dropped session={SID} gone")),
+        "{log}"
+    );
+    assert!(!machine.pending(SID).exists());
+    assert_eq!(log.lines().count(), 6, "{log}");
 }
 
 #[test]
@@ -1037,6 +1074,128 @@ fn take_hook_declines_when_the_caller_says_this_is_not_an_ending() {
     assert_eq!(code(&taken), 0, "{}", stderr(&taken));
     assert!(!source.exists());
     assert!(PathBuf::from(stdout(&taken).trim()).is_file());
+}
+
+/// A session other than the fixture's default — the one whose ending drives a
+/// drain of the other's owed take.
+const OTHER: &str = "bbbbcccc-dddd-eeee-ffff-000011112222";
+
+#[test]
+fn any_ending_reclaims_a_pending_take_whose_job_is_gone() {
+    let machine = Machine::new("pending-reclaim");
+    // The 2026-08-30 shape: a backgrounded session was declined behind its
+    // job, the operator deleted the job, and nothing came back for it.
+    let stranded =
+        machine.transcript(&[r#"{"type":"user","message":{"content":"a backgrounded run"}}"#]);
+    machine.pend(SID, "09901667");
+    let ending = machine.transcript_for(
+        OTHER,
+        &[r#"{"type":"user","message":{"content":"an unrelated session"}}"#],
+    );
+    let payload = format!(
+        r#"{{"hook_event_name":"SessionEnd","session_id":"{OTHER}","cwd":"/Users/you/code","reason":"other"}}"#
+    );
+
+    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(!ending.exists(), "the named take still happened");
+    // …and the stranded session came with it: archived, pointed at, cleared.
+    assert!(!stranded.exists());
+    assert!(!machine.pending(SID).exists());
+    let pointer = machine
+        .root()
+        .join("memories")
+        .join(".recent")
+        .join(format!("{SID}.json"));
+    assert!(pointer.is_file());
+    let archived = fs::read_to_string(&pointer).expect("read the pointer");
+    assert!(archived.contains(&format!("-{SID}.jsonl")), "{archived}");
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!("reclaimed session={SID} archived=")),
+        "{log}"
+    );
+
+    // Only what the hook named reaches stdout: a reclaim is the journal's
+    // business, and the caller asked about one session.
+    assert_eq!(stdout(&taken).lines().count(), 1, "{}", stdout(&taken));
+}
+
+#[test]
+fn a_pending_take_survives_the_declines_that_must_stay_quiet() {
+    let machine = Machine::new("pending-quiet");
+    let stranded =
+        machine.transcript(&[r#"{"type":"user","message":{"content":"a backgrounded run"}}"#]);
+    let entry = machine.pend(SID, "09901667");
+    let payload = |reason: &str| {
+        format!(
+            r#"{{"hook_event_name":"SessionEnd","session_id":"{OTHER}","cwd":"/Users/you/code","reason":"{reason}"}}"#
+        )
+    };
+
+    // A machine-driven resume turn, a dream mind's own ending, and a session
+    // being adopted: none of the three is an ending that may archive a
+    // bystander, so none of them drains.
+    for (reason, env) in [
+        ("other", vec![("SANDMAN_NO_TAKE", "1")]),
+        ("other", vec![("CLAUDE_MEMORY_PIPELINE", "1")]),
+        ("resume", Vec::new()),
+    ] {
+        let declined = machine.run_with(&["take", "--hook"], &payload(reason), &env);
+        assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+        assert!(stdout(&declined).is_empty());
+        assert!(entry.is_file(), "the debt is still owed after {env:?}");
+        assert!(stranded.is_file(), "and the transcript is untouched");
+    }
+
+    // A take by hand is an ending like any other, and drains on its way out.
+    let by_hand = machine.transcript_for(
+        OTHER,
+        &[r#"{"type":"user","message":{"content":"named by hand"}}"#],
+    );
+    let taken = machine.run(&["take", OTHER]);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(!by_hand.exists());
+    assert!(!stranded.exists(), "the by-hand take drained too");
+    assert!(!entry.exists());
+}
+
+#[test]
+fn reflect_is_the_backstop_for_a_ledger_no_ending_came_to_drain() {
+    let machine = Machine::new("pending-reflect");
+    // Nothing has ended on this machine for a stretch — the case a
+    // take-driven drain alone would never reach.
+    let stranded =
+        machine.transcript(&[r#"{"type":"user","message":{"content":"a backgrounded run"}}"#]);
+    let entry = machine.pend(SID, "09901667");
+    // No bank is due, so no mind is asked; the stub is here to guarantee it.
+    let claude = machine.script("claude", "exit 1\n");
+
+    let reflected = machine.run_with(
+        &["reflect"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &claude.display().to_string())],
+    );
+    assert_eq!(code(&reflected), 0, "{}", stderr(&reflected));
+    assert!(!stranded.exists());
+    assert!(!entry.exists());
+    let log = machine.journal("take");
+    assert!(
+        log.contains(&format!("reclaimed session={SID} archived=")),
+        "{log}"
+    );
+    // The day page is written after the drain, so the reclaim is on today's.
+    let page = fs::read_to_string(machine.root().join("log").join(format!(
+        "{}.md",
+        stdout(&reflected)
+            .lines()
+            .next()
+            .and_then(|path| Path::new(path).file_stem())
+            .and_then(|stem| stem.to_str())
+            .expect("the day page")
+    )))
+    .expect("read the day page");
+    assert!(page.contains("a backgrounded run"), "{page}");
 }
 
 #[test]

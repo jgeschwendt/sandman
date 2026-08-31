@@ -30,6 +30,7 @@ transcripts.
 │   ├── <date>.md                                     reflect's day pages
 │   ├── <verb>-<date>.log                             the journal — one line per decision
 │   └── INDEX.md                                      chronological index
+├── pending-takes/<sid>.json                         takes a live job deferred — {declined, job, session}
 └── memories/
     ├── .recent/<sid>.json                            pointers — the short-term surface (3 days)
     └── <bank>/
@@ -75,6 +76,23 @@ hook-event visibility.
   anything, so a caller driving `claude -p --resume` turns keeps its transcript live
   (those turns end with `reason: "other"` — the process really does exit, so the reason
   cannot carry the decision); a session named by hand is taken regardless.
+- Decline for a live job — a job directory under `~/.claude/jobs` still naming the
+  session says the conversation is resumable and will be resumed: the daemon retires an
+  idle background worker and the retired process's exit fires `SessionEnd`, but that
+  ending belongs to the worker, not the conversation. A job speaks for the session it
+  would resume next (`resumeSessionId`, else the `sessionId` it ran under), the guard is
+  `--hook`'s alone, and `reason: "clear"` reaches past it. Every uncertainty — no jobs
+  directory, an unreadable `state.json`, a field of the wrong type — reads as "no job".
+- **Pending-take ledger** — a live-job decline is a debt, not a dead end. Nothing fires a
+  second `SessionEnd` when the operator deletes the job, so the decline writes
+  `pending-takes/<sid>.json` `{declined, job, session}`, and every take that reaches an
+  ending — plus every reflect, for the stretches with no endings at all — drains the
+  ledger: entries whose job still lives are left alone, one whose job is gone is taken
+  *unforced* (the 120 s live window is the guard for a session resumed by hand in the
+  meantime), one whose transcript is gone is dropped, and anything else keeps its entry
+  for the next drain. `$SANDMAN_NO_TAKE`, the pipeline and `reason: "resume"` skip the
+  drain: those three must not archive bystanders. A drain never fails the verb it rode
+  in on, and a reclaimed take never spawns a dream of its own.
 - Resolve the transcript; `mv` it to the archive path — same-volume rename, atomic, no
   copy ever exists. A cross-device destination is an error, never a fallback copy.
 - Drop the pointer to `memories/.recent/<sid>.json`.
@@ -165,6 +183,8 @@ hook-event visibility.
   idempotent, so a double-fire or an early run is harmless.
 - Day page `log/<date>.md`, regenerated idempotently: the day's takes and the day's
   committed memories. `INDEX.md` lists every day page.
+- Pending-take drain first, before the day page is rendered: a take reclaimed by the
+  pass belongs on today's page, not tomorrow's.
 - Pointer sweep: delete `.recent` pointers that are dreamed and ended > 72 h ago.
 - Bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last, OR the previous pass
   spent every operation it was allowed (a backlog is old inventory already judged worth

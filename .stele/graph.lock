@@ -13,7 +13,7 @@
     },
     "resume-is-not-an-ending": {
       "file": "src/cli.rs",
-      "line": 360,
+      "line": 364,
       "node": "src"
     }
   },
@@ -30,7 +30,7 @@
           "text": "single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen",
           "verified": {
             "digest": "08ffd34819365da145ab6536764117600151de2829cd6bf0649d21b860fe5c54",
-            "sha": "30bb819e36ae8d1fd82c2672b67bfdbaa7029a05"
+            "sha": "c88c2adee45e3ce59472ddb3f9fd1bcee585ae95"
           }
         },
         {
@@ -42,7 +42,7 @@
           "text": "one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it",
           "verified": {
             "digest": null,
-            "sha": "30bb819e36ae8d1fd82c2672b67bfdbaa7029a05"
+            "sha": "c88c2adee45e3ce59472ddb3f9fd1bcee585ae95"
           }
         }
       ],
@@ -78,7 +78,7 @@
           "text": "dream owns what \"queued\" means — every reader of the queue goes through `dream::depth` / `dream::pending`, which count only undreamed pointers; nothing counts `.recent/*.json` off disk for itself. Take's dream trigger drifted from the run this way: spent pointers inflated the depth, so every ending past the tenth spawned a dream with nothing to route",
           "verified": {
             "digest": "4eafe897ac57350cea644152f5814d6f3aa2a2ded413528fb02e5b870b06d7f1",
-            "sha": "30bb819e36ae8d1fd82c2672b67bfdbaa7029a05"
+            "sha": "c88c2adee45e3ce59472ddb3f9fd1bcee585ae95"
           }
         },
         {
@@ -86,11 +86,11 @@
           "enforced_by": null,
           "id": "resume-is-not-an-ending",
           "kind": "hazard",
-          "resolved": "src/cli.rs:360",
+          "resolved": "src/cli.rs:364",
           "text": "a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive",
           "verified": {
-            "digest": "df50b891d4f124b7f91259be3a89dd83765e8657421f692fe02af459fbf98574",
-            "sha": "30bb819e36ae8d1fd82c2672b67bfdbaa7029a05"
+            "digest": "e684890377098f3d13c736f070f75c9e5876a966fbb8d08456b43942bdeb6bcb",
+            "sha": "c88c2adee45e3ce59472ddb3f9fd1bcee585ae95"
           }
         }
       ],
