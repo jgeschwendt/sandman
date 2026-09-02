@@ -247,7 +247,13 @@ export default function App() {
         const imported = importScene(scene);
         setBoot({
           elements: imported.elements,
-          appState: { viewBackgroundColor: imported.viewBackgroundColor },
+          // The owner draws in clean lines: architect roughness and Helvetica, never the hand-drawn
+          // defaults (stated 2026-09-01). Only the first render sets it; a pull never resets style.
+          appState: {
+            viewBackgroundColor: imported.viewBackgroundColor,
+            currentItemRoughness: 0,
+            currentItemFontFamily: 2,
+          },
           files: imported.files,
           scrollToContent: true,
         });
