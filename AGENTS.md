@@ -17,7 +17,7 @@ invariants:
 
 | where | what |
 | --- | --- |
-| design/ | excalidraw scenes — `sandman-v0` is the design wireframe |
+| design/ | excalidraw scenes — `sandman-v1` is the design wireframe (`sandman-v0` kept as its predecessor) |
 | docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875) |
 | src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's day page, sweep and bank upkeep |
 | tools/sketch/ | pair-drawing excalidraw over design/ — `tools/sketch/run.sh` (:7873) |
