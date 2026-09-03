@@ -1,0 +1,7568 @@
+{
+  "tldrawFileFormatVersion": 1,
+  "schema": {
+    "schemaVersion": 2,
+    "sequences": {
+      "com.tldraw.asset": 1,
+      "com.tldraw.asset.bookmark": 2,
+      "com.tldraw.asset.image": 6,
+      "com.tldraw.asset.video": 5,
+      "com.tldraw.binding.arrow": 1,
+      "com.tldraw.camera": 1,
+      "com.tldraw.document": 2,
+      "com.tldraw.instance": 26,
+      "com.tldraw.instance_page_state": 5,
+      "com.tldraw.instance_presence": 6,
+      "com.tldraw.page": 1,
+      "com.tldraw.pointer": 1,
+      "com.tldraw.shape": 4,
+      "com.tldraw.shape.arrow": 8,
+      "com.tldraw.shape.bookmark": 2,
+      "com.tldraw.shape.draw": 5,
+      "com.tldraw.shape.embed": 4,
+      "com.tldraw.shape.frame": 1,
+      "com.tldraw.shape.geo": 12,
+      "com.tldraw.shape.group": 0,
+      "com.tldraw.shape.highlight": 4,
+      "com.tldraw.shape.image": 5,
+      "com.tldraw.shape.line": 5,
+      "com.tldraw.shape.note": 13,
+      "com.tldraw.shape.text": 4,
+      "com.tldraw.shape.video": 4,
+      "com.tldraw.store": 5,
+      "com.tldraw.user": 1
+    }
+  },
+  "records": [
+    {
+      "fromId": "shape:a12",
+      "id": "binding:a12-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:a2",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:a12",
+      "id": "binding:a12-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:a1",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:a23",
+      "id": "binding:a23-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:a3",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:a23",
+      "id": "binding:a23-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:a2",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:a34",
+      "id": "binding:a34-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:a4",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:a34",
+      "id": "binding:a34-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:a3",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b12",
+      "id": "binding:b12-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:b2",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b12",
+      "id": "binding:b12-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:b1",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b23",
+      "id": "binding:b23-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:b3",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b23",
+      "id": "binding:b23-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:b2",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b34",
+      "id": "binding:b34-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:b4",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b34",
+      "id": "binding:b34-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:b3",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b45",
+      "id": "binding:b45-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:b5",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:b45",
+      "id": "binding:b45-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:b4",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:c12",
+      "id": "binding:c12-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:c2",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:c12",
+      "id": "binding:c12-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:c1",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:c23",
+      "id": "binding:c23-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:c3",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:c23",
+      "id": "binding:c23-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:c2",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:c34",
+      "id": "binding:c34-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:c4",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:c34",
+      "id": "binding:c34-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:c3",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:delete-a",
+      "id": "binding:delete-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:delete-v",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:delete-a",
+      "id": "binding:delete-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:delete-t",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-archive-pointer",
+      "id": "binding:f-archive-pointer-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:f-pointer",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-archive-pointer",
+      "id": "binding:f-archive-pointer-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:f-archive",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-dream-reflect",
+      "id": "binding:f-dream-reflect-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:f-reflect",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-dream-reflect",
+      "id": "binding:f-dream-reflect-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:f-dream",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-pointer-dream",
+      "id": "binding:f-pointer-dream-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:f-dream",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-pointer-dream",
+      "id": "binding:f-pointer-dream-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:f-pointer",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-take-archive",
+      "id": "binding:f-take-archive-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:f-archive",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:f-take-archive",
+      "id": "binding:f-take-archive-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": false,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:f-take",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:golden-a",
+      "id": "binding:golden-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:golden-v",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:golden-a",
+      "id": "binding:golden-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:golden-t",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:nightly-a",
+      "id": "binding:nightly-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:nightly-v",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:nightly-a",
+      "id": "binding:nightly-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:nightly-t",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:origin-a",
+      "id": "binding:origin-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:a1",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:origin-a",
+      "id": "binding:origin-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:origin",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:origin-b",
+      "id": "binding:origin-b-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:b1",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:origin-b",
+      "id": "binding:origin-b-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:origin",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:origin-c",
+      "id": "binding:origin-c-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:c1",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:origin-c",
+      "id": "binding:origin-c-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:origin",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:queue-a",
+      "id": "binding:queue-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:queue-v",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:queue-a",
+      "id": "binding:queue-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:queue-t",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:reclaim",
+      "id": "binding:reclaim-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 1
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:a3",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:reclaim",
+      "id": "binding:reclaim-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0.5,
+          "y": 0
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:b5",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:sessionend-a",
+      "id": "binding:sessionend-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:sessionend-v",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:sessionend-a",
+      "id": "binding:sessionend-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:sessionend-t",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:sessionstart-a",
+      "id": "binding:sessionstart-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:sessionstart-v",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:sessionstart-a",
+      "id": "binding:sessionstart-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:sessionstart-t",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:shell-a",
+      "id": "binding:shell-a-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:shell-v",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:shell-a",
+      "id": "binding:shell-a-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:shell-t",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "gridSize": 10,
+      "id": "document:document",
+      "meta": {},
+      "name": "sandman — architecture",
+      "typeName": "document"
+    },
+    {
+      "id": "page:page",
+      "index": "a1",
+      "meta": {},
+      "name": "Page 1",
+      "typeName": "page"
+    },
+    {
+      "id": "shape:a1",
+      "index": "b16",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 300,
+      "y": 126
+    },
+    {
+      "id": "shape:a1-t",
+      "index": "b17",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "--hook implies --force: the live window is not consulted",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 314,
+      "y": 140
+    },
+    {
+      "id": "shape:a12",
+      "index": "b1B",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:a2",
+      "index": "b19",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 636,
+      "y": 126
+    },
+    {
+      "id": "shape:a2-t",
+      "index": "b1A",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "mv transcript →\narchive/claude/<date>-<ts>-<relpath>",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 650,
+      "y": 140
+    },
+    {
+      "id": "shape:a23",
+      "index": "b1E",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:a3",
+      "index": "b1C",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 972,
+      "y": 126
+    },
+    {
+      "id": "shape:a3-t",
+      "index": "b1D",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "pointer memories/.recent/<sid>.json — IS short-term recall (3 days)",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 986,
+      "y": 140
+    },
+    {
+      "id": "shape:a34",
+      "index": "b1H",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:a4",
+      "index": "b1F",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1308,
+      "y": 126
+    },
+    {
+      "id": "shape:a4-t",
+      "index": "b1G",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "dream at queue ≥ 10",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1322,
+      "y": 140
+    },
+    {
+      "id": "shape:archive-dir",
+      "index": "aU",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 103,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 640
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 44,
+      "y": 269
+    },
+    {
+      "id": "shape:archive-dir-m",
+      "index": "aW",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "bytes at rest — take's target; append-only, the pipeline never deletes here",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 308
+    },
+    {
+      "id": "shape:archive-dir-p",
+      "index": "aV",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "archive/claude/<yyyy>-<mm>-<dd>-<ts>-<orig relpath>",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 283
+    },
+    {
+      "id": "shape:b1",
+      "index": "b1J",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 203,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 300,
+      "y": 370
+    },
+    {
+      "id": "shape:b1-t",
+      "index": "b1K",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "why: the daemon retires an idle worker — or a kill: SessionEnd fires ~0.5 s before the daemon settles the job and removes its dir",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 314,
+      "y": 384
+    },
+    {
+      "id": "shape:b12",
+      "index": "b1O",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:b2",
+      "index": "b1M",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 203,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 636,
+      "y": 370
+    },
+    {
+      "id": "shape:b2-t",
+      "index": "b1N",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "decline live-job (journal) — the ending belongs to the worker, not the conversation",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 650,
+      "y": 384
+    },
+    {
+      "id": "shape:b23",
+      "index": "b1R",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:b3",
+      "index": "b1P",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 203,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 972,
+      "y": 370
+    },
+    {
+      "id": "shape:b3-t",
+      "index": "b1Q",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "write the debt:\npending-takes/<sid>.json\n{declined, job, session}",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 986,
+      "y": 384
+    },
+    {
+      "id": "shape:b34",
+      "index": "b1U",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:b4",
+      "index": "b1S",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 203,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1308,
+      "y": 370
+    },
+    {
+      "id": "shape:b4-t",
+      "index": "b1T",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "schedule the alarm: detached\n`sandman take --pending --after 125`\n(LIVE_WINDOW 120 s + 5) — a debt with a timer of its own",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1322,
+      "y": 384
+    },
+    {
+      "id": "shape:b45",
+      "index": "b1X",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:b5",
+      "index": "b1V",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 203,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1644,
+      "y": 370
+    },
+    {
+      "id": "shape:b5-t",
+      "index": "b1W",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "drain: job still live → keep · job gone → take unforced (the 120 s window guards a by-hand resume) · transcript gone → drop",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1658,
+      "y": 384
+    },
+    {
+      "id": "shape:bank",
+      "index": "ai",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 419,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 720
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 748,
+      "y": 351
+    },
+    {
+      "id": "shape:bank-archive",
+      "index": "aq",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 680
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 768,
+      "y": 588
+    },
+    {
+      "id": "shape:bank-archive-m",
+      "index": "as",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "superseded files — never rm'd",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 627
+    },
+    {
+      "id": "shape:bank-archive-p",
+      "index": "ar",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "_archive/",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 602
+    },
+    {
+      "id": "shape:bank-file",
+      "index": "ak",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 680
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 768,
+      "y": 408
+    },
+    {
+      "id": "shape:bank-file-m",
+      "index": "am",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "one memory per file — long-term, pipeline-owned",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 447
+    },
+    {
+      "id": "shape:bank-file-p",
+      "index": "al",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "<type>_<slug>.md",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 422
+    },
+    {
+      "id": "shape:bank-h",
+      "index": "aj",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "<bank>/",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 680
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 768,
+      "y": 365
+    },
+    {
+      "id": "shape:bank-index",
+      "index": "an",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 680
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 768,
+      "y": 498
+    },
+    {
+      "id": "shape:bank-index-m",
+      "index": "ap",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the bank's index — regenerated",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 537
+    },
+    {
+      "id": "shape:bank-index-p",
+      "index": "ao",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "MEMORY.md",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 512
+    },
+    {
+      "id": "shape:bank-reflect",
+      "index": "at",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 680
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 768,
+      "y": 678
+    },
+    {
+      "id": "shape:bank-reflect-m",
+      "index": "av",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "{at, count, last_ops} due-baseline",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 717
+    },
+    {
+      "id": "shape:bank-reflect-p",
+      "index": "au",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "_reflect.json",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 652
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 782,
+      "y": 692
+    },
+    {
+      "id": "shape:c1",
+      "index": "b1Z",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 300,
+      "y": 689
+    },
+    {
+      "id": "shape:c1-t",
+      "index": "b1a",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "every later take --hook that reaches an ending drains the ledger",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 314,
+      "y": 703
+    },
+    {
+      "id": "shape:c12",
+      "index": "b1e",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:c2",
+      "index": "b1c",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 636,
+      "y": 689
+    },
+    {
+      "id": "shape:c2-t",
+      "index": "b1d",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "every reflect drains it — routine sandman-reflect · 03:30",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 650,
+      "y": 703
+    },
+    {
+      "id": "shape:c23",
+      "index": "b1h",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:c3",
+      "index": "b1f",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 972,
+      "y": 689
+    },
+    {
+      "id": "shape:c3-t",
+      "index": "b1g",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "$SANDMAN_NO_TAKE · pipeline · reason=resume skip the drain: bystanders are never archived",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 986,
+      "y": 703
+    },
+    {
+      "id": "shape:c34",
+      "index": "b1k",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:c4",
+      "index": "b1i",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 128,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 292
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1308,
+      "y": 689
+    },
+    {
+      "id": "shape:c4-t",
+      "index": "b1j",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman take --pending by hand (or from bridge's refresh) drains it now",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1322,
+      "y": 703
+    },
+    {
+      "id": "shape:cadence",
+      "index": "aw",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "page:page",
+      "props": {
+        "color": "black",
+        "h": 812,
+        "name": "cadence",
+        "w": 1552
+      },
+      "rotation": 0,
+      "type": "frame",
+      "typeName": "shape",
+      "x": 0,
+      "y": 1612
+    },
+    {
+      "id": "shape:cadence-note",
+      "index": "ay",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Every arrow is one exec: no verb is a daemon and none polls. take carries the dream trigger, so nothing needs hook-event visibility.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 1504
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 71
+    },
+    {
+      "id": "shape:cadence-title",
+      "index": "ax",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "cadence — what fires each verb",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 24
+    },
+    {
+      "id": "shape:data-root",
+      "index": "aM",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "page:page",
+      "props": {
+        "color": "black",
+        "h": 826,
+        "name": "data-root",
+        "w": 1532
+      },
+      "rotation": 0,
+      "type": "frame",
+      "typeName": "shape",
+      "x": 0,
+      "y": 626
+    },
+    {
+      "id": "shape:data-root-note",
+      "index": "aO",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "$SANDMAN_ROOT moves the whole tree. archive/ is append-only; memories/ is pipeline-owned and never hand-edited.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 1484
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 71
+    },
+    {
+      "id": "shape:data-root-title",
+      "index": "aN",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "data root — ~/.sandman",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 24
+    },
+    {
+      "id": "shape:delete-a",
+      "index": "b0X",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:delete-et",
+      "index": "b0Y",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "destroy every copy — no archive, no pointer, no routing, no journal line",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1048,
+      "y": 622
+    },
+    {
+      "id": "shape:delete-t",
+      "index": "b0T",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 540
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 608
+    },
+    {
+      "id": "shape:delete-tt",
+      "index": "b0U",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "/delete",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 512
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 622
+    },
+    {
+      "id": "shape:delete-v",
+      "index": "b0V",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 608,
+      "y": 608
+    },
+    {
+      "id": "shape:delete-vt",
+      "index": "b0W",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman forget $SESSION",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 622,
+      "y": 622
+    },
+    {
+      "id": "shape:dot-dream",
+      "index": "aR",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 640
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 44,
+      "y": 175
+    },
+    {
+      "id": "shape:dot-dream-m",
+      "index": "aT",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "dream mind transcripts — kept to evaluate",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 214
+    },
+    {
+      "id": "shape:dot-dream-p",
+      "index": "aS",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": ".dream/<claude project>/<session-id>.jsonl",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 189
+    },
+    {
+      "id": "shape:ending",
+      "index": "b11",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "page:page",
+      "props": {
+        "color": "black",
+        "h": 1004,
+        "name": "ending",
+        "w": 1960
+      },
+      "rotation": 0,
+      "type": "frame",
+      "typeName": "shape",
+      "x": 0,
+      "y": 3391
+    },
+    {
+      "id": "shape:ending-title",
+      "index": "b12",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the ending — three paths (v1: the debt gets an alarm)",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 24
+    },
+    {
+      "id": "shape:f-archive",
+      "index": "b0k",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 454,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 348
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 416,
+      "y": 71
+    },
+    {
+      "id": "shape:f-archive-b",
+      "index": "b0m",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "~/.sandman/archive/claude/\n  <yyyy>-<mm>-<dd>-<ts>-\n  <orig relpath>\n\nplain jsonl · no re-encode\nun-take = mv back — resumable again\nappend-only, sorts chronologically",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 430,
+      "y": 161
+    },
+    {
+      "id": "shape:f-archive-h",
+      "index": "b0l",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "② archive — bytes at rest",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 430,
+      "y": 85
+    },
+    {
+      "id": "shape:f-archive-pointer",
+      "index": "b0r",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:f-dream",
+      "index": "b0s",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 454,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 348
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1200,
+      "y": 71
+    },
+    {
+      "id": "shape:f-dream-b",
+      "index": "b0u",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "memories/.recent in — banks out\nsonnet · opus · fable, in parallel\nmemory-blind · each proposes,\nno veto\n2-of-3 consensus, matched by claim\nstrongest agreeing tier carries\nthe wording\ncommit_memory under .commit.lock",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1214,
+      "y": 161
+    },
+    {
+      "id": "shape:f-dream-h",
+      "index": "b0t",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "④ dream — 3 minds, one dream",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1214,
+      "y": 85
+    },
+    {
+      "id": "shape:f-dream-reflect",
+      "index": "b0z",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:f-pointer",
+      "index": "b0o",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 454,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 348
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 808,
+      "y": 71
+    },
+    {
+      "id": "shape:f-pointer-b",
+      "index": "b0q",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "{archived path · cwd · ended ·\ntitle · highlights}\n\nIS the short-term recall surface\n(3 days)\ndepth ≥ 10 at take-time → dream\nretirement: dreamed AND ended\n> 72 h → reflect sweeps it;\nundreamed never expires",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 822,
+      "y": 161
+    },
+    {
+      "id": "shape:f-pointer-dream",
+      "index": "b0v",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:f-pointer-h",
+      "index": "b0p",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "③ pointer — memories/.recent/",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 822,
+      "y": 85
+    },
+    {
+      "id": "shape:f-reflect",
+      "index": "b0w",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 454,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 348
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1592,
+      "y": 71
+    },
+    {
+      "id": "shape:f-reflect-b",
+      "index": "b0y",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the day page: one md per day\n  from the chronological lane ·\n  INDEX.md tail\nbank upkeep when grown\n  (+5 files AND ≥ 20 h):\n  ONE call, whole bank in,\n  ≤ 6 ops out, net-non-increasing\n  — merge · rewrite · archive\nprune + regen each bank's\nMEMORY.md (≤ 180)\nroutine sandman-reflect · 03:30 UTC",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1606,
+      "y": 161
+    },
+    {
+      "id": "shape:f-reflect-h",
+      "index": "b0x",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "⑤ reflect — 24 hour reflection",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1606,
+      "y": 85
+    },
+    {
+      "id": "shape:f-take",
+      "index": "b0h",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 454,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 348
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 71
+    },
+    {
+      "id": "shape:f-take-archive",
+      "index": "b0n",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:f-take-b",
+      "index": "b0j",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "SessionEnd hook · /dissolve · by hand\n\nrefuse live — a transcript touched\nin the last 120 s; --hook implies\n--force, SessionEnd being the proof\nmv the whole session set:\ntranscript · subagent sidecar dir\nrename(2) atomic · EXDEV is an\nerror, never a fallback copy",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 161
+    },
+    {
+      "id": "shape:f-take-h",
+      "index": "b0i",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "① sandman take <session>",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 320
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 85
+    },
+    {
+      "id": "shape:flow",
+      "index": "b0f",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "page:page",
+      "props": {
+        "color": "black",
+        "h": 647,
+        "name": "flow",
+        "w": 1964
+      },
+      "rotation": 0,
+      "type": "frame",
+      "typeName": "shape",
+      "x": 0,
+      "y": 2584
+    },
+    {
+      "id": "shape:flow-note",
+      "index": "b10",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "forget never enters this flow — /delete destroys every copy before take could see it.\ncommit_memory stays the single format authority: dream (routing) and reflect (upkeep) both write through it.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 1916
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 569
+    },
+    {
+      "id": "shape:flow-title",
+      "index": "b0g",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:flow",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "flow — take → dream (one conversation's whole afterlife)",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 24
+    },
+    {
+      "id": "shape:golden-a",
+      "index": "b0R",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:golden-et",
+      "index": "b0S",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "commit one memory now — the in-session path; the body also lands in the pointer",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1048,
+      "y": 524
+    },
+    {
+      "id": "shape:golden-t",
+      "index": "b0N",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 540
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 510
+    },
+    {
+      "id": "shape:golden-tt",
+      "index": "b0O",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "claude, in-session — the golden rule",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 512
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 524
+    },
+    {
+      "id": "shape:golden-v",
+      "index": "b0P",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 608,
+      "y": 510
+    },
+    {
+      "id": "shape:golden-vt",
+      "index": "b0Q",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman remember \"<body>\"",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 622,
+      "y": 524
+    },
+    {
+      "id": "shape:incident",
+      "index": "b1p",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "grey",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 103,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 1312
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 624,
+      "y": 873
+    },
+    {
+      "id": "shape:incident-t",
+      "index": "b1q",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "2026-09-02 · three jobs killed a minute apart → three debts. The only drains that ran were the next two kills' hooks, each inside the 120 s window: a kill appends a queue-operation line to the transcript at the instant SessionEnd fires, so the transcript is always fresh at hook time. No ending followed; the debts sat until an unrelated one. The alarm closes the gap.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 1284
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 638,
+      "y": 887
+    },
+    {
+      "id": "shape:lane-a-label",
+      "index": "b15",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "A · no job names the session",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 300,
+      "y": 88
+    },
+    {
+      "id": "shape:lane-b-label",
+      "index": "b1I",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "B · a job under ~/.claude/jobs names the session",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 300,
+      "y": 332
+    },
+    {
+      "id": "shape:lane-c-label",
+      "index": "b1Y",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "C · the backstops",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 300,
+      "y": 651
+    },
+    {
+      "id": "shape:log-dir",
+      "index": "aX",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 103,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 640
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 44,
+      "y": 388
+    },
+    {
+      "id": "shape:log-dir-m",
+      "index": "aZ",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "reflect's day pages · the journal, one line per decision · the chronological index",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 427
+    },
+    {
+      "id": "shape:log-dir-p",
+      "index": "aY",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "log/<date>.md · log/<verb>-<date>.log · log/INDEX.md",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 402
+    },
+    {
+      "id": "shape:memories",
+      "index": "ad",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 609,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 760
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 728,
+      "y": 175
+    },
+    {
+      "id": "shape:memories-h",
+      "index": "ae",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "memories/",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 720
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 748,
+      "y": 189
+    },
+    {
+      "id": "shape:nightly-a",
+      "index": "b0L",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:nightly-et",
+      "index": "b0M",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "day page + INDEX.md · pending-take drain · pointer sweep · gated bank upkeep",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1048,
+      "y": 426
+    },
+    {
+      "id": "shape:nightly-t",
+      "index": "b0H",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 540
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 412
+    },
+    {
+      "id": "shape:nightly-tt",
+      "index": "b0I",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "routine sandman-reflect · 03:30 UTC (≈ 23:30 local) — ~/.routines",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 512
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 426
+    },
+    {
+      "id": "shape:nightly-v",
+      "index": "b0J",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 608,
+      "y": 412
+    },
+    {
+      "id": "shape:nightly-vt",
+      "index": "b0K",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman reflect",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 622,
+      "y": 426
+    },
+    {
+      "id": "shape:origin",
+      "index": "b13",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 252
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 432.5
+    },
+    {
+      "id": "shape:origin-a",
+      "index": "b18",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": -56,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:origin-b",
+      "index": "b1L",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:origin-c",
+      "index": "b1b",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 56,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:origin-t",
+      "index": "b14",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "ClaudeCode(SessionEnd)\n→ sandman take --hook",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 224
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 446.5
+    },
+    {
+      "id": "shape:pending-takes",
+      "index": "aa",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 103,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 640
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 44,
+      "y": 507
+    },
+    {
+      "id": "shape:pending-takes-m",
+      "index": "ac",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "takes a live job deferred — {declined, job, session}; every ending drains the ledger",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 546
+    },
+    {
+      "id": "shape:pending-takes-p",
+      "index": "ab",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "pending-takes/<sid>.json",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 612
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 58,
+      "y": 521
+    },
+    {
+      "id": "shape:queue-a",
+      "index": "b0F",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:queue-et",
+      "index": "b0G",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "3 parallel dreams → 2-of-3 consensus → commit_memory under .commit.lock",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1048,
+      "y": 328
+    },
+    {
+      "id": "shape:queue-t",
+      "index": "b0B",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 540
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 314
+    },
+    {
+      "id": "shape:queue-tt",
+      "index": "b0C",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "take itself, after dropping a pointer — queue ≥ 10 · by hand",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 512
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 328
+    },
+    {
+      "id": "shape:queue-v",
+      "index": "b0D",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 608,
+      "y": 314
+    },
+    {
+      "id": "shape:queue-vt",
+      "index": "b0E",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman dream [--now]",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 622,
+      "y": 328
+    },
+    {
+      "id": "shape:recent",
+      "index": "af",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 103,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 720
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 748,
+      "y": 232
+    },
+    {
+      "id": "shape:recent-m",
+      "index": "ah",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "pointers — the short-term recall surface (3 days); dream reads this queue",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 692
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 762,
+      "y": 271
+    },
+    {
+      "id": "shape:recent-p",
+      "index": "ag",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": ".recent/<sid>.json",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 692
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 762,
+      "y": 246
+    },
+    {
+      "id": "shape:reclaim",
+      "index": "b1m",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "grey",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "reclaimed — never spawns a dream of its own",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:root",
+      "index": "aP",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 680,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 1484
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 118
+    },
+    {
+      "id": "shape:root-h",
+      "index": "aQ",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:data-root",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "~/.sandman/",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 1444
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 44,
+      "y": 132
+    },
+    {
+      "id": "shape:sessionend-a",
+      "index": "b09",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:sessionend-et",
+      "index": "b0A",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "archive by move + drop the pointer; the conversation leaves the live/resumable set",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1048,
+      "y": 230
+    },
+    {
+      "id": "shape:sessionend-t",
+      "index": "b05",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 540
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 216
+    },
+    {
+      "id": "shape:sessionend-tt",
+      "index": "b06",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "SessionEnd hook · /dissolve",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 512
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 230
+    },
+    {
+      "id": "shape:sessionend-v",
+      "index": "b07",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 608,
+      "y": 216
+    },
+    {
+      "id": "shape:sessionend-vt",
+      "index": "b08",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman take $SESSION",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 622,
+      "y": 230
+    },
+    {
+      "id": "shape:sessionstart-a",
+      "index": "b03",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:sessionstart-et",
+      "index": "b04",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "ancestor-directional banks + .recent pointers fold into the session",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1048,
+      "y": 132
+    },
+    {
+      "id": "shape:sessionstart-t",
+      "index": "az",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 540
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 118
+    },
+    {
+      "id": "shape:sessionstart-tt",
+      "index": "b00",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "SessionStart hook",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 512
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 132
+    },
+    {
+      "id": "shape:sessionstart-v",
+      "index": "b01",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 608,
+      "y": 118
+    },
+    {
+      "id": "shape:sessionstart-vt",
+      "index": "b02",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman recall",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 622,
+      "y": 132
+    },
+    {
+      "id": "shape:shell-a",
+      "index": "b0d",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:shell-et",
+      "index": "b0e",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "every verb is a plain CLI call; nothing about the pipeline needs a session",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1048,
+      "y": 720
+    },
+    {
+      "id": "shape:shell-t",
+      "index": "b0Z",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 540
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 706
+    },
+    {
+      "id": "shape:shell-tt",
+      "index": "b0a",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "shell — the owner",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 512
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 720
+    },
+    {
+      "id": "shape:shell-v",
+      "index": "b0b",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 78,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 608,
+      "y": 706
+    },
+    {
+      "id": "shape:shell-vt",
+      "index": "b0c",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:cadence",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "any verb, by hand",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 622,
+      "y": 720
+    },
+    {
+      "id": "shape:sidenote",
+      "index": "b1n",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "align": "middle",
+        "color": "grey",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 103,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 560
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 873
+    },
+    {
+      "id": "shape:sidenote-t",
+      "index": "b1o",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "forget never enters this flow — /delete destroys every copy, the debt entry included.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 532
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 887
+    },
+    {
+      "id": "shape:tag-b4",
+      "index": "b1l",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:ending",
+      "props": {
+        "autoSize": true,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "v1",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1308,
+      "y": 340
+    },
+    {
+      "id": "shape:v-dream",
+      "index": "a4",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 144,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 118
+    },
+    {
+      "id": "shape:v-dream-b",
+      "index": "a6",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "route short-term → banks: 3 parallel dreams → 2-of-3 consensus → commit",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 173
+    },
+    {
+      "id": "shape:v-dream-h",
+      "index": "a5",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman dream [--now]",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 132
+    },
+    {
+      "id": "shape:v-forget",
+      "index": "a7",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 144,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 456,
+      "y": 118
+    },
+    {
+      "id": "shape:v-forget-b",
+      "index": "a9",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the privacy ending — destroy every copy; no archive, no pointer, no routing",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 470,
+      "y": 173
+    },
+    {
+      "id": "shape:v-forget-h",
+      "index": "a8",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman forget <session>",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 470,
+      "y": 132
+    },
+    {
+      "id": "shape:v-recall",
+      "index": "aA",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 144,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 888,
+      "y": 118
+    },
+    {
+      "id": "shape:v-recall-b",
+      "index": "aC",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the recall surface: ancestor-directional banks + .recent pointers",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 902,
+      "y": 173
+    },
+    {
+      "id": "shape:v-recall-h",
+      "index": "aB",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman recall",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 902,
+      "y": 132
+    },
+    {
+      "id": "shape:v-reflect",
+      "index": "aD",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 144,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 294
+    },
+    {
+      "id": "shape:v-reflect-b",
+      "index": "aF",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the 24 h pass: day page, indexes, bank upkeep",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 349
+    },
+    {
+      "id": "shape:v-reflect-h",
+      "index": "aE",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman reflect",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 308
+    },
+    {
+      "id": "shape:v-remember",
+      "index": "aG",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 144,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 456,
+      "y": 294
+    },
+    {
+      "id": "shape:v-remember-b",
+      "index": "aI",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "commit one memory now — the in-session path",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 470,
+      "y": 349
+    },
+    {
+      "id": "shape:v-remember-h",
+      "index": "aH",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman remember \"<body>\"",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 470,
+      "y": 308
+    },
+    {
+      "id": "shape:v-take",
+      "index": "aJ",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 144,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 400
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 888,
+      "y": 294
+    },
+    {
+      "id": "shape:v-take-b",
+      "index": "aL",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "archive the session by move + drop a pointer; queue ≥ 10 fires dream",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 902,
+      "y": 349
+    },
+    {
+      "id": "shape:v-take-h",
+      "index": "aK",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sandman take <session>",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 372
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 902,
+      "y": 308
+    },
+    {
+      "id": "shape:verbs",
+      "index": "a1",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "page:page",
+      "props": {
+        "color": "black",
+        "h": 466,
+        "name": "verbs",
+        "w": 1312
+      },
+      "rotation": 0,
+      "type": "frame",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:verbs-note",
+      "index": "a3",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Alpha order — the same six the table lists. Each is a plain CLI call, exec'd by one dispatcher.",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 1264
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 71
+    },
+    {
+      "id": "shape:verbs-title",
+      "index": "a2",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:verbs",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the CLI surface — six memory verbs",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 24
+    }
+  ]
+}

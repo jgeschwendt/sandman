@@ -30,7 +30,7 @@ transcripts.
 │   ├── <date>.md                                     reflect's day pages
 │   ├── <verb>-<date>.log                             the journal — one line per decision
 │   └── INDEX.md                                      chronological index
-├── pending-takes/<sid>.json                         takes a live job deferred — {declined, job, session}
+├── pending-takes/<sid>.json                          takes a live job deferred — {declined, job, session}
 └── memories/
     ├── .recent/<sid>.json                            pointers — the short-term surface (3 days)
     └── <bank>/
@@ -49,7 +49,8 @@ One config point: `$SANDMAN_ROOT`, else `~/.sandman` — nothing else hardcodes 
 | `SessionStart` hook | `recall` |
 | `SessionEnd` hook · `/dissolve` | `take $SESSION` |
 | take itself, after dropping a pointer — queue ≥ 10 · by hand | `dream [--now]` |
-| nightly tick 23:30 | `reflect` |
+| routine `sandman-reflect` · 03:30 UTC (≈ 23:30 local) | `reflect` |
+| claude, in-session — the golden rule | `remember "<body>"` |
 | `/delete` | `forget $SESSION` |
 | shell — the owner | any verb by hand |
 
@@ -179,7 +180,8 @@ hook-event visibility.
 
 ### ⑤ reflect — the 24 h pass
 
-- Trigger: a nightly tick at 23:30 — launchd, cron, or any scheduler; reflect is
+- Trigger: the `sandman-reflect` routine at 03:30 UTC (≈ 23:30 local) — launchd,
+  cron, or any scheduler; reflect is
   idempotent, so a double-fire or an early run is harmless.
 - Day page `log/<date>.md`, regenerated idempotently: the day's takes and the day's
   committed memories. `INDEX.md` lists every day page.

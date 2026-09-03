@@ -17,10 +17,9 @@ invariants:
 
 | where | what |
 | --- | --- |
-| design/ | excalidraw scenes — `sandman-v1` is the design wireframe (`sandman-v0` kept as its predecessor) |
-| docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875) |
+| design/ | `.tldr` scenes — `sandman-v1` is the design wireframe (`sandman-v0` kept as its predecessor); `mise run plan` (:7873) draws them |
+| docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875); `arch.tldr` is the tldraft drawing the page's plates are cut from, into `plates/` — one frame per page section |
 | src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's day page, sweep and bank upkeep |
-| tools/sketch/ | pair-drawing excalidraw over design/ — `tools/sketch/run.sh` (:7873) |
 
 The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 

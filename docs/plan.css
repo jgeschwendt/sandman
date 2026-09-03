@@ -88,3 +88,76 @@ ol.port-order > li::marker {
   color: var(--ui-fg-faint);
   font-weight: 600;
 }
+
+/* A plate is tldraw's own export, and every frame is exported twice — once in
+   each theme (tldraft export --both). The figure holds both; this file shows
+   the one that matches, so the ink follows the page instead of fighting it.
+   No width or height attribute — an <object> takes the plate's own size, and
+   max-width scales it down whole rather than cropping it. */
+.plate {
+  margin: 1.5rem 0 0;
+}
+
+.plate img,
+.plate object {
+  background: var(--plate-paper);
+  border: 1px solid var(--ui-border);
+  border-radius: 0.5rem;
+  display: block;
+  height: auto;
+  max-width: 100%;
+  padding: 0.75rem;
+}
+
+/* Each variant carries its own paper, and the PNG fallback inside it inherits
+   the custom property: the light plate keeps the off-white it was drawn on, the
+   dark one sits on the page's own sunken ground rather than a white card. */
+.plate .plate-light {
+  --plate-paper: #fdfdfb;
+}
+
+.plate .plate-dark {
+  --plate-paper: var(--ui-sunken);
+}
+
+/* ui.css's theme contract, applied to the pair: light is the ground truth on
+   bare :root, dark arrives through the media query (guarded so a manual light
+   choice wins), and both [data-theme] blocks restate their side so the toggle
+   wins over the system in either direction. Two classes beat `.plate object`,
+   which is where the display: block above comes from. */
+.plate .plate-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .plate .plate-light {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .plate .plate-dark {
+    display: block;
+  }
+}
+
+:root[data-theme="dark"] .plate .plate-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .plate .plate-dark {
+  display: block;
+}
+
+:root[data-theme="light"] .plate .plate-light {
+  display: block;
+}
+
+:root[data-theme="light"] .plate .plate-dark {
+  display: none;
+}
+
+.plate figcaption {
+  color: var(--ui-fg-muted);
+  font-size: 0.875rem;
+  margin-top: 0.625rem;
+  max-width: 48rem;
+}

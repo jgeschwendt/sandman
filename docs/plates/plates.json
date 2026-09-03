@@ -1,0 +1,44 @@
+{
+  "plates": {
+    "cadence": {
+      "file": "../arch.tldr",
+      "frame": "shape:cadence",
+      "variants": [
+        "light",
+        "dark"
+      ]
+    },
+    "data-root": {
+      "file": "../arch.tldr",
+      "frame": "shape:data-root",
+      "variants": [
+        "light",
+        "dark"
+      ]
+    },
+    "ending": {
+      "file": "../arch.tldr",
+      "frame": "shape:ending",
+      "variants": [
+        "light",
+        "dark"
+      ]
+    },
+    "flow": {
+      "file": "../arch.tldr",
+      "frame": "shape:flow",
+      "variants": [
+        "light",
+        "dark"
+      ]
+    },
+    "verbs": {
+      "file": "../arch.tldr",
+      "frame": "shape:verbs",
+      "variants": [
+        "light",
+        "dark"
+      ]
+    }
+  }
+}

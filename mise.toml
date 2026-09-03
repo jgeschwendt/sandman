@@ -4,6 +4,8 @@
 [tools]
 # lefthook runs the pre-push gate (lefthook.toml); `lefthook install` wires it.
 lefthook = "2.1.10"
-# node runs tools/sketch (server.js + one-time dist build).
-node = "24.14.0"
 rust = "1.94.0"
+
+[tasks.plan]
+description = "Draw the design scenes through visor (http://127.0.0.1:7873)"
+run = "visor -p 7873 -- tldraft serve --dir design"

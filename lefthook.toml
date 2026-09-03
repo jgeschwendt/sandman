@@ -1,7 +1,9 @@
 # The pre-push gate: CI runs `stele check`/`emit --check` but never `build`,
 # so a stale graph.lock only fails remotely — one round-trip too late. The
 # `unset` matters: git exports GIT_DIR etc. into hook children, which would
-# point any test-spawned git at this repo instead of its fixture.
+# point any test-spawned git at this repo instead of its fixture. `tldraft check`
+# recomputes each plate's stamp against docs/arch.tldr, so a drawing edited
+# without re-exporting cannot be pushed.
 [pre-push]
   [pre-push.commands.gate]
-  run = "unset $(git rev-parse --local-env-vars); mise x -- sh -c 'stele check && stele emit --check && cargo test'"
+  run = "unset $(git rev-parse --local-env-vars); mise x -- sh -c 'stele check && stele emit --check && cargo test && tldraft check docs/plates'"
