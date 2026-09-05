@@ -33,7 +33,7 @@ hazards:
 | `hook.rs` `transcript.rs` | SessionStart/SessionEnd payloads; locating session files, digesting a transcript, extracting the conversation a mind reads |
 | `json.rs` (private) | JSON for our own shapes only — pointers, hook payloads, model replies; why `[dependencies]` is empty |
 | `mind.rs` | the runner seam — one `claude -p … --output-format json` process per mind, killed at the timeout, every failure an abstention; `Ask::keep` decides whether the run's own transcript is kept or never written |
-| `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the `log/` and `.dream/` trees |
+| `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the tier split the leading dot marks: raw and gitignored (`.archive/` `.dream/` `.trace/`) against versioned content (`log/` `memories/`) |
 | `verbs/` | `dream` `forget` `recall` `reflect` `remember` `take` — each takes its roots as arguments, never the environment |
 
 `recall.rs` is a port of `~/.claude/hooks/memory-recall.js`; its header comment

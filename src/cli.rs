@@ -123,13 +123,13 @@ usage: sandman <verb> [args]
       build that wrote it rather than whatever is checked out now.
 
 Every verb journals its decisions — one line each, stamped and carrying the
-writing pid and build — to <root>/log/<verb>-<date>.log, so a hook that
+writing pid and build — to <root>/.trace/<verb>-<date>.log, so a hook that
 declined can still be explained afterwards. forget alone is silent,
 deliberately: a line naming the session it destroyed would be the trace it
 promises not to leave.
 
 Data root: $SANDMAN_ROOT, else ~/.sandman. Transcripts: ~/.claude/projects/.
-Logs: <root>/log/<verb>-<date>.log.";
+Logs: <root>/.trace/<verb>-<date>.log.";
 
 /// Run the process. Everything the binary does is here.
 #[must_use]
@@ -883,7 +883,7 @@ fn forget_verb(args: &[String]) -> Result<(), Failure> {
         session_id.ok_or_else(|| Failure::Usage("forget needs a session id".to_owned()))?;
 
     // Deliberately unjournaled, and it must stay that way. Every other verb
-    // writes what it decided to <root>/log; this one destroys every copy of a
+    // writes what it decided to <root>/.trace; this one destroys every copy of a
     // session, and a line naming the session it destroyed would be precisely
     // the pointer the verb exists to remove.
     for path in forget::forget(&paths::data_root()?, &paths::claude_root()?, &session_id)? {

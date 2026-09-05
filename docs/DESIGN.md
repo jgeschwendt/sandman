@@ -23,12 +23,12 @@ transcripts.
 
 ```
 ~/.sandman/
+├── .archive/
+│   └── claude/<yyyy>/<mm>/<dd>/<HHMMSS>-<relpath>    bytes at rest — take's target
 ├── .dream/<claude project>/<session-id>.jsonl        dream mind transcripts — kept to evaluate
-├── archive/
-│   └── claude/<yyyy>-<mm>-<dd>-<ts>-<orig relpath>   bytes at rest — take's target
+├── .trace/<verb>-<date>.log                          the journal — one line per decision
 ├── log/
 │   ├── <date>.md                                     reflect's day pages
-│   ├── <verb>-<date>.log                             the journal — one line per decision
 │   └── INDEX.md                                      chronological index
 ├── pending-takes/<sid>.json                          takes a live job deferred — {declined, job, session}
 └── memories/
@@ -41,6 +41,10 @@ transcripts.
 ```
 
 One config point: `$SANDMAN_ROOT`, else `~/.sandman` — nothing else hardcodes the root.
+
+The leading dot is the tier boundary. Hidden directories hold raw bytes the operator's
+`~/.sandman` repo gitignores; visible ones hold the content it versions. Mixing them cost
+a commit of 60 run journals that shared `log/` with the day pages (2026-09-05).
 
 ## Cadence
 
@@ -100,14 +104,16 @@ hook-event visibility.
 - Check queue depth — *unrouted* pointers only, asked of dream rather than counted
   off disk, so the trigger and the run cannot disagree about what is queued;
   ≥ 10 → spawn `<self> dream`, fully detached,
-  stdout+stderr appended to `log/dream-<date>.log`; take never waits on it.
+  stdout+stderr appended to `.trace/dream-<date>.log`; take never waits on it.
 - Exit state: the conversation has left the live/resumable set — that is the feature,
   not a side effect. Un-take = `mv` back.
 
 ### ② archive
 
-- `archive/claude/<yyyy>-<mm>-<dd>-<ts>-<orig relpath>` — date + timestamp prefix keeps
-  names unique and sorts chronologically.
+- `.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-<orig relpath>` — the day is the directory
+  and the time is the prefix: names stay unique, sort chronologically, and a day's takes
+  are a listing rather than a prefix match over every take ever made. The tree is never
+  swept, so a flat one only grows.
 - Plain jsonl, byte-identical — no re-encoding, no compression; `mv` back restores the
   session whole.
 - Append-only tree: the pipeline never deletes here. `forget` destroys every copy before
@@ -211,7 +217,7 @@ hook-event visibility.
 
 ## Observability — the journal
 
-Every verb but one writes what it *decided* to `log/<verb>-<date>.log`: one line per
+Every verb but one writes what it *decided* to `.trace/<verb>-<date>.log`: one line per
 decision, never a transcript of the run. Hook-driven verbs decide and exit, and until
 the journal existed a `take --hook` that declined said nothing at all — the 2026-08-26
 mid-conversation archive had to be reconstructed out of Claude Code's own `daemon.log`.
@@ -234,9 +240,10 @@ mid-conversation archive had to be reconstructed out of Claude Code's own `daemo
   and a verb behaves identically whether its line landed or not. A journal that could
   fail would be a new way for a session edge to break.
 - Day pages are the *narrative* record — what happened; the journal is the *decision*
-  record — why a verb did or did not act. `reflect` keeps both in `log/`: one line per
-  bank and one run line (`reflect done banks=… due=… swept=… ms=…`). `dream` appends
-  its detached run's stdout and stderr to `log/dream-<date>.log`.
+  record — why a verb did or did not act. `reflect` writes both, to their own tiers: the
+  page to `log/`, and one line per bank plus one run line (`reflect done banks=… due=…
+  swept=… ms=…`) to `.trace/`. `dream` appends its detached run's stdout and stderr to
+  `.trace/dream-<date>.log`.
 
 **`forget` is deliberately unjournaled — an accepted forensic hole.** It is sandman's
 privacy ending, and a line naming the session it destroyed would be exactly the trace

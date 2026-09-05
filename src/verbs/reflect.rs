@@ -241,8 +241,10 @@ fn takes(data_root: &Path, day: Day) -> Vec<String> {
         ));
     }
 
-    let prefix = format!("{}-", day.key());
-    if let Ok(entries) = fs::read_dir(paths::archive_claude_dir(data_root)) {
+    // The day is a directory, so the listing is already the day's takes — a
+    // day nothing was taken on simply has none.
+    let archive = paths::archive_day_dir(data_root, day.year, day.month, day.day);
+    if let Ok(entries) = fs::read_dir(&archive) {
         for entry in entries.flatten() {
             let Ok(kind) = entry.file_type() else {
                 continue;
@@ -256,10 +258,7 @@ fn takes(data_root: &Path, day: Day) -> Vec<String> {
             if seen.contains(&name) {
                 continue;
             }
-            let Some(rest) = name.strip_prefix(&prefix) else {
-                continue;
-            };
-            let Some((time, title)) = rest.split_once('-') else {
+            let Some((time, title)) = name.split_once('-') else {
                 continue;
             };
             if time.len() != 6 || !time.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -653,7 +652,7 @@ fn upkeep(
     // memory's `source:` is the only other place its inputs are named — a
     // field inside a file inside the bank, which is not something the log can
     // be grepped for. Mirror them here so "what became of that memory?" is one
-    // `rg` over `<root>/log`, the question the journal exists to answer.
+    // `rg` over `<root>/.trace`, the question the journal exists to answer.
     let mut merged: Vec<String> = Vec::new();
     for op in &ops {
         // Guarded on both sides of `resolved`: once so a merge whose files
@@ -1269,8 +1268,8 @@ mod tests {
             path
         }
 
-        fn archived(&self, name: &str) -> PathBuf {
-            let dir = crate::paths::archive_claude_dir(&self.root);
+        fn archived(&self, year: i64, month: i64, day: i64, name: &str) -> PathBuf {
+            let dir = crate::paths::archive_day_dir(&self.root, year, month, day);
             fs::create_dir_all(&dir).expect("archive");
             let path = dir.join(name);
             fs::write(&path, "{}\n").expect("archived");
@@ -1317,9 +1316,9 @@ mod tests {
         }
 
         fn log(&self) -> String {
-            let dir = crate::paths::log_dir(&self.root);
+            let dir = crate::paths::trace_dir(&self.root);
             let mut text = String::new();
-            for entry in fs::read_dir(&dir).expect("log dir") {
+            for entry in fs::read_dir(&dir).expect("trace dir") {
                 let path = entry.expect("entry").path();
                 if path
                     .file_name()
@@ -1345,8 +1344,9 @@ mod tests {
         // Yesterday's pointer is not today's take.
         scratch.pointer("sid-old", "2026-08-11T23:00:00Z", None);
         // An archive file with no pointer left — swept, but still a take.
-        scratch.archived("2026-08-12-070000-projects-x-sid-c.jsonl");
-        scratch.archived("2026-08-11-070000-projects-x-sid-d.jsonl");
+        scratch.archived(2026, 8, 12, "070000-projects-x-sid-c.jsonl");
+        // Yesterday's day directory is not today's listing.
+        scratch.archived(2026, 8, 11, "070000-projects-x-sid-d.jsonl");
         scratch.seed_dated(
             "project_the_queue_is_the_surface.md",
             "the queue is the surface",
@@ -1437,7 +1437,7 @@ mod tests {
         .expect("old");
         // Not day pages.
         fs::write(dir.join("notes.md"), "# notes\n").expect("notes");
-        fs::write(dir.join("dream-2026-08-10.log"), "line\n").expect("log");
+        fs::write(dir.join(".DS_Store"), "\0").expect("stray");
 
         let outcome = reflect(
             &scratch.root,

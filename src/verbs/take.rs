@@ -84,7 +84,8 @@ pub fn take(
     let text = fs::read_to_string(&source).map_err(|error| Error::io(&source, error))?;
     let digest = transcript::digest(&text);
 
-    let archive_dir = paths::archive_claude_dir(data_root);
+    let (year, month, day, ..) = now.parts();
+    let archive_dir = paths::archive_day_dir(data_root, year, month, day);
     fs::create_dir_all(&archive_dir).map_err(|error| Error::io(&archive_dir, error))?;
     let name = archive_name(claude_root, &source, now);
     let archived = archive_dir.join(&name);
@@ -357,15 +358,16 @@ fn note(data_root: &Path, line: &str) {
     crate::journal::note(data_root, "take", line);
 }
 
-/// `<yyyy>-<mm>-<dd>-<HHMMSS>-<path under ~/.claude, `/` → `-`>`.
+/// `<HHMMSS>-<path under ~/.claude, `/` → `-`>` — the leaf inside the day's
+/// directory, which is where the date the name used to carry now lives.
 #[must_use]
 pub fn archive_name(claude_root: &Path, source: &Path, now: Timestamp) -> String {
     let relative = source.strip_prefix(claude_root).unwrap_or(source);
     let flattened = relative
         .to_string_lossy()
         .replace(std::path::MAIN_SEPARATOR, "-");
-    let (year, month, day, hour, minute, second) = now.parts();
-    format!("{year:04}-{month:02}-{day:02}-{hour:02}{minute:02}{second:02}-{flattened}")
+    let (.., hour, minute, second) = now.parts();
+    format!("{hour:02}{minute:02}{second:02}-{flattened}")
 }
 
 /// Move, never copy. A cross-device destination is the one io error with its
@@ -572,13 +574,15 @@ mod tests {
             name.ends_with(&format!("-projects-{PROJECT}-{SID}.jsonl")),
             "{name}"
         );
-        // <yyyy>-<mm>-<dd>-<HHMMSS>- prefix.
-        let stamp: Vec<&str> = name.splitn(5, '-').collect();
-        assert_eq!(stamp[0].len(), 4);
-        assert_eq!(stamp[1].len(), 2);
-        assert_eq!(stamp[2].len(), 2);
-        assert_eq!(stamp[3].len(), 6);
-        assert!(stamp[3].bytes().all(|byte| byte.is_ascii_digit()));
+        // <HHMMSS>- prefix, under the <yyyy>/<mm>/<dd> the take landed on.
+        let (stamp, _) = name.split_once('-').expect("a time prefix");
+        assert_eq!(stamp.len(), 6);
+        assert!(stamp.bytes().all(|byte| byte.is_ascii_digit()));
+        let (year, month, day, ..) = Timestamp::now().expect("clock").parts();
+        assert_eq!(
+            outcome.archived.parent(),
+            Some(crate::paths::archive_day_dir(&fixture.root, year, month, day).as_path())
+        );
 
         // The recorded size is the archived file's own.
         assert_eq!(
@@ -653,7 +657,7 @@ mod tests {
         // Refused means untouched — but the refusal is on the record, so a
         // take that never happened can still be explained afterwards.
         assert!(source.is_file());
-        assert!(!fixture.root.join("archive").exists());
+        assert!(!fixture.root.join(".archive").exists());
         let journal = fs::read_to_string(crate::paths::run_log(
             &fixture.root,
             "take",
@@ -1052,7 +1056,7 @@ mod tests {
                 Path::new("/Users/you/.claude/projects/-Users-you/sid.jsonl"),
                 now
             ),
-            "2026-08-06-121137-projects--Users-you-sid.jsonl"
+            "121137-projects--Users-you-sid.jsonl"
         );
         // A path outside the root keeps its own components rather than escaping.
         assert_eq!(
@@ -1061,7 +1065,7 @@ mod tests {
                 Path::new("/elsewhere/sid.jsonl"),
                 now
             ),
-            "2026-08-06-121137--elsewhere-sid.jsonl"
+            "121137--elsewhere-sid.jsonl"
         );
     }
 }

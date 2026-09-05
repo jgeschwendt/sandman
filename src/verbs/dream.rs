@@ -612,7 +612,7 @@ fn keep_for(options: &Options, pointer: &Pointer) -> Option<Keep> {
 }
 
 /// The Claude Code project slug the session ran under, read back out of the
-/// archive name `take` built: `<date>-<HHMMSS>-projects-<slug>-<sid>.jsonl`.
+/// archive name `take` built: `<HHMMSS>-projects-<slug>-<sid>.jsonl`.
 /// `None` for a pointer that names no archive, or one whose name predates the
 /// layout — those file under [`ORPHANS_DIR_NAME`].
 fn claude_slug(pointer: &Pointer) -> Option<String> {
@@ -911,10 +911,10 @@ mod tests {
 
         /// Archive a transcript and drop the pointer that names it.
         fn queue(&self, sid: &str, ended: &str) -> PathBuf {
-            let archive = crate::paths::archive_claude_dir(&self.root);
+            let archive = crate::paths::archive_day_dir(&self.root, 2026, 8, 11);
             fs::create_dir_all(&archive).expect("archive dir");
             // The name `take` builds — the claude project slug is in it.
-            let archived = archive.join(format!("2026-08-11-120000-projects-{SLUG}-{sid}.jsonl"));
+            let archived = archive.join(format!("120000-projects-{SLUG}-{sid}.jsonl"));
             fs::write(
                 &archived,
                 format!(
@@ -1007,7 +1007,7 @@ mod tests {
     /// Every dream log the run wrote — the day is whatever the clock said.
     fn read_log(root: &Path) -> String {
         let mut text = String::new();
-        for entry in fs::read_dir(crate::paths::log_dir(root)).expect("log dir") {
+        for entry in fs::read_dir(crate::paths::trace_dir(root)).expect("trace dir") {
             let path = entry.expect("log entry").path();
             if path
                 .file_name()
@@ -1293,7 +1293,7 @@ mod tests {
         };
         assert_eq!(
             slug(
-                "/data/archive/claude/2026-08-19-205555-projects--Users-you-code-sid-1.jsonl",
+                "/data/.archive/claude/2026/08/19/205555-projects--Users-you-code-sid-1.jsonl",
                 "sid-1"
             ),
             Some("-Users-you-code".to_owned())
@@ -1301,12 +1301,12 @@ mod tests {
         // A name from before the archive layout, and a pointer with no
         // archive at all, both file under `orphans`.
         assert_eq!(
-            slug("/data/archive/claude/2026-08-11-120000-sid.jsonl", "sid"),
+            slug("/data/.archive/claude/2026/08/11/120000-sid.jsonl", "sid"),
             None
         );
         assert_eq!(
             slug(
-                "/data/archive/claude/2026-08-11-120000-projects--Users-you-other.jsonl",
+                "/data/.archive/claude/2026/08/11/120000-projects--Users-you-other.jsonl",
                 "sid"
             ),
             None

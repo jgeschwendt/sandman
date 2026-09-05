@@ -114,14 +114,16 @@ mod tests {
         fs::write(project.join(SID).join("agent.jsonl"), "{}\n").expect("sidecar transcript");
         fs::write(project.join("other.jsonl"), "{}\n").expect("other transcript");
 
-        let archive = root.join("archive").join("claude");
+        // Nested by day: the walk has to descend `<yyyy>/<mm>/<dd>` to reach
+        // the copies, and stop at the `-dir` it destroys whole.
+        let archive = crate::paths::archive_day_dir(&root, 2026, 8, 6);
         fs::create_dir_all(&archive).expect("archive");
-        let archived = archive.join(format!("2026-08-06-121137-projects-{PROJECT}-{SID}.jsonl"));
-        let archived_dir = archive.join(format!("2026-08-06-121137-projects-{PROJECT}-{SID}-dir"));
+        let archived = archive.join(format!("121137-projects-{PROJECT}-{SID}.jsonl"));
+        let archived_dir = archive.join(format!("121137-projects-{PROJECT}-{SID}-dir"));
         fs::write(&archived, "{}\n").expect("archived");
         fs::create_dir_all(&archived_dir).expect("archived dir");
         fs::write(archived_dir.join("agent.jsonl"), "{}\n").expect("archived sidecar");
-        let unrelated = archive.join("2026-08-06-121137-projects-other.jsonl");
+        let unrelated = archive.join("121137-projects-other.jsonl");
         fs::write(&unrelated, "{}\n").expect("unrelated archive");
 
         let recent = root.join("memories").join(".recent");

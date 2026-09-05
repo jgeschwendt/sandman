@@ -72,12 +72,12 @@ impl Machine {
     /// Not the same as an untouched data root any more: a decline writes its
     /// reason to the journal, which is the whole point of the journal.
     fn took_nothing(&self) -> bool {
-        !self.root().join("archive").exists() && !self.root().join("memories").exists()
+        !self.root().join(".archive").exists() && !self.root().join("memories").exists()
     }
 
     /// Today's journal for `verb`, or empty when the verb wrote none.
     fn journal(&self, verb: &str) -> String {
-        let dir = self.root().join("log");
+        let dir = self.root().join(".trace");
         let Ok(entries) = fs::read_dir(&dir) else {
             return String::new();
         };
@@ -268,10 +268,16 @@ fn dream_and_reflect_run_on_an_empty_root() {
 #[test]
 fn dream_runs_the_configured_minds_and_commits_on_agreement() {
     let machine = Machine::new("dream-minds");
-    let archived = machine.root().join("archive").join("claude");
+    let archived = machine
+        .root()
+        .join(".archive")
+        .join("claude")
+        .join("2026")
+        .join("08")
+        .join("11");
     fs::create_dir_all(&archived).expect("archive dir");
     // The name `take` builds: the claude project slug the minds file under.
-    let transcript = archived.join(format!("2026-08-11-120000-projects-{PROJECT}-{SID}.jsonl"));
+    let transcript = archived.join(format!("120000-projects-{PROJECT}-{SID}.jsonl"));
     fs::write(
         &transcript,
         format!(
@@ -444,7 +450,29 @@ fn take_archives_then_recall_surfaces_the_pointer() {
     assert_eq!(code(&taken), 0, "{}", stderr(&taken));
     let archived = PathBuf::from(stdout(&taken).trim());
     assert!(archived.is_file());
-    assert!(archived.starts_with(machine.root().join("archive").join("claude")));
+    // A fresh root gets the day's directories made on the way:
+    // `.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…`.
+    let shelf = archived
+        .strip_prefix(machine.root().join(".archive").join("claude"))
+        .expect("under the claude lane");
+    let parts: Vec<&str> = shelf
+        .components()
+        .filter_map(|part| part.as_os_str().to_str())
+        .collect();
+    assert_eq!(parts.len(), 4, "{shelf:?}");
+    assert_eq!(parts[0].len(), 4, "{shelf:?}");
+    assert_eq!(parts[1].len(), 2, "{shelf:?}");
+    assert_eq!(parts[2].len(), 2, "{shelf:?}");
+    assert!(
+        parts[..3]
+            .iter()
+            .all(|part| part.bytes().all(|byte| byte.is_ascii_digit())),
+        "{shelf:?}"
+    );
+    let (stamp, rest) = parts[3].split_once('-').expect("a time prefix");
+    assert_eq!(stamp.len(), 6, "{shelf:?}");
+    assert!(stamp.bytes().all(|byte| byte.is_ascii_digit()), "{shelf:?}");
+    assert!(rest.starts_with("projects-"), "{shelf:?}");
     assert!(!machine.project().join(format!("{SID}.jsonl")).exists());
     assert!(stderr(&taken).is_empty(), "one pointer is not a due queue");
 
@@ -1028,8 +1056,8 @@ fn forget_is_the_one_verb_that_leaves_no_line() {
         "forget added a line to take's journal"
     );
     assert!(machine.journal("forget").is_empty());
-    let logs: Vec<String> = fs::read_dir(machine.root().join("log"))
-        .expect("log dir")
+    let logs: Vec<String> = fs::read_dir(machine.root().join(".trace"))
+        .expect("trace dir")
         .flatten()
         .filter_map(|entry| entry.file_name().to_str().map(ToOwned::to_owned))
         .filter(|name| name.contains("forget"))
@@ -1263,7 +1291,7 @@ fn a_full_queue_spawns_a_detached_dream() {
     );
 
     // take returned without waiting; the dream lands in its own log.
-    let log_dir = machine.root().join("log");
+    let log_dir = machine.root().join(".trace");
     let mut lines = String::new();
     for _ in 0..200 {
         lines = fs::read_dir(&log_dir)

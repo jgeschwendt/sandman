@@ -5,8 +5,8 @@
 //! take that fired said it only to a terminal nobody was watching. That is why
 //! the 2026-08-26 mid-conversation archive had to be reconstructed out of
 //! Claude Code's own `daemon.log`. A verb now writes what it decided to
-//! `<root>/log/<verb>-<date>.log` — the convention dream and reflect already
-//! keep — so the next incident is answerable from `~/.sandman/log` alone.
+//! `<root>/.trace/<verb>-<date>.log` — the convention dream and reflect already
+//! keep — so the next incident is answerable from `~/.sandman/.trace` alone.
 //!
 //! Best-effort by construction. A journal that could fail would be a new way
 //! for a session edge to break, so every error here is swallowed: there is no
@@ -74,7 +74,7 @@ mod tests {
 
     /// Every `.log` the journal wrote under `data_root`, by name.
     fn logs(data_root: &std::path::Path) -> Vec<String> {
-        let Ok(entries) = fs::read_dir(paths::log_dir(data_root)) else {
+        let Ok(entries) = fs::read_dir(paths::trace_dir(data_root)) else {
             return Vec::new();
         };
         let mut names: Vec<String> = entries
@@ -102,7 +102,7 @@ mod tests {
             "{name}"
         );
 
-        let text = fs::read_to_string(paths::log_dir(&root).join(name)).expect("the log");
+        let text = fs::read_to_string(paths::trace_dir(&root).join(name)).expect("the log");
         assert!(text.ends_with(" declined resume session=abc\n"), "{text}");
         assert!(
             text.contains(&format!(" pid={} ", std::process::id())),
@@ -137,7 +137,7 @@ mod tests {
 
         let names = logs(&root);
         assert_eq!(names.len(), 2, "{names:?}");
-        let text = fs::read_to_string(paths::log_dir(&root).join(&names[1])).expect("take log");
+        let text = fs::read_to_string(paths::trace_dir(&root).join(&names[1])).expect("take log");
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 3, "{text}");
         assert!(lines[0].ends_with("hook session=one"), "{}", lines[0]);

@@ -1,7 +1,7 @@
 //! The build stamp — what wrote a journal line.
 //!
 //! Every entry the journal writes carries `v=`, and `sandman version` prints
-//! the same string: given a line from `~/.sandman/log`, the build that wrote
+//! the same string: given a line from `~/.sandman/.trace`, the build that wrote
 //! it is nameable without guessing which worktree the installed binary came
 //! from. `build.rs` supplies the commit; `-dirty` means it was built over
 //! uncommitted work and the commit alone does not describe it.

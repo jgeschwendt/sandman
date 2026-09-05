@@ -72,7 +72,7 @@ mod tests {
     #[test]
     fn appending_creates_the_log_and_keeps_every_line() {
         let temp = TempDir::new("atomic-append");
-        let path = temp.path().join("log").join("dream-2026-08-12.log");
+        let path = temp.path().join(".trace").join("dream-2026-08-12.log");
         append_line(&path, "first").expect("append");
         append_line(&path, "second").expect("append again");
         assert_eq!(

@@ -93,7 +93,10 @@
   <header>
     <h2 class="h2">Data root — <code class="code">~/.sandman</code></h2>
     <p class="plan-note">One config point: <code class="code">$SANDMAN_ROOT</code>, else
-      <code class="code">~/.sandman</code> — nothing else hardcodes the root.</p>
+      <code class="code">~/.sandman</code> — nothing else hardcodes the root. The leading dot is the tier
+      boundary: hidden directories hold raw bytes the operator's <code class="code">~/.sandman</code> repo gitignores,
+      visible ones hold the content it versions. Mixing them cost a commit of 60 run journals that shared
+      <code class="code">log/</code> with the day pages (2026-09-05).</p>
   </header>
   <figure class="plate">
     <object class="plate-light" type="image/svg+xml" data="plates/data-root.svg" aria-label="data root — ~/.sandman"><img src="plates/data-root.png"
@@ -105,12 +108,12 @@
   </figure>
   <pre class="tree" data-live>
 ~/.sandman/
+├── .archive/
+│   └── claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;relpath&gt;    bytes at rest — take's target
 ├── .dream/&lt;claude project&gt;/&lt;session-id&gt;.jsonl        dream mind transcripts — kept to evaluate
-├── archive/
-│   └── claude/&lt;yyyy&gt;-&lt;mm&gt;-&lt;dd&gt;-&lt;ts&gt;-&lt;orig relpath&gt;   bytes at rest — take's target
+├── .trace/&lt;verb&gt;-&lt;date&gt;.log                          the journal — one line per decision
 ├── log/
 │   ├── &lt;date&gt;.md                                     reflect's day pages
-│   ├── &lt;verb&gt;-&lt;date&gt;.log                             the journal — one line per decision
 │   └── INDEX.md                                      chronological index
 ├── pending-takes/&lt;sid&gt;.json                          takes a live job deferred — {declined, job, session}
 └── memories/
@@ -176,7 +179,7 @@
           <li>decline on request — <code class="code">$SANDMAN_NO_TAKE</code> makes <code class="code">--hook</code> exit quietly before it reads anything, so a caller driving <code class="code">claude -p --resume</code> turns keeps its transcript live; a session named by hand is taken regardless</li>
           <li>resolve the transcript; <code class="code">mv</code> it to the archive path — same-volume rename, atomic, no copy ever exists; a cross-device destination is an error, never a fallback copy</li>
           <li>drop the pointer to <code class="code">memories/.recent/&lt;sid&gt;.json</code></li>
-          <li>check queue depth — <em>unrouted</em> pointers only, asked of dream rather than counted off disk, so the trigger and the run cannot disagree about what is queued; ≥ 10 → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, logged to <code class="code">log/dream-&lt;date&gt;.log</code>; take never waits on it</li>
+          <li>check queue depth — <em>unrouted</em> pointers only, asked of dream rather than counted off disk, so the trigger and the run cannot disagree about what is queued; ≥ 10 → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, logged to <code class="code">.trace/dream-&lt;date&gt;.log</code>; take never waits on it</li>
           <li>exit state: the conversation has left the live/resumable set — that is the feature, not a side effect; un-take = <code class="code">mv</code> back</li>
         </ul>
       </div>
@@ -185,7 +188,7 @@
       <div class="panel-head">② archive</div>
       <div class="panel-body">
         <ul role="list">
-          <li><code class="code">archive/claude/&lt;yyyy&gt;-&lt;mm&gt;-&lt;dd&gt;-&lt;ts&gt;-&lt;orig relpath&gt;</code> — date + timestamp prefix keeps names unique and sorts chronologically</li>
+          <li><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;orig relpath&gt;</code> — the day is the directory and the time is the prefix: names stay unique, sort chronologically, and a day's takes are a listing rather than a prefix match over every take ever made</li>
           <li>plain jsonl, byte-identical — no re-encoding, no compression; <code class="code">mv</code> back restores the session whole</li>
           <li>append-only tree: the pipeline never deletes here. <code class="code">forget</code> destroys every copy before take could see it, so an archived session was by definition wanted</li>
         </ul>
