@@ -69,12 +69,44 @@ impl Value {
         }
     }
 
+    /// The entries in file order, when this is an object.
+    pub(crate) fn as_object(&self) -> Option<&[(String, Self)]> {
+        match self {
+            Self::Object(entries) => Some(entries),
+            _ => None,
+        }
+    }
+
     /// The text, when this is a string.
     pub(crate) fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(text) => Some(text),
             _ => None,
         }
+    }
+
+    /// An array of the values given, in that order.
+    pub(crate) fn array(items: impl IntoIterator<Item = Self>) -> Self {
+        Self::Array(items.into_iter().collect())
+    }
+
+    /// A count as a JSON number.
+    ///
+    /// Counts past `u32::MAX` saturate rather than cast: nothing sandman
+    /// counts — memories, banks, pointers, characters — reaches four billion,
+    /// and a bounded answer beats a silently lossy one.
+    pub(crate) fn count(value: usize) -> Self {
+        Self::Number(f64::from(u32::try_from(value).unwrap_or(u32::MAX)))
+    }
+
+    /// An object from `(key, value)` pairs, keeping the order given.
+    pub(crate) fn object<'a>(entries: impl IntoIterator<Item = (&'a str, Self)>) -> Self {
+        Self::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect(),
+        )
     }
 
     /// A string value, built from anything string-like.
@@ -560,6 +592,23 @@ mod tests {
         assert_eq!(flags.get("n").and_then(Value::as_number), Some(2.5));
         assert_eq!(flags.get("text").and_then(Value::as_bool), None);
         assert_eq!(flags.get("text").and_then(Value::as_number), None);
+    }
+
+    #[test]
+    fn the_builders_keep_the_order_they_were_given() {
+        let value = Value::object([
+            ("zulu", Value::string("last")),
+            ("counts", Value::array([Value::count(0), Value::count(3)])),
+            ("alpha", Value::Bool(true)),
+        ]);
+        assert_eq!(
+            value.render(),
+            r#"{"zulu":"last","counts":[0,3],"alpha":true}"#
+        );
+        assert_eq!(value.as_object().map(<[(String, Value)]>::len), Some(3));
+        assert_eq!(Value::string("x").as_object(), None);
+        // A count past what an f64 holds exactly saturates rather than drifts.
+        assert_eq!(Value::count(usize::MAX).render(), "4294967295");
     }
 
     #[test]

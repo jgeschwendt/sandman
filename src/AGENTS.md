@@ -35,7 +35,11 @@ hazards:
 | `log.rs` | the voyage log's format — the day's sources and their fingerprint, entry parse/render, the prompt, `began:` and the index; who calls the mind and when is reflect's |
 | `mind.rs` | the runner seam — one `claude -p … --output-format json` process per mind, killed at the timeout, every failure an abstention; `Ask::keep` decides whether the run's own transcript is kept or never written |
 | `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the tier split the leading dot marks: raw and gitignored (`.archive/` `.dream/` `.trace/`) against versioned content (`log/` `memories/`) |
-| `verbs/` | `dream` `forget` `recall` `reflect` `remember` `take` — each takes its roots as arguments, never the environment |
+| `verbs/` | `dream` `forget` `mcp` `recall` `reflect` `remember` `take` — each takes its roots as arguments, never the environment; `mcp` is the tool server (the three handlers plus the stdio loop, journalling to `.trace/mcp-<date>.log`) |
+
+`mcp`'s handlers are plain functions over a `Context` — data root, home, session id —
+and read the environment no more than any other verb does: the stdio loop resolves
+`$CLAUDE_SESSION_ID` once and hands it over.
 
 `recall.rs` is a port of `~/.claude/hooks/memory-recall.js`; its header comment
 lists what changed and why.

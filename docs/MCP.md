@@ -1,6 +1,6 @@
 # `sandman mcp`: the banks as a tool server
 
-Status: **proposed 2026-09-09**, brief for a Claude Code session in this repo. Uncommitted until the operator says so. Read `AGENTS.md`, `src/AGENTS.md`, `docs/DESIGN.md`, and `docs/BANK-FORMAT.md` first; this document adds one verb and changes nothing about the format, the lock, or the passes.
+Status: **shipped 2026-09-10** — phases 1, 2 and 4 in this repo; phase 3's desktop-app half is the operator's check. The brief is kept below as written, with the facts verified since marked inline. Read `AGENTS.md`, `src/AGENTS.md`, `docs/DESIGN.md`, and `docs/BANK-FORMAT.md` first; this document adds one verb and changes nothing about the format, the lock, or the passes.
 
 The operator's ask, from the Cowork session that ablated the cloud memory store the same day: "why not a mcp server for sandman that gives you access?" then "can we make sandman a real server? on vercel? then everything can access my memory yeah?" then "maybe later." The decision that session reached: a local, stdio MCP server now; a remote (HTTP) server deferred; the server is what makes the cloud-to-sandman drain a single piece instead of an inbox plus a launchd routine.
 
@@ -43,14 +43,15 @@ remember
               name?: string, description?: string }
     output: { bank: string, file: string, outcome: "created"|"replaced"|"collided", index: string }
     Commits through verbs::remember::remember with the same defaults as the CLI.
-    Exactly one of bank/cwd resolves the bank; both given is an invalid-params error.
+    Exactly one of bank/cwd resolves the bank; both given is an invalid-params
+    error, and neither given is the home bank.
     session_id comes from $CLAUDE_SESSION_ID when set, else absent, as today.
 
 banks
     input:  {}
     output: { banks: [{ key: string, live: boolean, memories: number }] }
-    Every bank under <root>/memories/ with the cwd its key decodes to and
-    whether that directory exists. A cloud caller uses this to pick a home
+    Every bank under <root>/memories/, each marked live when the directory
+    its key decodes to still exists. A cloud caller uses this to pick a home
     instead of guessing the slug encoding; `live: false` is the signal that a
     bank should be retired, not written to.
 ```
@@ -59,7 +60,7 @@ Tool descriptions (the strings a model reads) state the budget rule from `~/.san
 
 ### Protocol
 
-JSON-RPC 2.0 over stdio, newline-delimited, per the current MCP specification. Verify the protocol version string against the spec before writing it down; do not trust this brief for it. The methods that must work:
+JSON-RPC 2.0 over stdio, newline-delimited, per the current MCP specification. Verified 2026-09-10: Claude Code 2.1.268 opens the server with the legacy `initialize` handshake and asks for `2025-11-25`. The server answers `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`, echoing the client's requested version when it is one of those and `2025-11-25` otherwise (a missing or non-string version included). The spec's newest revision, 2026-07-28, replaces `initialize` with per-request `_meta` and is deliberately not implemented until a client sends it. The methods that must work:
 
 ```
 initialize                → { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "sandman", version } }
@@ -71,6 +72,7 @@ tools/call                → { content: [ { type: "text", text: <JSON of the ou
 anything else             → JSON-RPC error -32601
 malformed line            → JSON-RPC error -32700 with id null, then keep reading
 invalid params            → -32602
+request before initialize → -32600
 ```
 
 A verb failure (bad bank, empty body, lock contention) is a tool result with `isError: true`, not a JSON-RPC error: the model should read it and recover. Only protocol-level problems are JSON-RPC errors.
@@ -97,23 +99,23 @@ Desktop app, so the bridge proxies it into cloud sessions:
 "sandman": { "command": "/Users/jlg/.local/bin/sandman", "args": ["mcp"] }
 ```
 
-The exact config file and key for the desktop app's MCP servers should be checked against the app's current settings UI rather than assumed. Claude Code, optional, for sessions that want the tools alongside the hook:
+The desktop app reads this from `~/Library/Application Support/Claude/claude_desktop_config.json` under the `mcpServers` key (Settings › Developer › Edit Config opens the same file); a restart of the app picks it up (verified 2026-09-10 · the file on this Mac). Claude Code, optional, for sessions that want the tools alongside the hook:
 
 ```
-claude mcp add --transport stdio sandman -- ~/.local/bin/sandman mcp
+claude mcp add --scope user sandman -- "$HOME/.local/bin/sandman" mcp
 ```
 
 The binary path is absolute because hooks and spawned processes get a stale PATH snapshot (`~/.sandman/memories/-Users-jlg--claude/project_claude_harness_path_and_classifier.md`).
 
 ## Phases
 
-**1. Handlers.** `src/verbs/mcp.rs`: the three tool functions over `data_root`/`home`, the tool schemas as constants, `McpError`. Unit tests against a temp `$SANDMAN_ROOT` seeded with two banks: `recall` equals `verbs::recall::compose` byte for byte; `remember` produces the file `tests/cli.rs` would expect from the equivalent CLI call and regenerates the index; `banks` decodes keys back to paths and marks a missing directory `live: false`.
+**1. Handlers — shipped.** `src/verbs/mcp.rs`: the three tool functions over `data_root`/`home`, the tool schemas as constants, `McpError`. Unit tests against a temp `$SANDMAN_ROOT` seeded with two banks: `recall` equals `verbs::recall::compose` byte for byte; `remember` produces the file `tests/cli.rs` would expect from the equivalent CLI call and regenerates the index; `banks` decodes keys back to paths and marks a missing directory `live: false`.
 
-**2. Transport.** The stdio loop in the same module: read a line, parse, dispatch, render, write, flush; `initialize` handshake state (a `tools/call` before `initialize` is an error); EOF exits 0. `src/cli.rs` gains the `mcp` arm and the usage stanza above. Integration test in `tests/mcp.rs` driving the built binary with a scripted stdin (initialize, initialized, tools/list, three tools/call, a malformed line, EOF) and asserting every stdout line parses and matches.
+**2. Transport — shipped.** The stdio loop in the same module: read a line, parse, dispatch, render, write, flush; `initialize` handshake state (a `tools/call` before `initialize` is an error); EOF exits 0. `src/cli.rs` gains the `mcp` arm and the usage stanza above. Integration test in `tests/mcp.rs` driving the built binary with a scripted stdin (initialize, initialized, tools/list, three tools/call, a malformed line, EOF) and asserting every stdout line parses and matches.
 
-**3. Live check.** Register with the desktop app. From a Cowork session linked to this Mac: `sandman__banks` lists the 23 live banks; `sandman__recall {cwd: "/Users/jlg"}` returns the same text as `sandman recall --cwd ~` run in a terminal, compared in `.trace/`; `sandman__remember` into a scratch bank under a temp `$SANDMAN_ROOT` (the server inherits the env of its launcher, so the check runs against a copy, not the live root) writes the file and the index. Then the real root.
+**3. Live check.** Register with the desktop app. From a Cowork session linked to this Mac: `sandman__banks` lists every bank under `memories/` (25, measured 2026-09-10 · the scripted session against a copy of the root); `sandman__recall {cwd: "/Users/jlg"}` returns the same text as `sandman recall --cwd ~` run in a terminal, compared in `.trace/`; `sandman__remember` into a scratch bank under a temp `$SANDMAN_ROOT` (the server inherits the env of its launcher, so the check runs against a copy, not the live root) writes the file and the index. Then the real root.
 
-**4. Docs.** `README.md` gains the verb; `AGENTS.md` map gains `verbs/mcp.rs`; this document's status line changes to shipped with the date.
+**4. Docs — shipped.** `README.md` gains the verb; `AGENTS.md` map gains `verbs/mcp.rs`; this document's status line changes to shipped with the date.
 
 ## Decisions taken here, open to the operator
 

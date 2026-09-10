@@ -41,6 +41,9 @@ pub struct CommitRequest {
 pub struct CommitOutcome {
     /// Where the superseded file was moved, when `replaces` was set.
     pub archived: Option<PathBuf>,
+    /// Whether the filename took a collision suffix because the slug's own
+    /// name was already taken in the bank.
+    pub collided: bool,
     /// The committed filename, collision suffix included.
     pub filename: String,
     /// The committed file's full path.
@@ -85,7 +88,7 @@ pub fn commit_memory(
         archived = Some(superseded.archived);
     }
 
-    let (filename, path) = free_filename(&bank, request.kind, &request.name)?;
+    let (filename, path, collided) = free_filename(&bank, request.kind, &request.name)?;
 
     let mut frontmatter = Frontmatter::new();
     frontmatter.set("name", &request.name);
@@ -101,6 +104,7 @@ pub fn commit_memory(
 
     Ok(CommitOutcome {
         archived,
+        collided,
         filename,
         path,
         committed_at: now,
@@ -163,16 +167,17 @@ fn stow(bank: &Bank, filename: &str, now: Timestamp) -> Result<PathBuf> {
     Ok(archived)
 }
 
-/// The first filename in the bank that is not taken, `_2`, `_3`, … suffixed.
+/// The first filename in the bank that is not taken, `_2`, `_3`, … suffixed,
+/// and whether it needed a suffix at all.
 ///
 /// A replaced file has already moved to `_archive/`, so it never counts as a
 /// collision with its own replacement.
-fn free_filename(bank: &Bank, kind: MemoryType, name: &str) -> Result<(String, PathBuf)> {
+fn free_filename(bank: &Bank, kind: MemoryType, name: &str) -> Result<(String, PathBuf, bool)> {
     for nth in 1..=MAX_COLLISIONS {
         let filename = slug::filename_nth(kind.as_str(), name, nth);
         let path = bank.dir().join(&filename);
         if !path.exists() {
-            return Ok((filename, path));
+            return Ok((filename, path, nth > 1));
         }
     }
     Err(Error::TooManyCollisions {

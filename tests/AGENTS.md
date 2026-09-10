@@ -2,7 +2,7 @@
 
 ```stele
 kind: container
-purpose: integration tests — `cli.rs` drives the built binary against a temp $HOME/$SANDMAN_ROOT; `real_banks.rs` round-trips the operator's live banks read-only (ignored by default, `cargo test -- --ignored`)
+purpose: integration tests — `cli.rs` and `mcp.rs` drive the built binary (hooks and flags; a scripted MCP stdin) against a temp $HOME/$SANDMAN_ROOT; `real_banks.rs` reads the live banks (`--ignored`)
 ```
 
 ## Working here

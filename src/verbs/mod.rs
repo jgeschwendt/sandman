@@ -6,6 +6,7 @@
 
 pub mod dream;
 pub mod forget;
+pub mod mcp;
 pub mod recall;
 pub mod reflect;
 pub mod remember;

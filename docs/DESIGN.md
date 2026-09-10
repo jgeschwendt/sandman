@@ -19,6 +19,11 @@ transcripts.
 | `remember "<body>"` | commit one memory now — the in-session path |
 | `take <session>` | archive the session by move + drop a pointer |
 
+`mcp` is a seventh verb and not a memory verb: it serves recall, remember and a bank
+listing to MCP clients over stdio — the desktop app, Cowork through the bridge, Claude
+Code — through the same code paths, so no consumer re-implements the format. The
+contract is `MCP.md`.
+
 ## Data root — `~/.sandman`
 
 ```
@@ -59,6 +64,7 @@ a commit of 60 run journals that shared `log/` with the log's own entries (2026-
 | routine `sandman-reflect` · 03:30 UTC (≈ 23:30 local) | `reflect` |
 | claude, in-session — the golden rule | `remember "<body>"` |
 | `/delete` | `forget $SESSION` |
+| MCP client — the desktop app, Cowork via the bridge, `claude mcp` | `mcp` (a served process, not a hook) |
 | shell — the owner | any verb by hand |
 
 One dispatcher: a calling hook's stdin hands over intact (recall, take). The dream
@@ -253,6 +259,8 @@ mid-conversation archive had to be reconstructed out of Claude Code's own `daemo
   actually spent in, and `trimmed=`/`banks_degraded=`/`cut_lines=` say what it cost to
   fit, which a size alone cannot; each `recalled-bank` line carries `rendering=` — `full`
   or `index` — naming the form its memories arrived in.
+- `mcp` journals one line per request — method, tool, bank, outcome and recall's
+  counts — never a body or payload.
 - Best effort by construction — every error is swallowed, there is no result to ignore,
   and a verb behaves identically whether its line landed or not. A journal that could
   fail would be a new way for a session edge to break.

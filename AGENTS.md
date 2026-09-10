@@ -2,7 +2,7 @@
 
 ```stele
 kind: system
-purpose: sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes); a zero-dependency Rust CLI driven by Claude Code hooks and a nightly tick.
+purpose: sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes, an MCP tool server); a zero-dependency Rust CLI driven by Claude Code hooks and a nightly tick.
 commands:
   lint: cargo clippy --all-targets -- -D warnings && cargo fmt --check
   test: cargo test
@@ -19,7 +19,7 @@ invariants:
 | --- | --- |
 | design/ | `.tldr` scenes — `sandman-v1` is the design wireframe (`sandman-v0` kept as its predecessor); `mise run plan` (:7873) draws them |
 | docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875); `arch.tldr` is the tldraft drawing the page's plates are cut from, into `plates/` — one frame per page section |
-| src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep |
+| src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep, the MCP tool server (recall · remember · banks over stdio) |
 
 The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 
@@ -37,10 +37,10 @@ The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 
 ## Map
 
-| node  | kind      | purpose                                                                                                                                                                                                  | unfold                                           |
-| ----- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| src   | container | crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call  | `stele unfold src` · or read `src/AGENTS.md`     |
-| tests | container | integration tests — `cli.rs` drives the built binary against a temp $HOME/$SANDMAN_ROOT; `real_banks.rs` round-trips the operator's live banks read-only (ignored by default, `cargo test -- --ignored`) | `stele unfold tests` · or read `tests/AGENTS.md` |
+| node  | kind      | purpose                                                                                                                                                                                                 | unfold                                           |
+| ----- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| src   | container | crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call | `stele unfold src` · or read `src/AGENTS.md`     |
+| tests | container | integration tests — `cli.rs` and `mcp.rs` drive the built binary (hooks and flags; a scripted MCP stdin) against a temp $HOME/$SANDMAN_ROOT; `real_banks.rs` reads the live banks (`--ignored`)         | `stele unfold tests` · or read `tests/AGENTS.md` |
 
 ## Indexes
 

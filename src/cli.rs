@@ -23,7 +23,7 @@ use crate::memory::MemoryType;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
-use crate::verbs::{dream, forget, recall, reflect, remember, take};
+use crate::verbs::{dream, forget, mcp, recall, reflect, remember, take};
 use crate::version::VERSION;
 
 /// A failure that ran a verb badly.
@@ -119,6 +119,13 @@ usage: sandman <verb> [args]
       gated opus upkeep call per grown bank ($SANDMAN_MIND_UPKEEP). --day
       renders that day's entry only — no drain, no sweep, no upkeep.
 
+  mcp
+      Serve the banks over MCP on stdio: JSON-RPC 2.0, one message per line,
+      requests on stdin, responses on stdout, nothing else on stdout ever.
+      Three tools — recall, remember, banks — over the same code paths the
+      verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
+      Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
+
   version
       The crate version and the commit it was built from — the same stamp
       every journal line carries as v=, so a line can be read against the
@@ -177,6 +184,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         }
         "dream" => dream_verb(rest),
         "forget" => forget_verb(rest),
+        "mcp" => mcp_verb(rest),
         "recall" => recall_verb(rest),
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
@@ -928,6 +936,35 @@ fn bank_memories(files: &[String]) -> String {
         listed.push_str(file);
     }
     listed
+}
+
+/// `mcp` — the banks as a tool server, JSON-RPC on stdio.
+///
+/// The one verb whose whole conversation is stdout, so nothing else may print
+/// there for as long as it runs. It takes no arguments: a client launches it
+/// with none, and an argument here is a registration to fix rather than
+/// something to guess at.
+fn mcp_verb(args: &[String]) -> Result<(), Failure> {
+    if let Some(arg) = args.first() {
+        return match arg.as_str() {
+            "-h" | "--help" => help(),
+            option if option.starts_with("--") => Err(unknown_option(option)),
+            positional => Err(Failure::Usage(format!(
+                "mcp takes no arguments, got `{positional}`"
+            ))),
+        };
+    }
+    // The roots resolve here, as they do for every verb: the handlers below
+    // take them as arguments and read the environment for nothing.
+    let ctx = mcp::Context {
+        data_root: paths::data_root()?,
+        home: paths::home()?,
+        session_id: env::var(SESSION_ENV).ok(),
+    };
+    // Locked for the whole conversation: one client, one message at a time, and
+    // no other writer to interleave with on either stream.
+    mcp::serve(&ctx, io::stdin().lock(), io::stdout().lock())
+        .map_err(|source| Failure::Error(Error::io("<stdout>", source)))
 }
 
 /// `version`.
