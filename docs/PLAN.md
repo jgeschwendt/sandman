@@ -1,7 +1,10 @@
 # The voyage log — plan
 
-Status: **proposed 2026-09-09, revised the same day**, awaiting one decision (the narrator,
-§ Decisions). The operator's brief, verbatim from `~/.sandman/plan-log-changes.md`: "this
+Status: **built 2026-09-10** — phases 1–4 shipped (sandman d2b21ed + a6091fd, bridge, the
+`~/.sandman` migration, and an 18-entry backfill from the pre-rewrite banks at
+`~/.sandman` fa6d093). Narrator decided: sandman, first person. The living design is
+`DESIGN.md`; the on-disk contract is `BANK-FORMAT.md` § log. Kept here: the brief, the
+reference study, the decisions, and the voice samples. The operator's brief, verbatim from `~/.sandman/plan-log-changes.md`: "this
 log format isn't really helpful … pretty sure these takes and memories can be distilled
 from the archive and mean nothing over time … i want my log to be a voyage log. i want
 entries that mean something over time." Revised on the operator's word: "i want daily
