@@ -203,7 +203,7 @@ hook-event visibility.
   variable, so its model moves independently of upkeep's) is asked for
   `{kind, title, body, next}` against the log's brief with the last five entries whole
   behind it, and the reply is stamped with `day`, `position` and the day's sources and
-  written. An abstention — a timeout, an unusable reply, a body over 700 characters or a
+  written. An abstention — a timeout, an unusable reply, a body over 1 000 characters or a
   title over 60 — leaves whatever is on disk and journals it; the next pass asks again,
   because the fingerprint still does not match. A day with no sources gets no entry and no
   file: a filler entry would be prose about nothing, and every reader of the log pays for

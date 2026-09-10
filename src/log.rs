@@ -32,7 +32,7 @@ use crate::verbs::{dream, reflect};
 /// The longest body a mind may write. Past it the reply is unusable and the
 /// mind has abstained: the samples in `docs/PLAN.md` overshot 2–4 sentences in
 /// every voice, so the cap is enforced rather than asked for.
-pub const BODY_MAX_CHARS: usize = 700;
+pub const BODY_MAX_CHARS: usize = 1_000;
 /// The log's index, regenerated on every entry write.
 pub const INDEX_FILE_NAME: &str = "INDEX.md";
 /// How much of the day's memories the prompt may carry, in total.

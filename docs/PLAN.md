@@ -103,7 +103,7 @@ Reflect gains one step, after the pending-take drain and before the sweep: **the
 It gathers the day's sources, computes the fingerprint, and if the entry on disk does not
 carry it, asks one mind (`$SANDMAN_MIND_LOG`, default `claude-opus-5` — its own variable,
 so the log's model moves independently of upkeep's) and writes the file. The mind
-abstaining (timeout, unusable reply, a `body` over 700 characters or a `title` over 60)
+abstaining (timeout, unusable reply, a `body` over 1 000 characters or a `title` over 60)
 leaves whatever is on disk and journals it; the next pass tries again because the
 fingerprint still does not match.
 
