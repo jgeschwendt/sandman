@@ -935,6 +935,510 @@
       "typeName": "binding"
     },
     {
+      "fromId": "shape:vg-a-banks-reflect",
+      "id": "binding:vg-a-banks-reflect-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-reflect",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-banks-reflect",
+      "id": "binding:vg-a-banks-reflect-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-banks",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-dream-banks",
+      "id": "binding:vg-a-dream-banks-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-banks",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-dream-banks",
+      "id": "binding:vg-a-dream-banks-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-dream",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-fp-kept",
+      "id": "binding:vg-a-fp-kept-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-kept",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-fp-kept",
+      "id": "binding:vg-a-fp-kept-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-fingerprint",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-fp-mind",
+      "id": "binding:vg-a-fp-mind-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-mind",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-fp-mind",
+      "id": "binding:vg-a-fp-mind-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-fingerprint",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-index-bridge",
+      "id": "binding:vg-a-index-bridge-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-bridge",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-index-bridge",
+      "id": "binding:vg-a-index-bridge-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-index",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-index-recall",
+      "id": "binding:vg-a-index-recall-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-recall",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-index-recall",
+      "id": "binding:vg-a-index-recall-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-index",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-kept-trace",
+      "id": "binding:vg-a-kept-trace-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.35
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-trace",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-kept-trace",
+      "id": "binding:vg-a-kept-trace-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-kept",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-log-index",
+      "id": "binding:vg-a-log-index-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-index",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-log-index",
+      "id": "binding:vg-a-log-index-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-log",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-mind-log",
+      "id": "binding:vg-a-mind-log-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-log",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-mind-log",
+      "id": "binding:vg-a-mind-log-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-mind",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-quiet-trace",
+      "id": "binding:vg-a-quiet-trace-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.75
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-trace",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-quiet-trace",
+      "id": "binding:vg-a-quiet-trace-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-quiet",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-reflect-sources",
+      "id": "binding:vg-a-reflect-sources-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-sources",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-reflect-sources",
+      "id": "binding:vg-a-reflect-sources-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-reflect",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-sources-fp",
+      "id": "binding:vg-a-sources-fp-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-fingerprint",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-sources-fp",
+      "id": "binding:vg-a-sources-fp-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-sources",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-sources-quiet",
+      "id": "binding:vg-a-sources-quiet-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-quiet",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-sources-quiet",
+      "id": "binding:vg-a-sources-quiet-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-sources",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-take-dream",
+      "id": "binding:vg-a-take-dream-end",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 0,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "end"
+      },
+      "toId": "shape:vg-dream",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
+      "fromId": "shape:vg-a-take-dream",
+      "id": "binding:vg-a-take-dream-start",
+      "meta": {},
+      "props": {
+        "isExact": false,
+        "isPrecise": true,
+        "normalizedAnchor": {
+          "x": 1,
+          "y": 0.5
+        },
+        "snap": "none",
+        "terminal": "start"
+      },
+      "toId": "shape:vg-take",
+      "type": "arrow",
+      "typeName": "binding"
+    },
+    {
       "gridSize": 10,
       "id": "document:document",
       "meta": {},
@@ -4091,7 +4595,7 @@
             {
               "content": [
                 {
-                  "text": "the day page: one md per day\n  from the chronological lane ·\n  INDEX.md tail\nbank upkeep when grown\n  (+5 files AND ≥ 20 h):\n  ONE call, whole bank in,\n  ≤ 6 ops out, net-non-increasing\n  — merge · rewrite · archive\nprune + regen each bank's\nMEMORY.md (≤ 180)\nroutine sandman-reflect · 03:30 UTC",
+                  "text": "the voyage entry: one md per day\n  from that day's memories ·\n  regen on change · INDEX.md tail\nbank upkeep when grown\n  (+5 files AND ≥ 20 h):\n  ONE call, whole bank in,\n  ≤ 6 ops out, net-non-increasing\n  — merge · rewrite · archive\nprune + regen each bank's\nMEMORY.md (≤ 180)\nroutine sandman-reflect · 03:30 UTC",
                   "type": "text"
                 }
               ],
@@ -4861,7 +5365,7 @@
             {
               "content": [
                 {
-                  "text": "reflect's day pages · the journal, one line per decision · the chronological index",
+                  "text": "the voyage log — one entry a day, derived from the banks · the index, ascending · the journal, one line per decision",
                   "type": "text"
                 }
               ],
@@ -4897,7 +5401,7 @@
             {
               "content": [
                 {
-                  "text": "log/<date>.md · log/<verb>-<date>.log · log/INDEX.md",
+                  "text": "log/<yyyy-mm-dd>.md · log/INDEX.md · .trace/<verb>-<date>.log",
                   "type": "text"
                 }
               ],
@@ -5052,7 +5556,7 @@
             {
               "content": [
                 {
-                  "text": "day page + INDEX.md · pending-take drain · pointer sweep · gated bank upkeep",
+                  "text": "voyage entry + INDEX.md · pending-take drain · pointer sweep · gated bank upkeep",
                   "type": "text"
                 }
               ],
@@ -7195,7 +7699,7 @@
             {
               "content": [
                 {
-                  "text": "the 24 h pass: day page, indexes, bank upkeep",
+                  "text": "the 24 h pass: the voyage entry, the log index, bank upkeep",
                   "type": "text"
                 }
               ],
@@ -7545,6 +8049,2303 @@
               "content": [
                 {
                   "text": "the CLI surface — six memory verbs",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 24
+    },
+    {
+      "id": "shape:vg-a-banks-reflect",
+      "index": "b2m",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-dream-banks",
+      "index": "b2l",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 30,
+        "color": "grey",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-fp-kept",
+      "index": "b2u",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 30,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-fp-mind",
+      "index": "b2p",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-index-bridge",
+      "index": "b2t",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 30,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-index-recall",
+      "index": "b2s",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": -30,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-kept-trace",
+      "index": "b2v",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-log-index",
+      "index": "b2r",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-mind-log",
+      "index": "b2q",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-quiet-trace",
+      "index": "b2x",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-reflect-sources",
+      "index": "b2n",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-sources-fp",
+      "index": "b2o",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-sources-quiet",
+      "index": "b2w",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 30,
+        "color": "black",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-a-take-dream",
+      "index": "b2k",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "arrowheadEnd": "arrow",
+        "arrowheadStart": "none",
+        "bend": 0,
+        "color": "grey",
+        "dash": "solid",
+        "elbowMidPoint": 0.5,
+        "end": {
+          "x": 100,
+          "y": 0
+        },
+        "fill": "none",
+        "font": "sans",
+        "kind": "arc",
+        "labelColor": "black",
+        "labelPosition": 0.5,
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "start": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "rotation": 0,
+      "type": "arrow",
+      "typeName": "shape",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "shape:vg-banks",
+      "index": "b29",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 568,
+      "y": 316
+    },
+    {
+      "id": "shape:vg-banks-c",
+      "index": "b2A",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the shared memory surface",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 582,
+      "y": 330
+    },
+    {
+      "id": "shape:vg-banks-l",
+      "index": "b28",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "banks/",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 568,
+      "y": 278
+    },
+    {
+      "id": "shape:vg-bridge",
+      "index": "b2X",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 2520,
+      "y": 468
+    },
+    {
+      "id": "shape:vg-bridge-c",
+      "index": "b2Y",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the calendar",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2534,
+      "y": 482
+    },
+    {
+      "id": "shape:vg-bridge-l",
+      "index": "b2W",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "bridge /memories/log",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2520,
+      "y": 430
+    },
+    {
+      "id": "shape:vg-dream",
+      "index": "b26",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "grey",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 72,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 296,
+      "y": 110
+    },
+    {
+      "id": "shape:vg-dream-c",
+      "index": "b27",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "memories land all day",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 310,
+      "y": 124
+    },
+    {
+      "id": "shape:vg-dream-l",
+      "index": "b25",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "dream",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 296,
+      "y": 72
+    },
+    {
+      "id": "shape:vg-entry-p1",
+      "index": "b2i",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "day N · title · kind · date · position",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1928,
+      "y": 442
+    },
+    {
+      "id": "shape:vg-entry-p2",
+      "index": "b2j",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sources: the memories it was written from",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 480
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1928,
+      "y": 466
+    },
+    {
+      "id": "shape:vg-fingerprint",
+      "index": "b2I",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1384,
+      "y": 316
+    },
+    {
+      "id": "shape:vg-fingerprint-c",
+      "index": "b2J",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "same sources, same entry, no call",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1398,
+      "y": 330
+    },
+    {
+      "id": "shape:vg-fingerprint-l",
+      "index": "b2H",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "fingerprint",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1384,
+      "y": 278
+    },
+    {
+      "id": "shape:vg-index",
+      "index": "b2R",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 2248,
+      "y": 316
+    },
+    {
+      "id": "shape:vg-index-c",
+      "index": "b2S",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "began: fixed once",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2262,
+      "y": 330
+    },
+    {
+      "id": "shape:vg-index-l",
+      "index": "b2Q",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "INDEX.md",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2248,
+      "y": 278
+    },
+    {
+      "id": "shape:vg-kept",
+      "index": "b2a",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 72,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1656,
+      "y": 598
+    },
+    {
+      "id": "shape:vg-kept-c",
+      "index": "b2b",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "matches → no call",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1670,
+      "y": 612
+    },
+    {
+      "id": "shape:vg-kept-l",
+      "index": "b2Z",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "kept",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1656,
+      "y": 560
+    },
+    {
+      "id": "shape:vg-log",
+      "index": "b2O",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1928,
+      "y": 316
+    },
+    {
+      "id": "shape:vg-log-c",
+      "index": "b2P",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "regenerated for the day",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1942,
+      "y": 330
+    },
+    {
+      "id": "shape:vg-log-l",
+      "index": "b2N",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "log/<yyyy-mm-dd>.md",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1928,
+      "y": 278
+    },
+    {
+      "id": "shape:vg-mind",
+      "index": "b2L",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1656,
+      "y": 316
+    },
+    {
+      "id": "shape:vg-mind-c",
+      "index": "b2M",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "$SANDMAN_MIND_LOG · sees the log so far",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1670,
+      "y": 330
+    },
+    {
+      "id": "shape:vg-mind-l",
+      "index": "b2K",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "one mind",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1656,
+      "y": 278
+    },
+    {
+      "id": "shape:vg-quiet",
+      "index": "b2d",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 72,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1384,
+      "y": 720
+    },
+    {
+      "id": "shape:vg-quiet-c",
+      "index": "b2e",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "no sources → no entry",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1398,
+      "y": 734
+    },
+    {
+      "id": "shape:vg-quiet-l",
+      "index": "b2c",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "quiet day",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1384,
+      "y": 682
+    },
+    {
+      "id": "shape:vg-recall",
+      "index": "b2U",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 2520,
+      "y": 124
+    },
+    {
+      "id": "shape:vg-recall-c",
+      "index": "b2V",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the latest entry into every new session",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2534,
+      "y": 138
+    },
+    {
+      "id": "shape:vg-recall-l",
+      "index": "b2T",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "recall",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2520,
+      "y": 86
+    },
+    {
+      "id": "shape:vg-reflect",
+      "index": "b2C",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 840,
+      "y": 316
+    },
+    {
+      "id": "shape:vg-reflect-c",
+      "index": "b2D",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "the day that ended",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 854,
+      "y": 330
+    },
+    {
+      "id": "shape:vg-reflect-l",
+      "index": "b2B",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "reflect 03:30 UTC",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 840,
+      "y": 278
+    },
+    {
+      "id": "shape:vg-sources",
+      "index": "b2F",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 112,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 1112,
+      "y": 316
+    },
+    {
+      "id": "shape:vg-sources-c",
+      "index": "b2G",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "memories created or updated that day",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1126,
+      "y": 330
+    },
+    {
+      "id": "shape:vg-sources-l",
+      "index": "b2E",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "sources",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 1112,
+      "y": 278
+    },
+    {
+      "id": "shape:vg-take",
+      "index": "b23",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "grey",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 72,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 24,
+      "y": 110
+    },
+    {
+      "id": "shape:vg-take-c",
+      "index": "b24",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "one ended session",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 38,
+      "y": 124
+    },
+    {
+      "id": "shape:vg-take-l",
+      "index": "b22",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "grey",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "take",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 24,
+      "y": 72
+    },
+    {
+      "id": "shape:vg-trace",
+      "index": "b2g",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "align": "middle",
+        "color": "black",
+        "dash": "solid",
+        "fill": "none",
+        "flipX": false,
+        "flipY": false,
+        "font": "sans",
+        "geo": "rectangle",
+        "growY": 0,
+        "h": 72,
+        "labelColor": "black",
+        "richText": {
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "url": "",
+        "verticalAlign": "middle",
+        "w": 240
+      },
+      "rotation": 0,
+      "type": "geo",
+      "typeName": "shape",
+      "x": 2248,
+      "y": 598
+    },
+    {
+      "id": "shape:vg-trace-c",
+      "index": "b2h",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": false,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "journaled",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "s",
+        "textAlign": "start",
+        "w": 212
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2262,
+      "y": 612
+    },
+    {
+      "id": "shape:vg-trace-l",
+      "index": "b2f",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": ".trace",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc"
+        },
+        "scale": 1,
+        "size": "m",
+        "textAlign": "start",
+        "w": 200
+      },
+      "rotation": 0,
+      "type": "text",
+      "typeName": "shape",
+      "x": 2248,
+      "y": 560
+    },
+    {
+      "id": "shape:voyage",
+      "index": "b20",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "page:page",
+      "props": {
+        "color": "black",
+        "h": 844,
+        "name": "voyage",
+        "w": 2800
+      },
+      "rotation": 0,
+      "type": "frame",
+      "typeName": "shape",
+      "x": 0,
+      "y": 4600
+    },
+    {
+      "id": "shape:voyage-title",
+      "index": "b21",
+      "isLocked": false,
+      "meta": {},
+      "opacity": 1,
+      "parentId": "shape:voyage",
+      "props": {
+        "autoSize": true,
+        "color": "black",
+        "font": "sans",
+        "richText": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "voyage — the log · one day, one entry, derived from the banks",
                   "type": "text"
                 }
               ],

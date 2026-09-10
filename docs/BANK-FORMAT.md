@@ -70,6 +70,83 @@ is ever deleted.
 Per-bank due-baseline: `{"at": <ISO>, "count": <int>, "last_ops": <int>}` — written
 only by reflect, seeded on first sight of a bank.
 
+## log/ — the voyage log
+
+Not a bank. `log/` is memory's derivative: one entry per UTC day, written by reflect from
+the memories that landed that day, and re-derivable from them at any time.
+
+`log/<yyyy-mm-dd>.md` — single-line frontmatter, keys alphabetical, a blank line, then
+the body:
+
+```
+---
+date: 2026-08-31
+day: 19
+fingerprint: 9f2c…
+kind: setback
+mind: claude-opus-5
+position: day 19 · 3 sessions · 2 memories landed · 254 memories in 32 banks
+sources: -Users-jlg/feedback_shared_trunk_write_discipline.md, -Users-jlg--grove-code-jgeschwendt-bridge--trunk/feedback_bridge_xterm_styling_rules.md
+title: Two writers, one trunk
+written: 2026-09-01T03:30:12Z
+---
+
+A subagent undid its own edit with a tree discard and took another feature's uncommitted
+scene down with it. I have kept the rule — undo by re-editing, never by discarding the
+tree — but the rule is the cheap half: the trunk has two writers and no lock, and day 12
+already noticed the shape of this once.
+
+Next: the scene is rebuilt from its plate by hand.
+```
+
+| key | what |
+| --- | --- |
+| `date` | the UTC day the entry covers — the same day the filename names |
+| `day` | which day of the voyage this is, counting `began:` as day 1 |
+| `fingerprint` | 16 hex characters hashed over the day's sources, names and bodies both — what idempotence rests on |
+| `kind` | the entry's spine: `discovery` · `milestone` · `reflection` · `setback` |
+| `mind` | the model that wrote it |
+| `position` | stamped, never recomputed: sessions taken that day, memories landed that day, live memories, banks |
+| `sources` | bank-relative `<bank>/<file>`, comma-separated, sorted — the derivative's provenance, carried on the derivative |
+| `title` | 2–6 words, the way a chapter is named |
+| `written` | when the entry was written, ISO-8601 Z |
+
+The four kinds are the four things the reference logs mark: `discovery` — something new
+exists or was named; `milestone` — something shipped, was adopted, or was retired for
+good; `reflection` — the day stepped back and changed how the work is done; `setback` —
+something was lost, broke, or went wrong, and what it cost.
+
+The body is the entry: 2–4 sentences of prose. A final line beginning `Next:` is the
+optional hand-off to the day after.
+
+### INDEX.md
+
+Regenerated behind every entry write. Fixed frontmatter — `began:` is the voyage's day 1,
+set once on the first entry ever written and preserved by every regeneration after it —
+then one line per entry, ascending:
+
+```
+---
+name: voyage log
+description: What this memory engine lived through, one entry per day the banks moved — newest last
+began: 2026-08-13
+type: reference
+---
+
+- day 19 · [Two writers, one trunk](2026-08-31.md) — setback · 2026-08-31
+```
+
+### The rules
+
+- **Idempotent for the day.** The entry is a function of the day's sources. Reflect
+  rewrites `<date>.md` only when the `fingerprint` on disk no longer matches the one the
+  day's sources hash to — same sources, same entry, no model call.
+- **Never hand-edited.** Pipeline-owned like `memories/`: an edit is lost on the next pass
+  that finds the sources changed. A day the operator wants marked is marked by what
+  `remember` puts in the banks that day.
+- **A quiet day gets no file.** No sources, no entry — the index shows the gap. A filler
+  entry would be prose about nothing, and every reader of the log pays for it in context.
+
 ## Concurrency
 
 All bank writes happen under `.commit.lock` at the data root; every file write is

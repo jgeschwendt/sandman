@@ -34,7 +34,7 @@ pub const RECENT_DIR_NAME: &str = ".recent";
 pub const ARCHIVE_DIR_NAME: &str = ".archive";
 /// The archive's Claude Code lane.
 pub const ARCHIVE_CLAUDE_DIR_NAME: &str = "claude";
-/// Reflect's day pages and their index.
+/// The voyage log — one entry per day — and its index.
 pub const LOG_DIR_NAME: &str = "log";
 /// The run journals — one file per verb per day.
 pub const TRACE_DIR_NAME: &str = ".trace";
@@ -108,7 +108,7 @@ pub fn recent_dir(data_root: &Path) -> PathBuf {
         .join(RECENT_DIR_NAME)
 }
 
-/// `<root>/log` — reflect's day pages and their `INDEX.md`, and nothing else.
+/// `<root>/log` — the voyage log entries and their `INDEX.md`, and nothing else.
 #[must_use]
 pub fn log_dir(data_root: &Path) -> PathBuf {
     data_root.join(LOG_DIR_NAME)

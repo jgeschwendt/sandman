@@ -126,6 +126,22 @@ impl Machine {
         dir
     }
 
+    /// Seed one bank memory, stamped `created:` on the day the caller names.
+    /// The voyage entry reads the banks, so this is a day's whole source set.
+    fn memory(&self, file: &str, created: &str, body: &str) -> PathBuf {
+        let dir = self.root().join("memories").join(PROJECT);
+        fs::create_dir_all(&dir).expect("bank dir");
+        let path = dir.join(file);
+        fs::write(
+            &path,
+            format!(
+                "---\nname: {file}\ndescription: what {file} says\ntype: reference\ncreated: {created}\nsource: test\n---\n\n{body}\n"
+            ),
+        )
+        .expect("memory");
+        path
+    }
+
     /// An executable `/bin/sh` script under the fabricated home. This is how
     /// the tests stand in for `claude`: no test ever runs the real one.
     fn script(&self, name: &str, body: &str) -> PathBuf {
@@ -253,16 +269,352 @@ fn dream_and_reflect_run_on_an_empty_root() {
         &[("SANDMAN_CLAUDE_BIN", "/nonexistent/claude")],
     );
     assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let written: Vec<PathBuf> = stdout(&output).lines().map(PathBuf::from).collect();
-    assert_eq!(written.len(), 2);
-    assert!(written[0].is_file(), "the day page");
-    assert_eq!(written[1], machine.root().join("log").join("INDEX.md"));
-    assert!(
-        fs::read_to_string(&written[0])
-            .expect("day page")
-            .starts_with("# 20")
+    let printed = stdout(&output);
+    let written: Vec<&str> = printed.lines().collect();
+    assert_eq!(written.len(), 2, "{written:?}");
+    // Nothing landed yesterday, so there is no entry to write — only the word
+    // that says so, and the index that has nothing to list.
+    assert_eq!(written[0], "quiet");
+    assert_eq!(
+        PathBuf::from(written[1]),
+        machine.root().join("log").join("INDEX.md")
     );
+    let index = fs::read_to_string(written[1]).expect("the index");
+    assert!(index.starts_with("---\nname: voyage log\n"), "{index}");
     assert!(stderr(&output).contains("swept 0 pointer(s)"));
+    let journal = machine.journal("reflect");
+    assert!(journal.contains("entry=quiet"), "{journal}");
+}
+
+// ─── the voyage log ───────────────────────────────────────────────────────
+
+/// A stub `claude` that records every invocation and answers with one entry,
+/// wrapped in the envelope `claude -p --output-format json` writes.
+fn entry_stub(machine: &Machine, counter: &Path, title: &str, body: &str) -> PathBuf {
+    machine.script(
+        "claude",
+        &format!(
+            concat!(
+                "printf 'called\\n' >> \"{counter}\"\n",
+                "printf '{{\"type\":\"result\",\"is_error\":false,\"result\":\"%s\"}}' ",
+                "'{{\\\"kind\\\":\\\"milestone\\\",\\\"title\\\":\\\"{title}\\\",",
+                "\\\"body\\\":\\\"{body}\\\",\\\"next\\\":null}}'\n",
+            ),
+            body = body,
+            counter = counter.display(),
+            title = title,
+        ),
+    )
+}
+
+/// How many times a stub built by [`entry_stub`] was reached.
+fn calls(counter: &Path) -> usize {
+    fs::read_to_string(counter).map_or(0, |text| text.lines().count())
+}
+
+/// The UTC day `days_ago` days before now, `yyyy-mm-dd`.
+///
+/// The civil-from-days conversion, written out rather than borrowed: an
+/// integration test drives the binary and must not check it against the
+/// crate's own calendar.
+fn utc_day(days_ago: i64) -> String {
+    let now = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("a clock past the epoch")
+            .as_secs(),
+    )
+    .expect("a sane clock");
+    let z = now.div_euclid(86_400) - days_ago + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// Every file the log holds, by name.
+fn log_files(machine: &Machine) -> Vec<PathBuf> {
+    let dir = machine.root().join("log");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn a_days_entry_lands_once_and_is_rewritten_only_when_its_sources_move() {
+    let machine = Machine::new("log-entry");
+    let counter = machine.home.join("calls.txt");
+    let stub = entry_stub(
+        &machine,
+        &counter,
+        "The banks move",
+        "The operator lands one memory.",
+    );
+    let claude = stub.display().to_string();
+    let memory = machine.memory(
+        "reference_the_first_claim.md",
+        "2026-08-31T11:00:00Z",
+        "the first body",
+    );
+
+    // a — the entry lands, and only the entry step ran.
+    let first = machine.run_with(
+        &["reflect", "--day", "2026-08-31"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &claude)],
+    );
+    assert_eq!(code(&first), 0, "{}", stderr(&first));
+    let path = machine.root().join("log").join("2026-08-31.md");
+    assert_eq!(stdout(&first).trim(), path.display().to_string());
+    let entry = fs::read_to_string(&path).expect("the entry");
+    assert_eq!(calls(&counter), 1);
+    assert!(entry.contains("\ndate: 2026-08-31\n"), "{entry}");
+    assert!(entry.contains("\nday: 1\n"), "{entry}");
+    assert!(entry.contains("\nkind: milestone\n"), "{entry}");
+    assert!(entry.contains("\ntitle: The banks move\n"), "{entry}");
+    assert!(
+        entry.contains(&format!(
+            "\nsources: {PROJECT}/reference_the_first_claim.md\n"
+        )),
+        "{entry}"
+    );
+    assert!(
+        entry.contains(
+            "\nposition: day 1 · 0 sessions · 1 memories landed · 1 memories in 1 banks\n"
+        ),
+        "{entry}"
+    );
+    assert!(entry.ends_with("The operator lands one memory."), "{entry}");
+    let fingerprint = entry
+        .lines()
+        .find_map(|line| line.strip_prefix("fingerprint: "))
+        .expect("a fingerprint")
+        .to_owned();
+    assert_eq!(fingerprint.len(), 16, "{fingerprint}");
+    assert!(
+        fingerprint.chars().all(|ch| ch.is_ascii_hexdigit()),
+        "{fingerprint}"
+    );
+
+    let index = fs::read_to_string(machine.root().join("log").join("INDEX.md")).expect("the index");
+    assert!(index.contains("\nbegan: 2026-08-31\n"), "{index}");
+    assert_eq!(
+        index
+            .lines()
+            .filter(|line| line.starts_with("- day "))
+            .collect::<Vec<&str>>(),
+        vec!["- day 1 · [The banks move](2026-08-31.md) — milestone · 2026-08-31"],
+        "{index}"
+    );
+    let journal = machine.journal("reflect");
+    assert!(
+        journal.contains("reflect entry date=2026-08-31 day=1"),
+        "{journal}"
+    );
+    assert!(
+        journal.contains("reflect done day=2026-08-31 entry=written"),
+        "{journal}"
+    );
+
+    // b — the same sources hash the same way, so nobody is asked again.
+    let again = machine.run_with(
+        &["reflect", "--day", "2026-08-31"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &claude)],
+    );
+    assert_eq!(code(&again), 0, "{}", stderr(&again));
+    assert_eq!(stdout(&again).trim(), "kept");
+    assert_eq!(calls(&counter), 1, "a matching fingerprint costs no call");
+    assert_eq!(fs::read_to_string(&path).expect("the entry"), entry);
+    assert!(
+        machine
+            .journal("reflect")
+            .contains("entry-kept date=2026-08-31"),
+        "{}",
+        machine.journal("reflect")
+    );
+
+    // c — the source moves, so the day is written again.
+    machine.memory(
+        "reference_the_first_claim.md",
+        "2026-08-31T11:00:00Z",
+        "the first body, reworked",
+    );
+    assert!(memory.is_file());
+    let third = machine.run_with(
+        &["reflect", "--day", "2026-08-31"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &claude)],
+    );
+    assert_eq!(code(&third), 0, "{}", stderr(&third));
+    assert_eq!(stdout(&third).trim(), path.display().to_string());
+    assert_eq!(calls(&counter), 2);
+    let rewritten = fs::read_to_string(&path).expect("the entry");
+    assert_ne!(rewritten, entry, "a moved source is a new fingerprint");
+
+    // h — nothing the log holds is a day page.
+    for file in log_files(&machine) {
+        let text = fs::read_to_string(&file).expect("a log file");
+        assert!(!text.contains("## takes"), "{}: {text}", file.display());
+    }
+}
+
+#[test]
+fn a_mind_that_will_not_answer_leaves_the_entry_on_disk_alone() {
+    let machine = Machine::new("log-abstain");
+    let counter = machine.home.join("calls.txt");
+    let stub = entry_stub(&machine, &counter, "The banks move", "One memory landed.");
+    machine.memory(
+        "reference_the_first_claim.md",
+        "2026-08-31T11:00:00Z",
+        "the first body",
+    );
+    let written = machine.run_with(
+        &["reflect", "--day", "2026-08-31"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &stub.display().to_string())],
+    );
+    assert_eq!(code(&written), 0, "{}", stderr(&written));
+    let path = machine.root().join("log").join("2026-08-31.md");
+    let entry = fs::read_to_string(&path).expect("the entry");
+
+    // The source moves, so the day is due again — and this time the mind
+    // exits non-zero, which is an abstention.
+    machine.memory(
+        "reference_the_first_claim.md",
+        "2026-08-31T11:00:00Z",
+        "the first body, reworked",
+    );
+    let silent = machine.script("claude", "exit 1\n");
+    let abstained = machine.run_with(
+        &["reflect", "--day", "2026-08-31"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &silent.display().to_string())],
+    );
+    assert_eq!(code(&abstained), 0, "{}", stderr(&abstained));
+    assert_eq!(stdout(&abstained).trim(), "abstained");
+    assert_eq!(
+        fs::read_to_string(&path).expect("the entry"),
+        entry,
+        "an abstention leaves what is on disk"
+    );
+    let journal = machine.journal("reflect");
+    assert!(
+        journal.contains("entry-skipped date=2026-08-31 reason=abstained"),
+        "{journal}"
+    );
+}
+
+#[test]
+fn a_day_nothing_landed_on_gets_no_entry_and_no_call() {
+    let machine = Machine::new("log-quiet");
+    let counter = machine.home.join("calls.txt");
+    let stub = entry_stub(&machine, &counter, "Never written", "Nothing happened.");
+    machine.memory(
+        "reference_another_day.md",
+        "2026-08-31T11:00:00Z",
+        "another day's body",
+    );
+
+    let quiet = machine.run_with(
+        &["reflect", "--day", "2026-08-30"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &stub.display().to_string())],
+    );
+    assert_eq!(code(&quiet), 0, "{}", stderr(&quiet));
+    assert_eq!(stdout(&quiet).trim(), "quiet");
+    assert_eq!(calls(&counter), 0);
+    assert!(!machine.root().join("log").join("2026-08-30.md").exists());
+    let journal = machine.journal("reflect");
+    assert!(
+        journal.contains("entry-skipped date=2026-08-30 reason=quiet"),
+        "{journal}"
+    );
+}
+
+#[test]
+fn a_day_that_is_not_a_date_is_a_usage_error() {
+    let machine = Machine::new("log-bad-day");
+    for value in ["yesterday", "2026-8-31", "2026-08-31T00:00:00Z", ""] {
+        let output = machine.run(&["reflect", "--day", value]);
+        assert_eq!(code(&output), 2, "{value}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains("--day wants yyyy-mm-dd"),
+            "{value}"
+        );
+        assert!(stderr(&output).contains("usage: sandman <verb>"), "{value}");
+    }
+    let bare = machine.run(&["reflect", "--day"]);
+    assert_eq!(code(&bare), 2, "{}", stderr(&bare));
+    assert!(stderr(&bare).contains("--day needs a value"));
+}
+
+#[test]
+fn the_whole_pass_writes_the_entry_for_the_day_that_ended() {
+    let machine = Machine::new("log-pass");
+    let counter = machine.home.join("calls.txt");
+    let stub = entry_stub(
+        &machine,
+        &counter,
+        "Yesterday closed",
+        "The operator landed one memory yesterday.",
+    );
+    let yesterday = utc_day(1);
+    machine.memory(
+        "reference_yesterdays_claim.md",
+        &format!("{yesterday}T11:00:00Z"),
+        "yesterday's body",
+    );
+
+    let output = machine.run_with(
+        &["reflect"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", &stub.display().to_string())],
+    );
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let printed = stdout(&output);
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    let path = machine.root().join("log").join(format!("{yesterday}.md"));
+    assert_eq!(PathBuf::from(lines[0]), path);
+    assert_eq!(
+        PathBuf::from(lines[1]),
+        machine.root().join("log").join("INDEX.md")
+    );
+    assert_eq!(
+        calls(&counter),
+        1,
+        "one call, and upkeep only seeds the bank"
+    );
+    let entry = fs::read_to_string(&path).expect("the entry");
+    assert!(entry.contains(&format!("\ndate: {yesterday}\n")), "{entry}");
+    assert!(entry.contains("\ntitle: Yesterday closed\n"), "{entry}");
+    // …and today's date is never the day a pass renders.
+    assert!(
+        !machine
+            .root()
+            .join("log")
+            .join(format!("{}.md", utc_day(0)))
+            .exists()
+    );
+    let journal = machine.journal("reflect");
+    assert!(
+        journal.contains(&format!("reflect entry date={yesterday}")),
+        "{journal}"
+    );
+    assert!(journal.contains("entry=written ms="), "{journal}");
+    for file in log_files(&machine) {
+        let text = fs::read_to_string(&file).expect("a log file");
+        assert!(!text.contains("## takes"), "{}: {text}", file.display());
+    }
 }
 
 #[test]
@@ -1212,18 +1564,11 @@ fn reflect_is_the_backstop_for_a_ledger_no_ending_came_to_drain() {
         log.contains(&format!("reclaimed session={SID} archived=")),
         "{log}"
     );
-    // The day page is written after the drain, so the reclaim is on today's.
-    let page = fs::read_to_string(machine.root().join("log").join(format!(
-        "{}.md",
-        stdout(&reflected)
-            .lines()
-            .next()
-            .and_then(|path| Path::new(path).file_stem())
-            .and_then(|stem| stem.to_str())
-            .expect("the day page")
-    )))
-    .expect("read the day page");
-    assert!(page.contains("a backgrounded run"), "{page}");
+    // The drain runs first, so the archived session counts towards the day it
+    // ended on — and the pass still reports its own run line.
+    let reflect_log = machine.journal("reflect");
+    assert!(reflect_log.contains("reflect done banks="), "{reflect_log}");
+    assert!(reflect_log.contains("entry="), "{reflect_log}");
 }
 
 #[test]

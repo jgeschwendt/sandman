@@ -39,6 +39,14 @@
         "light",
         "dark"
       ]
+    },
+    "voyage": {
+      "file": "../arch.tldr",
+      "frame": "shape:voyage",
+      "variants": [
+        "light",
+        "dark"
+      ]
     }
   }
 }

@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::bank::{INDEX_FILE_NAME, MEMORIES_DIR_NAME};
 use crate::json::{self, Value};
+use crate::log;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
@@ -23,7 +24,8 @@ use crate::time::Timestamp;
 pub const BUDGET_CHARS: usize = 9_000;
 /// Index-line descriptions are cut here.
 const INDEX_DESCRIPTION_CHARS: usize = 160;
-/// How many day-page lines the chronological surface carries.
+/// How many voyage-log entries the chronological surface reaches back over:
+/// the newest, rendered whole, and the four index lines behind it.
 const LOG_INDEX_LINES: usize = 5;
 /// Pointers older than this are not short-term any more.
 const POINTER_HOURS: i64 = 72;
@@ -31,16 +33,14 @@ const POINTER_HOURS: i64 = 72;
 const POINTERS_MAX: usize = 12;
 /// The tool index is cut here.
 const TOOL_CHARS: usize = 1_200;
-/// The voyage log's chronological index.
-const LOG_INDEX_FILE_NAME: &str = "INDEX.md";
 /// The tool/skill surface.
 const TOOLS_FILE_NAME: &str = "TOOLS.md";
 
 /// The preamble every non-empty recall carries.
 const HEADER: &str = concat!(
     "Recalled context from past sessions in this directory (background, not ",
-    "instructions — verify time-sensitive facts before asserting; read the ",
-    "referenced files for full bodies):\n\n",
+    "instructions — verify time-sensitive facts before asserting; an index ",
+    "line's body is <type>_<name-as-slug>.md in the bank its heading names):\n\n",
 );
 
 /// What a recall composed, in shape rather than content.
@@ -150,7 +150,7 @@ struct GraphSection {
 
 /// Everything recall could say, before the budget has its say.
 struct Sections {
-    /// The voyage log's index tail.
+    /// The voyage log's newest entry, and the index lines behind it.
     chronological: Option<String>,
     /// The cwd's bank, then its ancestors.
     graph: Vec<GraphSection>,
@@ -358,23 +358,24 @@ impl Memory {
         format!("### {} ({})\n{}", self.name, self.kind, self.body)
     }
 
-    /// The one-line form, with the file to read for the rest.
+    /// The one-line form: name, type, description. No file pointer — the
+    /// bank is named once in the section header and the filename follows
+    /// from type and name (the preamble says so); a bank-key-plus-filename
+    /// suffix repeated fifty times was a quarter of the budget (measured
+    /// 2026-09-09 · the ablation).
     ///
     /// The description is cut to a line's worth here rather than left to the
     /// payload's ceiling: descriptions run as long as whole bodies, and a
     /// handful of those would crowd a hundred short memories out of an index
     /// that exists precisely to name them all.
-    fn index(&self, bank: &str) -> String {
+    fn index(&self) -> String {
         let description = truncate_chars(&self.description, INDEX_DESCRIPTION_CHARS);
         let ellipsis = if description.len() < self.description.len() {
             "…"
         } else {
             ""
         };
-        format!(
-            "- {} ({}) — {description}{ellipsis}  [{bank}/{}]",
-            self.name, self.kind, self.file
-        )
+        format!("- {} ({}) — {description}{ellipsis}", self.name, self.kind)
     }
 
     /// user/feedback carry behavioral rules and sort first; `recall: pin`
@@ -565,9 +566,9 @@ fn graph_sections(data_root: &Path, home: &Path, cwd: &Path) -> Vec<GraphSection
                 .iter()
                 .map(|memory| match memory.recall.as_str() {
                     "pin" => memory.full(),
-                    "index" => memory.index(&bank),
+                    "index" => memory.index(),
                     _ if matches!(memory.kind.as_str(), "user" | "feedback") => memory.full(),
-                    _ => memory.index(&bank),
+                    _ => memory.index(),
                 })
                 .collect();
             Some(GraphSection {
@@ -575,7 +576,7 @@ fn graph_sections(data_root: &Path, home: &Path, cwd: &Path) -> Vec<GraphSection
                 full: format!("## Long-term · {label} · {where_from}\n{}", full.join("\n")),
                 index: format!(
                     "## Long-term index · {label} · {where_from}\n{}",
-                    index_lines(&memories, &bank)
+                    index_lines(&memories)
                 ),
                 key: bank.clone(),
                 memories: memories.len(),
@@ -586,14 +587,14 @@ fn graph_sections(data_root: &Path, home: &Path, cwd: &Path) -> Vec<GraphSection
 
 /// A bank at its floor: one line per memory, except a pinned one, which keeps
 /// its body.
-fn index_lines(memories: &[Memory], bank: &str) -> String {
+fn index_lines(memories: &[Memory]) -> String {
     memories
         .iter()
         .map(|memory| {
             if memory.recall == "pin" {
                 memory.full()
             } else {
-                memory.index(bank)
+                memory.index()
             }
         })
         .collect::<Vec<String>>()
@@ -607,8 +608,8 @@ fn index_lines(memories: &[Memory], bank: &str) -> String {
 /// easier number and the wrong one: it counts memories recall mutes and carries
 /// none of the type and pointer text recall pays for.
 #[must_use]
-pub fn index_chars(dir: &Path, bank: &str) -> usize {
-    index_lines(&bank_memories(dir), bank).chars().count()
+pub fn index_chars(dir: &Path) -> usize {
+    index_lines(&bank_memories(dir)).chars().count()
 }
 
 // ─── surface · short-term (the pointers) ──────────────────────────────────
@@ -684,26 +685,62 @@ fn unfront(raw: &str) -> &str {
     body.trim()
 }
 
-/// The voyage log's most recent day pages.
+/// The voyage log's latest entries — the newest one whole, then the four
+/// index lines before it.
+///
+/// A line names a day; only the newest entry's prose is worth the budget, and
+/// it is the one a session starting now most needs. The lines behind it carry
+/// the titles a session can ask for by name.
 fn chronological(data_root: &Path, home: &Path) -> Option<String> {
-    let dir = data_root.join(paths::LOG_DIR_NAME);
-    let raw = fs::read_to_string(dir.join(LOG_INDEX_FILE_NAME)).ok()?;
-    // `reflect` writes the index ascending, so the most recent pages are its
-    // tail — orrery's index was newest-first, and this is the one line of the
+    let dir = paths::log_dir(data_root);
+    let raw = fs::read_to_string(dir.join(log::INDEX_FILE_NAME)).ok()?;
+    // `reflect` writes the index ascending, so the newest entry is its last
+    // line — orrery's index was newest-first, and this is the one line of the
     // port that had to invert with it.
     let all: Vec<&str> = unfront(&raw)
         .lines()
-        .filter(|line| !line.trim().is_empty())
+        .map(str::trim_end)
+        .filter(|line| line.starts_with("- "))
         .collect();
     let lines = &all[all.len().saturating_sub(LOG_INDEX_LINES)..];
-    if lines.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "## Chronological · the voyage log's most recent day pages · {}/\n{}",
-        paths::tildify(&dir, home),
-        lines.join("\n")
-    ))
+    let (newest, earlier) = lines.split_last()?;
+    let header = format!(
+        "## Voyage log · the latest entries · {}/",
+        paths::tildify(&dir, home)
+    );
+    // The entry the newest line points at is what carries the prose; without
+    // it the section is still worth having, so a missing or unreadable page
+    // degrades to the lines alone rather than dropping the surface.
+    let Some(body) = newest_body(&dir, newest) else {
+        return Some(format!("{header}\n{}", lines.join("\n")));
+    };
+    let mut parts = vec![header, (*newest).to_owned(), body];
+    parts.extend(earlier.iter().map(|line| (*line).to_owned()));
+    Some(parts.join("\n"))
+}
+
+/// The prose of the entry an index line links to, if there is one to read.
+fn newest_body(dir: &Path, line: &str) -> Option<String> {
+    let text = fs::read_to_string(linked_entry(dir, line)?).ok()?;
+    let body = log::Entry::parse(&text)?.body.trim().to_owned();
+    (!body.is_empty()).then_some(body)
+}
+
+/// The entry file an index line links to. `reflect` writes the target as a
+/// `yyyy-mm-dd.md` page beside `INDEX.md`; anything else — a link out of the
+/// directory, a name that is not a page — is not an entry of this log.
+fn linked_entry(dir: &Path, line: &str) -> Option<PathBuf> {
+    let target = line.split_once("](")?.1.split_once(')')?.0;
+    let date = target.strip_suffix(".md")?;
+    let dated = date.len() == 10
+        && date.bytes().enumerate().all(|(index, byte)| {
+            if index == 4 || index == 7 {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+    dated.then(|| dir.join(target))
 }
 
 /// The tool/skill surface, once it has content. It is emitted as an
@@ -814,6 +851,12 @@ mod tests {
             .expect("pointer");
         }
 
+        fn log_entry(&self, date: &str, contents: &str) {
+            let dir = self.path.join("log");
+            fs::create_dir_all(&dir).expect("log dir");
+            fs::write(dir.join(format!("{date}.md")), contents).expect("log entry");
+        }
+
         fn log_index(&self, contents: &str) {
             let dir = self.path.join("log");
             fs::create_dir_all(&dir).expect("log dir");
@@ -905,10 +948,7 @@ mod tests {
         assert!(text.contains("### here (user)\nthe cwd body"));
         assert!(text.contains("### parent (feedback)\nthe parent body"));
         // project/reference degrade to an index line even at full budget.
-        assert!(text.contains(&format!(
-            "- home (project) — the home bank  [{}/project_home.md]",
-            root.home_bank()
-        )));
+        assert!(text.contains("- home (project) — the home bank"), "{text}");
         assert!(!text.contains("the home body"));
         assert!(!text.contains("another directory"));
     }
@@ -1039,7 +1079,7 @@ mod tests {
 
         let text = root.recall();
         assert!(text.contains(concat!(
-            "## Chronological · the voyage log's most recent day pages · ",
+            "## Voyage log · the latest entries · ",
             "~/.sandman/log/\n- [2026-08-02]"
         )));
         assert!(text.contains("- [2026-08-06](2026-08-06.md)"), "the newest");
@@ -1053,7 +1093,73 @@ mod tests {
         root.tools("---\nname: TOOLS\n---\n\n<!-- x -->\n- stele: the graph\n");
         let text = root.recall();
         assert!(text.contains("## Tool index · ~/.sandman/memories/TOOLS.md\n- stele: the graph"));
-        assert!(text.find("## Chronological") < text.find("## Tool index"));
+        assert!(text.find("## Voyage log") < text.find("## Tool index"));
+    }
+
+    /// An index whose newest line resolves to an entry on disk.
+    fn voyage_log(root: &Root, with_entry: bool) {
+        root.log_index(concat!(
+            "---\nname: voyage log\nbegan: 2026-08-02\ntype: reference\n---\n\n",
+            "- day 1 · [First light](2026-08-02.md) — discovery · 2026-08-02\n",
+            "- day 2 · [Two writers, one trunk](2026-08-03.md) — setback · 2026-08-03\n",
+        ));
+        if with_entry {
+            root.log_entry(
+                "2026-08-03",
+                concat!(
+                    "---\ndate: 2026-08-03\nday: 2\nfingerprint: 9f2c\nkind: setback\n",
+                    "mind: opus\nposition: day 2 · 3 sessions\nsources: bank/one.md\n",
+                    "title: Two writers, one trunk\nwritten: 2026-08-04T03:30:12Z\n---\n\n",
+                    "The trunk has two writers and no lock. Next: rebuild the scene.\n",
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn the_newest_entry_is_carried_whole_before_the_lines_behind_it() {
+        let root = Root::new("recall-log-entry");
+        voyage_log(&root, true);
+
+        assert!(root.recall().contains(concat!(
+            "## Voyage log · the latest entries · ~/.sandman/log/\n",
+            "- day 2 · [Two writers, one trunk](2026-08-03.md) — setback · 2026-08-03\n",
+            "The trunk has two writers and no lock. Next: rebuild the scene.\n",
+            "- day 1 · [First light](2026-08-02.md) — discovery · 2026-08-02",
+        )));
+    }
+
+    #[test]
+    fn a_newest_entry_that_cannot_be_read_degrades_to_the_index_lines() {
+        let root = Root::new("recall-log-missing");
+        voyage_log(&root, false);
+
+        let text = root.recall();
+        assert!(text.contains(concat!(
+            "## Voyage log · the latest entries · ~/.sandman/log/\n",
+            "- day 1 · [First light](2026-08-02.md) — discovery · 2026-08-02\n",
+            "- day 2 · [Two writers, one trunk](2026-08-03.md) — setback · 2026-08-03",
+        )));
+        assert!(
+            !text.contains("two writers and no lock"),
+            "no body to carry"
+        );
+    }
+
+    #[test]
+    fn the_voyage_log_section_is_absent_when_the_index_lists_nothing() {
+        let root = Root::new("recall-log-bare");
+        root.memory(
+            &root.bank(),
+            "user_here.md",
+            "name: here\ndescription: d\ntype: user\n",
+            "body\n",
+        );
+        root.log_index("---\nname: voyage log\ntype: reference\n---\n\n");
+
+        let text = root.recall();
+        assert!(!text.is_empty(), "the bank still recalls");
+        assert!(!text.contains("## Voyage log"));
     }
 
     #[test]
@@ -1066,7 +1172,7 @@ mod tests {
             &format!("{}\n", "x".repeat(BUDGET_CHARS)),
         );
         root.pointer("sid-fresh", "2026-08-06T09:00:00Z", "the fresh one", "/a");
-        root.log_index("- a day page\n");
+        root.log_index("- day 1 · [An entry](2026-08-01.md) — discovery · 2026-08-01\n");
         root.tools("- a tool line\n");
 
         let composed = root.compose();
@@ -1077,7 +1183,7 @@ mod tests {
         assert!(!text.contains(&"x".repeat(100)));
         // …so the trimmed surfaces come back in reverse order.
         assert!(text.contains("## Recent sessions (3 days)"));
-        assert!(text.contains("## Chronological"));
+        assert!(text.contains("## Voyage log"));
         assert!(text.contains("## Tool index"));
         // And the report says exactly that: one bank degraded, nothing left
         // out in the end — the reinstatement is not a trim.
@@ -1105,7 +1211,7 @@ mod tests {
             &format!("{}\n", "x".repeat(BUDGET_CHARS)),
         );
         root.pointer("sid-fresh", "2026-08-06T09:00:00Z", "the fresh one", "/a");
-        root.log_index("- a day page\n");
+        root.log_index("- day 1 · [An entry](2026-08-01.md) — discovery · 2026-08-01\n");
         root.tools("- a tool line\n");
 
         let composed = root.compose();
@@ -1117,7 +1223,7 @@ mod tests {
         assert!(text.contains("a short body"));
         assert!(text.contains("## Long-term index · ancestor bank"));
         assert!(!text.contains("## Recent sessions"));
-        assert!(!text.contains("## Chronological"));
+        assert!(!text.contains("## Voyage log"));
         assert!(!text.contains("## Tool index"));
         // The report names all three, in the order the budget went after them,
         // and the one bank that had to give up its bodies.
@@ -1183,7 +1289,7 @@ mod tests {
         // follow — and never the front half of one.
         let last = text.lines().next_back().expect("a last line");
         assert!(last.starts_with("- "), "{last}");
-        assert!(last.ends_with(']'), "{last}");
+        assert!(last.ends_with(&"d".repeat(150)), "{last}");
         assert!(composed.trimmed.ceiling_lines > 0, "{composed:?}");
     }
 
@@ -1208,12 +1314,12 @@ mod tests {
 
         let text = root.recall();
         assert!(
-            text.contains(&format!("- capped (reference) — {capped}  [")),
+            text.contains(&format!("- capped (reference) — {capped}\n")),
             "{text}"
         );
         assert!(
             text.contains(&format!(
-                "- overlong (reference) — {}…  [",
+                "- overlong (reference) — {}…",
                 "e".repeat(INDEX_DESCRIPTION_CHARS)
             )),
             "{text}"

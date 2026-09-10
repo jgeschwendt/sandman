@@ -112,10 +112,12 @@ usage: sandman <verb> [args]
       $SANDMAN_CLAUDE_BIN. Each mind's own transcript is kept at
       <root>/.dream/<claude project>/<session-id>.jsonl.
 
-  reflect
-      The 24 h pass: the day page and log index, the pointer sweep (dreamt and
-      older than 72 h), and one gated opus upkeep call per grown bank
-      ($SANDMAN_MIND_UPKEEP).
+  reflect [--day <yyyy-mm-dd>]
+      The 24 h pass: the voyage entry for the day that ended (one
+      $SANDMAN_MIND_LOG call, skipped when the day's sources are unchanged),
+      the log index, the pointer sweep (dreamt and older than 72 h), and one
+      gated opus upkeep call per grown bank ($SANDMAN_MIND_UPKEEP). --day
+      renders that day's entry only — no drain, no sweep, no upkeep.
 
   version
       The crate version and the commit it was built from — the same stamp
@@ -632,17 +634,50 @@ fn dream_verb(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `reflect`.
+/// `reflect [--day <yyyy-mm-dd>]`.
 fn reflect_verb(args: &[String]) -> Result<(), Failure> {
-    if let Some(arg) = args.first() {
-        return match arg.as_str() {
-            "-h" | "--help" => help(),
-            option if option.starts_with("--") => Err(unknown_option(option)),
-            positional => Err(Failure::Usage(format!(
-                "reflect takes no arguments, got `{positional}`"
-            ))),
-        };
+    let mut day: Option<reflect::Day> = None;
+    let mut cursor = Cursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg {
+            "-h" | "--help" => return help(),
+            "--day" => {
+                let value = cursor.value("--day")?;
+                day = Some(calendar_day(&value).ok_or_else(|| {
+                    Failure::Usage(format!("--day wants yyyy-mm-dd, got `{value}`"))
+                })?);
+            }
+            option if option.starts_with("--") => return Err(unknown_option(option)),
+            positional => {
+                return Err(Failure::Usage(format!(
+                    "reflect takes no arguments, got `{positional}`"
+                )));
+            }
+        }
     }
+    match day {
+        Some(day) => reflect_one_day(day),
+        None => reflect_pass(),
+    }
+}
+
+/// A `yyyy-mm-dd` argument as a calendar day. Shape only — a day the calendar
+/// does not hold simply has no sources, which the entry step already answers.
+fn calendar_day(text: &str) -> Option<reflect::Day> {
+    let mut fields = text.split('-');
+    let (year, month, day) = (fields.next()?, fields.next()?, fields.next()?);
+    if fields.next().is_some() || (year.len(), month.len(), day.len()) != (4, 2, 2) {
+        return None;
+    }
+    Some(reflect::Day {
+        day: day.parse().ok()?,
+        month: month.parse().ok()?,
+        year: year.parse().ok()?,
+    })
+}
+
+/// The whole 24 h pass.
+fn reflect_pass() -> Result<(), Failure> {
     // The pass already writes one line per bank. What it had no line for is
     // the run: a nightly tick that died halfway through left a log ending in
     // an ordinary bank line, indistinguishable from one that finished.
@@ -671,14 +706,18 @@ fn reflect_verb(args: &[String]) -> Result<(), Failure> {
         journal.as_deref(),
         "reflect",
         &format!(
-            "reflect done banks={} due={} swept={} ms={}",
+            "reflect done banks={} due={} swept={} entry={} ms={}",
             outcome.banks.len(),
             outcome.due,
             outcome.swept,
+            outcome.entry_status,
             started.elapsed().as_millis()
         ),
     );
-    println!("{}", outcome.day_page.display());
+    println!(
+        "{}",
+        entry_line(outcome.entry.as_deref(), outcome.entry_status)
+    );
     println!("{}", outcome.index.display());
     eprintln!(
         "swept {} pointer(s); {} bank(s) considered",
@@ -686,6 +725,49 @@ fn reflect_verb(args: &[String]) -> Result<(), Failure> {
         outcome.banks.len()
     );
     Ok(())
+}
+
+/// One past day's entry and the index behind it, and nothing else — the
+/// backfill hand-hold: no drain, no sweep, no upkeep.
+fn reflect_one_day(day: reflect::Day) -> Result<(), Failure> {
+    let journal = paths::data_root().ok();
+    let started = Instant::now();
+    let data_root = paths::data_root()?;
+    let options = reflect::Options::from_env();
+    let rendered = reflect::entry_step(&data_root, day, &options)
+        .and_then(|rendered| reflect::write_index(&data_root, day).map(|_| rendered));
+    let (entry, status) = match rendered {
+        Ok(rendered) => rendered,
+        Err(error) => {
+            note(
+                journal.as_deref(),
+                "reflect",
+                &format!(
+                    "reflect error day={} ms={}: {error}",
+                    day.key(),
+                    started.elapsed().as_millis()
+                ),
+            );
+            return Err(Failure::Error(error));
+        }
+    };
+    note(
+        journal.as_deref(),
+        "reflect",
+        &format!(
+            "reflect done day={} entry={status} ms={}",
+            day.key(),
+            started.elapsed().as_millis()
+        ),
+    );
+    println!("{}", entry_line(entry.as_deref(), status));
+    Ok(())
+}
+
+/// What the entry step has to show for itself: the path when it wrote one,
+/// else the word that says why it did not.
+fn entry_line(entry: Option<&Path>, status: &str) -> String {
+    entry.map_or_else(|| status.to_owned(), |path| path.display().to_string())
 }
 
 /// `recall [--cwd PATH] | --hook`.

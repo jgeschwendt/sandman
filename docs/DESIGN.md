@@ -15,7 +15,7 @@ transcripts.
 | `dream [--now]` | route short-term → banks: 3 parallel dreams → 2-of-3 consensus → commit |
 | `forget <session>` | the privacy ending — destroy every copy; no archive, no pointer, no routing |
 | `recall` | the recall surface: ancestor-directional banks + `.recent` pointers |
-| `reflect` | the 24 h pass: day page, indexes, bank upkeep |
+| `reflect` | the 24 h pass: the voyage entry, the log index, bank upkeep |
 | `remember "<body>"` | commit one memory now — the in-session path |
 | `take <session>` | archive the session by move + drop a pointer |
 
@@ -28,8 +28,8 @@ transcripts.
 ├── .dream/<claude project>/<session-id>.jsonl        dream mind transcripts — kept to evaluate
 ├── .trace/<verb>-<date>.log                          the journal — one line per decision
 ├── log/
-│   ├── <date>.md                                     reflect's day pages
-│   └── INDEX.md                                      chronological index
+│   ├── <yyyy-mm-dd>.md                               the voyage log — one entry a day, derived from the banks
+│   └── INDEX.md                                      regenerated — ascending, began fixed once
 ├── pending-takes/<sid>.json                          takes a live job deferred — {declined, job, session}
 └── memories/
     ├── .recent/<sid>.json                            pointers — the short-term surface (3 days)
@@ -42,9 +42,12 @@ transcripts.
 
 One config point: `$SANDMAN_ROOT`, else `~/.sandman` — nothing else hardcodes the root.
 
+`log/` is memory's derivative, not a second copy of it: reflect rewrites a day's entry
+only when the memories it was written from change. The format is `BANK-FORMAT.md` § log.
+
 The leading dot is the tier boundary. Hidden directories hold raw bytes the operator's
 `~/.sandman` repo gitignores; visible ones hold the content it versions. Mixing them cost
-a commit of 60 run journals that shared `log/` with the day pages (2026-09-05).
+a commit of 60 run journals that shared `log/` with the log's own entries (2026-09-05).
 
 ## Cadence
 
@@ -189,10 +192,24 @@ hook-event visibility.
 - Trigger: the `sandman-reflect` routine at 03:30 UTC (≈ 23:30 local) — launchd,
   cron, or any scheduler; reflect is
   idempotent, so a double-fire or an early run is harmless.
-- Day page `log/<date>.md`, regenerated idempotently: the day's takes and the day's
-  committed memories. `INDEX.md` lists every day page.
-- Pending-take drain first, before the day page is rendered: a take reclaimed by the
-  pass belongs on today's page, not tomorrow's.
+- Pending-take drain first, before anything is written: a take reclaimed by the pass
+  belongs to the day being written, not tomorrow's.
+- **The voyage entry** `log/<yyyy-mm-dd>.md` — the UTC day that *ended*, never the day the
+  03:30 pass runs in: an entry covers a whole day, and no entry ever claims hours that
+  have not happened yet. The day's sources are the memories whose `created:` or `updated:` fall in
+  it; their names and bodies hash to the entry's `fingerprint`, and an entry on disk
+  already carrying it is left alone — same sources, same entry, no model call. When it
+  does not match, ONE mind (`$SANDMAN_MIND_LOG`, default `claude-opus-5` — the log's own
+  variable, so its model moves independently of upkeep's) is asked for
+  `{kind, title, body, next}` against the log's brief with the last five entries whole
+  behind it, and the reply is stamped with `day`, `position` and the day's sources and
+  written. An abstention — a timeout, an unusable reply, a body over 700 characters or a
+  title over 60 — leaves whatever is on disk and journals it; the next pass asks again,
+  because the fingerprint still does not match. A day with no sources gets no entry and no
+  file: a filler entry would be prose about nothing, and every reader of the log pays for
+  it in context. `INDEX.md` is regenerated behind every write — ascending, `began:` fixed
+  on the first entry ever written and preserved by every regeneration after it.
+  `reflect --day <date>` renders that one day and nothing else: no sweep, no upkeep.
 - Pointer sweep: delete `.recent` pointers that are dreamed and ended > 72 h ago.
 - Bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last, OR the previous pass
   spent every operation it was allowed (a backlog is old inventory already judged worth
@@ -239,11 +256,15 @@ mid-conversation archive had to be reconstructed out of Claude Code's own `daemo
 - Best effort by construction — every error is swallowed, there is no result to ignore,
   and a verb behaves identically whether its line landed or not. A journal that could
   fail would be a new way for a session edge to break.
-- Day pages are the *narrative* record — what happened; the journal is the *decision*
-  record — why a verb did or did not act. `reflect` writes both, to their own tiers: the
-  page to `log/`, and one line per bank plus one run line (`reflect done banks=… due=…
-  swept=… ms=…`) to `.trace/`. `dream` appends its detached run's stdout and stderr to
-  `.trace/dream-<date>.log`.
+- The voyage log is the *narrative* record — what this engine lived through; the journal
+  is the *decision* record — why a verb did or did not act. `reflect` writes both, to their
+  own tiers: the entry to `log/`, and to `.trace/` the entry's own line (`reflect entry
+  date=… day=… kind=… mind=… ms=…` on a write, `reflect entry-kept date=…` when the
+  fingerprint matched and no mind was asked, `reflect entry-skipped date=…
+  reason=quiet|abstained` when the day had no sources or the mind abstained), one line per
+  bank, and one run line (`reflect done banks=… due=… swept=… ms=…`). Shape, never
+  content: no line carries an entry's prose. `dream` appends its detached run's stdout and
+  stderr to `.trace/dream-<date>.log`.
 
 **`forget` is deliberately unjournaled — an accepted forensic hole.** It is sandman's
 privacy ending, and a line naming the session it destroyed would be exactly the trace

@@ -34,6 +34,11 @@ use crate::json::{self, Value};
 pub const CLAUDE_BIN_ENV: &str = "SANDMAN_CLAUDE_BIN";
 /// The binary when `$SANDMAN_CLAUDE_BIN` says nothing.
 pub const CLAUDE_BIN_DEFAULT: &str = "claude";
+/// The model the voyage log's entry is written by — its own variable, so the
+/// log's model moves independently of upkeep's.
+pub const LOG_ENV: &str = "SANDMAN_MIND_LOG";
+/// The log model when `$SANDMAN_MIND_LOG` says nothing.
+pub const LOG_MODEL_DEFAULT: &str = "claude-opus-5";
 /// Set on every mind. A memory-blind run recalls nothing, so extraction can
 /// never echo the memories it is about to propose.
 pub const PIPELINE_ENV: &str = "CLAUDE_MEMORY_PIPELINE";
@@ -126,6 +131,17 @@ impl Mind {
             model: tier.model(),
             tier,
         }
+    }
+}
+
+/// Reflect's log mind — the one call that writes the day's voyage entry,
+/// pinned apart from upkeep so the log's voice can move without moving the
+/// bank keeper's.
+#[must_use]
+pub fn log() -> Mind {
+    Mind {
+        model: override_from(LOG_ENV).unwrap_or_else(|| LOG_MODEL_DEFAULT.to_owned()),
+        tier: Tier::Opus,
     }
 }
 

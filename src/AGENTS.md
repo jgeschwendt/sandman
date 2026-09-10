@@ -32,6 +32,7 @@ hazards:
 | `error.rs` `time.rs` | typed errors; UTC timestamps, both directions |
 | `hook.rs` `transcript.rs` | SessionStart/SessionEnd payloads; locating session files, digesting a transcript, extracting the conversation a mind reads |
 | `json.rs` (private) | JSON for our own shapes only — pointers, hook payloads, model replies; why `[dependencies]` is empty |
+| `log.rs` | the voyage log's format — the day's sources and their fingerprint, entry parse/render, the prompt, `began:` and the index; who calls the mind and when is reflect's |
 | `mind.rs` | the runner seam — one `claude -p … --output-format json` process per mind, killed at the timeout, every failure an abstention; `Ask::keep` decides whether the run's own transcript is kept or never written |
 | `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the tier split the leading dot marks: raw and gitignored (`.archive/` `.dream/` `.trace/`) against versioned content (`log/` `memories/`) |
 | `verbs/` | `dream` `forget` `recall` `reflect` `remember` `take` — each takes its roots as arguments, never the environment |
@@ -49,7 +50,7 @@ upkeep calls keep `--no-session-persistence`: they read a bank listing, not a
 session, so there is nothing in their transcripts to evaluate.
 
 Models and the binary are environment-configurable (`$SANDMAN_MIND_SONNET` /
-`_OPUS` / `_FABLE` / `_UPKEEP`, `$SANDMAN_CLAUDE_BIN`). Unit tests cannot set
+`_OPUS` / `_FABLE` / `_LOG` / `_UPKEEP`, `$SANDMAN_CLAUDE_BIN`). Unit tests cannot set
 environment variables — `unsafe_code = "forbid"` — so `dream::Options` and
 `reflect::Options` carry the binary, the minds and the timeout as fields:
 `from_env()` in production, a stub script in a test. No test in the suite runs

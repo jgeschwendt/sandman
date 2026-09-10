@@ -19,6 +19,7 @@ pub mod error;
 pub mod hook;
 pub mod journal;
 pub mod lock;
+pub mod log;
 pub mod memory;
 pub mod mind;
 pub mod paths;

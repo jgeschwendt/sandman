@@ -55,6 +55,7 @@
     <a class="pill" href="#data-root">data root</a>
     <a class="pill" href="#cadence">cadence</a>
     <a class="pill" href="#flow">flow</a>
+    <a class="pill" href="#voyage">voyage log</a>
     <a class="pill" href="#invariants">invariants</a>
     <a class="pill" href="#non-goals">non-goals</a>
   </nav>
@@ -81,7 +82,7 @@
         <tr data-verb="dream"><td class="table-mono">dream [--now]</td><td>route short-term → banks: 3 parallel dreams → 2-of-3 consensus → commit</td></tr>
         <tr data-verb="forget"><td class="table-mono">forget &lt;session&gt;</td><td>the privacy ending — destroy every copy; no archive, no pointer, no routing</td></tr>
         <tr data-verb="recall"><td class="table-mono">recall</td><td>the recall surface: ancestor-directional banks + <code class="code">.recent</code> pointers</td></tr>
-        <tr data-verb="reflect"><td class="table-mono">reflect</td><td>the 24 h pass: day page, indexes, bank upkeep</td></tr>
+        <tr data-verb="reflect"><td class="table-mono">reflect</td><td>the 24 h pass: the voyage entry, the log index, bank upkeep</td></tr>
         <tr data-verb="remember"><td class="table-mono">remember "&lt;body&gt;"</td><td>commit one memory now — the in-session path</td></tr>
         <tr data-verb="take"><td class="table-mono">take &lt;session&gt;</td><td>archive the session by move + drop a pointer; queue ≥ 10 fires dream</td></tr>
       </tbody>
@@ -96,7 +97,9 @@
       <code class="code">~/.sandman</code> — nothing else hardcodes the root. The leading dot is the tier
       boundary: hidden directories hold raw bytes the operator's <code class="code">~/.sandman</code> repo gitignores,
       visible ones hold the content it versions. Mixing them cost a commit of 60 run journals that shared
-      <code class="code">log/</code> with the day pages (2026-09-05).</p>
+      <code class="code">log/</code> with the log's own entries (2026-09-05). <code class="code">log/</code> is memory's
+      derivative, not a second copy of it: reflect rewrites a day's entry only when the memories it was written from
+      change.</p>
   </header>
   <figure class="plate">
     <object class="plate-light" type="image/svg+xml" data="plates/data-root.svg" aria-label="data root — ~/.sandman"><img src="plates/data-root.png"
@@ -113,8 +116,8 @@
 ├── .dream/&lt;claude project&gt;/&lt;session-id&gt;.jsonl        dream mind transcripts — kept to evaluate
 ├── .trace/&lt;verb&gt;-&lt;date&gt;.log                          the journal — one line per decision
 ├── log/
-│   ├── &lt;date&gt;.md                                     reflect's day pages
-│   └── INDEX.md                                      chronological index
+│   ├── &lt;yyyy-mm-dd&gt;.md                               the voyage log — one entry a day, derived from the banks
+│   └── INDEX.md                                      regenerated — ascending, began fixed once
 ├── pending-takes/&lt;sid&gt;.json                          takes a live job deferred — {declined, job, session}
 └── memories/
     ├── .recent/&lt;sid&gt;.json                            pointers — the short-term surface (3 days)
@@ -226,7 +229,8 @@
       <div class="panel-body">
         <ul role="list">
           <li>trigger: the <code class="code">sandman-reflect</code> routine at 03:30 UTC (≈ 23:30 local) — launchd, cron, or any scheduler; reflect is idempotent, so a double-fire or an early run is harmless</li>
-          <li>day page <code class="code">log/&lt;date&gt;.md</code>, regenerated idempotently: the day's takes and committed memories; <code class="code">INDEX.md</code> lists every day page</li>
+          <li>pending-take drain first, before anything is written: a take reclaimed by the pass belongs to the day being written, not tomorrow's</li>
+          <li><strong>the voyage entry</strong> <code class="code">log/&lt;yyyy-mm-dd&gt;.md</code> — the UTC day that <em>ended</em>, never the day the 03:30 pass runs in; the day's sources are the memories whose <code class="code">created:</code> or <code class="code">updated:</code> fall in it, their names and bodies hash to the entry's <code class="code">fingerprint</code>, and an entry already carrying it is left alone — same sources, same entry, no model call. Otherwise ONE mind (<code class="code">$SANDMAN_MIND_LOG</code>, default <code class="code">claude-opus-5</code> — the log's own variable) writes it, seeing the last five entries whole; an abstention leaves whatever is on disk and the next pass asks again. A day with no sources gets no entry and no file. <code class="code">INDEX.md</code> is regenerated behind every write — ascending, <code class="code">began:</code> fixed once. <code class="code">reflect --day &lt;date&gt;</code> renders that one day and nothing else</li>
           <li>pointer sweep: delete <code class="code">.recent</code> pointers that are dreamed and ended &gt; 72 h ago</li>
           <li>bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last: ONE opus call (<code class="code">$SANDMAN_MIND_UPKEEP</code>) proposing at most 6 net-non-increasing ops (prune, merge, retitle), validated whole — an invalid reply is rejected entire, never partially applied; upkeep never grows a bank</li>
           <li><code class="code">_reflect.json</code> <code class="code">{at, count, last_ops}</code> — the due-baseline, seeded on first sight of a bank</li>
@@ -241,6 +245,25 @@
       alt="Three lanes leaving one origin, ClaudeCode(SessionEnd) to sandman take --hook: lane A archives the session outright, lane B declines the ending, writes the debt and schedules the alarm that drains it, lane C is the backstops. Lane B's drain hands the reclaimed session back to lane A's pointer." /></object>
     <figcaption>Station ① alone, zoomed: one <code class="code">SessionEnd</code>, and the lane it takes depending on whether a job under <code class="code">~/.claude/jobs</code> names the session — the guards the take panel above lists, drawn as the decision they are. Source: <a href="arch.tldr">arch.tldr</a>, frame
       <code class="code">ending</code>.</figcaption>
+  </figure>
+</section>
+
+<section class="plan-section" id="voyage" data-component="voyage">
+  <header>
+    <h2 class="h2">The voyage log</h2>
+    <p class="plan-note">A changelog says <em>that</em> something happened, to nobody. The log says what this
+      memory engine lived through: one entry per day, written by reflect from the memories that landed and
+      re-derivable from them, in sandman's own voice and its own running vocabulary. The on-disk format is
+      <code class="code">docs/BANK-FORMAT.md</code> § <code class="code">log/</code>.</p>
+  </header>
+  <figure class="plate">
+    <object class="plate-light" type="image/svg+xml" data="plates/voyage.svg" aria-label="voyage — the log · one day, one entry, derived from the banks"><img src="plates/voyage.png"
+      alt="Left to right: take and dream feed the banks, then reflect at 03:30 UTC takes the day that ended — sources, fingerprint, one mind — and writes log/&lt;yyyy-mm-dd&gt;.md and INDEX.md, which recall and bridge read; a matching fingerprint keeps the entry with no call, a quiet day gets no entry, and every outcome is journaled." /></object>
+    <object class="plate-dark" type="image/svg+xml" data="plates/voyage.dark.svg" aria-label="voyage — the log · one day, one entry, derived from the banks"><img src="plates/voyage.dark.png"
+      alt="Left to right: take and dream feed the banks, then reflect at 03:30 UTC takes the day that ended — sources, fingerprint, one mind — and writes log/&lt;yyyy-mm-dd&gt;.md and INDEX.md, which recall and bridge read; a matching fingerprint keeps the entry with no call, a quiet day gets no entry, and every outcome is journaled." /></object>
+    <figcaption>One day, one entry, derived from the banks — the whole path from the memories that landed to the
+      entry every new session opens on. Source: <a href="arch.tldr">arch.tldr</a>, frame
+      <code class="code">voyage</code>.</figcaption>
   </figure>
 </section>
 

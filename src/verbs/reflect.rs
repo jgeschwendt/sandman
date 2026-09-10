@@ -1,9 +1,22 @@
-//! `reflect` — the 24 h pass: the day page, the log index, the pointer sweep
-//! and the gated bank upkeep.
+//! `reflect` — the 24 h pass: the voyage entry, the log index, the pointer
+//! sweep and the gated bank upkeep.
 //!
-//! Everything here is derived: the day page and `INDEX.md` are regenerated
-//! from what is on disk, so running the pass twice in a day is a no-op rather
-//! than a duplicate. The two destructive steps are both gated and both
+//! The entry is the pass's one derivative of memory, and it is written for the
+//! UTC day that *ended* rather than the day the pass is running in: a 03:30
+//! pass rendering its own date would cover three hours and never see anything
+//! stamped after it. The window is closed before it is read.
+//!
+//! It is independent of the dream. The step reads the banks, not the queue, so
+//! a memory the operator committed by hand counts exactly as much as a dreamt
+//! one — and it is idempotent for the day, because the day's sources hash into
+//! a fingerprint the entry carries: an entry already stamped with it is left
+//! alone, and the same day rendered twice costs no model call. A mind that
+//! abstains leaves whatever is on disk and journals it, and the next pass asks
+//! again, since the fingerprint still does not match.
+//!
+//! Everything else here is derived too: `INDEX.md` is regenerated from the
+//! entries on disk, so running the pass twice in a day is a no-op rather than
+//! a duplicate. The two destructive steps are both gated and both
 //! conservative — a pointer is only swept once it has been dreamt *and* aged
 //! out, and a bank is only reworked when it has grown and had a day to
 //! settle, or when the pass before it spent every operation it was allowed:
@@ -34,19 +47,19 @@ use std::fmt::Write as _;
 use std::fs;
 use std::hash::{Hash as _, Hasher as _};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::atomic;
 use crate::bank::{Bank, MEMORIES_DIR_NAME};
 use crate::commit::{CommitRequest, archive_memory, commit_memory};
 use crate::error::{Error, Result};
+use crate::journal;
 use crate::json::{self, Value};
+use crate::log::{self, Entry};
 use crate::memory::{MemoryFile, MemoryType};
 use crate::mind::{self, Ask, Mind};
 use crate::paths;
-use crate::slug::truncate_chars;
 use crate::time::Timestamp;
-use crate::transcript::one_line;
 use crate::verbs::dream::{self, DREAMED_KEY};
 use crate::verbs::recall::{self, BUDGET_CHARS};
 use crate::verbs::take;
@@ -64,31 +77,31 @@ pub const UPKEEP_HOURS: i64 = 20;
 /// all plainly left work behind, and that backlog keeps the bank due on its
 /// own until a pass comes in under the ceiling.
 pub const UPKEEP_MAX_OPS: usize = 6;
-/// Day-page descriptions are cut here.
-pub const DESCRIPTION_MAX_CHARS: usize = 100;
 /// The per-bank due-baseline.
 pub const BASELINE_FILE_NAME: &str = "_reflect.json";
-/// The log's chronological index.
-pub const LOG_INDEX_FILE_NAME: &str = "INDEX.md";
 
-/// How reflect reaches its one mind — the same seam dream uses, with one
-/// model instead of three.
+/// How reflect reaches its minds — the same seam dream uses, with one model
+/// per step instead of three per pointer.
 #[derive(Clone, Debug)]
 pub struct Options {
-    /// The `claude` binary upkeep is run through.
+    /// The `claude` binary both steps are run through.
     pub binary: OsString,
+    /// The mind that writes the voyage entry, pinned apart from upkeep's so
+    /// the log's voice can move without moving the bank keeper's.
+    pub log_mind: Mind,
     /// The upkeep mind.
     pub mind: Mind,
-    /// How long it may take.
+    /// How long either may take.
     pub timeout: Duration,
 }
 
 impl Options {
-    /// The production configuration: binary and model from the environment.
+    /// The production configuration: binary and models from the environment.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
             binary: mind::claude_bin(),
+            log_mind: mind::log(),
             mind: mind::upkeep(),
             timeout: mind::TIMEOUT_DEFAULT,
         }
@@ -100,25 +113,32 @@ impl Options {
 pub struct Outcome {
     /// One line per bank — what upkeep decided about each.
     pub banks: Vec<String>,
-    /// The day page that was written.
-    pub day_page: PathBuf,
     /// How many banks' upkeep gate fired this pass — the calls made, not the
     /// operations they applied.
     pub due: usize,
+    /// The entry this pass wrote, when it wrote one.
+    pub entry: Option<PathBuf>,
+    /// Why: `written`, `kept` (the fingerprint matched), `quiet` (the day had
+    /// no sources) or `abstained` (the mind said nothing usable).
+    pub entry_status: &'static str,
     /// The log index that was regenerated.
     pub index: PathBuf,
     /// How many pointers the sweep deleted.
     pub swept: usize,
 }
 
-/// Run the pass for the day `now` falls in (UTC).
+/// Run the pass at `now` (UTC).
 ///
 /// The pass opens by draining the pending-take ledger, and `claude_root` is
 /// here for that: a decline behind a live background job is retried by the
 /// next take, and a machine with no session endings for a stretch has no next
 /// take. Reflect is the only thing that runs anyway, so it is the backstop.
-/// It runs first because the day page is rendered from what is on disk — a
-/// take reclaimed now belongs on today's page, not tomorrow's.
+/// It runs first because a take reclaimed now belongs to the day it ended on,
+/// and the entry step is about to measure that day.
+///
+/// The entry covers the day that *ended*, so upkeep's own stamps are not
+/// folded back into it: they land on today's memories, which are the next
+/// pass's sources.
 pub fn reflect(
     data_root: &Path,
     claude_root: &Path,
@@ -126,27 +146,22 @@ pub fn reflect(
     options: &Options,
 ) -> Result<Outcome> {
     take::drain_pending(data_root, claude_root);
-    let day = Day::of(now);
-    let day_page = write_day_page(data_root, day)?;
-    let index = write_log_index(data_root)?;
+    let day = log::day_ended(now);
+    let (entry, entry_status) = entry_step(data_root, day, options)?;
     let swept = sweep(data_root, now)?;
-    let (banks, applied, due) = upkeep_all(data_root, now, options)?;
-    // Upkeep is the one step that changes memories after the day page was
-    // rendered, so its work is folded back in rather than waiting a day.
-    if applied > 0 {
-        write_day_page(data_root, day)?;
-        write_log_index(data_root)?;
-    }
+    let (banks, _applied, due) = upkeep_all(data_root, now, options)?;
+    let index = write_index(data_root, day)?;
     Ok(Outcome {
         banks,
-        day_page,
         due,
+        entry,
+        entry_status,
         index,
         swept,
     })
 }
 
-// ─── the day page ─────────────────────────────────────────────────────────
+// ─── the voyage entry ─────────────────────────────────────────────────────
 
 /// A calendar day, UTC.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -180,226 +195,118 @@ impl Day {
     }
 }
 
-/// Write `<root>/log/<yyyy-mm-dd>.md`, regenerating it from what is on disk.
-fn write_day_page(data_root: &Path, day: Day) -> Result<PathBuf> {
-    let dir = paths::log_dir(data_root);
-    fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
-    let path = dir.join(format!("{}.md", day.key()));
-    atomic::write(&path, &day_page(data_root, day))?;
-    Ok(path)
-}
-
-/// The day page's text.
-#[must_use]
-pub fn day_page(data_root: &Path, day: Day) -> String {
-    let mut out = format!("# {}\n", day.key());
-    let takes = takes(data_root, day);
-    if !takes.is_empty() {
-        out.push_str("\n## takes\n");
-        for line in takes {
-            out.push_str(&line);
-            out.push('\n');
-        }
-    }
-    let memories = memories(data_root, day);
-    if !memories.is_empty() {
-        out.push_str("\n## memories\n");
-        for line in memories {
-            out.push_str(&line);
-            out.push('\n');
-        }
-    }
-    out
-}
-
-/// The day's takes — `- <HHMMSS> <title> · <cwd>`.
+/// Write the day's entry, or say why there is none.
 ///
-/// Two sources, because the two outlive each other: the pointers carry the
-/// title and the cwd but are swept at 72 h, and the archive files carry only
-/// their own names but are never deleted. A take named by both is listed once.
-fn takes(data_root: &Path, day: Day) -> Vec<String> {
-    let mut lines: Vec<(String, String)> = Vec::new();
-    let mut seen: BTreeSet<String> = BTreeSet::new();
-
-    for pointer in pointers(data_root) {
-        let Some(ended) = pointer.value.get("ended").and_then(Value::as_str) else {
-            continue;
-        };
-        if !day.holds(ended) {
-            continue;
-        }
-        if let Some(archived) = &pointer.archived
-            && let Some(name) = file_name(archived)
-        {
-            seen.insert(name);
-        }
-        let time = clock(ended);
-        let cwd = pointer.cwd.clone().filter(|cwd| !cwd.is_empty());
-        lines.push((
-            time.clone(),
-            take_line(&time, &pointer.title, cwd.as_deref()),
-        ));
-    }
-
-    // The day is a directory, so the listing is already the day's takes — a
-    // day nothing was taken on simply has none.
-    let archive = paths::archive_day_dir(data_root, day.year, day.month, day.day);
-    if let Ok(entries) = fs::read_dir(&archive) {
-        for entry in entries.flatten() {
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if !kind.is_file() {
-                continue;
-            }
-            let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
-                continue;
-            };
-            if seen.contains(&name) {
-                continue;
-            }
-            let Some((time, title)) = name.split_once('-') else {
-                continue;
-            };
-            if time.len() != 6 || !time.bytes().all(|byte| byte.is_ascii_digit()) {
-                continue;
-            }
-            lines.push((time.to_owned(), take_line(time, title, None)));
-        }
-    }
-
-    lines.sort();
-    lines.into_iter().map(|(_, line)| line).collect()
-}
-
-/// One take line.
-fn take_line(time: &str, title: &str, cwd: Option<&str>) -> String {
-    let title = one_line(title, crate::transcript::TITLE_MAX_CHARS);
-    match cwd {
-        Some(cwd) => format!("- {time} {title} · {cwd}"),
-        None => format!("- {time} {title}"),
-    }
-}
-
-/// `HHMMSS` out of an ISO-8601 stamp.
-fn clock(iso: &str) -> String {
-    Timestamp::parse_iso8601(iso).map_or_else(
-        || "000000".to_owned(),
-        |at| {
-            let (_, _, _, hour, minute, second) = at.parts();
-            format!("{hour:02}{minute:02}{second:02}")
-        },
-    )
-}
-
-/// The day's memories — `- <bank>/<filename> — <description>`.
-fn memories(data_root: &Path, day: Day) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    for (bank, dir) in banks(data_root) {
-        let Ok(names) = Bank::at(&dir).memory_filenames() else {
-            continue;
-        };
-        for name in names {
-            if name.starts_with('_') {
-                continue;
-            }
-            let Ok(text) = fs::read_to_string(dir.join(&name)) else {
-                continue;
-            };
-            let Ok(memory) = MemoryFile::parse(&text) else {
-                continue;
-            };
-            let updated = memory
-                .frontmatter
-                .get("updated")
-                .or_else(|| memory.frontmatter.get("created"))
-                .unwrap_or_default();
-            if !day.holds(updated) {
-                continue;
-            }
-            let description = memory.frontmatter.get("description").unwrap_or_default();
-            lines.push(format!(
-                "- {bank}/{name} — {}",
-                truncate_chars(description, DESCRIPTION_MAX_CHARS)
-            ));
-        }
-    }
-    lines.sort();
-    lines
-}
-
-// ─── the log index ────────────────────────────────────────────────────────
-
-/// Regenerate `<root>/log/INDEX.md` from the day pages on disk, ascending.
-fn write_log_index(data_root: &Path) -> Result<PathBuf> {
-    let dir = paths::log_dir(data_root);
-    fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
-    let path = dir.join(LOG_INDEX_FILE_NAME);
-    let mut days: Vec<String> = Vec::new();
-    let entries = fs::read_dir(&dir).map_err(|source| Error::io(&dir, source))?;
-    for entry in entries {
-        let entry = entry.map_err(|source| Error::io(&dir, source))?;
-        let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
-            continue;
-        };
-        if is_day_page(&name) {
-            days.push(name);
-        }
-    }
-    days.sort();
-
-    let mut out = String::new();
-    for name in days {
-        let text = fs::read_to_string(dir.join(&name)).unwrap_or_default();
-        let date = name.trim_end_matches(".md");
-        let _ = writeln!(
-            out,
-            "- [{date}]({name}) — {} takes · {} memories",
-            section_count(&text, "## takes"),
-            section_count(&text, "## memories")
+/// The three ways out without a model call are all cheap and all journaled: a
+/// day with no sources is `quiet` and gets no file at all — a filler entry
+/// would be prose about nothing, and every session that reads this log pays
+/// for it — a day whose sources still hash to what the entry on disk carries
+/// is `kept`, and a mind that says nothing usable is `abstained`, which
+/// leaves the file where it is for the next pass to try again.
+pub fn entry_step(
+    data_root: &Path,
+    day: Day,
+    options: &Options,
+) -> Result<(Option<PathBuf>, &'static str)> {
+    let date = day.key();
+    let sources = log::sources(data_root, day);
+    if sources.is_empty() {
+        journal::note(
+            data_root,
+            "reflect",
+            &format!("reflect entry-skipped date={date} reason=quiet"),
         );
+        return Ok((None, "quiet"));
     }
-    atomic::write(&path, &out)?;
-    Ok(path)
-}
 
-/// Whether `name` is a `yyyy-mm-dd.md` day page.
-fn is_day_page(name: &str) -> bool {
-    let Some(date) = name.strip_suffix(".md") else {
-        return false;
+    let fingerprint = log::fingerprint(&sources);
+    if log::existing(data_root, &date).is_some_and(|held| held.fingerprint == fingerprint) {
+        journal::note(
+            data_root,
+            "reflect",
+            &format!("reflect entry-kept date={date}"),
+        );
+        return Ok((None, "kept"));
+    }
+
+    let began = began(data_root, day);
+    let (count, tail) = log::tail(data_root);
+    let number = log::day_number(&began, &date);
+    let started = Instant::now();
+    let request = Ask {
+        binary: options.binary.clone(),
+        // The log mind reads the banks, not a session: there is nothing in its
+        // transcript a later pass would evaluate.
+        keep: None,
+        model: options.log_mind.model.clone(),
+        prompt: log::prompt(&began, count, &tail, &date, number, &sources),
+        timeout: options.timeout,
     };
-    date.len() == 10
-        && date.bytes().enumerate().all(|(index, byte)| {
-            if index == 4 || index == 7 {
-                byte == b'-'
-            } else {
-                byte.is_ascii_digit()
-            }
-        })
+    let reply = match mind::ask(&request) {
+        Ok(answer) => log::parse_reply(&answer),
+        Err(_) => None,
+    };
+    let Some(reply) = reply else {
+        journal::note(
+            data_root,
+            "reflect",
+            &format!("reflect entry-skipped date={date} reason=abstained"),
+        );
+        return Ok((None, "abstained"));
+    };
+
+    let entry = Entry {
+        body: log::body_with_next(&reply),
+        date: date.clone(),
+        day: number,
+        fingerprint,
+        kind: reply.kind,
+        mind: options.log_mind.model.clone(),
+        position: log::position(data_root, day, number),
+        sources: sources
+            .iter()
+            .map(|source| format!("{}/{}", source.bank, source.file))
+            .collect(),
+        title: reply.title,
+        written: Timestamp::now()?.iso8601(),
+    };
+    let path = log::write_entry(data_root, &entry)?;
+    journal::note(
+        data_root,
+        "reflect",
+        &format!(
+            "reflect entry date={date} day={number} kind={} mind={} ms={}",
+            entry.kind.as_str(),
+            entry.mind,
+            started.elapsed().as_millis()
+        ),
+    );
+    Ok((Some(path), "written"))
 }
 
-/// How many entries a day page's section carries.
-fn section_count(page: &str, header: &str) -> usize {
-    page.lines()
-        .skip_while(|line| line.trim_end() != header)
-        .skip(1)
-        .take_while(|line| !line.starts_with("## "))
-        .filter(|line| line.starts_with("- "))
-        .count()
+/// Regenerate `log/INDEX.md`, fixing `began:` if this is the first write.
+///
+/// Day 1 is whatever `INDEX.md` already says, else the earliest day the
+/// archive holds, else the day being rendered — and once written it never
+/// moves, or the day numbers every entry behind it carries would stop meaning
+/// anything.
+pub fn write_index(data_root: &Path, day: Day) -> Result<PathBuf> {
+    log::write_index(data_root, Some(&began(data_root, day)))
+}
+
+/// Day 1 of the voyage, as the entry and the index both count from it.
+fn began(data_root: &Path, day: Day) -> String {
+    log::began(data_root)
+        .or_else(|| log::earliest_archive_day(data_root))
+        .unwrap_or_else(|| day.key())
 }
 
 // ─── the pointer sweep ────────────────────────────────────────────────────
 
-/// One `.recent/` pointer, as the sweep and the day page read it.
+/// One `.recent/` pointer, as the sweep reads it.
 struct Pointer {
-    /// Where the transcript was archived to.
-    archived: Option<PathBuf>,
-    /// Where the session ran.
-    cwd: Option<String>,
     /// The pointer file.
     path: PathBuf,
-    /// The session's first prompt, or its id.
-    title: String,
     /// The whole document.
     value: Value,
 }
@@ -422,15 +329,7 @@ fn pointers(data_root: &Path) -> Vec<Pointer> {
             if !matches!(value, Value::Object(_)) {
                 return None;
             }
-            let text = |key: &str| value.get(key).and_then(Value::as_str);
-            let stem = path.file_stem()?.to_str()?.to_owned();
-            Some(Pointer {
-                archived: text("archived").map(PathBuf::from),
-                cwd: text("cwd").map(ToOwned::to_owned),
-                title: text("title").map_or(stem, ToOwned::to_owned),
-                value,
-                path,
-            })
+            Some(Pointer { path, value })
         })
         .collect();
     pointers.sort_by(|left, right| left.path.cmp(&right.path));
@@ -627,7 +526,7 @@ fn upkeep(
         // transcript a later pass would evaluate.
         keep: None,
         model: options.mind.model.clone(),
-        prompt: upkeep_prompt(key, recall::index_chars(bank.dir(), key), &listing),
+        prompt: upkeep_prompt(key, recall::index_chars(bank.dir()), &listing),
         timeout: options.timeout,
     };
     // An abstention leaves the baseline where it is, so the bank is due again
@@ -1136,16 +1035,11 @@ fn origin(bank: &Bank, files: &[String]) -> String {
         .map_or_else(first, |(_, file)| file)
 }
 
-/// A path's file name, as a string.
-fn file_name(path: &Path) -> Option<String> {
-    path.file_name()?.to_str().map(ToOwned::to_owned)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        BUDGET_CHARS, Baseline, Day, Op, Options, UPKEEP_MAX_OPS, day_page, read_baseline,
-        read_ops, reflect, upkeep_prompt, write_baseline,
+        BUDGET_CHARS, Baseline, Day, Op, Options, UPKEEP_MAX_OPS, read_baseline, read_ops, reflect,
+        upkeep_prompt, write_baseline,
     };
     use crate::bank::Bank;
     use crate::commit::{CommitRequest, commit_memory};
@@ -1239,6 +1133,7 @@ mod tests {
                     ),
                 )
                 .into(),
+                log_mind: mind::log(),
                 mind: mind::upkeep(),
                 timeout: Duration::from_secs(20),
             };
@@ -1248,6 +1143,7 @@ mod tests {
         fn silent() -> Options {
             Options {
                 binary: "/nonexistent/claude".into(),
+                log_mind: mind::log(),
                 mind: mind::upkeep(),
                 timeout: Duration::from_secs(1),
             }
@@ -1336,76 +1232,92 @@ mod tests {
         fs::read_to_string(path).expect("read")
     }
 
+    #[cfg(unix)]
     #[test]
-    fn the_day_page_lists_the_days_takes_and_memories_and_is_idempotent() {
-        let scratch = Scratch::new("reflect-day-page");
-        scratch.pointer("sid-b", "2026-08-12T14:30:05Z", None);
-        scratch.pointer("sid-a", "2026-08-12T09:15:00Z", None);
-        // Yesterday's pointer is not today's take.
-        scratch.pointer("sid-old", "2026-08-11T23:00:00Z", None);
-        // An archive file with no pointer left — swept, but still a take.
-        scratch.archived(2026, 8, 12, "070000-projects-x-sid-c.jsonl");
-        // Yesterday's day directory is not today's listing.
-        scratch.archived(2026, 8, 11, "070000-projects-x-sid-d.jsonl");
+    fn the_entry_is_written_for_the_day_that_ended_and_kept_the_next_pass() {
+        let scratch = Scratch::new("reflect-entry");
+        // Yesterday, not today: the pass runs on 2026-08-12 and writes the
+        // day that closed under it.
         scratch.seed_dated(
             "project_the_queue_is_the_surface.md",
             "the queue is the surface",
             "how recall reaches a session",
-            "2026-08-12T11:00:00Z",
+            "2026-08-11T11:00:00Z",
         );
-        // Written yesterday: not today's memory.
+        scratch.archived(2026, 8, 11, "070000-projects-x-sid.jsonl");
+        // Today's memory belongs to tomorrow's entry.
         scratch.seed_dated(
-            "project_an_older_claim.md",
-            "an older claim",
-            "settled a while ago",
-            "2026-08-10T11:00:00Z",
+            "project_a_later_claim.md",
+            "a later claim",
+            "settled after the window",
+            "2026-08-12T08:00:00Z",
         );
 
+        let reply = concat!(
+            r#"{"kind":"milestone","title":"The banks move","#,
+            r#""body":"The operator lands one memory.","next":"More tomorrow."}"#
+        );
         let outcome = reflect(
             &scratch.root,
             &scratch.claude,
             Scratch::now(),
-            &Scratch::silent(),
+            &scratch.options(reply),
         )
         .expect("reflect");
+        assert_eq!(outcome.entry_status, "written");
+        let path = outcome.entry.clone().expect("an entry");
         assert_eq!(
-            outcome.day_page,
-            crate::paths::log_dir(&scratch.root).join("2026-08-12.md")
+            path,
+            crate::paths::log_dir(&scratch.root).join("2026-08-11.md")
         );
-        let page = read(&outcome.day_page);
-        assert_eq!(
-            page,
-            concat!(
-                "# 2026-08-12\n",
-                "\n## takes\n",
-                "- 070000 projects-x-sid-c.jsonl\n",
-                "- 091500 a session about sid-a · /Users/you/code\n",
-                "- 143005 a session about sid-b · /Users/you/code\n",
-                "\n## memories\n",
-                "- -Users-you-code/project_the_queue_is_the_surface.md — how recall reaches a session\n",
-            )
+        let written = read(&path);
+        assert!(written.contains("\nday: 1\n"), "{written}");
+        assert!(written.contains("\nkind: milestone\n"), "{written}");
+        assert!(written.contains("\ntitle: The banks move\n"), "{written}");
+        assert!(
+            written.contains(
+                "\nposition: day 1 · 1 sessions · 1 memories landed · 2 memories in 1 banks\n"
+            ),
+            "{written}"
+        );
+        assert!(
+            written.contains("\nsources: -Users-you-code/project_the_queue_is_the_surface.md\n"),
+            "{written}"
+        );
+        assert!(
+            written.ends_with("The operator lands one memory.\n\nNext: More tomorrow."),
+            "{written}"
+        );
+        let index = read(&outcome.index);
+        assert!(index.contains("began: 2026-08-11\n"), "{index}");
+        assert!(
+            index.contains("- day 1 · [The banks move](2026-08-11.md) — milestone · 2026-08-11\n"),
+            "{index}"
+        );
+        assert!(
+            scratch
+                .log()
+                .contains("reflect entry date=2026-08-11 day=1")
         );
 
-        // Regenerating changes nothing.
-        reflect(
+        // The same sources hash to the same fingerprint, so the second pass
+        // asks nobody — the stub it could reach is unreachable on purpose.
+        let again = reflect(
             &scratch.root,
             &scratch.claude,
             Scratch::now(),
             &Scratch::silent(),
         )
         .expect("second reflect");
-        assert_eq!(read(&outcome.day_page), page);
-
-        let index = read(&outcome.index);
-        assert_eq!(
-            index,
-            "- [2026-08-12](2026-08-12.md) — 3 takes · 1 memories\n"
-        );
+        assert_eq!(again.entry_status, "kept");
+        assert_eq!(again.entry, None);
+        assert_eq!(read(&path), written);
+        assert!(scratch.log().contains("reflect entry-kept date=2026-08-11"));
     }
 
     #[test]
-    fn a_day_with_nothing_in_it_is_a_bare_heading() {
-        let scratch = Scratch::new("reflect-empty-day");
+    fn a_day_with_no_sources_gets_no_entry_at_all() {
+        let scratch = Scratch::new("reflect-quiet");
         let outcome = reflect(
             &scratch.root,
             &scratch.claude,
@@ -1413,32 +1325,29 @@ mod tests {
             &Scratch::silent(),
         )
         .expect("reflect");
-        assert_eq!(read(&outcome.day_page), "# 2026-08-12\n");
-        assert_eq!(
-            read(&outcome.index),
-            "- [2026-08-12](2026-08-12.md) — 0 takes · 0 memories\n"
+        assert_eq!(outcome.entry_status, "quiet");
+        assert_eq!(outcome.entry, None);
+        assert!(
+            !crate::paths::log_dir(&scratch.root)
+                .join("2026-08-11.md")
+                .exists()
+        );
+        assert!(
+            scratch
+                .log()
+                .contains("reflect entry-skipped date=2026-08-11 reason=quiet")
         );
     }
 
     #[test]
-    fn the_index_lists_every_day_page_ascending() {
-        let scratch = Scratch::new("reflect-index");
-        let dir = crate::paths::log_dir(&scratch.root);
-        fs::create_dir_all(&dir).expect("log dir");
-        fs::write(
-            dir.join("2026-08-09.md"),
-            "# 2026-08-09\n\n## takes\n- 1\n- 2\n",
-        )
-        .expect("older");
-        fs::write(
-            dir.join("2026-08-10.md"),
-            "# 2026-08-10\n\n## takes\n- 1\n\n## memories\n- a\n- b\n- c\n",
-        )
-        .expect("old");
-        // Not day pages.
-        fs::write(dir.join("notes.md"), "# notes\n").expect("notes");
-        fs::write(dir.join(".DS_Store"), "\0").expect("stray");
-
+    fn a_mind_that_says_nothing_leaves_the_day_for_the_next_pass() {
+        let scratch = Scratch::new("reflect-abstain");
+        scratch.seed_dated(
+            "project_the_queue_is_the_surface.md",
+            "the queue is the surface",
+            "how recall reaches a session",
+            "2026-08-11T11:00:00Z",
+        );
         let outcome = reflect(
             &scratch.root,
             &scratch.claude,
@@ -1446,13 +1355,12 @@ mod tests {
             &Scratch::silent(),
         )
         .expect("reflect");
-        assert_eq!(
-            read(&outcome.index),
-            concat!(
-                "- [2026-08-09](2026-08-09.md) — 2 takes · 0 memories\n",
-                "- [2026-08-10](2026-08-10.md) — 1 takes · 3 memories\n",
-                "- [2026-08-12](2026-08-12.md) — 0 takes · 0 memories\n",
-            )
+        assert_eq!(outcome.entry_status, "abstained");
+        assert_eq!(outcome.entry, None);
+        assert!(
+            scratch
+                .log()
+                .contains("reflect entry-skipped date=2026-08-11 reason=abstained")
         );
     }
 
@@ -2238,12 +2146,5 @@ is wrong on sight — retitle it."
         assert!(day.holds("2026-08-12T23:59:59Z"));
         assert!(!day.holds("2026-08-13T00:00:00Z"));
         assert!(!day.holds(""));
-    }
-
-    #[test]
-    fn the_day_page_is_written_even_with_no_data_root_content() {
-        let scratch = Scratch::new("reflect-bare");
-        let page = day_page(&scratch.root, Day::of(Scratch::now()));
-        assert_eq!(page, "# 2026-08-12\n");
     }
 }
