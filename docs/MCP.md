@@ -1,6 +1,6 @@
 # `sandman mcp`: the banks as a tool server
 
-Status: **shipped 2026-09-10** — phases 1, 2 and 4 in this repo; phase 3's desktop-app half is the operator's check. The brief is kept below as written, with the facts verified since marked inline. Read `AGENTS.md`, `src/AGENTS.md`, `docs/DESIGN.md`, and `docs/BANK-FORMAT.md` first; this document adds one verb and changes nothing about the format, the lock, or the passes.
+Status: **shipped 2026-09-10** — phases 1, 2 and 4 in this repo; phase 3 is registered in Claude Code (user scope) and in the desktop app, which spawns the server at launch (verified 2026-09-10 · `~/Library/Logs/Claude/mcp-server-sandman.log`); the Cowork tool calls are the operator's check. The brief is kept below as written, with the facts verified since marked inline. Read `AGENTS.md`, `src/AGENTS.md`, `docs/DESIGN.md`, and `docs/BANK-FORMAT.md` first; this document adds one verb and changes nothing about the format, the lock, or the passes.
 
 The operator's ask, from the Cowork session that ablated the cloud memory store the same day: "why not a mcp server for sandman that gives you access?" then "can we make sandman a real server? on vercel? then everything can access my memory yeah?" then "maybe later." The decision that session reached: a local, stdio MCP server now; a remote (HTTP) server deferred; the server is what makes the cloud-to-sandman drain a single piece instead of an inbox plus a launchd routine.
 
