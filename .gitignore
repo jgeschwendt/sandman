@@ -1,3 +1,4 @@
 .visor/
 node_modules/
 target/
+Claude outputs/

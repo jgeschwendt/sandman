@@ -137,3 +137,11 @@ The binary path is absolute because hooks and spawned processes get a stale PATH
 ## After this ships
 
 The cloud-to-sandman drain becomes one scheduled Cowork task, Mac-linked, nightly beside `sandman-reflect`: read the cloud memory store, `sandman__remember` every line not marked `(bank: …)`, then rewrite the store's `profile.md` and `preferences.md` from the `~` bank's `user_*` and `feedback_*` memories. Auto-memory (`~/.claude/projects/*/memory/`) is retired independently of all of this; its tarball from 2026-09-09 is the rollback.
+
+## TODO · from the first live Cowork check (2026-09-11)
+
+The operator's phase-3 check ran from a Cowork session linked to this Mac. `banks` listed every bank; `remember` created `reference_sandman_reachable_from_cowork_cloud.md` in the `~` bank and regenerated the index; `recall` with no cwd answered for `~` and reported `trimmed.sections: ["chronological"]`, no `tools`.
+
+- **`~` recall is over budget, so the voyage log never reaches a session started in `~`.** The home bank's bodies alone fill the 9,000 characters; `compose` drops the tools surface (absent here: no `TOOLS.md` with content) then the chronological one, and the graph never floors, so nothing is reinstated. Reported correctly, but the log the operator asked for is invisible from exactly the cwd he starts most sessions in. Options, unranked: slim the `~` bank (the budget rule says it should be small); reserve a floor for the log tail before the graph gets the remainder; render the log as one index line when it cannot be carried whole. Decision is the operator's.
+- **Retire a wrong memory.** The Cowork session banked that recall's payload "omits the voyage log tail and tool index the description promises". It does not: the log was budget-trimmed and said so; the tool index is empty on this box. `sandman forget` it from `~/.sandman/memories/-Users-jlg/reference_sandman_reachable_from_cowork_cloud.md`, or re-`remember` it with the first sentence only (the bridge path and the ToolSearch step are right).
+- **The description could name the trim.** The `recall` tool description reads as if all five surfaces always arrive; a clause that `trimmed.sections` names the surfaces the budget cut would have prevented the misread above. One line in `src/verbs/mcp.rs`.
