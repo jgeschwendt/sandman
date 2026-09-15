@@ -102,9 +102,14 @@ const RECALL_DESCRIPTION: &str = concat!(
     "What past sessions know for a working directory, composed exactly as a ",
     "Claude Code session is primed at start: the directory's memory bank, its ",
     "ancestors' banks, the last three days of session pointers, the voyage log ",
-    "tail and the tool index, inside one 9,000-character budget. text is the ",
-    "payload a session would have read; banks, memories, pointers and trimmed ",
-    "say what the budget cut. cwd defaults to the home directory.",
+    "tail and the tool index, inside one 9,000-character budget. Not every ",
+    "surface arrives — the budget drops the cheap ones and cuts banks back to ",
+    "one line per memory, and trimmed.sections names the surfaces it dropped ",
+    "while trimmed.banks_degraded counts the banks it cut back. The voyage ",
+    "log's latest entry is carried whenever the log has one: its cost is ",
+    "reserved before anything else is fitted. text is the payload a session ",
+    "would have read; banks, memories, pointers and trimmed say what the ",
+    "budget cut. cwd defaults to the home directory.",
 );
 
 /// What the model reads before calling `remember` — the budget rule included,

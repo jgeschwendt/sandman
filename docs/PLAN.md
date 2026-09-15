@@ -152,8 +152,11 @@ say "day 12 noticed this once".
 ## Who reads
 
 - **recall** — the section becomes `## Voyage log · the latest entries · ~/.sandman/log/`:
-  the newest entry's body whole, then the four index lines before it. Budget order
-  (tools → chronological → recent) is unchanged; `LOG_INDEX_LINES` stays 5.
+  the newest entry's body whole, then the four index lines before it. The log holds a
+  reserved floor in the budget (decided 2026-09-15): tools and recent trim first, the
+  graph degrades next, the last-resort cut takes graph index lines rather than the
+  payload's tail, and the log drops only when it alone exceeds the budget;
+  `LOG_INDEX_LINES` stays 5.
 - **bridge** — `/memories/log` and `/memories/log/:day` keep their routes and calendar;
   `Bridge.Memories.Log` stops counting `## takes`/`## memories` and renders the entry
   (frontmatter to a header line: day, title, kind; body as markdown).

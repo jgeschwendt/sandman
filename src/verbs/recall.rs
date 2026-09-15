@@ -1,14 +1,23 @@
 //! `recall` — what past sessions know, composed for a session start.
 //!
 //! A port of `~/.claude/hooks/memory-recall.js`: same surfaces, same section
-//! headers, same limits, same trim-cheapest-first budget. Two changes, both
-//! forced by the rewrite — banks live under `<root>/memories/` instead of
-//! `~/.orrery/memory/`, and the short-term surface is now `.recent/` pointers
-//! (orrery's `.dissolve-queue.jsonl` and its sweep ledger retire with it).
+//! headers, same limits, the same trim-cheapest-first budget over the surfaces
+//! that take part in it. Three changes — banks live under `<root>/memories/`
+//! instead of `~/.orrery/memory/`, the short-term surface is now `.recent/`
+//! pointers (orrery's `.dissolve-queue.jsonl` and its sweep ledger retire with
+//! it), and the voyage log has a reserved floor: its cost comes off the budget
+//! first and the graph and the other optional surfaces divide the remainder.
+//! Cheapest-first trimming dropped the log from exactly the home directory
+//! most sessions start in, whose bank fills the budget on its own; a surface
+//! this cheap and this dated is worth more than the bodies it displaces. The
+//! floor holds all the way down: the last-resort cut takes index lines out of
+//! the graph rather than characters off the payload's tail, so the only thing
+//! that can cost the log its place is a log wider than the whole budget.
 //!
 //! Nothing here fails: an unreadable surface is an absent surface, because a
 //! session start that errors is worse than one that recalls less.
 
+use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -86,9 +95,10 @@ pub struct RecalledBank {
 pub struct Trimmed {
     /// How many banks ended at their index rendering rather than their bodies.
     pub banks_degraded: usize,
-    /// How many rendered lines the ceiling cut took off the end. Zero is the
-    /// ordinary case; anything else means the payload was still over with every
-    /// surface at its floor, and nothing but this says how much never arrived.
+    /// How many rendered lines the ceiling cut took out of the graph. Zero is
+    /// the ordinary case; anything else means the payload was still over with
+    /// every surface at its floor, and nothing but this says how much never
+    /// arrived.
     pub ceiling_lines: usize,
     /// The optional surfaces that did not survive, in the order they went.
     pub sections: Vec<&'static str>,
@@ -150,7 +160,8 @@ struct GraphSection {
 
 /// Everything recall could say, before the budget has its say.
 struct Sections {
-    /// The voyage log's newest entry, and the index lines behind it.
+    /// The voyage log's newest entry, and the index lines behind it. Costed
+    /// first: the budget never trims it, only the log itself can be too big.
     chronological: Option<String>,
     /// The cwd's bank, then its ancestors.
     graph: Vec<GraphSection>,
@@ -179,8 +190,10 @@ impl Sections {
     /// order the budget went after them.
     fn dropped(&self, budget: &Budget) -> Vec<&'static str> {
         [
-            (Surface::Tools, self.tools.is_some()),
+            // Chronological is settled before the trim sequence starts —
+            // reserved, unless the log outgrew the whole budget by itself.
             (Surface::Chronological, self.chronological.is_some()),
+            (Surface::Tools, self.tools.is_some()),
             (Surface::Recent, self.recent.is_some()),
         ]
         .into_iter()
@@ -189,15 +202,31 @@ impl Sections {
         .collect()
     }
 
-    /// Render, then trim cheapest-surface-first until the payload fits.
+    /// Render, then trim cheapest-surface-first until the payload fits — the
+    /// chronological surface excepted, whose cost is reserved before the trim
+    /// sequence begins.
     ///
-    /// The budget it settled on comes back with the text, along with the lines
-    /// the ceiling cut took: what was cut is not recoverable from the payload,
-    /// and it is exactly what the journal has to say for `budget=` to mean
-    /// anything.
+    /// The budget it settled on comes back with the text, along with the graph
+    /// lines the ceiling cut took: what was cut is not recoverable from the
+    /// payload, and it is exactly what the journal has to say for `budget=` to
+    /// mean anything.
     fn compose(&self) -> (String, Budget, usize) {
         let mut budget = Budget {
-            chronological: self.chronological.is_some(),
+            // The voyage log is never trimmed while it fits under the budget
+            // on its own: a dated, page-cheap surface outranks the bodies it
+            // costs, and the trim sequence used to drop it from the one cwd
+            // whose bank fills the budget alone. The single way out is a log
+            // bigger than the entire budget, where reserving it would leave
+            // the graph nothing — that drops, and `dropped` names it.
+            //
+            // "On its own" is the payload it would be the whole of, preamble
+            // included: the preamble is not optional, and reserving a section
+            // that leaves no room for it would put the ceiling cut back on the
+            // log, which is exactly what the floor exists to prevent.
+            chronological: self
+                .chronological
+                .as_ref()
+                .is_some_and(|section| !over(&format!("{HEADER}{section}"))),
             graph: vec![true; self.graph.len()],
             recent: self.recent.is_some(),
             tools: self.tools.is_some(),
@@ -206,7 +235,7 @@ impl Sections {
 
         // Cheapest first, the graph last — a payload that already fits is
         // never trimmed at all.
-        for step in [Surface::Tools, Surface::Chronological, Surface::Recent] {
+        for step in [Surface::Tools, Surface::Recent] {
             if !over(&text) {
                 break;
             }
@@ -228,7 +257,7 @@ impl Sections {
         // would otherwise be wasted: reinstate the trimmed surfaces in reverse
         // order, each only if it still fits.
         if floored {
-            for step in [Surface::Recent, Surface::Chronological, Surface::Tools] {
+            for step in [Surface::Recent, Surface::Tools] {
                 let had = step.get(&budget);
                 step.set(&mut budget, true);
                 let candidate = self.render(&budget);
@@ -240,34 +269,75 @@ impl Sections {
             }
         }
 
-        // Over even with everything at its floor, so the tail has to go. It
-        // goes a whole line at a time: an index entry cut mid-word is a pointer
-        // that names no file, worse to a session than an entry it never saw.
-        // Only a single line longer than the entire budget has no boundary to
-        // fall back to, and there the blunt cut still beats an empty payload.
+        // Over even with every surface at its floor, so the graph gives up
+        // index lines until the payload fits. The cut lands on the graph and
+        // never on the payload's tail: a blunt cut at the end would take the
+        // voyage log, the one surface whose cost was reserved, and a reserved
+        // floor that the last resort can eat is not a floor.
+        //
+        // Lines go whole: an index entry cut mid-word is a pointer that names
+        // no file, worse to a session than an entry it never saw. The smallest
+        // cut that fits is the one taken — binary search, since a wider cut is
+        // never a longer payload.
         if !over(&text) {
             return (text, budget, 0);
         }
         let lines = text.lines().count();
-        let cut = truncate_chars(&text, BUDGET_CHARS);
-        let bounded = cut.rfind('\n').map_or("", |end| &cut[..end]);
-        let kept = if bounded.chars().count() <= HEADER.chars().count() {
-            cut
-        } else {
-            bounded
-        };
-        (kept.to_owned(), budget, lines - kept.lines().count())
+        let (mut low, mut high) = (0, self.graph_lines(&budget));
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if over(&self.render_cut(&budget, mid)) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        // The widest cut always fits: every bank is gone and what is left is
+        // the preamble plus the chronological surface, which was reserved only
+        // on the condition that the two of them fit together. The other
+        // optional surfaces cannot be in — reinstatement admits one only when
+        // the payload it makes fits, and this payload did not.
+        let text = self.render_cut(&budget, low);
+        let cut_lines = lines - text.lines().count();
+        (text, budget, cut_lines)
     }
 
     /// The payload at this budget.
     fn render(&self, budget: &Budget) -> String {
-        let mut parts: Vec<&str> = Vec::new();
-        for (index, section) in self.graph.iter().enumerate() {
-            parts.push(if budget.graph[index] {
-                &section.full
-            } else {
-                &section.index
-            });
+        self.render_cut(budget, 0)
+    }
+
+    /// The payload at this budget, with `cut` of the graph's lines gone.
+    ///
+    /// The cut eats the last bank's tail first and reaches the cwd's own bank
+    /// only once every ancestor behind it has nothing left to give — the
+    /// ranking the floor loop already established, where the most distant
+    /// ancestor is the cheapest thing to lose. A bank cut to nothing loses its
+    /// heading with its lines: a heading over no memories names a bank and
+    /// says nothing about it.
+    ///
+    /// Only [`Self::compose`]'s ceiling passes a non-zero cut, and only with
+    /// every bank already at its index rendering.
+    fn render_cut(&self, budget: &Budget, cut: usize) -> String {
+        let mut keep: Vec<usize> = Vec::with_capacity(self.graph.len());
+        let mut remaining = cut;
+        for (section, full) in self.graph.iter().zip(&budget.graph).rev() {
+            let lines = body_lines(rendering(section, *full));
+            let taken = remaining.min(lines);
+            remaining -= taken;
+            keep.push(lines - taken);
+        }
+        keep.reverse();
+
+        let mut parts: Vec<Cow<'_, str>> = Vec::new();
+        for ((section, full), kept) in self.graph.iter().zip(&budget.graph).zip(&keep) {
+            let body = rendering(section, *full);
+            if *kept == body_lines(body) {
+                parts.push(Cow::Borrowed(body));
+            } else if *kept > 0 {
+                let head: Vec<&str> = body.lines().take(kept + 1).collect();
+                parts.push(Cow::Owned(head.join("\n")));
+            }
         }
         for (enabled, section) in [
             (budget.recent, self.recent.as_ref()),
@@ -275,7 +345,7 @@ impl Sections {
             (budget.tools, self.tools.as_ref()),
         ] {
             if let (true, Some(section)) = (enabled, section) {
-                parts.push(section);
+                parts.push(Cow::Borrowed(section));
             }
         }
         if parts.is_empty() {
@@ -284,6 +354,26 @@ impl Sections {
             format!("{HEADER}{}", parts.join("\n\n"))
         }
     }
+
+    /// How many lines the graph can give the ceiling cut — every rendered line
+    /// but each section's heading, which goes only with the last of them.
+    fn graph_lines(&self, budget: &Budget) -> usize {
+        self.graph
+            .iter()
+            .zip(&budget.graph)
+            .map(|(section, full)| body_lines(rendering(section, *full)))
+            .sum()
+    }
+}
+
+/// The rendering a bank is at: bodies while it is `full`, index lines after.
+fn rendering(section: &GraphSection, full: bool) -> &str {
+    if full { &section.full } else { &section.index }
+}
+
+/// A section's cuttable lines — everything under its heading.
+fn body_lines(section: &str) -> usize {
+    section.lines().count().saturating_sub(1)
 }
 
 /// The optional surfaces, as budget switches.
@@ -1181,7 +1271,8 @@ mod tests {
         // The only bank is at its floor…
         assert!(text.contains("## Long-term index · this directory's bank"));
         assert!(!text.contains(&"x".repeat(100)));
-        // …so the trimmed surfaces come back in reverse order.
+        // …so the trimmed surfaces come back in reverse order, and the voyage
+        // log — reserved, so never trimmed — was in the whole time.
         assert!(text.contains("## Recent sessions (3 days)"));
         assert!(text.contains("## Voyage log"));
         assert!(text.contains("## Tool index"));
@@ -1218,22 +1309,95 @@ mod tests {
         let text = &composed.text;
         assert!(text.chars().count() <= BUDGET_CHARS);
         // The graph never reached its floor, so nothing is reinstated: the
-        // cwd bank keeps its bodies and the cheap surfaces stay trimmed.
+        // cwd bank keeps its bodies and the cheap surfaces stay trimmed. The
+        // voyage log is not one of them — its floor was reserved first.
         assert!(text.contains("## Long-term · this directory's bank"));
         assert!(text.contains("a short body"));
         assert!(text.contains("## Long-term index · ancestor bank"));
         assert!(!text.contains("## Recent sessions"));
-        assert!(!text.contains("## Voyage log"));
+        assert!(text.contains("## Voyage log"));
         assert!(!text.contains("## Tool index"));
-        // The report names all three, in the order the budget went after them,
-        // and the one bank that had to give up its bodies.
-        assert_eq!(
-            composed.trimmed.sections,
-            ["tools", "chronological", "recent"]
-        );
+        // The report names both, in the order the budget went after them, and
+        // the one bank that had to give up its bodies.
+        assert_eq!(composed.trimmed.sections, ["tools", "recent"]);
         assert_eq!(composed.trimmed.banks_degraded, 1);
         assert!(!composed.banks[0].degraded, "the cwd bank kept its bodies");
         assert!(composed.banks[1].degraded, "the ancestor gave them up");
+    }
+
+    #[test]
+    fn the_voyage_log_keeps_its_floor_while_the_bank_degrades_around_it() {
+        let root = Root::new("recall-log-floor");
+        // A bank whose bodies alone fill the budget — the shape of the `~`
+        // bank on the operator's machine, which used to cost the log its
+        // place. Twenty short-index memories: the floor is cheap, the full
+        // rendering is not.
+        for index in 0..20 {
+            root.memory(
+                &root.bank(),
+                &format!("user_{index:02}.md"),
+                &format!("name: memory {index:02}\ndescription: d\ntype: user\n"),
+                &format!("{}\n", "x".repeat(600)),
+            );
+        }
+        voyage_log(&root, true);
+
+        let composed = root.compose();
+        let text = &composed.text;
+        assert!(text.chars().count() <= BUDGET_CHARS);
+        // The bank is at its floor…
+        assert!(text.contains("## Long-term index · this directory's bank"));
+        assert!(!text.contains(&"x".repeat(100)));
+        // …and the log arrived whole anyway, newest entry's prose and all.
+        assert!(text.contains("## Voyage log"), "{text}");
+        assert!(text.contains("The trunk has two writers and no lock."));
+        // The report says what it cost: the bank gave up its bodies, and the
+        // chronological surface was never a candidate for the trim.
+        assert_eq!(composed.trimmed.banks_degraded, 1);
+        assert!(
+            !composed.trimmed.sections.contains(&"chronological"),
+            "{composed:?}"
+        );
+        assert_eq!(composed.trimmed.ceiling_lines, 0);
+    }
+
+    #[test]
+    fn a_voyage_log_bigger_than_the_whole_budget_is_the_one_case_it_drops() {
+        let root = Root::new("recall-log-oversized");
+        root.memory(
+            &root.bank(),
+            "user_here.md",
+            "name: here\ndescription: d\ntype: user\n",
+            "a short body\n",
+        );
+        // The newest entry's body at the cap a mind is held to, and an index
+        // line past the whole budget behind it. `reflect` writes neither —
+        // titles are capped at 60 characters — but recall reads the log
+        // leniently off disk, so a hand-edited page can reach here.
+        root.log_index(&format!(
+            "---\nname: voyage log\n---\n\n\
+- day 1 · [{}](2026-08-02.md) — discovery · 2026-08-02\n\
+- day 2 · [Two writers, one trunk](2026-08-03.md) — setback · 2026-08-03\n",
+            "t".repeat(BUDGET_CHARS)
+        ));
+        root.log_entry(
+            "2026-08-03",
+            &format!(
+                "---\ndate: 2026-08-03\nday: 2\nfingerprint: 9f2c\nkind: setback\n\
+mind: opus\nposition: day 2 · 3 sessions\nsources: bank/one.md\n\
+title: Two writers, one trunk\nwritten: 2026-08-04T03:30:12Z\n---\n\n{}\n",
+                "b".repeat(crate::log::BODY_MAX_CHARS)
+            ),
+        );
+
+        let composed = root.compose();
+        // Reserving a surface wider than the budget would leave the graph
+        // nothing, so this one drops — and the journal is told.
+        assert!(!composed.text.contains("## Voyage log"), "{composed:?}");
+        assert!(composed.text.contains("### here (user)\na short body"));
+        assert_eq!(composed.trimmed.sections, ["chronological"]);
+        assert_eq!(composed.trimmed.banks_degraded, 0);
+        assert_eq!(composed.trimmed.ceiling_lines, 0);
     }
 
     #[test]
@@ -1291,6 +1455,46 @@ mod tests {
         assert!(last.starts_with("- "), "{last}");
         assert!(last.ends_with(&"d".repeat(150)), "{last}");
         assert!(composed.trimmed.ceiling_lines > 0, "{composed:?}");
+    }
+
+    #[test]
+    fn the_ceiling_cut_comes_out_of_the_graph_and_never_out_of_the_voyage_log() {
+        let root = Root::new("recall-ceiling-log");
+        // Index lines alone past the budget: the graph is at its floor and
+        // still over, which is the one place the last-resort cut runs.
+        for index in 0..200 {
+            root.memory(
+                &root.bank(),
+                &format!("user_{index:03}.md"),
+                &format!(
+                    "name: memory {index:03}\ndescription: {}\ntype: user\n",
+                    "d".repeat(150)
+                ),
+                &format!("{}\n", "b".repeat(150)),
+            );
+        }
+        voyage_log(&root, true);
+
+        let composed = root.compose();
+        let text = &composed.text;
+        assert!(text.chars().count() <= BUDGET_CHARS);
+        assert!(text.contains("## Long-term index · this directory's bank"));
+        // The log is carried whole — heading, the newest entry's prose, the
+        // line behind it — and the graph paid for it.
+        assert!(
+            text.contains(concat!(
+                "## Voyage log · the latest entries · ~/.sandman/log/\n",
+                "- day 2 · [Two writers, one trunk](2026-08-03.md) — setback · 2026-08-03\n",
+                "The trunk has two writers and no lock. Next: rebuild the scene.\n",
+                "- day 1 · [First light](2026-08-02.md) — discovery · 2026-08-02",
+            )),
+            "{text}"
+        );
+        assert!(composed.trimmed.ceiling_lines > 0, "{composed:?}");
+        assert!(
+            !composed.trimmed.sections.contains(&"chronological"),
+            "{composed:?}"
+        );
     }
 
     #[test]

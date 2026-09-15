@@ -14,10 +14,23 @@ transcripts.
 | --- | --- |
 | `dream [--now]` | route short-term → banks: 3 parallel dreams → 2-of-3 consensus → commit |
 | `forget <session>` | the privacy ending — destroy every copy; no archive, no pointer, no routing |
-| `recall` | the recall surface: ancestor-directional banks + `.recent` pointers |
+| `recall` | the recall surface: ancestor-directional banks + `.recent` pointers + the voyage log tail + the tool index |
 | `reflect` | the 24 h pass: the voyage entry, the log index, bank upkeep |
 | `remember "<body>"` | commit one memory now — the in-session path |
 | `take <session>` | archive the session by move + drop a pointer |
+
+`recall` composes four surfaces into one 9,000-character budget — the cwd's bank and its
+ancestors', `.recent` pointers, the voyage log tail, the tool index. The voyage log has a
+**reserved floor**: it is costed before anything else, and the graph and the other optional
+surfaces divide the remainder. Everything else trims cheapest-first — the tool index, then
+the pointers — and only then do banks fall back to one index line per memory, oldest
+ancestor first; a graph that reaches its floor gives back what it saved, so the trimmed
+surfaces return in reverse order if they fit. A graph still over budget at its floor loses
+index lines, the most distant ancestor's tail first and the cwd's own bank last — the cut
+falls on the graph and never on the end of the payload, because a blunt tail cut would
+take the one surface the floor exists to protect. The log leaves the payload for two
+reasons only: the log is empty, or the tail alone is wider than the whole budget, and both
+are reported as a trim.
 
 `mcp` is a seventh verb and not a memory verb: it serves recall, remember and a bank
 listing to MCP clients over stdio — the desktop app, Cowork through the bridge, Claude
@@ -258,7 +271,11 @@ mid-conversation archive had to be reconstructed out of Claude Code's own `daemo
 - Honest units — `chars=` is reported against `budget=` in the characters the budget is
   actually spent in, and `trimmed=`/`banks_degraded=`/`cut_lines=` say what it cost to
   fit, which a size alone cannot; each `recalled-bank` line carries `rendering=` — `full`
-  or `index` — naming the form its memories arrived in.
+  or `index` — naming the form its memories arrived in. `cut_lines=` counts graph index
+  lines the last-resort cut took, never characters off the payload's tail. `trimmed=`
+  names surfaces the budget dropped, so `chronological` appears there only when the log
+  itself outgrew the budget — its floor is reserved, and a payload without it is a fact
+  worth a line.
 - `mcp` journals one line per request — method, tool, bank, outcome and recall's
   counts — never a body or payload.
 - Best effort by construction — every error is swallowed, there is no result to ignore,
