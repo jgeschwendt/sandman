@@ -491,9 +491,14 @@ fn mark_dreamed(pointer: &Pointer, at: Timestamp) -> Result<()> {
 pub fn banks_for(home: &Path, cwd: Option<&str>) -> Vec<(String, String)> {
     let mut banks: Vec<(String, String)> = Vec::new();
     if let Some(cwd) = cwd.filter(|cwd| !cwd.is_empty()) {
+        // A linked worktree keys as its repo — see [`crate::project::root`].
+        let project = crate::project::root(Path::new(cwd));
         banks.push((
-            Bank::key_for(Path::new(cwd)),
-            format!("the bank for this session's working directory, {cwd} — facts that belong to this project"),
+            Bank::key_for(&project),
+            format!(
+                "the bank for this session's working directory, {} — facts that belong to this project",
+                project.display()
+            ),
         ));
     }
     let home_key = Bank::key_for(home);

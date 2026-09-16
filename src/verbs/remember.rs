@@ -25,6 +25,7 @@ pub struct Remember {
     /// The memory itself.
     pub body: String,
     /// The working directory the memory belongs to; default is the process's.
+    /// A linked worktree keys as its repo — see [`crate::project::root`].
     pub cwd: Option<PathBuf>,
     /// The one-line description; default is the body's first line.
     pub description: Option<String>,
@@ -49,7 +50,7 @@ pub fn remember(data_root: &Path, request: Remember) -> Result<CommitOutcome> {
             Some(cwd) => cwd,
             None => env::current_dir().map_err(|source| Error::io(".", source))?,
         };
-        Bank::key_for(&cwd)
+        Bank::key_for(&crate::project::root(&cwd))
     };
     let now = Timestamp::now()?;
     let commit = CommitRequest {
@@ -93,6 +94,7 @@ pub fn source_line(now: Timestamp, session_id: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{Remember, default_name, first_line, remember, source_line};
+    use crate::bank::Bank;
     use crate::error::Error;
     use crate::memory::{MemoryFile, MemoryType};
     use crate::testutil::TempDir;
@@ -173,6 +175,37 @@ mod tests {
                 .expect("source")
                 .ends_with(" · sid-42")
         );
+    }
+
+    #[test]
+    fn a_linked_worktree_commits_into_its_repos_bank() {
+        let temp = TempDir::new("remember-worktree");
+        let parent = temp.path().join("code").join("o").join("r");
+        let worktree = parent.join("main");
+        fs::create_dir_all(&worktree).expect("worktree");
+        fs::write(
+            worktree.join(".git"),
+            "gitdir: /somewhere/bare/worktrees/main\n",
+        )
+        .expect(".git file");
+
+        let outcome = remember(
+            temp.path(),
+            Remember {
+                body: "a worktree memory".to_owned(),
+                cwd: Some(worktree.clone()),
+                ..Remember::default()
+            },
+        )
+        .expect("remember");
+
+        let memories = temp.path().join("memories");
+        assert_eq!(
+            outcome.path.parent(),
+            Some(memories.join(Bank::key_for(&parent)).as_path())
+        );
+        assert!(!memories.join(Bank::key_for(&worktree)).exists());
+        assert_eq!(fs::read_dir(&memories).expect("memories dir").count(), 1);
     }
 
     #[test]

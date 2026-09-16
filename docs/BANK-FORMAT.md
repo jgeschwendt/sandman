@@ -10,6 +10,9 @@ was measured against the production banks — 232 memory files across 33 banks (
 One bank per working directory: the cwd with every non-alphanumeric character replaced
 by `-` (same encoding Claude Code uses for `~/.claude/projects/`).
 `/Users/you/.code/project` → `-Users-you--code-project`.
+A linked git worktree (a `.git` file pointing into `worktrees/`) keys as its parent
+directory, so every branch of one repo shares one bank:
+`~/.grove/code/o/r/main` → `-Users-you--grove-code-o-r`.
 
 ## Memory file
 

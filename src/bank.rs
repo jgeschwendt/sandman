@@ -50,6 +50,9 @@ impl Bank {
     ///
     /// The same encoding Claude Code uses for `~/.claude/projects/`, so a
     /// transcript directory and its bank carry the same name.
+    ///
+    /// This is the encoding alone: which directory a cwd belongs to — a
+    /// linked worktree keys as its repo — is [`crate::project::root`]'s.
     #[must_use]
     pub fn key_for(cwd: &Path) -> String {
         cwd.as_os_str()

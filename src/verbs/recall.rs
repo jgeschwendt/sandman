@@ -113,6 +113,9 @@ pub fn recall(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> Stri
 /// Compose, and report the shape of what was composed.
 #[must_use]
 pub fn compose(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> Recalled {
+    // A linked worktree recalls as its repo: the project bank is the cwd's
+    // own bank, not an ancestor. See [`crate::project::root`].
+    let cwd = &crate::project::root(cwd);
     let recent = recent_sessions(data_root, now);
     let sections = Sections {
         chronological: chronological(data_root, home),
@@ -1041,6 +1044,49 @@ mod tests {
         assert!(text.contains("- home (project) — the home bank"), "{text}");
         assert!(!text.contains("the home body"));
         assert!(!text.contains("another directory"));
+    }
+
+    #[test]
+    fn a_linked_worktree_recalls_its_repos_bank_as_its_own() {
+        let root = Root::new("recall-worktree");
+        let repo = root.home.join("code").join("o").join("r");
+        let worktree = repo.join("main");
+        fs::create_dir_all(&worktree).expect("worktree");
+        fs::write(
+            worktree.join(".git"),
+            "gitdir: /somewhere/bare/worktrees/main\n",
+        )
+        .expect(".git file");
+        root.memory(
+            &Bank::key_for(&repo),
+            "user_repo.md",
+            "name: repo\ndescription: the repo bank\ntype: user\n",
+            "the repo body\n",
+        );
+
+        let recalled = compose(
+            &root.path,
+            &root.home,
+            &worktree,
+            Timestamp::from_unix_seconds(NOW),
+        );
+        assert_eq!(
+            recalled
+                .banks
+                .iter()
+                .map(|bank| bank.key.clone())
+                .collect::<Vec<_>>(),
+            [Bank::key_for(&repo)]
+        );
+        assert!(
+            recalled.text.contains(&format!(
+                "## Long-term · this directory's bank · ~/.sandman/memories/{}/",
+                Bank::key_for(&repo)
+            )),
+            "{}",
+            recalled.text
+        );
+        assert!(recalled.text.contains("### repo (user)\nthe repo body"));
     }
 
     #[test]

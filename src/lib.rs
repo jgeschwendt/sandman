@@ -23,6 +23,7 @@ pub mod log;
 pub mod memory;
 pub mod mind;
 pub mod paths;
+pub mod project;
 pub mod slug;
 pub mod time;
 pub mod transcript;
