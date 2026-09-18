@@ -27,6 +27,6 @@ jobs:
       # `stele build` in CI: build is the sole writer of .stele/graph.lock, so
       # running it here would overwrite the committed lock and make check's
       # byte-compare trivially pass, defeating the stale-lock gate.
-      - run: curl -fsSL https://raw.githubusercontent.com/jgeschwendt/stele/main/scripts/install.sh | bash -s v0.2.0
+      - run: curl -fsSL https://raw.githubusercontent.com/jgeschwendt/stele/main/scripts/install.sh | bash -s v0.3.0
       - run: ~/.local/bin/stele check
       - run: ~/.local/bin/stele emit --check
