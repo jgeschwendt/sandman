@@ -9,7 +9,7 @@ invariants:
       / `dream::pending`, which count only undreamed pointers; nothing counts `.recent/*.json`
       off disk for itself. Take's dream trigger drifted from the run this way: spent pointers
       inflated the depth, so every ending past the tenth spawned a dream with nothing to route
-    anchor: lm:queue-definition
+    anchor: ※ queue-definition
 hazards:
   - claim: >-
       a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code
@@ -18,7 +18,7 @@ hazards:
       recreates the file, the next ending takes that live fragment too, and
       `.recent/<sid>.json` is overwritten to name the stub while the whole conversation
       sits orphaned in the archive
-    anchor: lm:resume-is-not-an-ending
+    anchor: ※ resume-is-not-an-ending
 ```
 
 ## Map
@@ -60,5 +60,5 @@ environment variables — `unsafe_code = "forbid"` — so `dream::Options` and
 `from_env()` in production, a stub script in a test. No test in the suite runs
 the real `claude`.
 
-<!-- stele:begin router -->
-<!-- stele:end -->
+<!-- @stele -->
+<!-- @end -->

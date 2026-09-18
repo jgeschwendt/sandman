@@ -371,7 +371,7 @@ fn take_run(
         // and the pointer ends up naming a stub while the real conversation
         // sits orphaned in the archive (observed across twelve sessions on
         // 2026-08-25). A beginning is not an ending; decline it.
-        // stele:landmark resume-is-not-an-ending
+        // ※ resume-is-not-an-ending
         if ending.is_resume() {
             note(
                 journal,

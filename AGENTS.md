@@ -8,7 +8,7 @@ commands:
   test: cargo test
 invariants:
   - claim: single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen
-    anchor: lm:format-authority
+    anchor: ※ format-authority
   - claim: one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it
     anchor: README.md#sandman
 ```
@@ -29,11 +29,11 @@ The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 - Never call a model from a test — `$SANDMAN_CLAUDE_BIN` (and the `Options` structs it feeds) is the seam, and the stubs are shell scripts in a temp dir.
 - Std only — `[dependencies]` is empty and stays that way until a verb needs otherwise.
 
-<!-- stele:begin router -->
+<!-- @stele -->
 
 ## Hazards (1 active)
 
-- ⚠ `src`: a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive (→ lm:resume-is-not-an-ending)
+- ⚠ `src`: a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive (→ ※ resume-is-not-an-ending)
 
 ## Map
 
@@ -50,4 +50,4 @@ All invariants: `.stele/index/invariants.md` · all hazards: `.stele/index/hazar
 
 `stele` CLI available → `stele root | unfold <id> | invariants --touching <path> | hazards | nodes --kind <k>`. MCP: `stele serve`.
 No engine → everything above is complete; nested AGENTS.md files carry the detail (nearest file wins).
-<!-- stele:end -->
+<!-- @end -->

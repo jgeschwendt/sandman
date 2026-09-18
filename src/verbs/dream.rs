@@ -386,7 +386,7 @@ fn by_age(left: &Pointer, right: &Pointer) -> Ordering {
 /// would actually do work on: a pointer already stamped `dreamed` is spent,
 /// not queued. Counting those too made every ending past the tenth look like
 /// a full queue and spawn a dream over nothing (2026-08-25).
-// stele:landmark queue-definition
+// ※ queue-definition
 pub fn depth(data_root: &Path) -> Result<usize> {
     Ok(pending(data_root)?.len())
 }

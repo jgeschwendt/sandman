@@ -9,7 +9,7 @@
 //! banks: those files are the regression suite, and parse → render is
 //! byte-identical for every one of them.
 
-// stele:landmark format-authority
+// ※ format-authority
 pub mod commit;
 
 pub mod bank;

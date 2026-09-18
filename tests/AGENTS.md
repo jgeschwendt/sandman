@@ -14,5 +14,5 @@ purpose: integration tests — `cli.rs` and `mcp.rs` drive the built binary (hoo
 - Unit tests live beside their module in `src/`; only cross-process and
   live-machine coverage belongs here.
 
-<!-- stele:begin router -->
-<!-- stele:end -->
+<!-- @stele -->
+<!-- @end -->

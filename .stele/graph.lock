@@ -22,7 +22,7 @@
       "budget": null,
       "claims": [
         {
-          "anchor": "lm:format-authority",
+          "anchor": "※ format-authority",
           "enforced_by": null,
           "id": "format-authority",
           "kind": "invariant",
@@ -30,7 +30,7 @@
           "text": "single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen",
           "verified": {
             "digest": "08ffd34819365da145ab6536764117600151de2829cd6bf0649d21b860fe5c54",
-            "sha": "76c2a461604700074e896da8b0d4626e2df16d03"
+            "sha": "ac7cac54593926dd1dda7222cd506e7f951c9bcd"
           }
         },
         {
@@ -42,7 +42,7 @@
           "text": "one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it",
           "verified": {
             "digest": null,
-            "sha": "76c2a461604700074e896da8b0d4626e2df16d03"
+            "sha": "ac7cac54593926dd1dda7222cd506e7f951c9bcd"
           }
         }
       ],
@@ -70,7 +70,7 @@
       "budget": null,
       "claims": [
         {
-          "anchor": "lm:queue-definition",
+          "anchor": "※ queue-definition",
           "enforced_by": null,
           "id": "queue-definition",
           "kind": "invariant",
@@ -78,11 +78,11 @@
           "text": "dream owns what \"queued\" means — every reader of the queue goes through `dream::depth` / `dream::pending`, which count only undreamed pointers; nothing counts `.recent/*.json` off disk for itself. Take's dream trigger drifted from the run this way: spent pointers inflated the depth, so every ending past the tenth spawned a dream with nothing to route",
           "verified": {
             "digest": "4eafe897ac57350cea644152f5814d6f3aa2a2ded413528fb02e5b870b06d7f1",
-            "sha": "76c2a461604700074e896da8b0d4626e2df16d03"
+            "sha": "ac7cac54593926dd1dda7222cd506e7f951c9bcd"
           }
         },
         {
-          "anchor": "lm:resume-is-not-an-ending",
+          "anchor": "※ resume-is-not-an-ending",
           "enforced_by": null,
           "id": "resume-is-not-an-ending",
           "kind": "hazard",
@@ -90,7 +90,7 @@
           "text": "a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive",
           "verified": {
             "digest": "e684890377098f3d13c736f070f75c9e5876a966fbb8d08456b43942bdeb6bcb",
-            "sha": "76c2a461604700074e896da8b0d4626e2df16d03"
+            "sha": "ac7cac54593926dd1dda7222cd506e7f951c9bcd"
           }
         }
       ],
@@ -126,5 +126,5 @@
       "purpose": "integration tests — `cli.rs` and `mcp.rs` drive the built binary (hooks and flags; a scripted MCP stdin) against a temp $HOME/$SANDMAN_ROOT; `real_banks.rs` reads the live banks (`--ignored`)"
     }
   },
-  "version": 1
+  "version": 2
 }
