@@ -174,12 +174,18 @@ impl Machine {
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn sandman");
-        child
+        // A hook that declines (SANDMAN_NO_TAKE) exits before it reads its
+        // payload; the pipe closing under this write is that behavior, not a
+        // failure of the harness.
+        if let Err(error) = child
             .stdin
             .as_mut()
             .expect("stdin")
             .write_all(stdin.as_bytes())
-            .expect("write stdin");
+            && error.kind() != std::io::ErrorKind::BrokenPipe
+        {
+            panic!("write stdin: {error}");
+        }
         child.wait_with_output().expect("wait for sandman")
     }
 }
