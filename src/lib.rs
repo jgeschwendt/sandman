@@ -16,6 +16,7 @@ pub mod bank;
 pub mod cli;
 pub mod consensus;
 pub mod error;
+pub mod grove;
 pub mod hook;
 pub mod journal;
 pub mod lock;

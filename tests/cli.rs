@@ -214,7 +214,14 @@ fn the_usage_screen_lists_the_verbs() {
     let output = machine.run(&["--help"]);
     assert_eq!(code(&output), 0);
     for verb in [
-        "dream", "forget", "recall", "reflect", "remember", "take", "version",
+        "dream",
+        "forget",
+        "recall",
+        "reflect",
+        "remember",
+        "take",
+        "trail",
+        "version",
     ] {
         assert!(stdout(&output).contains(verb), "usage omits {verb}");
     }

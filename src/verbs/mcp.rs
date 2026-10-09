@@ -487,6 +487,7 @@ fn error_kind(error: &Error) -> &'static str {
     match error {
         Error::Clock => "Clock",
         Error::CrossDevice { .. } => "CrossDevice",
+        Error::Git(_) => "Git",
         Error::InvalidInput { .. } => "InvalidInput",
         Error::Io { .. } => "Io",
         Error::Json { .. } => "Json",

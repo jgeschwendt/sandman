@@ -11,3 +11,4 @@ pub mod recall;
 pub mod reflect;
 pub mod remember;
 pub mod take;
+pub mod trail;

@@ -17,13 +17,14 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use crate::error::Error;
+use crate::grove;
 use crate::hook;
 use crate::journal;
 use crate::memory::MemoryType;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
-use crate::verbs::{dream, forget, mcp, recall, reflect, remember, take};
+use crate::verbs::{dream, forget, mcp, recall, reflect, remember, take, trail};
 use crate::version::VERSION;
 
 /// A failure that ran a verb badly.
@@ -126,6 +127,22 @@ usage: sandman <verb> [args]
       verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
       Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
 
+  trail append --kind K [--shift S] [--repo R] [--branch B] [--sha SHA]
+               [--rationale TEXT] [--cost USD] [--model M] [--parent ID]
+               [--ref X]... [--json '<object>']
+  trail log [--since yyyy-mm-dd] [--kind K] [--shift S] [--repo R] [--json]
+  trail show <id>
+  trail revoke <id> --reason TEXT
+  trail today
+  trail trailers --shift S --event E
+      The append-only event log, one JSONL file per UTC day under
+      <root>/trail/<yyyy>/<mm>/<dd>.jsonl. append prints the new id; log
+      prints newest last; show adds the event's descendants and the commits
+      carrying it; revoke appends a revoke event (once — a second is a note);
+      today prints today's file; trailers prints the Shift:/Event: lines every
+      machine commit carries. Kinds: breath change correction decay guard
+      promote reconcile revoke shift.handoff shift.start.
+
   version
       The crate version and the commit it was built from — the same stamp
       every journal line carries as v=, so a line can be read against the
@@ -189,6 +206,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
         "take" => take_verb(rest),
+        "trail" => trail_verb(rest),
         "version" => version_verb(rest),
         other => Err(Failure::Usage(format!("unknown verb `{other}`"))),
     }
@@ -965,6 +983,274 @@ fn mcp_verb(args: &[String]) -> Result<(), Failure> {
     // no other writer to interleave with on either stream.
     mcp::serve(&ctx, io::stdin().lock(), io::stdout().lock())
         .map_err(|source| Failure::Error(Error::io("<stdout>", source)))
+}
+
+/// `trail <subcommand> …`.
+fn trail_verb(args: &[String]) -> Result<(), Failure> {
+    let Some(sub) = args.first() else {
+        return Err(Failure::Usage("trail needs a subcommand".to_owned()));
+    };
+    let rest = &args[1..];
+    match sub.as_str() {
+        "-h" | "--help" => help(),
+        "append" => trail_append(rest),
+        "log" => trail_log(rest),
+        "revoke" => trail_revoke(rest),
+        "show" => trail_show(rest),
+        "today" => {
+            if let Some(extra) = rest.first() {
+                return Err(Failure::Usage(format!(
+                    "trail today takes no arguments, got `{extra}`"
+                )));
+            }
+            println!("{}", trail::today(&paths::data_root()?)?.display());
+            Ok(())
+        }
+        "trailers" => trail_trailers(rest),
+        other => Err(Failure::Usage(format!(
+            "unknown trail subcommand `{other}`"
+        ))),
+    }
+}
+
+/// `trail append --kind K [flags] | --json '<object>'`.
+fn trail_append(args: &[String]) -> Result<(), Failure> {
+    let mut draft = trail::Draft::default();
+    let mut flags: Vec<(&str, String)> = Vec::new();
+    let mut cursor = Cursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg {
+            "-h" | "--help" => return help(),
+            "--json" => {
+                let value = cursor.value("--json")?;
+                draft = trail::Draft::from_json(&value)
+                    .map_err(|error| Failure::Usage(format!("--json: {error}")))?;
+            }
+            "--branch" | "--cost" | "--kind" | "--model" | "--parent" | "--rationale" | "--ref"
+            | "--repo" | "--sha" | "--shift" => flags.push((arg, cursor.value(arg)?)),
+            option if option.starts_with("--") => return Err(unknown_option(option)),
+            positional => {
+                return Err(Failure::Usage(format!(
+                    "trail append takes no positional arguments, got `{positional}`"
+                )));
+            }
+        }
+    }
+    // Flags land after `--json`, so a flag overrides the object's key.
+    for (flag, value) in flags {
+        match flag {
+            "--branch" => draft.branch = Some(value),
+            "--cost" => {
+                draft.cost_usd = Some(
+                    value
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|cost| cost.is_finite() && *cost >= 0.0)
+                        .ok_or_else(|| {
+                            Failure::Usage(format!("--cost wants USD, got `{value}`"))
+                        })?,
+                );
+            }
+            "--kind" => draft.kind = value,
+            "--model" => draft.model = Some(value),
+            "--parent" => draft.parent = Some(value),
+            "--rationale" => draft.rationale = Some(value),
+            "--ref" => draft.refs.push(value),
+            "--repo" => draft.repo = Some(value),
+            "--sha" => draft.sha = Some(value),
+            _ => draft.shift = Some(value),
+        }
+    }
+    if draft.kind.is_empty() {
+        return Err(Failure::Usage("trail append needs --kind".to_owned()));
+    }
+    if !trail::is_kind(&draft.kind) {
+        return Err(Failure::Usage(format!("unknown kind `{}`", draft.kind)));
+    }
+    let data_root = paths::data_root()?;
+    let event = trail::append(&data_root, draft)?;
+    note(
+        Some(&data_root),
+        "trail",
+        &format!("appended id={} kind={}", event.id, event.draft.kind),
+    );
+    println!("{}", event.id);
+    Ok(())
+}
+
+/// `trail log [--since D] [--kind K] [--shift S] [--repo R] [--json]`.
+fn trail_log(args: &[String]) -> Result<(), Failure> {
+    let (mut since, mut kind, mut shift, mut repo, mut raw) = (None, None, None, None, false);
+    let mut cursor = Cursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg {
+            "-h" | "--help" => return help(),
+            "--json" => raw = true,
+            "--kind" => kind = Some(cursor.value("--kind")?),
+            "--repo" => repo = Some(cursor.value("--repo")?),
+            "--shift" => shift = Some(cursor.value("--shift")?),
+            "--since" => {
+                let value = cursor.value("--since")?;
+                if calendar_day(&value).is_none() {
+                    return Err(Failure::Usage(format!(
+                        "--since wants yyyy-mm-dd, got `{value}`"
+                    )));
+                }
+                since = Some(value);
+            }
+            option if option.starts_with("--") => return Err(unknown_option(option)),
+            positional => {
+                return Err(Failure::Usage(format!(
+                    "trail log takes no positional arguments, got `{positional}`"
+                )));
+            }
+        }
+    }
+    let entries = trail::read(&paths::data_root()?, since.as_deref())?;
+    let matches = |wanted: &Option<String>, have: Option<&str>| {
+        wanted.as_deref().is_none_or(|wanted| have == Some(wanted))
+    };
+    for entry in &entries {
+        let draft = &entry.event.draft;
+        if !matches(&kind, Some(&draft.kind))
+            || !matches(&shift, draft.shift.as_deref())
+            || !matches(&repo, draft.repo.as_deref())
+        {
+            continue;
+        }
+        if raw {
+            println!("{}", entry.raw);
+        } else {
+            println!("{}", entry.event.summary());
+        }
+    }
+    Ok(())
+}
+
+/// `trail show <id>`.
+fn trail_show(args: &[String]) -> Result<(), Failure> {
+    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+        return help();
+    }
+    let id = one_id(args, "trail show")?;
+    let entries = trail::read(&paths::data_root()?, None)?;
+    let event = trail::find(&entries, &id).ok_or_else(|| Error::not_found("event", id.clone()))?;
+    println!("{}", event.pretty());
+    let descendants = trail::descendants(&entries, &id);
+    println!("\ndescendants:");
+    if descendants.is_empty() {
+        println!("  -");
+    }
+    for descendant in &descendants {
+        println!("  {}", descendant.summary());
+    }
+    let revocations = trail::revocations(&entries, &id);
+    if !revocations.is_empty() {
+        println!("\nrevoked:");
+        for revocation in revocations {
+            println!("  {}", revocation.summary());
+        }
+    }
+    let mut events: std::collections::BTreeSet<String> =
+        descendants.iter().map(|event| event.id.clone()).collect();
+    events.insert(id);
+    println!("\ncommits:");
+    let repos = grove::repos_with_hits(&grove_roots()?, &events);
+    if repos.is_empty() {
+        println!("  -");
+    }
+    for repo in repos {
+        for hit in repo.hits {
+            println!("  {}@{}  {}", repo.label, hit.sha, hit.event);
+        }
+    }
+    Ok(())
+}
+
+/// `trail revoke <id> --reason TEXT`.
+fn trail_revoke(args: &[String]) -> Result<(), Failure> {
+    let mut id: Option<String> = None;
+    let mut reason: Option<String> = None;
+    let mut cursor = Cursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg {
+            "-h" | "--help" => return help(),
+            "--reason" => reason = Some(cursor.value("--reason")?),
+            option if option.starts_with("--") => return Err(unknown_option(option)),
+            positional => {
+                if id.is_some() {
+                    return Err(Failure::Usage("trail revoke takes one id".to_owned()));
+                }
+                id = Some(positional.to_owned());
+            }
+        }
+    }
+    let id = id.ok_or_else(|| Failure::Usage("trail revoke needs an id".to_owned()))?;
+    let reason = reason
+        .filter(|reason| !reason.trim().is_empty())
+        .ok_or_else(|| Failure::Usage("trail revoke needs --reason".to_owned()))?;
+    let data_root = paths::data_root()?;
+    match trail::revoke(&data_root, &id, &reason)? {
+        trail::Revoked::Already(earlier) => {
+            eprintln!("{id} is already revoked by {}", earlier.id);
+            println!("{}", earlier.id);
+        }
+        trail::Revoked::Now(event) => {
+            note(
+                Some(&data_root),
+                "trail",
+                &format!("revoked id={id} by={}", event.id),
+            );
+            println!("{}", event.id);
+        }
+    }
+    Ok(())
+}
+
+/// `trail trailers --shift S --event E`.
+fn trail_trailers(args: &[String]) -> Result<(), Failure> {
+    let (mut shift, mut event) = (None, None);
+    let mut cursor = Cursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg {
+            "-h" | "--help" => return help(),
+            "--event" => event = Some(cursor.value("--event")?),
+            "--shift" => shift = Some(cursor.value("--shift")?),
+            option if option.starts_with("--") => return Err(unknown_option(option)),
+            positional => {
+                return Err(Failure::Usage(format!(
+                    "trail trailers takes no positional arguments, got `{positional}`"
+                )));
+            }
+        }
+    }
+    let (Some(shift), Some(event)) = (shift, event) else {
+        return Err(Failure::Usage(
+            "trail trailers needs --shift and --event".to_owned(),
+        ));
+    };
+    println!("{}", trail::trailers(&shift, &event));
+    Ok(())
+}
+
+/// The single id a subcommand takes.
+fn one_id(args: &[String], what: &str) -> Result<String, Failure> {
+    match args {
+        [id] if !id.starts_with("--") => Ok(id.clone()),
+        [option, ..] if option.starts_with("--") => Err(unknown_option(option)),
+        _ => Err(Failure::Usage(format!("{what} takes one id"))),
+    }
+}
+
+/// The repos `trail show` reaches, resolved from `crate::paths`.
+fn grove_roots() -> Result<grove::Roots, Failure> {
+    let grove_code = paths::grove_code()?;
+    Ok(grove::Roots {
+        extras: paths::reconcile_extras()?,
+        home: paths::home()?,
+        manifest: paths::grove_manifest(&grove_code),
+        grove_code,
+    })
 }
 
 /// `version`.

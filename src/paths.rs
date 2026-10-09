@@ -40,6 +40,13 @@ pub const LOG_DIR_NAME: &str = "log";
 pub const TRACE_DIR_NAME: &str = ".trace";
 /// Kept dream mind transcripts live under `<root>/.dream/`.
 pub const DREAM_DIR_NAME: &str = ".dream";
+/// The trail — one JSONL file of events per UTC day.
+pub const TRAIL_DIR_NAME: &str = "trail";
+/// The environment variable that moves the grove's code directory.
+pub const GROVE_CODE_ENV: &str = "SANDMAN_GROVE_CODE";
+/// The environment variable that replaces reconcile's extra repos,
+/// colon-separated.
+pub const RECONCILE_EXTRA_ENV: &str = "SANDMAN_RECONCILE_EXTRA";
 /// Takes a live background job deferred — one file per session, cleared when
 /// the take finally happens.
 pub const PENDING_TAKES_DIR_NAME: &str = "pending-takes";
@@ -150,6 +157,53 @@ pub fn archive_day_dir(data_root: &Path, year: i64, month: i64, day: i64) -> Pat
         .join(format!("{day:02}"))
 }
 
+/// `<root>/trail` — the event log, versioned content like `log/`.
+#[must_use]
+pub fn trail_dir(data_root: &Path) -> PathBuf {
+    data_root.join(TRAIL_DIR_NAME)
+}
+
+/// `<root>/trail/<yyyy>/<mm>/<dd>.jsonl` — the UTC day `at` falls on.
+#[must_use]
+pub fn trail_day(data_root: &Path, at: crate::time::Timestamp) -> PathBuf {
+    let (year, month, day, ..) = at.parts();
+    trail_dir(data_root)
+        .join(format!("{year:04}"))
+        .join(format!("{month:02}"))
+        .join(format!("{day:02}.jsonl"))
+}
+
+/// The grove's code directory: `$SANDMAN_GROVE_CODE`, else `~/.grove/code`.
+/// Its checkouts sit at `<code>/<owner>/<repo>/<branch>/`.
+pub fn grove_code() -> Result<PathBuf> {
+    if let Some(code) = env::var_os(GROVE_CODE_ENV).filter(|code| !code.is_empty()) {
+        return Ok(PathBuf::from(code));
+    }
+    Ok(home()?.join(".grove").join("code"))
+}
+
+/// The grove manifest, beside the code directory: `<code>/../manifest.toml`.
+#[must_use]
+pub fn grove_manifest(grove_code: &Path) -> PathBuf {
+    grove_code
+        .parent()
+        .unwrap_or(grove_code)
+        .join("manifest.toml")
+}
+
+/// The repos reconcile reaches beyond the grove: `$SANDMAN_RECONCILE_EXTRA`
+/// (colon-separated; set and empty means none), else `~`, `~/.routines` and
+/// the data root.
+pub fn reconcile_extras() -> Result<Vec<PathBuf>> {
+    if let Some(extra) = env::var_os(RECONCILE_EXTRA_ENV) {
+        return Ok(env::split_paths(&extra)
+            .filter(|path| !path.as_os_str().is_empty())
+            .collect());
+    }
+    let home = home()?;
+    Ok(vec![home.clone(), home.join(".routines"), data_root()?])
+}
+
 /// A path with `$HOME` folded back to `~`, for prose that a human reads.
 #[must_use]
 pub fn tildify(path: &Path, home: &Path) -> String {
@@ -163,7 +217,8 @@ pub fn tildify(path: &Path, home: &Path) -> String {
 mod tests {
     use super::{
         archive_claude_dir, archive_day_dir, claude_jobs_dir, claude_projects_dir, dream_dir,
-        log_dir, pending_take, pending_takes_dir, recent_dir, run_log, tildify, trace_dir,
+        grove_manifest, log_dir, pending_take, pending_takes_dir, recent_dir, run_log, tildify,
+        trace_dir, trail_day, trail_dir,
     };
     use crate::time::Timestamp;
     use std::path::Path;
@@ -180,6 +235,15 @@ mod tests {
         assert_eq!(dream_dir(root), Path::new("/data/.dream"));
         assert_eq!(log_dir(root), Path::new("/data/log"));
         assert_eq!(trace_dir(root), Path::new("/data/.trace"));
+        assert_eq!(trail_dir(root), Path::new("/data/trail"));
+        assert_eq!(
+            trail_day(root, Timestamp::from_unix_seconds(1_786_018_297)),
+            Path::new("/data/trail/2026/08/06.jsonl")
+        );
+        assert_eq!(
+            grove_manifest(Path::new("/Users/you/.grove/code")),
+            Path::new("/Users/you/.grove/manifest.toml")
+        );
         assert_eq!(pending_takes_dir(root), Path::new("/data/pending-takes"));
         assert_eq!(
             pending_take(root, "aaaabbbb-cccc"),

@@ -25,6 +25,8 @@ pub enum Error {
         /// Where it was headed.
         to: PathBuf,
     },
+    /// A git command exited non-zero; the command, where, and its stderr.
+    Git(String),
     /// A filesystem operation failed on `path`.
     Io {
         /// The path the operation was attempted on.
@@ -154,7 +156,7 @@ impl fmt::Display for Error {
             }
             Self::NotFound { what, value } => write!(f, "no {what} for {value}"),
             Self::Parse { path, source } => write!(f, "{}: {source}", path.display()),
-            Self::Refused { message } => write!(f, "{message}"),
+            Self::Git(message) | Self::Refused { message } => write!(f, "{message}"),
             Self::ReplacesMissing { path } => {
                 write!(f, "replaces target not in bank: {}", path.display())
             }
