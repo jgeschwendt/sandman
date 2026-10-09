@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Perpetual Shift</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#111}
+a{color:#111}a:hover{color:#000}
+</style>
+</helmet>
+<div style="position: relative; width: 1600px; height: 900px; box-sizing: border-box; background: #ffffff; overflow: hidden">
+
+<div style="position: absolute; left: 64px; top: 48px; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: #555">sandman · docs/plan.md · plate</div>
+<div style="position: absolute; left: 64px; top: 72px; font-size: 40px; font-weight: 600; letter-spacing: -0.01em">Perpetual Shift</div>
+<div style="position: absolute; left: 64px; top: 126px; font-size: 16px; color: #444; max-width: 760px; line-height: 1.4">Every repo under jgeschwendt gets better in back-to-back five-hour shifts. Every decision leaves an event. Revoke an event and the machine reconciles.</div>
+
+<!-- energy sources -->
+<div style="position: absolute; left: 64px; top: 220px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #555">Energy</div>
+<div style="position: absolute; left: 64px; top: 244px; width: 220px; display: flex; flex-direction: column; gap: 10px">
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 10px 14px; font-size: 15px; background: #fff">Sessions · transcripts, traces</div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 10px 14px; font-size: 15px; background: #fff">Corrections · live, in the turn</div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 10px 14px; font-size: 15px; background: #fff">Outcomes · CI, threads, releases</div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 10px 14px; font-size: 15px; background: #fff">Breath · ideas from outside</div>
+</div>
+
+<!-- arrow energy -> shift -->
+<div style="position: absolute; left: 290px; top: 343px; width: 70px; height: 2px; background: #111"></div>
+<div style="position: absolute; left: 354px; top: 338px; width: 0; height: 0; border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 10px solid #111"></div>
+
+<!-- shift -->
+<div style="position: absolute; left: 366px; top: 244px; width: 250px; height: 200px; box-sizing: border-box; border: 2px solid #111; border-radius: 14px; padding: 18px 20px; background: #fff">
+  <div style="font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #555">1 · Shift</div>
+  <div style="font-size: 24px; font-weight: 600; margin-top: 4px">brief → work → handoff</div>
+  <div style="font-size: 14px; color: #444; margin-top: 10px; line-height: 1.45">Five hours, back to back. The day's giga skill on the least-recently-shifted repo, in a <span style="font-family: 'IBM Plex Mono', monospace">shift/</span> worktree.</div>
+</div>
+
+<!-- arrow shift -> trail -->
+<div style="position: absolute; left: 622px; top: 343px; width: 70px; height: 2px; background: #111"></div>
+<div style="position: absolute; left: 686px; top: 338px; width: 0; height: 0; border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 10px solid #111"></div>
+
+<!-- trail -->
+<div style="position: absolute; left: 698px; top: 244px; width: 250px; height: 200px; box-sizing: border-box; border: 2px solid #111; border-radius: 14px; padding: 18px 20px; background: #111; color: #fff">
+  <div style="font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #bbb">2 · Trail · the core</div>
+  <div style="font-size: 24px; font-weight: 600; margin-top: 4px">events, by shift</div>
+  <div style="font-size: 14px; color: #ddd; margin-top: 10px; line-height: 1.45">Append-only JSONL. Every commit carries <span style="font-family: 'IBM Plex Mono', monospace">Shift:</span> and <span style="font-family: 'IBM Plex Mono', monospace">Event:</span> trailers. Revoke one → reconcile reverts downstream.</div>
+</div>
+
+<!-- arrow trail -> score -->
+<div style="position: absolute; left: 954px; top: 343px; width: 70px; height: 2px; background: #111"></div>
+<div style="position: absolute; left: 1018px; top: 338px; width: 0; height: 0; border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 10px solid #111"></div>
+
+<!-- score -->
+<div style="position: absolute; left: 1030px; top: 244px; width: 230px; height: 200px; box-sizing: border-box; border: 2px solid #111; border-radius: 14px; padding: 18px 20px; background: #fff">
+  <div style="font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #555">3 · Score</div>
+  <div style="font-size: 24px; font-weight: 600; margin-top: 4px">did it work?</div>
+  <div style="font-size: 14px; color: #444; margin-top: 10px; line-height: 1.45">Correction recurrence, bearing rate, promotion precision, repo coverage, cost per shift.</div>
+</div>
+
+<!-- arrow score -> compile -->
+<div style="position: absolute; left: 1266px; top: 343px; width: 50px; height: 2px; background: #111"></div>
+<div style="position: absolute; left: 1310px; top: 338px; width: 0; height: 0; border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 10px solid #111"></div>
+
+<!-- compile -->
+<div style="position: absolute; left: 1322px; top: 244px; width: 214px; height: 200px; box-sizing: border-box; border: 2px solid #111; border-radius: 14px; padding: 18px 20px; background: #fff">
+  <div style="font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #555">4 · Compile</div>
+  <div style="font-size: 24px; font-weight: 600; margin-top: 4px">the next prompt</div>
+  <div style="font-size: 14px; color: #444; margin-top: 10px; line-height: 1.45">Promote, decay, guard. Bearing-ranked under a budget. Its own prompts are nodes it rewrites on Sunday.</div>
+</div>
+
+<!-- return loop compile -> shift -->
+<div style="position: absolute; left: 1428px; top: 444px; width: 2px; height: 40px; background: #111"></div>
+<div style="position: absolute; left: 491px; top: 484px; width: 939px; height: 2px; background: #111"></div>
+<div style="position: absolute; left: 491px; top: 456px; width: 2px; height: 30px; background: #111"></div>
+<div style="position: absolute; left: 486px; top: 446px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid #111"></div>
+<div style="position: absolute; left: 900px; top: 492px; font-size: 12px; color: #555; letter-spacing: 0.08em">the compiled prompt opens the next shift · never stops</div>
+
+<!-- weekly rhythm -->
+<div style="position: absolute; left: 64px; top: 548px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #555">Weekly rhythm · America/New_York · four to five shifts a day</div>
+<div style="position: absolute; left: 64px; top: 574px; width: 1472px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px">
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 12px 14px; background: #fff"><div style="font-size: 13px; color: #555">Mon</div><div style="font-size: 18px; font-weight: 600">Refactor</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #444; margin-top: 6px">/gigarefine</div></div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 12px 14px; background: #fff"><div style="font-size: 13px; color: #555">Tue</div><div style="font-size: 18px; font-weight: 600">Hunt</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #444; margin-top: 6px">/gigasweep → /gigadebug</div></div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 12px 14px; background: #fff"><div style="font-size: 13px; color: #555">Wed</div><div style="font-size: 18px; font-weight: 600">Breathe</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #444; margin-top: 6px">/gigaresearch</div></div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 12px 14px; background: #fff"><div style="font-size: 13px; color: #555">Thu</div><div style="font-size: 18px; font-weight: 600">Redesign</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #444; margin-top: 6px">/gigaredesign → /execute-plan</div></div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 12px 14px; background: #fff"><div style="font-size: 13px; color: #555">Fri</div><div style="font-size: 18px; font-weight: 600">Ship</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #444; margin-top: 6px">/gigareview · releases</div></div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 12px 14px; background: #fff"><div style="font-size: 13px; color: #555">Sat</div><div style="font-size: 18px; font-weight: 600">Tend</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #444; margin-top: 6px">/tighten · dream-pass</div></div>
+  <div style="border: 1.5px solid #111; border-radius: 10px; padding: 12px 14px; background: #111; color: #fff"><div style="font-size: 13px; color: #bbb">Sun</div><div style="font-size: 18px; font-weight: 600">Reflect</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #ddd; margin-top: 6px">self-pass · score · voyage</div></div>
+</div>
+
+<!-- mod band -->
+<div style="position: absolute; left: 64px; top: 712px; width: 1472px; box-sizing: border-box; border: 1.5px dashed #111; border-radius: 12px; padding: 14px 20px; display: flex; gap: 32px; align-items: baseline; background: #fff">
+  <div style="font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #555; white-space: nowrap">Mod · runs inside every session, shifts included</div>
+  <div style="font-size: 15px"><span style="font-weight: 600">Guards</span> on tool calls · <span style="font-family: 'IBM Plex Mono', monospace">pkill -f</span>, <span style="font-family: 'IBM Plex Mono', monospace">checkout --</span>, <span style="font-family: 'IBM Plex Mono', monospace">.yml</span>, unpinned model</div>
+  <div style="font-size: 15px"><span style="font-weight: 600">Corrections</span> captured in the turn</div>
+  <div style="font-size: 15px"><span style="font-weight: 600">Band</span> · shift, theme, repo, clock, last event</div>
+  <div style="font-size: 15px; font-family: 'IBM Plex Mono', monospace">/shift · /trail</div>
+</div>
+
+<div style="position: absolute; left: 64px; top: 820px; font-size: 13px; color: #555; line-height: 1.5">Rails: trunk never carries in-flight work · merge on green plus a GO · patch releases alone, minor via thread · no history rewrites, reconcile is by revert · cost cap per shift · three failed blocks end the shift and open a thread.</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1600,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

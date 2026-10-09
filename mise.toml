@@ -5,7 +5,3 @@
 # lefthook runs the pre-push gate (lefthook.toml); `lefthook install` wires it.
 lefthook = "2.1.10"
 rust = "1.94.0"
-
-[tasks.plan]
-description = "Draw the design scenes through visor (http://127.0.0.1:7873)"
-run = "visor -p 7873 -- tldraft serve --dir design"
