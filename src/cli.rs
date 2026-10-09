@@ -24,7 +24,7 @@ use crate::memory::MemoryType;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
-use crate::verbs::{dream, forget, mcp, recall, reflect, remember, take, trail};
+use crate::verbs::{dream, forget, mcp, recall, reconcile, reflect, remember, take, trail};
 use crate::version::VERSION;
 
 /// A failure that ran a verb badly.
@@ -127,6 +127,17 @@ usage: sandman <verb> [args]
       verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
       Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
 
+  reconcile <event-id> [--dry-run]
+      Walk the trail back past a wrong turn: the event and every event whose
+      parent chain reaches it are revoked; every commit carrying one of them
+      in an Event: trailer — in each checkout under ~/.grove/code
+      ($SANDMAN_GROVE_CODE) and in ~, ~/.routines and the data root
+      ($SANDMAN_RECONCILE_EXTRA, colon-separated) — is reverted newest-first
+      on a reconcile/<event-id> branch per repo, in a scratch worktree; a
+      conflict is aborted, reported and ends that repo. Appends one reconcile
+      event and lists the memories whose source: names a revoked event, for
+      reflect to retire. --dry-run prints the plan and changes nothing.
+
   trail append --kind K [--shift S] [--repo R] [--branch B] [--sha SHA]
                [--rationale TEXT] [--cost USD] [--model M] [--parent ID]
                [--ref X]... [--json '<object>']
@@ -203,6 +214,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "forget" => forget_verb(rest),
         "mcp" => mcp_verb(rest),
         "recall" => recall_verb(rest),
+        "reconcile" => reconcile_verb(rest),
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
         "take" => take_verb(rest),
@@ -1242,7 +1254,7 @@ fn one_id(args: &[String], what: &str) -> Result<String, Failure> {
     }
 }
 
-/// The repos `trail show` reaches, resolved from `crate::paths`.
+/// The repos `reconcile` and `trail show` reach, resolved from `crate::paths`.
 fn grove_roots() -> Result<grove::Roots, Failure> {
     let grove_code = paths::grove_code()?;
     Ok(grove::Roots {
@@ -1251,6 +1263,83 @@ fn grove_roots() -> Result<grove::Roots, Failure> {
         manifest: paths::grove_manifest(&grove_code),
         grove_code,
     })
+}
+
+/// `reconcile <event-id> [--dry-run]`.
+fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
+    let mut dry_run = false;
+    let mut id: Option<String> = None;
+    let mut cursor = Cursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg {
+            "-h" | "--help" => return help(),
+            "--dry-run" => dry_run = true,
+            option if option.starts_with("--") => return Err(unknown_option(option)),
+            positional => {
+                if id.is_some() {
+                    return Err(Failure::Usage("reconcile takes one event id".to_owned()));
+                }
+                id = Some(positional.to_owned());
+            }
+        }
+    }
+    let id = id.ok_or_else(|| Failure::Usage("reconcile needs an event id".to_owned()))?;
+    let data_root = paths::data_root()?;
+    let home = paths::home()?;
+    let report = reconcile::reconcile(&data_root, &grove_roots()?, &id, dry_run)?;
+    if dry_run {
+        println!("dry run — nothing changed");
+    }
+    println!("revoked: {}", report.revoked.join(" "));
+    for repo in &report.repos {
+        println!(
+            "\n{} ({}) on {}",
+            repo.label,
+            paths::tildify(&repo.checkout, &home),
+            repo.branch
+        );
+        for (label, shas) in [
+            ("planned", &repo.planned),
+            ("reverted", &repo.reverted),
+            ("conflict", &repo.conflicts),
+            ("already reverted", &repo.already),
+            ("off head", &repo.off_head),
+        ] {
+            if dry_run && label == "reverted" {
+                continue;
+            }
+            for sha in shas {
+                println!("  {label}: {sha}");
+            }
+        }
+        if let Some(failed) = &repo.failed {
+            println!("  failed: {failed}");
+        }
+    }
+    if report.repos.is_empty() {
+        println!("\nno commit carries a revoked event");
+    }
+    println!("\nfor reflect to retire:");
+    if report.memories.is_empty() {
+        println!("  -");
+    }
+    for memory in &report.memories {
+        println!("  {}", paths::tildify(memory, &home));
+    }
+    if let Some(event) = &report.event {
+        note(
+            Some(&data_root),
+            "reconcile",
+            &format!(
+                "reconciled target={id} event={} revoked={} repos={}",
+                event.id,
+                report.revoked.len(),
+                report.repos.len()
+            ),
+        );
+        println!("\nevent: {}", event.id);
+    }
+    Ok(())
 }
 
 /// `version`.

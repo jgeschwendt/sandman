@@ -1,4 +1,4 @@
-//! The trail, end to end: the built binary against a temp
+//! The trail and reconcile, end to end: the built binary against a temp
 //! `$HOME`/`$SANDMAN_ROOT` and a fixture grove of real git repositories.
 //!
 //! Every git process here — the fixture's and the binary's — runs with the
@@ -161,6 +161,21 @@ fn fixture(machine: &Machine, commits: &[(&str, &str)]) -> (PathBuf, Vec<String>
         shas.push(git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned());
     }
     (checkout, shas)
+}
+
+/// Seed one bank memory whose `source:` line is `source`.
+fn memory(machine: &Machine, file: &str, source: &str) -> PathBuf {
+    let bank = machine.root().join("memories").join("-bank");
+    fs::create_dir_all(&bank).expect("bank");
+    let path = bank.join(file);
+    fs::write(
+        &path,
+        format!(
+            "---\nname: {file}\ndescription: d\ntype: project\nsource: {source}\n---\n\nbody\n"
+        ),
+    )
+    .expect("memory");
+    path
 }
 
 #[test]
@@ -334,5 +349,146 @@ fn revoke_is_idempotent_and_show_lists_descendants_and_commits() {
     assert!(
         shown.contains(&format!("o/fixture@{}  {child}", shas[0])),
         "{shown}"
+    );
+}
+
+#[test]
+fn reconcile_reverts_the_revoked_line_and_names_the_memories_to_retire() {
+    let machine = Machine::new("reconcile");
+    let first = machine.append(&["--kind", "promote", "--shift", "s-test"]);
+    let second = machine.append(&["--kind", "change", "--shift", "s-test", "--parent", &first]);
+    let (checkout, shas) = fixture(&machine, &[("one", &first), ("two", &second)]);
+    let head = git(&checkout, &["rev-parse", "HEAD"]);
+    let doomed = memory(&machine, "project_doomed.md", &format!("dream · {second}"));
+    memory(&machine, "project_kept.md", "remember 2026-10-09T00:00:00Z");
+
+    machine.ok(&["trail", "revoke", &first, "--reason", "wrong path"]);
+    let report = machine.ok(&["reconcile", &first]);
+
+    // Both commits reverted, newest first, on the reconcile branch.
+    let branch = format!("reconcile/{first}");
+    let subjects = git(&checkout, &["log", &branch, "--format=%s", "-4"]);
+    assert_eq!(
+        subjects.lines().collect::<Vec<_>>(),
+        [
+            "Revert \"change 0\"",
+            "Revert \"change 1\"",
+            "change 1",
+            "change 0"
+        ],
+        "{report}"
+    );
+    assert_eq!(
+        git(&checkout, &["show", &format!("{branch}:file.txt")]),
+        "base\n"
+    );
+    for sha in &shas {
+        assert!(report.contains(&format!("reverted: {sha}")), "{report}");
+    }
+
+    // The operator's checkout is where it was, and no scratch tree is left.
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), head);
+    assert_eq!(
+        fs::read_to_string(checkout.join("file.txt")).expect("file"),
+        "two\n"
+    );
+    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+
+    // One reconcile event, its id on every revert commit.
+    let events = machine.ok(&["trail", "log", "--kind", "reconcile", "--json"]);
+    assert_eq!(events.lines().count(), 1, "{events}");
+    let line = events.trim();
+    assert!(line.contains(&format!(r#""parent":"{first}""#)), "{line}");
+    assert!(line.contains(r#""shift":"reconcile""#), "{line}");
+    for sha in &shas {
+        assert!(line.contains(&format!("o/fixture@{sha}")), "{line}");
+    }
+    assert!(line.contains("conflicts: none"), "{line}");
+    let id_at = line.find(r#""id":""#).expect("id") + 6;
+    let id = &line[id_at..id_at + line[id_at..].find('"').expect("id end")];
+    let bodies = git(&checkout, &["log", &branch, "--format=%B", "-2"]);
+    assert_eq!(bodies.matches("Shift: reconcile").count(), 2, "{bodies}");
+    assert_eq!(
+        bodies.matches(&format!("Event: {id}")).count(),
+        2,
+        "{bodies}"
+    );
+    assert!(report.contains(&format!("event: {id}")), "{report}");
+
+    // The memory naming the descendant is listed for retirement, untouched.
+    let listed = report
+        .split("for reflect to retire:")
+        .nth(1)
+        .expect("retirement section");
+    assert!(listed.contains("project_doomed.md"), "{report}");
+    assert!(!listed.contains("project_kept.md"), "{report}");
+    assert!(doomed.is_file());
+
+    // A second run finds the work done: no new commits, both hits already reverted.
+    let rerun = machine.ok(&["reconcile", &first]);
+    assert_eq!(
+        git(&checkout, &["rev-list", "--count", &branch]),
+        "5\n",
+        "{rerun}"
+    );
+    for sha in &shas {
+        assert!(
+            rerun.contains(&format!("already reverted: {sha}")),
+            "{rerun}"
+        );
+    }
+}
+
+#[test]
+fn a_dry_run_reports_the_plan_and_changes_nothing() {
+    let machine = Machine::new("dry-run");
+    let first = machine.append(&["--kind", "promote"]);
+    let second = machine.append(&["--kind", "change", "--parent", &first]);
+    let (checkout, shas) = fixture(&machine, &[("one", &first), ("two", &second)]);
+    memory(&machine, "project_doomed.md", &second);
+    let trail = machine.trail_bytes();
+    let refs = git(&checkout, &["for-each-ref"]);
+
+    let report = machine.ok(&["reconcile", &first, "--dry-run"]);
+    assert!(report.starts_with("dry run"), "{report}");
+    let planned: Vec<&str> = report
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("planned: "))
+        .collect();
+    assert_eq!(planned, [shas[1].as_str(), shas[0].as_str()], "{report}");
+    assert!(report.contains("project_doomed.md"), "{report}");
+
+    assert_eq!(machine.trail_bytes(), trail);
+    assert_eq!(git(&checkout, &["for-each-ref"]), refs);
+    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+
+    assert_eq!(code(&machine.run(&["reconcile", "e-nope"])), 1);
+    assert_eq!(code(&machine.run(&["reconcile"])), 2);
+}
+
+#[test]
+fn a_conflicting_revert_is_aborted_and_reported() {
+    let machine = Machine::new("conflict");
+    let first = machine.append(&["--kind", "change"]);
+    // A later hand edit of the same line: reverting the machine's commit
+    // cannot apply cleanly.
+    let (checkout, shas) = fixture(&machine, &[("one", &first), ("hand edit", "e-human")]);
+
+    let report = machine.ok(&["reconcile", &first]);
+    assert!(
+        report.contains(&format!("conflict: {}", shas[0])),
+        "{report}"
+    );
+    let branch = format!("reconcile/{first}");
+    assert_eq!(
+        git(&checkout, &["rev-parse", &branch]),
+        git(&checkout, &["rev-parse", "HEAD"])
+    );
+    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+    assert_eq!(git(&checkout, &["status", "--porcelain"]), "");
+    let events = machine.ok(&["trail", "log", "--kind", "reconcile", "--json"]);
+    assert!(
+        events.contains(&format!("conflicts: o/fixture@{}", shas[0])),
+        "{events}"
     );
 }

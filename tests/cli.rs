@@ -217,6 +217,7 @@ fn the_usage_screen_lists_the_verbs() {
         "dream",
         "forget",
         "recall",
+        "reconcile",
         "reflect",
         "remember",
         "take",
