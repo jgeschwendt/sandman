@@ -30,12 +30,13 @@ hazards:
 | `cli.rs` | the dispatcher: parsing, exit codes (0 ran · 1 failed · 2 command line), the usage screen, take's detached dream spawn |
 | `consensus.rs` | 2-of-3 — deterministic claim grouping: connected components of a name-and-description-slug Jaccard; no model, no wording rewrite |
 | `error.rs` `time.rs` | typed errors; UTC timestamps, both directions |
+| `grove.rs` | the repos the machine commits into — grove checkouts (manifest roots plus the tree) and the extras; scrubbed-env git calls; `Event:` trailer scans, one pass per repository |
 | `hook.rs` `transcript.rs` | SessionStart/SessionEnd payloads; locating session files, digesting a transcript, extracting the conversation a mind reads |
 | `json.rs` (private) | JSON for our own shapes only — pointers, hook payloads, model replies; why `[dependencies]` is empty |
 | `log.rs` | the voyage log's format — the day's sources and their fingerprint, entry parse/render, the prompt, `began:` and the index; who calls the mind and when is reflect's |
 | `mind.rs` | the runner seam — one `claude -p … --output-format json` process per mind, killed at the timeout, every failure an abstention; `Ask::keep` decides whether the run's own transcript is kept or never written |
-| `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the tier split the leading dot marks: raw and gitignored (`.archive/` `.dream/` `.trace/`) against versioned content (`log/` `memories/`) |
-| `verbs/` | `dream` `forget` `mcp` `recall` `reflect` `remember` `take` — each takes its roots as arguments, never the environment; `mcp` is the tool server (the three handlers plus the stdio loop, journalling to `.trace/mcp-<date>.log`) |
+| `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, and the tier split the leading dot marks: raw and gitignored (`.archive/` `.dream/` `.trace/`) against versioned content (`log/` `memories/` `trail/`) |
+| `verbs/` | `dream` `forget` `mcp` `recall` `reconcile` `reflect` `remember` `take` `trail` — each takes its roots as arguments, never the environment; `mcp` is the tool server (the three handlers plus the stdio loop, journalling to `.trace/mcp-<date>.log`); `trail` is the event log's format and verbs, `reconcile` reverts a revoked event's commits on `reconcile/<id>` branches |
 
 `mcp`'s handlers are plain functions over a `Context` — data root, home, session id —
 and read the environment no more than any other verb does: the stdio loop resolves

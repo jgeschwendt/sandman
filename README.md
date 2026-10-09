@@ -2,6 +2,14 @@
 
 Memory engine for Claude sessions — sandman-format banks, session archiving, and the dream/reflect passes. A zero-dependency Rust CLI that plugs into Claude Code's hooks: `recall` on SessionStart, `take` on SessionEnd, three-mind consensus dreaming, a nightly reflect that writes the voyage log and keeps the banks. Design in `docs/DESIGN.md`, on-disk format in `docs/BANK-FORMAT.md`.
 
+## Trail
+
+`sandman trail` is the append-only event log every autonomous decision lands in — one
+JSONL file per UTC day under `<root>/trail/`, every machine commit joined to it by
+`Shift:`/`Event:` trailers. `sandman reconcile <event-id>` reverts the commits of a
+revoked event and its descendants across the grove, on a `reconcile/<event-id>` branch
+per repo. The contract is `docs/BANK-FORMAT.md` § trail.
+
 ## MCP
 
 `sandman mcp` serves the banks as a tool server on stdio — JSON-RPC 2.0, one message

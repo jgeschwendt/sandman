@@ -150,7 +150,85 @@ type: reference
 - **A quiet day gets no file.** No sources, no entry — the index shows the gap. A filler
   entry would be prose about nothing, and every reader of the log pays for it in context.
 
+## trail/ — the event log
+
+Not a bank. `trail/` is the machine's ledger: every autonomous decision is one event,
+appended and never edited, and every commit the machine makes names its event by
+trailer, so `git log` in any repo joins back to it.
+
+`trail/<yyyy>/<mm>/<dd>.jsonl` — one file per UTC day, one JSON object per line, keys
+alphabetical, newest last:
+
+```
+{"at":"2026-10-09T23:41:02Z","branch":"perpetual","cost_usd":0.12,"id":"e-20261009T234102Z-7f3a","kind":"change","model":"opus","parent":null,"rationale":"…","refs":[],"repo":"jgeschwendt/sandman","sha":"9b32c84…","shift":"s-20261009T2300Z"}
+```
+
+| key | what |
+| --- | --- |
+| `at` | when the event was appended, ISO-8601 Z; the file is the UTC day it falls on |
+| `branch` | the branch the work landed on |
+| `cost_usd` | what the work cost, US dollars, a non-negative number |
+| `id` | `e-<yyyymmddThhmmss>Z-<4 hex>` — the instant plus four random hex digits, unique within the day's file and so across the trail |
+| `kind` | what happened — one of the kinds below |
+| `model` | the model that did the work |
+| `parent` | the id of the event this one descends from, or `null`; must already be on the trail |
+| `rationale` | why, in prose |
+| `refs` | free strings — thread ids, URLs, memory files, `repo@sha` |
+| `repo` | the repo touched, `owner/repo` |
+| `sha` | the commit the work produced |
+| `shift` | the shift the event belongs to |
+
+`at`, `id`, `kind`, `parent` and `refs` are always present (`refs` may be `[]`); every
+other key is omitted when it has no value, never `null`.
+
+Kinds: `breath` · `change` · `correction` · `decay` · `guard` · `promote` · `reconcile`
+· `revoke` · `shift.handoff` · `shift.start`. Any other kind is refused.
+
+### The parent chain
+
+An event's descendants are every event whose `parent` chain reaches it — a `change`
+made because of a `promote`, a `guard` made because of a `correction`. `revoke` and
+`reconcile` events name their target as `parent` too, but they speak *about* it rather
+than descend from it: the walk never enters them, so a second reconcile never reverts
+the first one's reverts.
+
+### Trailers
+
+Every commit the machine makes carries two git trailers:
+
+```
+Shift: <shift-id>
+Event: <event-id>
+```
+
+`sandman trail trailers --shift S --event E` prints exactly those lines, for appending
+to a message or for `git commit --trailer`.
+
+### Revoke and reconcile
+
+- **Revoke** appends a `revoke` event with `parent: <id>` and the reason as its
+  `rationale`. Nothing is edited or deleted; revoking a revoked event appends nothing.
+- **Reconcile** `<id>` takes the event and its descendants as the revoked set. In every
+  repo it reaches — each checkout under `~/.grove/code/<owner>/<repo>/<branch>/` (repos
+  from the grove manifest's `[roots."owner/repo"]` tables and from the tree itself), plus
+  `~`, `~/.routines` and the data root — it selects the commits whose `Event:` trailer is
+  in the set, one pass per repository however many worktrees it has. Those reachable
+  from the checkout's `HEAD` are reverted newest-first onto `reconcile/<id>` (reused if
+  it exists, already-reverted commits skipped), in a scratch worktree so no checkout is
+  switched. Each revert commit carries `Shift: reconcile` and `Event: <the reconcile
+  event's id>`. A conflicting revert is aborted and ends that repo's pass. History is
+  never reset or forced.
+- Reconcile then appends one `reconcile` event — `parent: <id>`, `shift: reconcile`,
+  `refs` every reverted commit as `repo@sha`, `rationale` the count and every conflict —
+  and lists the memories under `memories/` whose `source:` names a revoked event, for
+  reflect to retire. It modifies no memory. `--dry-run` prints the plan and writes
+  nothing.
+
+`$SANDMAN_GROVE_CODE` moves the grove's code directory (the manifest is read beside it,
+`<code>/../manifest.toml`, and may be absent); `$SANDMAN_RECONCILE_EXTRA`
+(colon-separated) replaces the three extra repos.
+
 ## Concurrency
 
-All bank writes happen under `.commit.lock` at the data root; every file write is
+All bank and trail writes happen under `.commit.lock` at the data root; every file write is
 atomic (tmp → rename in the same directory).

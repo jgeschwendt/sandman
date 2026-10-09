@@ -7,8 +7,7 @@ knew. The on-disk format is `BANK-FORMAT.md`.
 
 ## Verbs
 
-Six memory verbs — the whole surface. Sandman never sees a hook event; it reads
-transcripts.
+Six memory verbs. Sandman never sees a hook event; it reads transcripts.
 
 | verb | duty |
 | --- | --- |
@@ -18,6 +17,15 @@ transcripts.
 | `reflect` | the 24 h pass: the voyage entry, the log index, bank upkeep |
 | `remember "<body>"` | commit one memory now — the in-session path |
 | `take <session>` | archive the session by move + drop a pointer |
+
+Two ledger verbs sit beside them, for the machine that commits on the operator's behalf:
+
+| verb | duty |
+| --- | --- |
+| `reconcile <event>` | revert every commit carrying a revoked event or its descendants, on `reconcile/<event>` per repo |
+| `trail append\|log\|show\|revoke\|today\|trailers` | the append-only event log; every machine commit names its event by `Event:` trailer |
+
+Their contract is `BANK-FORMAT.md` § trail.
 
 `recall` composes four surfaces into one 9,000-character budget — the cwd's bank and its
 ancestors', `.recent` pointers, the voyage log tail, the tool index. The voyage log has a
