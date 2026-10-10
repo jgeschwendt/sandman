@@ -172,10 +172,12 @@ usage: sandman <verb> [args]
       (or, for a shift id, naming it in Shift:) — in each checkout under ~/.grove/code
       ($SANDMAN_GROVE_CODE) and in ~, ~/.routines and the data root
       ($SANDMAN_RECONCILE_EXTRA, colon-separated) — that the repo's trunk
-      reaches is reverted newest-first (a merge with -m 1) on a
-      reconcile/<event-id> branch cut from trunk, in a scratch worktree, with
-      the repo's hooks off; hits trunk does not reach are reported off trunk.
-      A conflict is aborted, reported and ends that repo. Appends one
+      reaches is reverted newest-first (a merge against the one parent whose
+      side carries no hit) on a reconcile/<event-id> branch cut from trunk
+      (the manifest's trunk, else main, else origin/HEAD — a repo with none
+      fails), in a scratch worktree, with the repo's hooks off; hits trunk
+      does not reach are reported off trunk. A conflict, or a merge whose
+      trunk side cannot be told, is reported and ends that repo. Appends one
       reconcile event and lists the memories whose source: names a revoked
       event, for reflect to retire; exits 1 when any repo ended in a conflict
       or a failure. --dry-run prints the plan and changes nothing.

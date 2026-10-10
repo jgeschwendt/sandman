@@ -643,6 +643,19 @@ fn revoking_a_shift_reverts_every_commit_it_made() {
         &machine,
         &[("one", &first), ("two", &second), ("three", "e-unlogged")],
     );
+    // Another shift's commit in the same repo is no hit.
+    fs::write(checkout.join("other.txt"), "stranger\n").expect("stranger");
+    git(&checkout, &["add", "other.txt"]);
+    git(
+        &checkout,
+        &[
+            "commit",
+            "--quiet",
+            "-m",
+            &format!("stranger\n\nShift: s-other\nEvent: {stranger}"),
+        ],
+    );
+    let foreign = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
 
     let revocation = machine.ok(&["trail", "revoke", "s-test", "--reason", "the whole shift"]);
     let again = machine.ok(&["trail", "revoke", "s-test", "--reason", "twice"]);
@@ -665,9 +678,15 @@ fn revoking_a_shift_reverts_every_commit_it_made() {
         "{report}"
     );
     assert!(!report.contains(&stranger), "{report}");
+    assert!(!report.contains(&foreign), "{report}");
     assert_eq!(
         git(&checkout, &["show", "reconcile/s-test:file.txt"]),
         "base\n"
+    );
+    assert_eq!(
+        git(&checkout, &["show", "reconcile/s-test:other.txt"]),
+        "stranger\n",
+        "another shift's commit survives"
     );
     let events = machine.ok(&["trail", "log", "--kind", "reconcile", "--json"]);
     assert!(events.contains(r#""parent":null"#), "{events}");
@@ -675,4 +694,181 @@ fn revoking_a_shift_reverts_every_commit_it_made() {
         events.contains(r#""refs":["shift:s-test","o/fixture@"#),
         "{events}"
     );
+}
+
+/// The trailers for `event` under shift `s-test`.
+fn trailered(subject: &str, event: &str) -> String {
+    format!("{subject}\n\nShift: s-test\nEvent: {event}")
+}
+
+#[test]
+fn a_merge_of_trunk_into_the_shift_reverts_against_trunks_side() {
+    let machine = Machine::new("merge-side");
+    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let (checkout, _) = fixture(&machine, &[]);
+    fs::write(checkout.join("file.txt"), "trunkmoved\n").expect("trunk");
+    commit(&checkout, "trunk moved", None);
+    git(&checkout, &["switch", "--quiet", "-c", "shift/x", "HEAD~1"]);
+    fs::write(checkout.join("other.txt"), "shift work\n").expect("work");
+    let work = commit(&checkout, "work", Some(&event));
+    // The shift merges trunk into its branch; trunk then takes it --ff-only,
+    // so the merge's first parent is the shift's line, not trunk's.
+    git(
+        &checkout,
+        &[
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "main",
+            "-m",
+            &trailered("merge main", &event),
+        ],
+    );
+    let merge = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&checkout, &["switch", "--quiet", "main"]);
+    git(&checkout, &["merge", "--quiet", "--ff-only", "shift/x"]);
+
+    let report = machine.ok(&["reconcile", &event]);
+    assert!(report.contains(&format!("reverted: {merge}")), "{report}");
+    assert!(
+        report.contains(&format!("in reverted merge: {work}")),
+        "{report}"
+    );
+    let branch = format!("reconcile/{event}");
+    assert_eq!(
+        git(&checkout, &["show", &format!("{branch}:file.txt")]),
+        "trunkmoved\n",
+        "trunk's own commit survives"
+    );
+    let files = git(&checkout, &["ls-tree", "--name-only", &branch]);
+    assert_eq!(files.lines().collect::<Vec<_>>(), ["file.txt"], "{files}");
+}
+
+#[test]
+fn an_octopus_merge_reverts_against_its_one_clean_side() {
+    let machine = Machine::new("octopus");
+    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let (checkout, _) = fixture(&machine, &[]);
+    let mut work = Vec::new();
+    for side in ["a", "b"] {
+        git(&checkout, &["switch", "--quiet", "-c", side, "main"]);
+        fs::write(checkout.join(format!("{side}.txt")), "shift work\n").expect("work");
+        work.push(commit(&checkout, side, Some(&event)));
+    }
+    git(&checkout, &["switch", "--quiet", "main"]);
+    fs::write(checkout.join("file.txt"), "trunk moved\n").expect("trunk");
+    commit(&checkout, "trunk edit", None);
+    git(
+        &checkout,
+        &[
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "a",
+            "b",
+            "-m",
+            &trailered("octopus", &event),
+        ],
+    );
+    let merge = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let report = machine.ok(&["reconcile", &event]);
+    assert!(report.contains(&format!("reverted: {merge}")), "{report}");
+    for sha in &work {
+        assert!(
+            report.contains(&format!("in reverted merge: {sha}")),
+            "{report}"
+        );
+    }
+    let branch = format!("reconcile/{event}");
+    let files = git(&checkout, &["ls-tree", "--name-only", &branch]);
+    assert_eq!(files.lines().collect::<Vec<_>>(), ["file.txt"], "{files}");
+    assert_eq!(
+        git(&checkout, &["show", &format!("{branch}:file.txt")]),
+        "trunk moved\n"
+    );
+}
+
+#[test]
+fn a_merge_whose_every_side_carries_a_hit_is_refused() {
+    let machine = Machine::new("merge-both");
+    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let (checkout, _) = fixture(&machine, &[]);
+    git(&checkout, &["switch", "--quiet", "-c", "shift/x"]);
+    fs::write(checkout.join("other.txt"), "shift work\n").expect("work");
+    let side = commit(&checkout, "side", Some(&event));
+    git(&checkout, &["switch", "--quiet", "main"]);
+    fs::write(checkout.join("file.txt"), "also machine\n").expect("trunk");
+    let trunk = commit(&checkout, "trunk hit", Some(&event));
+    git(
+        &checkout,
+        &[
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "shift/x",
+            "-m",
+            &trailered("merge", &event),
+        ],
+    );
+    let merge = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let output = machine.run(&["reconcile", &event]);
+    let report = stdout(&output);
+    assert_eq!(code(&output), 1, "{report}");
+    assert!(report.contains(&format!("conflict: {merge}")), "{report}");
+    assert!(
+        report.contains(&format!("parents {trunk}, {side}")),
+        "{report}"
+    );
+    assert!(!report.contains("reverted:"), "{report}");
+    assert_eq!(
+        git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
+        ""
+    );
+}
+
+#[test]
+fn a_repo_with_no_trunk_to_name_fails_until_the_manifest_names_it() {
+    let machine = Machine::new("no-trunk");
+    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let grove = machine.home.join(".grove");
+    fs::create_dir_all(&grove).expect("grove");
+    fs::write(grove.join("manifest.toml"), "").expect("manifest");
+    let checkout = machine.grove_code().join("o").join("fixture").join("trunk");
+    fs::create_dir_all(&checkout).expect("checkout");
+    git(&checkout, &["init", "--quiet", "--initial-branch=trunk"]);
+    fs::write(checkout.join("file.txt"), "base\n").expect("base");
+    commit(&checkout, "base", None);
+    git(&checkout, &["switch", "--quiet", "-c", "shift/y"]);
+    fs::write(checkout.join("file.txt"), "shift\n").expect("work");
+    let hit = commit(&checkout, "work", Some(&event));
+
+    let output = machine.run(&["reconcile", &event]);
+    let report = stdout(&output);
+    assert_eq!(code(&output), 1, "{report}");
+    assert!(report.contains("failed: no trunk"), "{report}");
+    assert!(
+        report.contains(r#"~/.grove/manifest.toml as `trunk = "…"` under [roots."o/fixture"]"#),
+        "{report}"
+    );
+    assert!(!report.contains("reverted:"), "{report}");
+    assert_eq!(
+        git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
+        ""
+    );
+    assert_eq!(
+        git(&checkout, &["show", "HEAD:file.txt"]),
+        "shift\n",
+        "nothing reverted"
+    );
+
+    fs::write(
+        grove.join("manifest.toml"),
+        "[roots.\"o/fixture\"]\ntrunk = \"trunk\"\n",
+    )
+    .expect("manifest");
+    let report = machine.ok(&["reconcile", &event]);
+    assert!(report.contains("from refs/heads/trunk"), "{report}");
+    assert!(report.contains(&format!("off trunk: {hit}")), "{report}");
 }

@@ -3,10 +3,12 @@
 //! The revoked set is the event and everything its `parent` chains reach —
 //! for a shift id, every event of the shift and theirs. Every repo the roots
 //! hold is asked for commits whose `Event:` trailer names one of them (or
-//! whose `Shift:` trailer names the shift); the hits its trunk reaches are reverted newest-first — a
-//! merge against its first parent — on a `reconcile/<event-id>` branch cut
-//! from that trunk, one per repo: new commits, never a reset, never a force,
-//! never the repo's commit hooks. Then one
+//! whose `Shift:` trailer names the shift); the hits its trunk reaches are
+//! reverted newest-first — a merge against the one parent whose side carries
+//! no hit, trunk's — on a `reconcile/<event-id>` branch cut from that trunk,
+//! one per repo: new commits, never a reset, never a force, never the repo's
+//! commit hooks. A repo with no trunk to name, or a merge whose trunk side
+//! cannot be told, is refused rather than guessed at. Then one
 //! `reconcile` event goes on the trail, and the memories whose `source:` names
 //! a revoked event are listed for reflect to retire; reconcile itself never
 //! touches a bank.
@@ -45,7 +47,8 @@ pub struct RepoReport {
     pub branch: String,
     /// The checkout the repo was worked through.
     pub checkout: PathBuf,
-    /// The hit whose revert conflicted and was aborted; the repo stops there.
+    /// The hit whose revert conflicted and was aborted, or the merge whose
+    /// trunk side could not be told; the repo stops there.
     pub conflicts: Vec<String>,
     /// Hits a reverted merge brought in: its revert undoes them already.
     pub covered: Vec<String>,
@@ -187,13 +190,14 @@ fn reconcile_repo(
     };
     let dir = &first.path;
     report.checkout.clone_from(dir);
-    let trunk = trunk_ref(dir, trunks.get(&repo.label).map(String::as_str));
-    if trunk == "HEAD" {
-        report.notes.push(format!(
-            "no trunk ref (manifest trunk, main, origin/HEAD); based on HEAD of {}",
-            dir.display()
+    let Some(trunk) = trunk_ref(dir, trunks.get(&repo.label).map(String::as_str)) else {
+        report.failed = Some(format!(
+            "no trunk: no manifest trunk, refs/heads/main or origin/HEAD resolves in {}; name it in ~/.grove/manifest.toml as `trunk = \"…\"` under [roots.\"{}\"]",
+            dir.display(),
+            repo.label
         ));
-    }
+        return report;
+    };
     report.base.clone_from(&trunk);
     let branch_ref = format!("refs/heads/{branch}");
     let reused = git_ok(dir, &["rev-parse", "--verify", "--quiet", &branch_ref]);
@@ -219,19 +223,36 @@ fn reconcile_repo(
             report.off_trunk.push(hit.sha.clone());
         }
     }
-    // A merge's revert (`-m 1`) undoes everything it brought in, so the hits
-    // inside it are not reverted a second time.
+    // A merge reverts against its trunk side, and that revert undoes
+    // everything the other sides brought in: the hits there are not
+    // reverted a second time.
+    let mut mainlines: BTreeMap<String, usize> = BTreeMap::new();
     let mut inside: BTreeSet<String> = BTreeSet::new();
-    for sha in &reachable {
-        if is_merge(dir, sha) {
-            let brought = git(dir, &["rev-list", &format!("{sha}^1..{sha}")]).unwrap_or_default();
-            inside.extend(
-                brought
-                    .lines()
-                    .filter(|inner| inner != sha)
-                    .map(ToOwned::to_owned),
-            );
+    for sha in reachable.iter().filter(|sha| !already.contains(**sha)) {
+        let parents = parents(dir, sha);
+        if parents.len() < 2 {
+            continue;
         }
+        let mainline = match trunk_side(dir, &parents, &hits) {
+            Ok(mainline) => mainline,
+            Err(why) => {
+                report.conflicts.push((*sha).to_owned());
+                report.notes.push(format!(
+                    "merge {sha} (parents {}): {why}; revert it by hand with `git revert -m <n>`",
+                    parents.join(", ")
+                ));
+                return report;
+            }
+        };
+        let brought =
+            git(dir, &["rev-list", sha, "--not", &parents[mainline - 1]]).unwrap_or_default();
+        inside.extend(
+            brought
+                .lines()
+                .filter(|inner| inner != sha)
+                .map(ToOwned::to_owned),
+        );
+        mainlines.insert((*sha).to_owned(), mainline);
     }
     for sha in reachable {
         if already.contains(sha) {
@@ -254,7 +275,7 @@ fn reconcile_repo(
         }
     };
     for sha in report.planned.clone() {
-        match revert_one(&scratch.path, &sha, event_id) {
+        match revert_one(&scratch.path, &sha, mainlines.get(&sha).copied(), event_id) {
             Ok(()) => report.reverted.push(sha),
             Err(Undone::Conflict) => {
                 report.conflicts.push(sha);
@@ -273,33 +294,66 @@ fn reconcile_repo(
 }
 
 /// The ref a repo's reconcile branch starts from: the manifest's `trunk`,
-/// else `main`, else what `origin/HEAD` names, else `HEAD`.
-fn trunk_ref(dir: &Path, manifest: Option<&str>) -> String {
+/// else `main`, else what `origin/HEAD` names — never `HEAD`, which in a
+/// `shift/…` checkout is the very line being revoked.
+fn trunk_ref(dir: &Path, manifest: Option<&str>) -> Option<String> {
     let verified = |name: &str| git_ok(dir, &["rev-parse", "--verify", "--quiet", name]);
     if let Some(trunk) = manifest.map(|trunk| format!("refs/heads/{trunk}"))
         && verified(&trunk)
     {
-        return trunk;
+        return Some(trunk);
     }
     if verified("refs/heads/main") {
-        return "refs/heads/main".to_owned();
+        return Some("refs/heads/main".to_owned());
     }
-    if let Ok(origin) = git(
+    let origin = git(
         dir,
         &["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
-    ) {
-        let origin = origin.trim();
-        if !origin.is_empty() && verified(origin) {
-            return origin.to_owned();
-        }
-    }
-    "HEAD".to_owned()
+    )
+    .ok()?;
+    let origin = origin.trim();
+    (!origin.is_empty() && verified(origin)).then(|| origin.to_owned())
 }
 
-/// Whether `sha` has more than one parent.
-fn is_merge(dir: &Path, sha: &str) -> bool {
+/// `sha`'s parents, in order.
+fn parents(dir: &Path, sha: &str) -> Vec<String> {
     git(dir, &["rev-list", "--parents", "-n", "1", sha])
-        .is_ok_and(|line| line.split_whitespace().count() > 2)
+        .map(|line| {
+            line.split_whitespace()
+                .skip(1)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The 1-based `-m` of a merge: the one parent whose side — what it reaches
+/// that no other parent does — carries no hit. That side is trunk's, so
+/// reverting against it undoes the shift's sides and keeps trunk's own work
+/// whichever way round the merge was made.
+fn trunk_side(
+    dir: &Path,
+    parents: &[String],
+    hits: &BTreeSet<&str>,
+) -> std::result::Result<usize, &'static str> {
+    let clean: Vec<usize> = (0..parents.len())
+        .filter(|&index| {
+            let mut args = vec!["rev-list", parents[index].as_str(), "--not"];
+            args.extend(
+                parents
+                    .iter()
+                    .enumerate()
+                    .filter(|(other, _)| *other != index)
+                    .map(|(_, parent)| parent.as_str()),
+            );
+            git(dir, &args).is_ok_and(|side| side.lines().all(|sha| !hits.contains(sha)))
+        })
+        .collect();
+    match clean.as_slice() {
+        [only] => Ok(only + 1),
+        [] => Err("every side carries a revoked hit, so no side is trunk's"),
+        _ => Err("no single side is free of revoked hits, so trunk's side cannot be told"),
+    }
 }
 
 /// `git` with the repository's hooks switched off. A revert is the owner's
@@ -390,12 +444,18 @@ enum Undone {
 }
 
 /// Revert `sha` in the scratch worktree as one commit carrying the trailers;
-/// a merge against its first parent, the line it was merged into.
-fn revert_one(scratch: &Path, sha: &str, event_id: &str) -> std::result::Result<(), Undone> {
+/// a merge against `mainline`, its trunk side.
+fn revert_one(
+    scratch: &Path,
+    sha: &str,
+    mainline: Option<usize>,
+    event_id: &str,
+) -> std::result::Result<(), Undone> {
     let subject = git(scratch, &["log", "-1", "--format=%s", sha]).map_err(Undone::Failed)?;
+    let mainline = mainline.map(|mainline| mainline.to_string());
     let mut args = vec!["revert", "--no-commit"];
-    if is_merge(scratch, sha) {
-        args.extend(["-m", "1"]);
+    if let Some(mainline) = &mainline {
+        args.extend(["-m", mainline.as_str()]);
     }
     args.push(sha);
     if hookless(scratch, &args).is_err() {

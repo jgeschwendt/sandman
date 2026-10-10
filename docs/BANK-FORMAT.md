@@ -224,17 +224,24 @@ to a message or for `git commit --trailer`.
   in the set (or, for a shift id, whose `Shift:` names it), one pass per repository
   however many worktrees it has.
 - The base is the repo's **trunk**: the manifest root's `trunk = "…"`, else `main`, else
-  the branch `refs/remotes/origin/HEAD` names, else `HEAD` with a note in the report and
-  the journal — never the `HEAD` of whichever checkout reaches the hits, since a
-  `shift/…` checkout would carry the shift's other commits onto the reconcile branch.
+  the branch `refs/remotes/origin/HEAD` names — never `HEAD`, since a `shift/…` checkout
+  would carry the shift's other commits onto the reconcile branch. A repo where none of
+  the three resolves fails (`failed`, exit 1): nothing is reverted and no branch is cut,
+  and the message asks the operator to name the trunk in `~/.grove/manifest.toml` as
+  `trunk = "…"` under the repo's `[roots."owner/repo"]` table.
   A hit trunk does not reach is reported `off trunk` and left alone: its branch is
   simply never merged.
 - The hits trunk reaches are reverted newest-first onto `reconcile/<id>` — cut from
   trunk, or reused if it exists and still contains trunk (a reconcile branch trunk has
   moved past fails that repo: merge trunk in or delete the branch, then rerun);
-  already-reverted commits are skipped. A merge commit is reverted with `-m 1`, against
-  the line it was merged into, and the hits it brought in are reported `in reverted
-  merge` rather than reverted twice. The reverts happen in a scratch worktree, so no
+  already-reverted commits are skipped. A merge commit is reverted against its **trunk
+  side**: `-m N` for the one parent whose side — the commits it reaches that no other
+  parent does — carries no revoked hit, whichever way round the merge was made (a shift
+  that ran `git merge main` into its branch, then landed `--ff-only`, has trunk as its
+  second parent). The hits the other sides brought in are reported `in reverted merge`
+  rather than reverted twice. When every side carries a hit, or more than one side is
+  clean, trunk's side cannot be told: the repo is refused as a `conflict` (exit 1) with a
+  note naming the merge and its parents, and nothing in it is reverted. The reverts happen in a scratch worktree, so no
   checkout is switched, and it is removed with `--force` however the pass ends. The
   repo's commit hooks are switched off (`core.hooksPath=/dev/null`, `--no-verify`): a
   revert is the owner's reconcile, not a shift's work, so a repo's hook suite neither
