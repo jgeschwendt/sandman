@@ -150,7 +150,10 @@ rc=0
 "$sm" shift clock --check >/dev/null || rc=$?
 [ "$rc" -ne 1 ] || exit 0   # the window is nearly spent: wait for the reset
 [ "$rc" -eq 0 ] || exit "$rc"   # 3: the clock file is unreadable — a fault, not a wait
-id=$("$sm" shift brief)
+rc=0
+id=$("$sm" shift brief) || rc=$?
+[ "$rc" -ne 1 ] || exit 0   # brief refused: the Sabbath is kept for today, or nothing to do — wait
+[ "$rc" -eq 0 ] || exit "$rc"   # 2 or 3: a fault — template, trust, window file
 cwd=$("$sm" shift pick --path --shift "$id")
 profile=$("$sm" shift profile)
 req=$(python3 -I -c '
