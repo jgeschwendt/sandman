@@ -40,7 +40,7 @@
     "enabled": true,
     "excludedCommands": ["git fetch *", "git pull *", "git push *", "grove sync *"],
     "filesystem": {
-      "allowWrite": ["~/.grove/code", "~/.local/state/claude", "~/.routines", "~/.sandman"],
+      "allowWrite": ["~/.grove", "~/.local/state/claude", "~/.routines", "~/.sandman"],
       "denyRead": ["~/.aws", "~/.netrc", "~/.npmrc", "~/.ssh", "~/Codes"]
     },
     "network": {

@@ -470,7 +470,7 @@ strict Bash sandbox, under the settings `sandman shift profile [--kind shift|bre
 prints — `profiles/session.json`, compiled into the binary, one profile for both kinds
 today (`--kind` is there so they can diverge). Strict means
 `allowUnsandboxedCommands: false`: a command the sandbox refuses fails rather than
-retrying outside it. Writes reach only `~/.grove/code`, `~/.local/state/claude`,
+retrying outside it. Writes reach only `~/.grove` (the checkouts, and the bare repositories and manifest lock under `~/.grove/roots` and `~/.grove` that every commit and `grove tree add` write — observed 2026-10-10, the first Sabbath could not cut its branch with `~/.grove/code` alone), `~/.local/state/claude`,
 `~/.routines` and `~/.sandman`; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
 cannot be read; the network reaches only the profile's `allowedDomains`.
 
