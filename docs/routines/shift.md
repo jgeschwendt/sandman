@@ -39,6 +39,10 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 - `SANDMAN_SHIFT_GRACE_MIN` — minutes past `handoff_by` before a still-working shift is stopped, default `20`.
 - `SANDMAN_SHIFT_MIN_WINDOW_MIN` — the least window a shift may open with, default `60`; `handoff_by` is the reset minus fifteen, so a shift always has at least 45 minutes.
 
+## The sandbox
+
+A shift runs in `bypassPermissions` — no prompts, no classifier — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove/code`, `~/.sandman`, `~/.routines` and `~/.local/state/claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. `git fetch`, `git pull`, `git push` and `grove sync` run outside the sandbox with the host's own git auth, because git over SSH fails inside the macOS sandbox and a `--bg` session inherits no environment. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
+
 ## Spawn's answers
 
 `spawn run` reads one JSON request per line and answers one JSON line: the result object or `{"error": …}`. `claude start` answers `{"id": <8-char bg id>, "session_id": <uuid>, …}`; `claude list` (with or without `ids`) answers `{"sessions": [row…]}`, each row carrying `id`, `name`, `state`, `status`; a session that has left the listing is simply absent. A row's `state` (`working` · `blocked` · `done` · `failed`) says whether the session is working; its `status` (`busy` · `idle`) does not — a finished session reports `status: busy`. `claude stop` with `id` ends a session and keeps its conversation. Every request is built with `python3 -I` `json.dumps`, never by hand — the brief is thousands of characters of markdown, quotes and backticks.
@@ -147,19 +151,21 @@ rc=0
 [ "$rc" -eq 0 ] || exit "$rc"   # 3: the clock file is unreadable — a fault, not a wait
 id=$("$sm" shift brief)
 cwd=$("$sm" shift pick --path --shift "$id")
+profile=$("$sm" shift profile)
 req=$(python3 -I -c '
 import json, sys
-brief, cwd, mind, shift = sys.argv[1:5]
+brief, cwd, mind, shift, profile = sys.argv[1:6]
 print(json.dumps({
     "verb": "claude",
     "action": "start",
     "prompt": open(brief).read(),
     "cwd": cwd,
     "model": mind,
-    "permission_mode": "auto",
+    "permission_mode": "bypassPermissions",
+    "settings": json.loads(profile),
     "name": "shift " + shift,
 }))
-' "$root/shifts/$id/brief.md" "$cwd" "${SANDMAN_SHIFT_MIND:-opus}" "$id")
+' "$root/shifts/$id/brief.md" "$cwd" "${SANDMAN_SHIFT_MIND:-opus}" "$id" "$profile")
 answer=$(printf '%s\n' "$req" | "$sp" run)
 ids=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys

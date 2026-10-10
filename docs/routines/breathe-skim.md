@@ -15,6 +15,10 @@ The ruach's hourly pass. Research is its own perpetual engine, outside the creat
 - `~/.sandman/breath/<date>-<slug>.md` — the breaths. `~/.sandman/breath/problems.md` — what the shift engine wants answered, written by `sandman shift brief`.
 - `~/.sandman/shifts/PAUSE` — the machine's one off switch; while it exists no pass starts.
 
+## The sandbox
+
+A pass runs in `bypassPermissions` inside Claude Code's strict Bash sandbox with the profile `sandman shift profile --kind breath` prints — the same boundary as `shift.md` § The sandbox: writes under the machine's own trees only, network to the allowlisted feeds and GitHub, credentials unreadable.
+
 ## Knobs
 
 - `SANDMAN_BREATH_MIND` — the pass model, default `opus`. The skim spawns no readers.
@@ -35,19 +39,21 @@ rc=0
 id=$("$sm" breathe pass --kind skim) || rc=$?
 [ "$rc" -ne 1 ] || exit 0   # nothing due, budget spent, a pass of this kind in flight, or the lock held: wait
 [ "$rc" -eq 0 ] || exit "$rc"   # 2 or 3: a fault — unknown verb, bad sources.toml, missing template
+profile=$("$sm" shift profile --kind breath)
 req=$(python3 -I -c '
 import json, sys
-prompt, cwd, mind, pid = sys.argv[1:5]
+prompt, cwd, mind, pid, profile = sys.argv[1:6]
 print(json.dumps({
     "verb": "claude",
     "action": "start",
     "prompt": open(prompt).read(),
     "cwd": cwd,
     "model": mind,
-    "permission_mode": "auto",
+    "permission_mode": "bypassPermissions",
+    "settings": json.loads(profile),
     "name": "breath skim " + pid,
 }))
-' "$root/breath/passes/$id/prompt.md" "$root/breath" "${SANDMAN_BREATH_MIND:-opus}" "$id")
+' "$root/breath/passes/$id/prompt.md" "$root/breath" "${SANDMAN_BREATH_MIND:-opus}" "$id" "$profile")
 answer=$(printf '%s\n' "$req" | "$HOME/.local/bin/spawn" run)
 ids=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys
