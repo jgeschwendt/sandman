@@ -31,7 +31,10 @@ The ruach's hourly pass. Research is its own perpetual engine, outside the creat
 root="${SANDMAN_ROOT:-$HOME/.sandman}"
 [ ! -f "$root/shifts/PAUSE" ] || exit 0
 sm="$HOME/.local/bin/sandman"
-id=$("$sm" breathe pass --kind skim) || exit 0   # nothing due, or the day's budget is spent
+rc=0
+id=$("$sm" breathe pass --kind skim) || rc=$?
+[ "$rc" -ne 1 ] || exit 0   # nothing due, or the day's budget is spent: wait
+[ "$rc" -eq 0 ] || exit "$rc"   # 2 or 3: a fault — unknown verb, bad sources.toml, missing template
 req=$(python3 -I -c '
 import json, sys
 prompt, cwd, mind, pid = sys.argv[1:5]

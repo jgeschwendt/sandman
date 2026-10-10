@@ -59,62 +59,69 @@ cur="$root/shifts/current.json"
 [ -f "$cur" ] || exit 0
 sm="$HOME/.local/bin/sandman"
 sp="$HOME/.local/bin/spawn"
-read -r id bg due < <(python3 -I -c '
+field() {   # one field of current.json; "-" when absent, null or empty
+  python3 -I -c '
 import json, sys
-c = json.load(open(sys.argv[1]))
-print(c.get("shift", ""), c.get("bg_id", "-"), c.get("handoff_by", "-"))
-' "$cur")
-[ -n "$id" ] || { echo "current.json names no shift: $(cat "$cur")" >&2; exit 1; }
-stop_named() {   # stop every session spawn lists under the name "shift <id>"
+v = json.load(open(sys.argv[1])).get(sys.argv[2])
+print(v if isinstance(v, str) and v else "-")
+' "$cur" "$1"
+}
+id=$(field shift); bg=$(field bg_id); due=$(field handoff_by)
+[ "$id" != "-" ] || { echo "current.json names no shift: $(cat "$cur")" >&2; exit 1; }
+ask() {   # one spawn request; prints the answer; exit 1 when spawn answers an error
+  answer=$(printf '%s\n' "$1" | "$sp" run)
+  printf '%s\n' "$answer"
+  printf '%s' "$answer" | python3 -I -c 'import json,sys; a=json.loads(sys.stdin.readline() or "{}"); sys.exit(1 if "error" in a else 0)'
+}
+stop_session() {   # stop one bg session; a failed stop is a fault — never release the lock over a running session
+  req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"stop","id":sys.argv[1]}))' "$1")
+  ask "$req" >/dev/null || { echo "spawn could not stop $1; lock kept" >&2; exit 1; }
+}
+stop_named() {   # stop every working or blocked session spawn lists under the name "shift <id>"
   req=$(python3 -I -c 'import json; print(json.dumps({"verb": "claude", "action": "list"}))')
-  printf '%s\n' "$req" | "$sp" run | python3 -I -c '
+  answer=$(ask "$req") || { echo "spawn list failed: $answer" >&2; exit 1; }
+  strays=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys
 answer = json.loads(sys.stdin.readline() or "{}")
 for row in answer.get("sessions", []):
     if row.get("name") == "shift " + sys.argv[1] and row.get("state") in ("working", "blocked"):
         print(row["id"])
-' "$1" | while read -r stray; do
-    printf '%s\n' "$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"stop","id":sys.argv[1]}))' "$stray")" | "$sp" run >/dev/null || true
-  done
+' "$1")
+  for stray in $strays; do stop_session "$stray"; done
 }
 if [ "$bg" = "-" ]; then
   # briefed but never attached: the open block failed between brief and spawn; a session may still have started
   stop_named "$id"
-  "$sm" shift handoff --shift "$id" --abandoned
+  "$sm" shift handoff --shift "$id" --abandoned --reason "the open block failed between brief and attach; any session named shift $id was stopped"
   exit 0
 fi
 req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb": "claude", "action": "list", "ids": [sys.argv[1]]}))' "$bg")
-answer=$(printf '%s\n' "$req" | "$sp" run)
+answer=$(ask "$req") || { echo "spawn list for $bg answered: $answer" >&2; exit 1; }
 state=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys
-answer = json.loads(sys.stdin.readline() or "{}")
-if "error" in answer or "sessions" not in answer:
-    print("error")
-else:
-    rows = answer["sessions"]
-    print(rows[0].get("state", "") if rows else "gone")
+rows = json.loads(sys.stdin.readline() or "{}").get("sessions", [])
+print(rows[0].get("state", "") if rows else "gone")
 ')
 case "$state" in
   done|failed|gone)
     "$sm" shift handoff --shift "$id" --from-session || "$sm" shift handoff --shift "$id" --abandoned
     ;;
   working|blocked)
-    overrun=$(python3 -I -c '
+    late=$(python3 -I -c '
 import sys, datetime
 due = sys.argv[1]
 if due == "-":
-    print("no"); sys.exit()
+    print(-1); sys.exit()
 d = datetime.datetime.fromisoformat(due.replace("Z", "+00:00"))
-late = datetime.datetime.now(datetime.timezone.utc) - d
-print("yes" if late.total_seconds() > int(sys.argv[2]) * 60 else "no")
-' "$due" "${SANDMAN_SHIFT_GRACE_MIN:-20}")
-    if [ "$overrun" = "yes" ]; then
-      printf '%s\n' "$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"stop","id":sys.argv[1]}))' "$bg")" | "$sp" run >/dev/null
-      "$sm" shift handoff --shift "$id" --from-session || "$sm" shift handoff --shift "$id" --abandoned
+print(int((datetime.datetime.now(datetime.timezone.utc) - d).total_seconds() // 60))
+' "$due")
+    if [ "$late" -gt "${SANDMAN_SHIFT_GRACE_MIN:-20}" ]; then
+      stop_session "$bg"
+      "$sm" shift handoff --shift "$id" --from-session || "$sm" shift handoff --shift "$id" --abandoned --reason "stopped at $(date -u +%FT%TZ): still $state $late min past handoff_by"
     fi
     ;;
   *)
-    echo "spawn list for $bg answered: $answer" >&2
+    echo "spawn list for $bg answered an unknown state: $answer" >&2
     exit 1
     ;;
 esac
@@ -155,24 +162,10 @@ print(answer.get("id", ""), answer.get("session_id", ""))
 bg=${ids% *}
 sid=${ids#* }
 if [ -z "$bg" ]; then
-  # the start may have succeeded without a parsable answer: stop anything already running under this name
-  req=$(python3 -I -c 'import json; print(json.dumps({"verb": "claude", "action": "list"}))')
-  printf '%s\n' "$req" | "$sp" run | python3 -I -c '
-import json, sys
-answer = json.loads(sys.stdin.readline() or "{}")
-for row in answer.get("sessions", []):
-    if row.get("name") == "shift " + sys.argv[1]:
-        print(row["id"])
-' "$id" | while read -r stray; do
-    printf '%s\n' "$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"stop","id":sys.argv[1]}))' "$stray")" | "$sp" run >/dev/null || true
-  done
-  "$sm" shift handoff --shift "$id" --abandoned
+  # the start may have succeeded without a parsable answer: keep the lock (current.json has no bg_id) and let
+  # the close block's briefed-but-never-attached path stop any session named "shift <id>" and abandon it
   echo "spawn start failed for $id: $answer" >&2
   exit 1
 fi
-"$sm" shift attach --shift "$id" --bg-id "$bg" --session-id "$sid" || {
-  printf '%s\n' "$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"stop","id":sys.argv[1]}))' "$bg")" | "$sp" run >/dev/null || true
-  "$sm" shift handoff --shift "$id" --abandoned
-  exit 1
-}
+"$sm" shift attach --shift "$id" --bg-id "$bg" --session-id "$sid" || { echo "attach failed for $id ($bg); the close block will stop and abandon it" >&2; exit 1; }
 ```
