@@ -178,12 +178,13 @@ usage: sandman <verb> [args]
       (or, for a shift id, naming it in Shift:) — in each checkout under ~/.grove/code
       ($SANDMAN_GROVE_CODE) and in ~, ~/.routines and the data root
       ($SANDMAN_RECONCILE_EXTRA, colon-separated) — that the repo's trunk
-      reaches is reverted newest-first (a merge against the one parent whose
-      side carries no hit) on a reconcile/<event-id> branch cut from trunk
-      (the manifest's trunk, else main, else origin/HEAD — a repo with none
-      fails), in a scratch worktree, with the repo's hooks off; hits trunk
-      does not reach are reported off trunk. A conflict, or a merge whose
-      trunk side cannot be told, is reported and ends that repo. Appends one
+      reaches is reverted newest-first on a reconcile/<event-id> branch cut
+      from trunk (the manifest's trunk — one that does not resolve fails —
+      else main, else origin/HEAD; a repo with none fails), in a scratch
+      worktree, with the repo's hooks off; hits trunk does not reach are
+      reported off trunk. A conflict ends that repo, and so does a trailered
+      merge: the machine lands by fast-forward only, so merges are never
+      reverted but left to the operator. Appends one
       reconcile event and lists the memories whose source: names a revoked
       event, for reflect to retire; exits 1 when any repo ended in a conflict
       or a failure. --dry-run prints the plan and changes nothing.
@@ -1411,7 +1412,6 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
             ("reverted", &repo.reverted),
             ("conflict", &repo.conflicts),
             ("already reverted", &repo.already),
-            ("in reverted merge", &repo.covered),
             ("off trunk", &repo.off_trunk),
         ] {
             if dry_run && label == "reverted" {

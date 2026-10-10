@@ -223,31 +223,34 @@ to a message or for `git commit --trailer`.
   `~`, `~/.routines` and the data root — it selects the commits whose `Event:` trailer is
   in the set (or, for a shift id, whose `Shift:` names it), one pass per repository
   however many worktrees it has.
-- The base is the repo's **trunk**: the manifest root's `trunk = "…"`, else `main`, else
-  the branch `refs/remotes/origin/HEAD` names — never `HEAD`, since a `shift/…` checkout
-  would carry the shift's other commits onto the reconcile branch. A repo where none of
-  the three resolves fails (`failed`, exit 1): nothing is reverted and no branch is cut,
-  and the message asks the operator to name the trunk in `~/.grove/manifest.toml` as
-  `trunk = "…"` under the repo's `[roots."owner/repo"]` table.
-  A hit trunk does not reach is reported `off trunk` and left alone: its branch is
-  simply never merged.
-- The hits trunk reaches are reverted newest-first onto `reconcile/<id>` — cut from
-  trunk, or reused if it exists and still contains trunk (a reconcile branch trunk has
-  moved past fails that repo: merge trunk in or delete the branch, then rerun);
-  already-reverted commits are skipped. A merge commit is reverted against its **trunk
-  side**: `-m N` for the one parent whose side — the commits it reaches that no other
-  parent does — carries no revoked hit, whichever way round the merge was made (a shift
-  that ran `git merge main` into its branch, then landed `--ff-only`, has trunk as its
-  second parent). The hits the other sides brought in are reported `in reverted merge`
-  rather than reverted twice. When every side carries a hit, or more than one side is
-  clean, trunk's side cannot be told: the repo is refused as a `conflict` (exit 1) with a
-  note naming the merge and its parents, and nothing in it is reverted. The reverts happen in a scratch worktree, so no
-  checkout is switched, and it is removed with `--force` however the pass ends. The
-  repo's commit hooks are switched off (`core.hooksPath=/dev/null`, `--no-verify`): a
-  revert is the owner's reconcile, not a shift's work, so a repo's hook suite neither
-  blocks nor slows it. Each revert commit carries `Shift: reconcile` and `Event: <the
-  reconcile event's id>`. A conflicting revert is aborted and ends that repo's pass.
-  History is never reset or forced.
+- The base is the repo's **trunk**: the manifest root's `trunk = "…"` when it names one,
+  else `main`, else the branch `refs/remotes/origin/HEAD` names — never `HEAD`, since a
+  `shift/…` checkout would carry the shift's other commits onto the reconcile branch. A
+  manifest `trunk` that does not resolve to a branch fails the repo (`failed`, exit 1)
+  rather than falling through; so does a repo where none of the three resolves, and that
+  message asks the operator to name the trunk in `~/.grove/manifest.toml` as
+  `trunk = "…"` under the repo's `[roots."owner/repo"]` table. Nothing is reverted and
+  no branch is cut. A hit trunk does not reach is reported `off trunk` and left alone:
+  its branch is simply never merged.
+- **The machine lands by fast-forward only.** A shift never makes a merge commit: when
+  trunk has moved it rebases its own unpushed `shift/<id>` branch onto trunk, then
+  `git merge --ff-only` — so every commit it lands sits on trunk's first-parent line and
+  reverts on its own. A merge carrying a revoked `Event:` or `Shift:` trailer is
+  therefore a shift that broke the rule: reconcile never reverts a merge, and refuses
+  that repo as a `conflict` (exit 1) with a note naming the merge, nothing in it
+  reverted. Merges without trailers are not hits and are never touched.
+- The hits trunk reaches are reverted newest-first (`git rev-list --topo-order`) onto
+  `reconcile/<id>` — cut from trunk, or reused if it exists and still contains trunk (a
+  reconcile branch trunk has moved past fails that repo: merge trunk in or delete the
+  branch, then rerun); a hit the branch's history already reverts — its `This reverts
+  commit <sha>.` line — is reported `already reverted` and skipped, so a rerun after a
+  complete reconcile changes nothing and exits 0. The reverts happen in a scratch
+  worktree, so no checkout is switched, and it is removed with `--force` however the
+  pass ends. The repo's commit hooks are switched off (`core.hooksPath=/dev/null`,
+  `--no-verify`): a revert is the owner's reconcile, not a shift's work, so a repo's hook
+  suite neither blocks nor slows it. Each revert commit carries `Shift: reconcile` and
+  `Event: <the reconcile event's id>`. A conflicting revert is aborted and ends that
+  repo's pass. History is never reset or forced.
 - Reconcile then appends one `reconcile` event — `parent: <id>`, `shift: reconcile`,
   `refs` every reverted commit as `repo@sha`, `rationale` the count and every conflict —
   and lists the memories under `memories/` whose `source:` names a revoked event, for

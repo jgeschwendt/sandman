@@ -509,50 +509,6 @@ fn commit(dir: &Path, subject: &str, event: Option<&str>) -> String {
 }
 
 #[test]
-fn a_merge_carrying_the_event_is_reverted_against_its_first_parent() {
-    let machine = Machine::new("merge");
-    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
-    let (checkout, _) = fixture(&machine, &[]);
-    git(&checkout, &["switch", "--quiet", "-c", "shift/x"]);
-    fs::write(checkout.join("other.txt"), "shift work\n").expect("work");
-    let work = commit(&checkout, "work", Some(&event));
-    git(&checkout, &["switch", "--quiet", "main"]);
-    fs::write(checkout.join("file.txt"), "trunk moved\n").expect("trunk");
-    commit(&checkout, "trunk edit", None);
-    git(
-        &checkout,
-        &[
-            "merge",
-            "--quiet",
-            "--no-ff",
-            "shift/x",
-            "-m",
-            &format!("merge shift/x\n\nShift: s-test\nEvent: {event}"),
-        ],
-    );
-    let merge = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
-
-    let report = machine.ok(&["reconcile", &event]);
-    assert!(report.contains(&format!("reverted: {merge}")), "{report}");
-    assert!(
-        report.contains(&format!("in reverted merge: {work}")),
-        "{report}"
-    );
-    let branch = format!("reconcile/{event}");
-    assert_eq!(
-        git(&checkout, &["rev-parse", &format!("{branch}^")]).trim(),
-        merge
-    );
-    let files = git(&checkout, &["ls-tree", "--name-only", &branch]);
-    assert_eq!(files.lines().collect::<Vec<_>>(), ["file.txt"], "{files}");
-    assert_eq!(
-        git(&checkout, &["show", &format!("{branch}:file.txt")]),
-        "trunk moved\n"
-    );
-    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
-}
-
-#[test]
 fn a_failing_commit_hook_never_blocks_a_revert_or_strands_the_scratch_tree() {
     let machine = Machine::new("hooks");
     let first = machine.append(&["--kind", "change"]);
@@ -701,131 +657,115 @@ fn trailered(subject: &str, event: &str) -> String {
     format!("{subject}\n\nShift: s-test\nEvent: {event}")
 }
 
-#[test]
-fn a_merge_of_trunk_into_the_shift_reverts_against_trunks_side() {
-    let machine = Machine::new("merge-side");
-    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
-    let (checkout, _) = fixture(&machine, &[]);
-    fs::write(checkout.join("file.txt"), "trunkmoved\n").expect("trunk");
-    commit(&checkout, "trunk moved", None);
-    git(&checkout, &["switch", "--quiet", "-c", "shift/x", "HEAD~1"]);
-    fs::write(checkout.join("other.txt"), "shift work\n").expect("work");
-    let work = commit(&checkout, "work", Some(&event));
-    // The shift merges trunk into its branch; trunk then takes it --ff-only,
-    // so the merge's first parent is the shift's line, not trunk's.
-    git(
-        &checkout,
-        &[
-            "merge",
-            "--quiet",
-            "--no-ff",
-            "main",
-            "-m",
-            &trailered("merge main", &event),
-        ],
-    );
-    let merge = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
-    git(&checkout, &["switch", "--quiet", "main"]);
-    git(&checkout, &["merge", "--quiet", "--ff-only", "shift/x"]);
-
-    let report = machine.ok(&["reconcile", &event]);
-    assert!(report.contains(&format!("reverted: {merge}")), "{report}");
-    assert!(
-        report.contains(&format!("in reverted merge: {work}")),
-        "{report}"
-    );
-    let branch = format!("reconcile/{event}");
-    assert_eq!(
-        git(&checkout, &["show", &format!("{branch}:file.txt")]),
-        "trunkmoved\n",
-        "trunk's own commit survives"
-    );
-    let files = git(&checkout, &["ls-tree", "--name-only", &branch]);
-    assert_eq!(files.lines().collect::<Vec<_>>(), ["file.txt"], "{files}");
+/// Reconcile `event`, asserting the repo is refused at `merge` as a conflict
+/// with nothing reverted and no branch cut.
+fn refused_at(machine: &Machine, checkout: &Path, event: &str, merge: &str) {
+    let output = machine.run(&["reconcile", event]);
+    let report = stdout(&output);
+    assert_eq!(code(&output), 1, "{report}");
+    assert!(report.contains(&format!("conflict: {merge}")), "{report}");
+    assert!(report.contains("fast-forward only"), "{report}");
+    assert!(!report.contains("reverted:"), "{report}");
+    assert_eq!(git(checkout, &["for-each-ref", "refs/heads/reconcile"]), "");
 }
 
 #[test]
-fn an_octopus_merge_reverts_against_its_one_clean_side() {
-    let machine = Machine::new("octopus");
-    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
-    let (checkout, _) = fixture(&machine, &[]);
-    let mut work = Vec::new();
-    for side in ["a", "b"] {
-        git(&checkout, &["switch", "--quiet", "-c", side, "main"]);
-        fs::write(checkout.join(format!("{side}.txt")), "shift work\n").expect("work");
-        work.push(commit(&checkout, side, Some(&event)));
-    }
-    git(&checkout, &["switch", "--quiet", "main"]);
-    fs::write(checkout.join("file.txt"), "trunk moved\n").expect("trunk");
-    commit(&checkout, "trunk edit", None);
-    git(
-        &checkout,
-        &[
-            "merge",
-            "--quiet",
-            "--no-ff",
-            "a",
-            "b",
-            "-m",
-            &trailered("octopus", &event),
-        ],
-    );
-    let merge = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
-
-    let report = machine.ok(&["reconcile", &event]);
-    assert!(report.contains(&format!("reverted: {merge}")), "{report}");
-    for sha in &work {
-        assert!(
-            report.contains(&format!("in reverted merge: {sha}")),
-            "{report}"
-        );
-    }
-    let branch = format!("reconcile/{event}");
-    let files = git(&checkout, &["ls-tree", "--name-only", &branch]);
-    assert_eq!(files.lines().collect::<Vec<_>>(), ["file.txt"], "{files}");
-    assert_eq!(
-        git(&checkout, &["show", &format!("{branch}:file.txt")]),
-        "trunk moved\n"
-    );
-}
-
-#[test]
-fn a_merge_whose_every_side_carries_a_hit_is_refused() {
-    let machine = Machine::new("merge-both");
+fn a_criss_cross_is_refused_with_nothing_reverted() {
+    let machine = Machine::new("criss-cross");
     let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
     let (checkout, _) = fixture(&machine, &[]);
     git(&checkout, &["switch", "--quiet", "-c", "shift/x"]);
     fs::write(checkout.join("other.txt"), "shift work\n").expect("work");
-    let side = commit(&checkout, "side", Some(&event));
+    commit(&checkout, "work", Some(&event));
     git(&checkout, &["switch", "--quiet", "main"]);
-    fs::write(checkout.join("file.txt"), "also machine\n").expect("trunk");
-    let trunk = commit(&checkout, "trunk hit", Some(&event));
+    fs::write(checkout.join("file.txt"), "trunk moved\n").expect("trunk");
+    commit(&checkout, "trunk edit", None);
+    // Each side merges the other's tip, then trunk takes the shift's merge.
+    let merge = |into: &str, from: &str| {
+        git(&checkout, &["switch", "--quiet", into]);
+        let message = trailered(&format!("merge {from}"), &event);
+        git(
+            &checkout,
+            &["merge", "--quiet", "--no-ff", from, "-m", &message],
+        );
+    };
+    git(&checkout, &["branch", "trunk-tip", "main"]);
+    git(&checkout, &["branch", "shift-tip", "shift/x"]);
+    merge("shift/x", "trunk-tip");
+    merge("main", "shift-tip");
+    merge("main", "shift/x");
+    let top = git(&checkout, &["rev-parse", "main"]).trim().to_owned();
+    refused_at(&machine, &checkout, &event, &top);
+}
+
+#[test]
+fn a_merged_foreign_branch_is_refused_and_the_humans_commit_survives() {
+    let machine = Machine::new("foreign");
+    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let (checkout, _) = fixture(&machine, &[]);
+    git(&checkout, &["switch", "--quiet", "-c", "human"]);
+    fs::write(checkout.join("human.txt"), "a human's work\n").expect("human");
+    commit(&checkout, "human work", None);
+    git(&checkout, &["switch", "--quiet", "-c", "shift/x", "main"]);
+    fs::write(checkout.join("other.txt"), "shift work\n").expect("work");
+    commit(&checkout, "work", Some(&event));
+    let message = trailered("merge human", &event);
     git(
         &checkout,
-        &[
-            "merge",
-            "--quiet",
-            "--no-ff",
-            "shift/x",
-            "-m",
-            &trailered("merge", &event),
-        ],
+        &["merge", "--quiet", "--no-ff", "human", "-m", &message],
     );
     let merge = git(&checkout, &["rev-parse", "HEAD"]).trim().to_owned();
-
-    let output = machine.run(&["reconcile", &event]);
-    let report = stdout(&output);
-    assert_eq!(code(&output), 1, "{report}");
-    assert!(report.contains(&format!("conflict: {merge}")), "{report}");
-    assert!(
-        report.contains(&format!("parents {trunk}, {side}")),
-        "{report}"
-    );
-    assert!(!report.contains("reverted:"), "{report}");
+    git(&checkout, &["switch", "--quiet", "main"]);
+    git(&checkout, &["merge", "--quiet", "--ff-only", "shift/x"]);
+    refused_at(&machine, &checkout, &event, &merge);
     assert_eq!(
-        git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
-        ""
+        git(&checkout, &["show", "main:human.txt"]),
+        "a human's work\n"
     );
+}
+
+#[test]
+fn a_fast_forwarded_shift_is_reverted_past_an_untrailered_merge() {
+    let machine = Machine::new("ff");
+    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let (checkout, _) = fixture(&machine, &[]);
+    git(&checkout, &["switch", "--quiet", "-c", "human"]);
+    fs::write(checkout.join("human.txt"), "a human's work\n").expect("human");
+    commit(&checkout, "human work", None);
+    git(&checkout, &["switch", "--quiet", "main"]);
+    git(
+        &checkout,
+        &["merge", "--quiet", "--no-ff", "human", "-m", "merge human"],
+    );
+    git(&checkout, &["switch", "--quiet", "-c", "shift/x"]);
+    let shas: Vec<String> = ["one", "two"]
+        .iter()
+        .map(|content| {
+            fs::write(checkout.join("file.txt"), format!("{content}\n")).expect("work");
+            commit(&checkout, content, Some(&event))
+        })
+        .collect();
+    git(&checkout, &["switch", "--quiet", "main"]);
+    git(&checkout, &["merge", "--quiet", "--ff-only", "shift/x"]);
+
+    let report = machine.ok(&["reconcile", &event]);
+    for sha in &shas {
+        assert!(report.contains(&format!("reverted: {sha}")), "{report}");
+    }
+    let branch = format!("reconcile/{event}");
+    assert_eq!(
+        git(&checkout, &["show", &format!("{branch}:file.txt")]),
+        "base\n"
+    );
+    assert_eq!(
+        git(&checkout, &["show", &format!("{branch}:human.txt")]),
+        "a human's work\n"
+    );
+
+    let tip = git(&checkout, &["rev-parse", &branch]);
+    let rerun = machine.ok(&["reconcile", &event]);
+    assert_eq!(git(&checkout, &["rev-parse", &branch]), tip, "{rerun}");
+    assert!(!rerun.contains("  reverted: "), "{rerun}");
 }
 
 #[test]
@@ -871,4 +811,28 @@ fn a_repo_with_no_trunk_to_name_fails_until_the_manifest_names_it() {
     let report = machine.ok(&["reconcile", &event]);
     assert!(report.contains("from refs/heads/trunk"), "{report}");
     assert!(report.contains(&format!("off trunk: {hit}")), "{report}");
+}
+
+#[test]
+fn a_manifest_trunk_that_does_not_resolve_fails_the_repo() {
+    let machine = Machine::new("bad-trunk");
+    let event = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let (checkout, _) = fixture(&machine, &[("one", &event)]);
+    fs::write(
+        machine.home.join(".grove").join("manifest.toml"),
+        "[roots.\"o/fixture\"]\ntrunk = \"trunk\"\n",
+    )
+    .expect("manifest");
+
+    let output = machine.run(&["reconcile", &event]);
+    let report = stdout(&output);
+    assert_eq!(code(&output), 1, "{report}");
+    assert!(
+        report.contains("failed: no trunk: the manifest names refs/heads/trunk"),
+        "{report}"
+    );
+    assert_eq!(
+        git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
+        ""
+    );
 }
