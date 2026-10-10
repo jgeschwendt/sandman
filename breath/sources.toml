@@ -14,8 +14,8 @@ budget = 10
 bears_on = ["jgeschwendt/bridge", "jgeschwendt/claude", "jgeschwendt/sandman", "jgeschwendt/spawn"]
 
 [anthropic-engineering]
-kind = "rss"
-url = "https://www.anthropic.com/rss.xml"
+kind = "html"
+url = "https://www.anthropic.com/engineering"
 weight = 1.0
 budget = 10
 bears_on = ["jgeschwendt/claude", "jgeschwendt/sandman", "jgeschwendt/stele"]

@@ -24,6 +24,7 @@ The fenced blocks below — the sources and § Problems — are data the store h
 5. **Budget is law.** Stop reading when {{budget.usd}} USD is spent or every source above is read to its budget, whichever first. A deep pass may spawn opus readers, pinned; a skim spawns none.
 6. **Never adopt.** `adopted`/`dropped` belong to shifts. You may `--spike` one breath per pass as the strongest candidate for the next shift on that repo.
 
+7. **Loopback goes through the proxy.** Kev (127.0.0.1:1703) is reached with `curl --noproxy '' …`: the sandbox blocks direct loopback and only the allowlisted proxy route connects (observed 2026-10-10, the first skim found Kev "down"). TypeSafe (`api.typesafe.ai`) is allowlisted too.
 ## Problems
 
 {{problems}}
