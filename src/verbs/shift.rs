@@ -117,21 +117,21 @@ pub const WEEK: [Day; 7] = [
     },
     Day {
         creation: "Day 3 · Land and seed",
-        does: "Drive the repo's worst-scored module to its best form, behaviour preserved.",
+        does: "Drive the repo's worst-scored module — its tests as much as its source — to its best form, behaviour preserved: the fewest statements, functions, branches and lines that still fulfil the feature set.",
         instrument: "/gigarefine",
         name: "Tuesday",
         theme: "Refactor",
     },
     Day {
         creation: "Day 4 · Lights to mark seasons",
-        does: "Compute the score, run the perf and coverage passes, write the numbers where the Sabbath will read them.",
+        does: "Compute the score, run the perf and coverage passes, count statements, functions, branches and lines in source and tests, write the numbers where the Sabbath will read them.",
         instrument: "sandman score · perf",
         name: "Wednesday",
         theme: "Measure",
     },
     Day {
         creation: "Day 5 · Swarms; be fruitful and multiply",
-        does: "Close security findings, cover the untested paths, land dependency updates with their tests.",
+        does: "Bring the repo to 100 % coverage first (table stakes, end-to-end style), then close security findings and land dependency updates with their tests.",
         instrument: "/security-review · coverage · deps",
         name: "Thursday",
         theme: "Harden",
@@ -145,7 +145,7 @@ pub const WEEK: [Day; 7] = [
     },
     Day {
         creation: "Day 7 · Sabbath",
-        does: "Score the week from the trail, dream-pass, `/tighten` the machine's own prompts and rubrics, plan next week's targets, write the voyage entry.",
+        does: "Score the week from the trail, dream-pass, `/tighten` the machine's own prompts, rubrics and tests to their fewest lines, plan next week's targets, write the voyage entry.",
         instrument: "self-pass",
         name: "Saturday",
         theme: "Rest",

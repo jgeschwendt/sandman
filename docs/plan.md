@@ -27,11 +27,11 @@ Hebrew reckoning: Sunday is Day 1, Saturday the Sabbath. Local time, America/New
 | --- | --- | --- | --- | --- |
 | Sun | Day 1 · Light divided from darkness | **Hunt** | `/gigasweep` → `/gigadebug` | sweep a repo for real defects, root-cause the confirmed ones, ship the repro as a regression test |
 | Mon | Day 2 · Firmament; waters divided | **Redesign** | `/gigaredesign` → `/execute-plan` | rebuild the structure Sunday's findings and standing proposals indict, always-green staged migration |
-| Tue | Day 3 · Land and seed | **Refactor** | `/gigarefine` | drive a repo's worst-scored module to its best form, behaviour preserved |
-| Wed | Day 4 · Lights to mark seasons | **Measure** | `sandman score`, benchmarks | compute the score, run the perf and coverage passes, write the numbers where the Sabbath will read them |
-| Thu | Day 5 · Swarms; be fruitful and multiply | **Harden** | `/security-review`, coverage, dependencies | close security findings, cover the untested paths, land dependency updates with their tests |
+| Tue | Day 3 · Land and seed | **Refactor** | `/gigarefine` | drive a repo's worst-scored module — tests as much as source — to its best form, behaviour preserved: the fewest statements, functions, branches and lines that still fulfil the feature set |
+| Wed | Day 4 · Lights to mark seasons | **Measure** | `sandman score`, benchmarks | compute the score, run the perf and coverage passes, count statements, functions, branches and lines in source and tests, write the numbers where the Sabbath will read them |
+| Thu | Day 5 · Swarms; be fruitful and multiply | **Harden** | `/security-review`, coverage, dependencies | bring the repo to 100 % coverage first (table stakes, end-to-end style), then close security findings and land dependency updates with their tests |
 | Fri | Day 6 · Image; the work finished, very good | **Ship** | `/gigareview` | GO/NO-GO on the week's branches, merge the GOs, patch releases, `stele check` across the grove, CI green before sundown |
-| Sat | Day 7 · Sabbath | **Rest** | the self-pass | no code commits: score the week from the trail, dream-pass, `/tighten` the machine's own prompts and rubrics, plan next week's targets, write the voyage entry; every seventh week, the ablation |
+| Sat | Day 7 · Sabbath | **Rest** | the self-pass | no code commits: score the week from the trail, dream-pass, `/tighten` the machine's own prompts, rubrics and tests to their fewest lines, plan next week's targets, write the voyage entry; every seventh week, the ablation |
 
 ## The ruach — research as its own engine
 
@@ -62,7 +62,7 @@ Scope is every root under `~/.grove/code/jgeschwendt/`. The three home repos (`~
 ## Standing rails
 
 - A shift works in `shift/<id>` worktrees created through `grove tree add`; trunk never carries in-flight work.
-- Merge to trunk only when the repo's test, lint and `stele check && stele emit --check` are green and a `/gigareview` says GO. Patch releases ship on their own; a minor or major opens a decision thread (release policy, unchanged).
+- Merge to trunk only when the repo's test, lint and `stele check && stele emit --check` are green, coverage has not dropped — 100 % is table stakes, end-to-end style like jlg.io, and test code is source code (owner 2026-10-09: "code golf should be in the spirit of the refactor/tighten phases") — and a `/gigareview` says GO. Patch releases ship on their own; a minor or major opens a decision thread (release policy, unchanged).
 - History is never rewritten and nothing is force-pushed; the trail reconciles by revert.
 - The orchestrator model is a knob, `SANDMAN_SHIFT_MIND`, default `opus`. Fable takes the Sabbath self-pass and Friday's verdicts while quota allows; when the weekly limit is exhausted every spawned agent pins opus or below. Workers are always opus or below.
 - Cost: every headless call logs its cost to the trail; a shift stops at `SANDMAN_SHIFT_BUDGET_USD` and hands off early; the ruach stops at `SANDMAN_BREATH_BUDGET_USD` per day. `claude-breaker` keeps its cap of twenty.
