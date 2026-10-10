@@ -228,7 +228,116 @@ to a message or for `git commit --trailer`.
 `<code>/../manifest.toml`, and may be absent); `$SANDMAN_RECONCILE_EXTRA`
 (colon-separated) replaces the three extra repos.
 
+## shifts/ — the shift engine
+
+Not a bank. A **shift** is one autonomous session bounded by the five-hour usage
+window; `sandman shift` opens it with a brief and closes it with a handoff. Its id is
+`s-<yyyymmddThhmm>Z`, the UTC minute `shift brief` ran, and every machine commit it
+makes carries that id in its `Shift:` trailer.
+
+```
+shifts/
+  current.json            # the open shift; absent between shifts
+  PAUSE                   # the owner's off switch — the runner starts nothing while it exists
+  s-20261016T1600Z/
+    brief.md              # the composed prompt the session started from
+    handoff.md            # what the shift left the next one
+    meta.json
+```
+
+`current.json` — one object, keys alphabetical, written by `shift brief`, extended by
+`shift attach`, removed by `shift handoff` for the shift it names:
+
+| key | what |
+| --- | --- |
+| `bg_id` | the background session's short id, once the runner has attached it |
+| `handoff_by` | when the shift must hand off — fifteen minutes before the window resets, or before five hours pass when the window is unknown |
+| `path` | the checkout the shift works |
+| `repo` | `owner/repo`, or `~`, `~/.routines`, `~/.sandman` for the home repos |
+| `session_id` | the session's full id, once attached |
+| `shift` | the shift id |
+| `started` | when the brief was composed, ISO-8601 Z |
+| `theme` | the day's theme |
+
+`meta.json` — keys alphabetical: `shift`, `theme`, `instrument`, `repo`, `path`,
+`started`, `mind` (the orchestrator model), `window` (`remaining` as prose, `resets_at`,
+`stale`, `used` — the clock at the start); `shift handoff` adds `ended`, and `abandoned:
+true` when the runner found the session gone. The rotation reads `repo` and `started`
+from every `meta.json` to know which repo has rested longest.
+
+### The rotation
+
+`shift pick` covers the trunk checkout of every grove repo whose owner is in
+`$SANDMAN_SHIFT_OWNERS` (colon-separated, default `jgeschwendt`) — the trunk is the
+checkout named by the manifest root's `trunk = "…"`, else `main` — plus `~`,
+`~/.routines` and the data root (`$SANDMAN_RECONCILE_EXTRA` replaces the three, as it
+does for reconcile). Least recently shifted first, never-shifted before any; a tie goes
+to a failing `stele check` (run only where `.stele/graph.lock` exists, 20 s timeout, a
+missing binary skipped), then the most open threads naming the slug, then the most
+`state: new` breaths filed against it, then the name. The open shift's repo and
+`$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over.
+
+### The brief and its slots
+
+`shift brief` fills `prompts/shift.md` — `$SANDMAN_PROMPTS`, else the `prompts/` of
+sandman's trunk checkout in the grove — and refuses (exit 1) while `current.json` names
+an open shift, when the template is missing, or when it names a slot outside this
+table. The theme is the America/New_York weekday's (the US daylight-time rule,
+computed); `$SANDMAN_NOW` pins the instant.
+
+| slot | filled with |
+| --- | --- |
+| `brief.at` | the instant, ISO-8601 Z |
+| `breath.pending` | `breath/*.md` with `repo:` the target and `state: new`, one line each |
+| `budget.spent` | `cost_usd` summed over today's UTC trail events whose `shift` is a shift id |
+| `budget.usd` | `$SANDMAN_SHIFT_BUDGET_USD`, default 15 |
+| `clock.handoff_by` | as in `current.json` |
+| `clock.remaining` | the window's remaining time, `fresh` once it has reset, `unknown` without a window file |
+| `handoff.previous` | the newest `shifts/*/handoff.md`, else `none` |
+| `memories.bearing` | the target's bank chain as recall renders it, under 3,000 characters |
+| `score.week` | the first 20 lines of `score/<yyyy>-W<ww>.md`, else `none yet` |
+| `shift.creation` | the creation-day note — `Day 6 · Image; the work finished, very good` |
+| `shift.id` | the shift id |
+| `shift.instrument` | the day's instrument |
+| `shift.mind` | `--mind`, else `$SANDMAN_SHIFT_MIND`, else `opus` |
+| `shift.theme` | Hunt · Redesign · Refactor · Measure · Harden · Ship · Rest, Sunday first |
+| `shift.theme_notes` | the day's work; on Saturday "No code commits; remember, don't make.", and in an ISO week divisible by seven the Shemitah's ablation instead of the self-pass |
+| `shift.weekday` | the local weekday's name |
+| `target.last_shifted` | the target's newest `started`, else `never` |
+| `target.path` | the target checkout |
+| `target.plan_next` | the first paragraph under the first `docs/plan.md` heading that mentions "next", else its `Status:` line, cut at 600 characters |
+| `target.reason` | why the rotation chose it |
+| `target.repo` | the target's slug |
+| `threads.open` | `~/.threads/*.md` with `state: open` whose text names the slug, one line each |
+| `trail.recent` | the trail's summary lines from the 24 h before the instant, the newest 40 |
+
+The composed brief is capped at 24,000 characters. Over the cap, whole lines go —
+`trail.recent` first (oldest lines first), then `memories.bearing`, then `threads.open`
+(from the tail) — and a marker line says how many; a brief still over is cut at the
+cap.
+
+### Attribution
+
+`shift brief` appends one `shift.start` event — `shift` the id, `repo` the target,
+`model` the mind, `rationale` the theme and the rotation's reason — whose `refs` are:
+
+- `brief:<path>` — the brief it wrote;
+- `fp:<slot>=<8 hex>` — one per slot the template names, the 32-bit FNV-1a of the text
+  that slot received (after any trim): the record of what the shift was primed with,
+  for Wednesday's score to attribute outcomes to;
+- `trimmed:<slot>` — one per slot the cap cut, `trimmed:brief` for a final cut.
+
+`shift handoff` appends one `shift.handoff` event — `rationale` the handoff's first line,
+`refs` `handoff:<path>` and `abandoned` when it was.
+
+### breath/problems.md
+
+The ruach's reading list, kept by `shift brief`: one `## <repo> · <yyyy-mm-dd>` section
+per repo per local day — the target's plan-next, its open threads, and the newest five
+`guard`/`correction` events touching it — replaced in place when the same heading is
+briefed again.
+
 ## Concurrency
 
-All bank and trail writes happen under `.commit.lock` at the data root; every file write is
+All bank, trail and shift writes happen under `.commit.lock` at the data root; every file write is
 atomic (tmp → rename in the same directory).
