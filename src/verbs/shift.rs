@@ -1,0 +1,1460 @@
+//! `shift` — one autonomous session of the perpetual machine, opened with a
+//! brief and closed with a handoff.
+//!
+//! The shift engine's state is files under the data root: `shifts/<id>/`
+//! holds a shift's `brief.md`, `handoff.md` and `meta.json`; `shifts/current.json`
+//! names the open shift and is absent between shifts. Every write holds
+//! `.commit.lock` and goes tmp → rename; the trail events (`shift.start`,
+//! `shift.handoff`) are appended after the lock is released, through the
+//! trail's own append.
+//!
+//! Nothing here calls a model. `brief` composes the dynamic prompt from
+//! `prompts/shift.md` by filling its `{{slot}}`s from the trail, the banks, the
+//! target repo and the calendar; the runner (`~/.routines/shift.md`) hands the
+//! result to a session.
+//!
+//! The contract is `docs/BANK-FORMAT.md` § shift.
+
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::atomic;
+use crate::error::{Error, Result};
+use crate::grove;
+use crate::json::{self, Value};
+use crate::paths;
+use crate::slug::truncate_chars;
+use crate::time::{Timestamp, civil_from_days, days_from_civil};
+use crate::verbs::recall;
+use crate::verbs::trail;
+
+/// The composed brief's hard ceiling.
+pub const BRIEF_CHARS: usize = 24_000;
+/// How long `--check` insists the window still has.
+const CHECK_MARGIN_SECONDS: i64 = 15 * 60;
+/// `--check` refuses at or above this share of the window used.
+const CHECK_USED_PERCENT: f64 = 90.0;
+/// How many breath, thread and guard lines the problems file keeps per repo.
+const PROBLEM_EVENTS: usize = 5;
+/// The memories slot's ceiling.
+const MEMORIES_CHARS: usize = 3_000;
+/// The plan-next slot's ceiling.
+const PLAN_NEXT_CHARS: usize = 600;
+/// How many lines of the week's score the brief carries.
+const SCORE_LINES: usize = 20;
+/// How long `pick` waits for one `stele check`.
+const STELE_TIMEOUT: Duration = Duration::from_secs(20);
+/// A window file older than this is reported stale.
+const STALE_SECONDS: i64 = 30 * 60;
+/// What a thread title is cut to.
+const TITLE_CHARS: usize = 120;
+/// How many trail lines the brief carries.
+const TRAIL_LINES: usize = 40;
+/// The usage window's length.
+const WINDOW_SECONDS: i64 = 5 * 3600;
+
+/// One day of the creation week — the spine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Day {
+    /// Its creation note.
+    pub creation: &'static str,
+    /// What a shift does that day.
+    pub does: &'static str,
+    /// The instrument the theme runs.
+    pub instrument: &'static str,
+    /// The weekday's name.
+    pub name: &'static str,
+    /// The theme.
+    pub theme: &'static str,
+}
+
+/// Sunday first — Hebrew reckoning, Day 1 to the Sabbath.
+pub const WEEK: [Day; 7] = [
+    Day {
+        creation: "Day 1 · Light divided from darkness",
+        does: "Sweep the repo for real defects, root-cause the confirmed ones, ship each repro as a regression test.",
+        instrument: "/gigasweep → /gigadebug",
+        name: "Sunday",
+        theme: "Hunt",
+    },
+    Day {
+        creation: "Day 2 · Firmament; waters divided",
+        does: "Rebuild the structure Sunday's findings and standing proposals indict, through an always-green staged migration.",
+        instrument: "/gigaredesign → /execute-plan",
+        name: "Monday",
+        theme: "Redesign",
+    },
+    Day {
+        creation: "Day 3 · Land and seed",
+        does: "Drive the repo's worst-scored module to its best form, behaviour preserved.",
+        instrument: "/gigarefine",
+        name: "Tuesday",
+        theme: "Refactor",
+    },
+    Day {
+        creation: "Day 4 · Lights to mark seasons",
+        does: "Compute the score, run the perf and coverage passes, write the numbers where the Sabbath will read them.",
+        instrument: "sandman score · perf",
+        name: "Wednesday",
+        theme: "Measure",
+    },
+    Day {
+        creation: "Day 5 · Swarms; be fruitful and multiply",
+        does: "Close security findings, cover the untested paths, land dependency updates with their tests.",
+        instrument: "/security-review · coverage · deps",
+        name: "Thursday",
+        theme: "Harden",
+    },
+    Day {
+        creation: "Day 6 · Image; the work finished, very good",
+        does: "GO/NO-GO on the week's branches, merge the GOs, patch releases, `stele check` across the grove, CI green before sundown.",
+        instrument: "/gigareview",
+        name: "Friday",
+        theme: "Ship",
+    },
+    Day {
+        creation: "Day 7 · Sabbath",
+        does: "Score the week from the trail, dream-pass, `/tighten` the machine's own prompts and rubrics, plan next week's targets, write the voyage entry.",
+        instrument: "self-pass",
+        name: "Saturday",
+        theme: "Rest",
+    },
+];
+
+/// Everything the shift verbs read, resolved by the caller.
+#[derive(Clone, Debug)]
+pub struct Context {
+    /// The data root.
+    pub data_root: PathBuf,
+    /// `$HOME`.
+    pub home: PathBuf,
+    /// The instant the verb acts at.
+    pub now: Timestamp,
+    /// The grove owners whose repos rotate; extras always do.
+    pub owners: Vec<String>,
+    /// The directory holding `shift.md`.
+    pub prompts: PathBuf,
+    /// The repos to rotate over.
+    pub roots: grove::Roots,
+    /// Repo slugs never picked.
+    pub skip: Vec<String>,
+    /// `~/.threads`.
+    pub threads: PathBuf,
+    /// The five-hour window file.
+    pub window: PathBuf,
+}
+
+// ─── the calendar ────────────────────────────────────────────────────────
+
+/// `America/New_York`'s offset from UTC at `at`, in hours: −4 from the second
+/// Sunday of March at 02:00 EST (07:00Z) until the first Sunday of November at
+/// 02:00 EDT (06:00Z), −5 otherwise. The US rule since 2007.
+#[must_use]
+pub fn new_york_offset_hours(at: Timestamp) -> i64 {
+    let (year, ..) = at.parts();
+    let sunday_on_or_after = |month: i64, day: i64| {
+        let days = days_from_civil(year, month, day);
+        days + (7 - weekday(days)) % 7
+    };
+    let begins = (sunday_on_or_after(3, 8)) * 86_400 + 7 * 3600;
+    let ends = (sunday_on_or_after(11, 1)) * 86_400 + 6 * 3600;
+    if (begins..ends).contains(&at.unix_seconds()) {
+        -4
+    } else {
+        -5
+    }
+}
+
+/// Day of the week for days since the epoch, Sunday 0 — 1970-01-01 was a
+/// Thursday.
+fn weekday(days: i64) -> i64 {
+    (days + 4).rem_euclid(7)
+}
+
+/// The local calendar facts a brief needs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Local {
+    /// Local civil date.
+    pub date: (i64, i64, i64),
+    /// ISO-8601 week-numbering year and week.
+    pub iso_week: (i64, i64),
+    /// Sunday 0 … Saturday 6.
+    pub weekday: usize,
+}
+
+impl Local {
+    /// `at` in New York.
+    #[must_use]
+    pub fn at(at: Timestamp) -> Self {
+        let local = at.unix_seconds() + new_york_offset_hours(at) * 3600;
+        let days = local.div_euclid(86_400);
+        let iso_weekday = (days + 3).rem_euclid(7) + 1;
+        let thursday = days - iso_weekday + 4;
+        let (iso_year, ..) = civil_from_days(thursday);
+        let iso_week = (thursday - days_from_civil(iso_year, 1, 1)) / 7 + 1;
+        Self {
+            date: civil_from_days(days),
+            iso_week: (iso_year, iso_week),
+            weekday: usize::try_from(weekday(days)).unwrap_or_default(),
+        }
+    }
+
+    /// The day of the creation week.
+    #[must_use]
+    pub fn day(self) -> Day {
+        WEEK[self.weekday]
+    }
+
+    /// `yyyy-mm-dd`.
+    #[must_use]
+    pub fn ymd(self) -> String {
+        let (year, month, day) = self.date;
+        format!("{year:04}-{month:02}-{day:02}")
+    }
+
+    /// `yyyy-Www` — the score page's name.
+    #[must_use]
+    pub fn week_name(self) -> String {
+        let (year, week) = self.iso_week;
+        format!("{year:04}-W{week:02}")
+    }
+
+    /// Every seventh ISO week.
+    #[must_use]
+    pub fn shemitah(self) -> bool {
+        self.iso_week.1 % 7 == 0
+    }
+}
+
+/// `s-<yyyymmddThhmm>Z` — the instant to the minute, UTC.
+#[must_use]
+pub fn shift_id(at: Timestamp) -> String {
+    let stamp = at.stamp();
+    format!("s-{}Z", &stamp[..stamp.len() - 2])
+}
+
+// ─── the clock ───────────────────────────────────────────────────────────
+
+/// The five-hour window as the harness last saw it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Window {
+    /// When the file was written.
+    pub at: Option<Timestamp>,
+    /// When the window resets.
+    pub resets_at: Option<Timestamp>,
+    /// How much of it is used, percent.
+    pub used: Option<f64>,
+}
+
+impl Window {
+    /// Read the window file; `None` when it is absent or unreadable.
+    #[must_use]
+    pub fn read(path: &Path) -> Option<Self> {
+        let value = json::parse(&fs::read_to_string(path).ok()?).ok()?;
+        let five = value.get("five_hour");
+        let resets_at = five
+            .and_then(|five| five.get("resets_at"))
+            .and_then(Value::as_number)
+            .filter(|seconds| seconds.is_finite() && *seconds > 0.0);
+        Some(Self {
+            at: value
+                .get("at")
+                .and_then(Value::as_str)
+                .and_then(Timestamp::parse_iso8601),
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "a unix second count, finite and positive, well inside i64"
+            )]
+            resets_at: resets_at.map(|seconds| Timestamp::from_unix_seconds(seconds as i64)),
+            used: five
+                .and_then(|five| five.get("used_percentage"))
+                .and_then(Value::as_number)
+                .filter(|used| used.is_finite()),
+        })
+    }
+}
+
+/// What the clock answers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clock {
+    /// When it was asked.
+    pub now: Timestamp,
+    /// The window, when the file was readable.
+    pub window: Option<Window>,
+}
+
+impl Clock {
+    /// Seconds left in the window: `None` when unknown, `Some(None)` when the
+    /// recorded window has already reset (a fresh one opens on first use).
+    #[must_use]
+    pub fn remaining(&self) -> Option<Option<i64>> {
+        let resets_at = self.window?.resets_at?;
+        let left = resets_at.unix_seconds() - self.now.unix_seconds();
+        Some((left > 0).then_some(left))
+    }
+
+    /// Whether the window file is more than thirty minutes old.
+    #[must_use]
+    pub fn stale(&self) -> bool {
+        self.window
+            .and_then(|window| window.at)
+            .is_none_or(|at| self.now.unix_seconds() - at.unix_seconds() > STALE_SECONDS)
+    }
+
+    /// `remaining` as prose: `4h7m`, `fresh`, `unknown`.
+    #[must_use]
+    pub fn remaining_text(&self) -> String {
+        match self.remaining() {
+            None => "unknown".to_owned(),
+            Some(None) => "fresh".to_owned(),
+            Some(Some(left)) => format!("{}h{}m", left / 3600, (left % 3600) / 60),
+        }
+    }
+
+    /// The one line `shift clock` prints.
+    #[must_use]
+    pub fn line(&self) -> String {
+        let Some(window) = self.window else {
+            return "remaining=unknown".to_owned();
+        };
+        let used = match (self.remaining(), window.used) {
+            (Some(None), _) => "0%".to_owned(),
+            (_, Some(used)) => format!("{used}%"),
+            (_, None) => "unknown".to_owned(),
+        };
+        format!(
+            "remaining={} used={used} resets_at={} stale={}",
+            self.remaining_text(),
+            window
+                .resets_at
+                .map_or_else(|| "unknown".to_owned(), Timestamp::iso8601),
+            self.stale()
+        )
+    }
+
+    /// Why a shift must not start now, if it must not: under fifteen minutes
+    /// left, or ninety percent used. An unknown window never refuses — the
+    /// runner's five-hour timeout is the bound then.
+    #[must_use]
+    pub fn refusal(&self) -> Option<String> {
+        if let Some(Some(left)) = self.remaining()
+            && left < CHECK_MARGIN_SECONDS
+        {
+            return Some(format!("window: {} left", self.remaining_text()));
+        }
+        if self.remaining() != Some(None)
+            && let Some(used) = self.window.and_then(|window| window.used)
+            && used >= CHECK_USED_PERCENT
+        {
+            return Some(format!("window: {used}% used"));
+        }
+        None
+    }
+
+    /// When a shift started now must hand off: fifteen minutes before the
+    /// window resets, or before five hours pass when the window is unknown.
+    #[must_use]
+    pub fn handoff_by(&self) -> Timestamp {
+        let end = match self.remaining() {
+            Some(Some(left)) => self.now.unix_seconds() + left,
+            _ => self.now.unix_seconds() + WINDOW_SECONDS,
+        };
+        Timestamp::from_unix_seconds(end - CHECK_MARGIN_SECONDS)
+    }
+}
+
+/// The clock, read now.
+#[must_use]
+pub fn clock(ctx: &Context) -> Clock {
+    Clock {
+        now: ctx.now,
+        window: Window::read(&ctx.window),
+    }
+}
+
+// ─── the rotation ────────────────────────────────────────────────────────
+
+/// A repo a shift can work.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Target {
+    /// When it was last shifted.
+    pub last: Option<Timestamp>,
+    /// `owner/repo`, or `~`, `~/.routines`, … for an extra.
+    pub label: String,
+    /// The trunk checkout.
+    pub path: PathBuf,
+    /// Why it came first, in prose.
+    pub reason: String,
+}
+
+/// One shift's `meta.json`, as far as the rotation reads it.
+#[derive(Clone, Debug, PartialEq)]
+struct Meta {
+    /// When it was handed off.
+    ended: Option<String>,
+    /// The checkout it worked.
+    path: Option<String>,
+    /// Its repo slug.
+    repo: Option<String>,
+    /// Its id.
+    shift: String,
+    /// When it started.
+    started: Option<Timestamp>,
+    /// The whole object, for a rewrite.
+    value: Value,
+}
+
+/// Read a shift's `meta.json`.
+fn read_meta(data_root: &Path, shift: &str) -> Result<Meta> {
+    let path = paths::shift_dir(data_root, shift).join("meta.json");
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(source) if source.kind() == ErrorKind::NotFound => {
+            return Err(Error::not_found("shift", shift.to_owned()));
+        }
+        Err(source) => return Err(Error::io(&path, source)),
+    };
+    let value = json::parse(&text).map_err(|error| Error::Json {
+        path: Some(path.clone()),
+        message: error.to_string(),
+    })?;
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    };
+    Ok(Meta {
+        ended: text("ended"),
+        path: text("path"),
+        repo: text("repo"),
+        shift: shift.to_owned(),
+        started: text("started").and_then(|at| Timestamp::parse_iso8601(&at)),
+        value: value.clone(),
+    })
+}
+
+/// Every shift directory's name, sorted — ids are stamps, so oldest first.
+fn shift_ids(data_root: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(paths::shifts_dir(data_root)) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(ToOwned::to_owned))
+        .filter(|name| name.starts_with("s-"))
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// The newest `started` per repo.
+fn last_shifted(data_root: &Path) -> BTreeMap<String, Timestamp> {
+    let mut last: BTreeMap<String, Timestamp> = BTreeMap::new();
+    for id in shift_ids(data_root) {
+        let Ok(meta) = read_meta(data_root, &id) else {
+            continue;
+        };
+        if let (Some(repo), Some(started)) = (meta.repo, meta.started) {
+            let entry = last.entry(repo).or_insert(started);
+            *entry = (*entry).max(started);
+        }
+    }
+    last
+}
+
+/// The open shift's `current.json`, when one is open.
+fn read_current(data_root: &Path) -> Result<Option<Value>> {
+    let path = paths::shift_current(data_root);
+    match fs::read_to_string(&path) {
+        Ok(text) => json::parse(&text).map(Some).map_err(|error| Error::Json {
+            path: Some(path),
+            message: error.to_string(),
+        }),
+        Err(source) if source.kind() == ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(Error::io(&path, source)),
+    }
+}
+
+/// Every trunk the rotation covers: each grove repo of an allowed owner at its
+/// trunk checkout (the manifest's `trunk`, else `main`), then the extras.
+fn trunks(ctx: &Context) -> Vec<(String, PathBuf)> {
+    let named = grove::manifest_trunks(&ctx.roots.manifest);
+    let mut found = Vec::new();
+    for checkout in grove::checkouts(&ctx.roots) {
+        let extra = ctx.roots.extras.contains(&checkout.path);
+        if extra {
+            let label = match checkout.label.as_str() {
+                "~/" => "~".to_owned(),
+                label => label.to_owned(),
+            };
+            found.push((label, checkout.path));
+            continue;
+        }
+        let owner = checkout.label.split('/').next().unwrap_or_default();
+        if !ctx.owners.iter().any(|allowed| allowed == owner) {
+            continue;
+        }
+        let trunk = named.get(&checkout.label).map_or("main", String::as_str);
+        if checkout.path.file_name().and_then(|name| name.to_str()) == Some(trunk) {
+            found.push((checkout.label, checkout.path));
+        }
+    }
+    found
+}
+
+/// The live signals that break a tie between equally rested repos.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+struct Signals {
+    /// Whether `stele check` fails on a committed `graph.lock`.
+    stale_lock: bool,
+    /// Open threads naming the repo.
+    threads: usize,
+    /// Breaths filed against it.
+    breaths: usize,
+}
+
+impl Signals {
+    /// The tie-break, as prose.
+    fn reasons(self) -> Vec<String> {
+        let mut reasons = Vec::new();
+        if self.stale_lock {
+            reasons.push("`stele check` fails".to_owned());
+        }
+        if self.threads > 0 {
+            reasons.push(format!("{} open thread(s)", self.threads));
+        }
+        if self.breaths > 0 {
+            reasons.push(format!("{} breath(s) filed", self.breaths));
+        }
+        reasons
+    }
+}
+
+/// Whether `stele check` fails in `dir`. A missing binary, a repo without a
+/// lock, or a check that outlives the timeout reads as passing — the signal is
+/// a tie-break, never a reason to stall.
+fn stele_fails(dir: &Path) -> bool {
+    if !dir.join(".stele").join("graph.lock").is_file() {
+        return false;
+    }
+    let mut command = Command::new("stele");
+    command
+        .arg("check")
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    grove::scrub(&mut command);
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    let deadline = Instant::now() + STELE_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return !status.success(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+/// Every `*.md` in `dir` with its frontmatter fields and body, by file stem.
+fn front_files(dir: &Path) -> Vec<(String, BTreeMap<String, String>, String)> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    paths.sort();
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let raw = fs::read_to_string(&path).ok()?;
+            let stem = path.file_stem()?.to_str()?.to_owned();
+            let (front, body) = recall::split_frontmatter(&raw);
+            let fields = front
+                .map(recall::frontmatter_fields)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect();
+            Some((stem, fields, body.to_owned()))
+        })
+        .collect()
+}
+
+/// The first `# ` heading of a body, cut to a line.
+fn title(body: &str) -> Option<String> {
+    body.lines()
+        .find_map(|line| line.strip_prefix("# "))
+        .map(|title| truncate_chars(title.trim(), TITLE_CHARS).to_owned())
+}
+
+/// Open threads whose text names `slug`, one line each. `~` alone names
+/// nothing — every path under home would match it.
+fn open_threads(ctx: &Context, slug: &str) -> Vec<String> {
+    if slug == "~" {
+        return Vec::new();
+    }
+    front_files(&ctx.threads)
+        .into_iter()
+        .filter(|(_, fields, body)| {
+            fields.get("state").map(String::as_str) == Some("open")
+                && (body.contains(slug) || fields.values().any(|value| value.contains(slug)))
+        })
+        .map(|(stem, fields, body)| {
+            let waiting = fields
+                .get("waiting")
+                .map(|who| format!(" (waiting: {who})"))
+                .unwrap_or_default();
+            format!(
+                "- `{stem}` · {}{waiting}",
+                title(&body).unwrap_or_else(|| "untitled".to_owned())
+            )
+        })
+        .collect()
+}
+
+/// Breaths filed against `slug` and still `state: new`.
+fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
+    front_files(&paths::breath_dir(&ctx.data_root))
+        .into_iter()
+        .filter(|(_, fields, _)| {
+            fields.get("repo").map(String::as_str) == Some(slug)
+                && fields.get("state").map(String::as_str) == Some("new")
+        })
+        .map(|(stem, fields, body)| {
+            let name = fields
+                .get("title")
+                .cloned()
+                .or_else(|| title(&body))
+                .unwrap_or_else(|| stem.clone());
+            let url = fields
+                .get("url")
+                .map(|url| format!(" · {url}"))
+                .unwrap_or_default();
+            format!("- `{stem}` · {name}{url}")
+        })
+        .collect()
+}
+
+/// The rotation's choice: the least recently shifted trunk, ties broken by the
+/// live signals (a failing `stele check`, then open threads, then breaths) and
+/// then by name. Repos the open shift names and `skip` are passed over.
+pub fn pick(ctx: &Context) -> Result<Option<Target>> {
+    let busy: Vec<String> = read_current(&ctx.data_root)?
+        .and_then(|current| {
+            current
+                .get("repo")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .into_iter()
+        .collect();
+    let last = last_shifted(&ctx.data_root);
+    let mut candidates: Vec<(Option<Timestamp>, String, PathBuf)> = trunks(ctx)
+        .into_iter()
+        .filter(|(label, _)| !busy.contains(label) && !ctx.skip.contains(label))
+        .map(|(label, path)| (last.get(&label).copied(), label, path))
+        .collect();
+    candidates.sort();
+    let Some(front) = candidates.first().map(|(last, ..)| *last) else {
+        return Ok(None);
+    };
+    // Signals cost a process per repo, so only the front's tie pays for them.
+    let mut tied: Vec<(Signals, String, PathBuf)> = candidates
+        .into_iter()
+        .take_while(|(last, ..)| *last == front)
+        .map(|(_, label, path)| {
+            let signals = Signals {
+                breaths: breaths(ctx, &label).len(),
+                stale_lock: stele_fails(&path),
+                threads: open_threads(ctx, &label).len(),
+            };
+            (signals, label, path)
+        })
+        .collect();
+    let rivals = tied.len() - 1;
+    tied.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    let (signals, label, path) = tied.swap_remove(0);
+    let mut reasons = vec![match front {
+        None => "never shifted".to_owned(),
+        Some(at) => format!("least recently shifted ({})", at.iso8601()),
+    }];
+    reasons.extend(signals.reasons());
+    if rivals > 0 {
+        reasons.push(format!("ahead of {rivals} equally rested repo(s)"));
+    }
+    Ok(Some(Target {
+        last: front,
+        label,
+        path,
+        reason: reasons.join("; "),
+    }))
+}
+
+/// The target a shift was briefed on, out of its `meta.json`.
+pub fn picked(ctx: &Context, shift: &str) -> Result<Target> {
+    let meta = read_meta(&ctx.data_root, shift)?;
+    match (meta.repo, meta.path) {
+        (Some(label), Some(path)) => Ok(Target {
+            last: meta.started,
+            label,
+            path: PathBuf::from(path),
+            reason: format!("briefed for {shift}"),
+        }),
+        _ => Err(Error::invalid("meta.json", shift.to_owned())),
+    }
+}
+
+// ─── the brief ───────────────────────────────────────────────────────────
+
+/// What `brief` was asked for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BriefOptions {
+    /// The per-shift budget, US dollars.
+    pub budget_usd: f64,
+    /// Print, write nothing.
+    pub dry_run: bool,
+    /// The orchestrator model.
+    pub mind: String,
+}
+
+/// What `brief` composed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Briefed {
+    /// The `shift.start` event — `None` on a dry run.
+    pub event: Option<trail::Event>,
+    /// The shift id.
+    pub shift: String,
+    /// The target.
+    pub target: Target,
+    /// The composed prompt.
+    pub text: String,
+    /// The slots the cap cut, in the order it cut them.
+    pub trimmed: Vec<String>,
+}
+
+/// FNV-1a, 32 bits — the slot fingerprint the attribution refs carry.
+#[must_use]
+pub fn fnv1a(text: &str) -> u32 {
+    text.bytes().fold(0x811c_9dc5, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    })
+}
+
+/// The slots a template names, in order of first appearance.
+fn slot_names(template: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find("{{") {
+        let after = &rest[open + 2..];
+        let Some(close) = after.find("}}") else {
+            break;
+        };
+        let name = after[..close].trim().to_owned();
+        if !names.contains(&name) {
+            names.push(name);
+        }
+        rest = &after[close + 2..];
+    }
+    names
+}
+
+/// The template with every slot filled.
+fn fill(template: &str, slots: &BTreeMap<&'static str, String>) -> String {
+    let mut text = template.to_owned();
+    for (name, value) in slots {
+        text = text.replace(&format!("{{{{{name}}}}}"), value);
+    }
+    text
+}
+
+/// The first paragraph under a heading that mentions "next", else the
+/// `Status:` line — the target's own word on what comes next.
+fn plan_next(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path.join("docs").join("plan.md")).ok()?;
+    let lines: Vec<&str> = text.lines().collect();
+    let heading = lines
+        .iter()
+        .position(|line| line.starts_with('#') && line.to_lowercase().contains("next"));
+    let found = heading.and_then(|heading| {
+        let paragraph: Vec<&str> = lines[heading + 1..]
+            .iter()
+            .skip_while(|line| line.trim().is_empty())
+            .take_while(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            .copied()
+            .collect();
+        (!paragraph.is_empty()).then(|| paragraph.join("\n"))
+    });
+    let found = found.or_else(|| {
+        lines
+            .iter()
+            .find(|line| line.starts_with("Status:"))
+            .map(|line| (*line).to_owned())
+    })?;
+    let cut = truncate_chars(&found, PLAN_NEXT_CHARS);
+    Some(if cut.len() < found.len() {
+        format!("{cut}…")
+    } else {
+        found
+    })
+}
+
+/// The newest handoff on file, other than `except`'s.
+fn previous_handoff(data_root: &Path, except: &str) -> Option<String> {
+    shift_ids(data_root)
+        .into_iter()
+        .rev()
+        .filter(|id| id != except)
+        .find_map(|id| {
+            let text =
+                fs::read_to_string(paths::shift_dir(data_root, &id).join("handoff.md")).ok()?;
+            let text = text.trim();
+            (!text.is_empty()).then(|| format!("From `{id}`:\n\n{text}"))
+        })
+}
+
+/// The trail since `now − 24 h`, the newest [`TRAIL_LINES`].
+fn recent_trail(entries: &[trail::Entry], now: Timestamp) -> Vec<String> {
+    let since = now.unix_seconds() - 86_400;
+    let lines: Vec<String> = entries
+        .iter()
+        .filter(|entry| entry.event.at.unix_seconds() >= since)
+        .map(|entry| entry.event.summary())
+        .collect();
+    let skip = lines.len().saturating_sub(TRAIL_LINES);
+    lines.into_iter().skip(skip).collect()
+}
+
+/// What today's shifts have spent: `cost_usd` over today's UTC trail events
+/// that belong to a shift.
+fn spent_today(entries: &[trail::Entry], now: Timestamp) -> f64 {
+    let (year, month, day, ..) = now.parts();
+    let today = format!("{year:04}-{month:02}-{day:02}");
+    entries
+        .iter()
+        .map(|entry| &entry.event)
+        .filter(|event| event.day() == today)
+        .filter(|event| {
+            event
+                .draft
+                .shift
+                .as_deref()
+                .is_some_and(|shift| shift.starts_with("s-"))
+        })
+        .filter_map(|event| event.draft.cost_usd)
+        .fold(0.0, |total, cost| total + cost)
+}
+
+/// The newest guard and correction events touching `slug` (or no repo).
+fn guard_lines(entries: &[trail::Entry], slug: &str) -> Vec<String> {
+    let lines: Vec<String> = entries
+        .iter()
+        .map(|entry| &entry.event)
+        .filter(|event| matches!(event.draft.kind.as_str(), "correction" | "guard"))
+        .filter(|event| event.draft.repo.as_deref().is_none_or(|repo| repo == slug))
+        .map(|event| format!("- {}", event.summary()))
+        .collect();
+    let skip = lines.len().saturating_sub(PROBLEM_EVENTS);
+    lines.into_iter().skip(skip).collect()
+}
+
+/// `lines` as a slot, `none` when empty.
+fn listed(lines: &[String]) -> String {
+    if lines.is_empty() {
+        "none".to_owned()
+    } else {
+        lines.join("\n")
+    }
+}
+
+/// The Saturday and Shemitah notes, on top of the day's work.
+fn theme_notes(ctx: &Context, local: Local) -> String {
+    let day = local.day();
+    let mut notes = vec![format!("{} — {}", day.creation, day.does)];
+    if local.weekday == 6 {
+        notes.push("No code commits; remember, don't make.".to_owned());
+        if local.shemitah() {
+            notes.push(format!(
+                "Shemitah: run the ablation prompt ({}) instead of the self-pass.",
+                paths::tildify(&ctx.data_root.join("ablation.prompt.md"), &ctx.home)
+            ));
+        }
+    }
+    notes.join("\n\n")
+}
+
+/// Cut `slot` by whole lines until the brief is under the cap — the oldest
+/// first when `oldest_first` (the trail), else from the tail. Whether it cut.
+fn trim_slot(
+    template: &str,
+    slots: &mut BTreeMap<&'static str, String>,
+    slot: &'static str,
+    oldest_first: bool,
+) -> bool {
+    let over = fill(template, slots)
+        .chars()
+        .count()
+        .saturating_sub(BRIEF_CHARS);
+    if over == 0 || !template.contains(&format!("{{{{{slot}}}}}")) {
+        return false;
+    }
+    let Some(text) = slots.get(slot).filter(|text| text.as_str() != "none") else {
+        return false;
+    };
+    let mut lines: Vec<String> = text.lines().map(ToOwned::to_owned).collect();
+    let mut removed = 0;
+    let mut dropped = 0;
+    // Room for the marker line that replaces what went.
+    while removed < over + 80 && !lines.is_empty() {
+        let line = if oldest_first {
+            lines.remove(0)
+        } else {
+            lines.pop().unwrap_or_default()
+        };
+        removed += line.chars().count() + 1;
+        dropped += 1;
+    }
+    let marker = format!("… {dropped} line(s) trimmed for the {BRIEF_CHARS}-character cap");
+    let kept = if oldest_first {
+        std::iter::once(marker).chain(lines).collect::<Vec<_>>()
+    } else {
+        lines.into_iter().chain(std::iter::once(marker)).collect()
+    };
+    slots.insert(slot, kept.join("\n"));
+    true
+}
+
+/// Compose the brief for the rotation's next target; unless `dry_run`, write
+/// the shift's files, take `current.json` and append `shift.start`.
+pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
+    let template_path = ctx.prompts.join("shift.md");
+    let template = fs::read_to_string(&template_path).map_err(|source| {
+        if source.kind() == ErrorKind::NotFound {
+            Error::not_found("shift template", template_path.display().to_string())
+        } else {
+            Error::io(&template_path, source)
+        }
+    })?;
+    if !options.dry_run
+        && let Some(current) = read_current(&ctx.data_root)?
+    {
+        let open = current.get("shift").and_then(Value::as_str).unwrap_or("?");
+        return Err(Error::refused(format!(
+            "shift {open} is open — hand it off before briefing another"
+        )));
+    }
+    let shift = shift_id(ctx.now);
+    let dir = paths::shift_dir(&ctx.data_root, &shift);
+    if !options.dry_run && dir.exists() {
+        return Err(Error::refused(format!("shift {shift} already exists")));
+    }
+    let target = pick(ctx)?.ok_or_else(|| Error::not_found("repo to shift", "the rotation"))?;
+    let local = Local::at(ctx.now);
+    let day = local.day();
+    let clock = clock(ctx);
+    let handoff_by = clock.handoff_by();
+    let entries = trail::read(&ctx.data_root, None)?;
+    let threads = open_threads(ctx, &target.label);
+    let plan = plan_next(&target.path);
+    let score = fs::read_to_string(
+        paths::score_dir(&ctx.data_root).join(format!("{}.md", local.week_name())),
+    )
+    .ok()
+    .map(|text| {
+        text.lines()
+            .take(SCORE_LINES)
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+    .filter(|text| !text.trim().is_empty());
+    let memories = recall::bearing(&ctx.data_root, &ctx.home, &target.path, MEMORIES_CHARS);
+
+    let mut slots: BTreeMap<&'static str, String> = BTreeMap::new();
+    slots.insert("brief.at", ctx.now.iso8601());
+    slots.insert("breath.pending", listed(&breaths(ctx, &target.label)));
+    slots.insert(
+        "budget.spent",
+        format!("{:.2}", spent_today(&entries, ctx.now)),
+    );
+    slots.insert("budget.usd", format!("{}", options.budget_usd));
+    slots.insert("clock.handoff_by", handoff_by.iso8601());
+    slots.insert("clock.remaining", clock.remaining_text());
+    slots.insert(
+        "handoff.previous",
+        previous_handoff(&ctx.data_root, &shift).unwrap_or_else(|| "none".to_owned()),
+    );
+    slots.insert(
+        "memories.bearing",
+        if memories.is_empty() {
+            "none".to_owned()
+        } else {
+            memories
+        },
+    );
+    slots.insert("score.week", score.unwrap_or_else(|| "none yet".to_owned()));
+    slots.insert("shift.creation", day.creation.to_owned());
+    slots.insert("shift.id", shift.clone());
+    slots.insert("shift.instrument", day.instrument.to_owned());
+    slots.insert("shift.mind", options.mind.clone());
+    slots.insert("shift.theme", day.theme.to_owned());
+    slots.insert("shift.theme_notes", theme_notes(ctx, local));
+    slots.insert("shift.weekday", day.name.to_owned());
+    slots.insert(
+        "target.last_shifted",
+        target
+            .last
+            .map_or_else(|| "never".to_owned(), Timestamp::iso8601),
+    );
+    slots.insert("target.path", target.path.display().to_string());
+    slots.insert(
+        "target.plan_next",
+        plan.clone().unwrap_or_else(|| "none".to_owned()),
+    );
+    slots.insert("target.reason", target.reason.clone());
+    slots.insert("target.repo", target.label.clone());
+    slots.insert("threads.open", listed(&threads));
+    slots.insert("trail.recent", listed(&recent_trail(&entries, ctx.now)));
+
+    let unknown: Vec<String> = slot_names(&template)
+        .into_iter()
+        .filter(|name| !slots.contains_key(name.as_str()))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(Error::invalid("shift template slot", unknown.join(", ")));
+    }
+
+    let mut trimmed: Vec<String> = Vec::new();
+    for (slot, oldest_first) in [
+        ("trail.recent", true),
+        ("memories.bearing", false),
+        ("threads.open", false),
+    ] {
+        if trim_slot(&template, &mut slots, slot, oldest_first) {
+            trimmed.push(slot.to_owned());
+        }
+    }
+    let mut text = fill(&template, &slots);
+    if text.chars().count() > BRIEF_CHARS {
+        let cut = truncate_chars(&text, BRIEF_CHARS).to_owned();
+        text = cut;
+        trimmed.push("brief".to_owned());
+    }
+
+    if options.dry_run {
+        return Ok(Briefed {
+            event: None,
+            shift,
+            target,
+            text,
+            trimmed,
+        });
+    }
+
+    let brief_path = dir.join("brief.md");
+    let window = Value::object([
+        ("remaining", Value::string(clock.remaining_text())),
+        (
+            "resets_at",
+            clock
+                .window
+                .and_then(|window| window.resets_at)
+                .map_or(Value::Null, |at| Value::string(at.iso8601())),
+        ),
+        ("stale", Value::Bool(clock.stale())),
+        (
+            "used",
+            clock
+                .window
+                .and_then(|window| window.used)
+                .map_or(Value::Null, Value::Number),
+        ),
+    ]);
+    let path_text = target.path.display().to_string();
+    let meta = Value::object([
+        ("instrument", Value::string(day.instrument)),
+        ("mind", Value::string(options.mind.clone())),
+        ("path", Value::string(path_text.clone())),
+        ("repo", Value::string(target.label.clone())),
+        ("shift", Value::string(shift.clone())),
+        ("started", Value::string(ctx.now.iso8601())),
+        ("theme", Value::string(day.theme)),
+        ("window", window),
+    ]);
+    let current = Value::object([
+        ("handoff_by", Value::string(handoff_by.iso8601())),
+        ("path", Value::string(path_text)),
+        ("repo", Value::string(target.label.clone())),
+        ("shift", Value::string(shift.clone())),
+        ("started", Value::string(ctx.now.iso8601())),
+        ("theme", Value::string(day.theme)),
+    ]);
+    let problems = problems_section(
+        &target.label,
+        &local.ymd(),
+        plan.as_deref(),
+        &threads,
+        &guard_lines(&entries, &target.label),
+    );
+    {
+        let _lock = trail::acquire(&ctx.data_root)?;
+        fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
+        atomic::write(&brief_path, &text)?;
+        atomic::write(&dir.join("meta.json"), &format!("{}\n", meta.render()))?;
+        atomic::write(
+            &paths::shift_current(&ctx.data_root),
+            &format!("{}\n", current.render()),
+        )?;
+        upsert_problems(&ctx.data_root, &problems)?;
+    }
+
+    let mut refs = vec![format!("brief:{}", brief_path.display())];
+    for name in slot_names(&template) {
+        if let Some(value) = slots.get(name.as_str()) {
+            refs.push(format!("fp:{name}={:08x}", fnv1a(value)));
+        }
+    }
+    refs.extend(trimmed.iter().map(|slot| format!("trimmed:{slot}")));
+    let event = trail::append(
+        &ctx.data_root,
+        trail::Draft {
+            kind: "shift.start".to_owned(),
+            model: Some(options.mind.clone()),
+            rationale: Some(format!(
+                "{} ({}) on {}: {}",
+                day.theme, day.instrument, target.label, target.reason
+            )),
+            refs,
+            repo: Some(target.label.clone()),
+            shift: Some(shift.clone()),
+            ..trail::Draft::default()
+        },
+    )?;
+    Ok(Briefed {
+        event: Some(event),
+        shift,
+        target,
+        text,
+        trimmed,
+    })
+}
+
+/// One repo's day in the problems file: `(heading, section)`.
+fn problems_section(
+    repo: &str,
+    date: &str,
+    plan: Option<&str>,
+    threads: &[String],
+    guards: &[String],
+) -> (String, String) {
+    let heading = format!("## {repo} · {date}");
+    let mut section = format!(
+        "{heading}\n\n### Plan — next\n\n{}\n",
+        plan.unwrap_or("none")
+    );
+    let _ = write!(section, "\n### Open threads\n\n{}\n", listed(threads));
+    let _ = write!(
+        section,
+        "\n### Guards and corrections\n\n{}\n",
+        listed(guards)
+    );
+    (heading, section)
+}
+
+/// The problems file's preamble.
+const PROBLEMS_HEADER: &str = "# Problems\n\nWhat the shift engine knows is open, one section per repo per local day, written by `sandman shift brief`; the ruach reads its sources against it.\n";
+
+/// Replace the section under the same heading, or append it.
+fn upsert_problems(data_root: &Path, (heading, section): &(String, String)) -> Result<()> {
+    let path = paths::breath_problems(data_root);
+    let existing = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(source) if source.kind() == ErrorKind::NotFound => PROBLEMS_HEADER.to_owned(),
+        Err(source) => return Err(Error::io(&path, source)),
+    };
+    let mut out = String::new();
+    let mut skipping = false;
+    let mut replaced = false;
+    for line in existing.lines() {
+        if line.starts_with("## ") {
+            skipping = line == heading;
+            if skipping {
+                if !out.ends_with("\n\n") {
+                    out.push('\n');
+                }
+                out.push_str(section);
+                replaced = true;
+            }
+        }
+        if !skipping {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if !replaced {
+        if !out.ends_with("\n\n") {
+            out.push('\n');
+        }
+        out.push_str(section);
+    }
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
+    }
+    atomic::write(&path, &out)
+}
+
+// ─── the handoff ─────────────────────────────────────────────────────────
+
+/// Where a handoff comes from.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Source {
+    /// The runner found the session gone without one.
+    Abandoned,
+    /// A markdown file to copy in.
+    File(PathBuf),
+    /// `shifts/<id>/handoff.md`, written by the shift itself.
+    Session,
+}
+
+/// Finalize `shift`: its `handoff.md`, `ended` in `meta.json`, `current.json`
+/// released when it names this shift, and a `shift.handoff` event.
+pub fn handoff(ctx: &Context, shift: &str, source: &Source) -> Result<trail::Event> {
+    let meta = read_meta(&ctx.data_root, shift)?;
+    if let Some(ended) = &meta.ended {
+        return Err(Error::refused(format!(
+            "shift {shift} was handed off at {ended}"
+        )));
+    }
+    let dir = paths::shift_dir(&ctx.data_root, shift);
+    let path = dir.join("handoff.md");
+    let existing = fs::read_to_string(&path)
+        .ok()
+        .filter(|text| !text.trim().is_empty());
+    let (text, write) = match source {
+        Source::File(from) => (
+            fs::read_to_string(from).map_err(|source| Error::io(from, source))?,
+            true,
+        ),
+        Source::Session => (
+            existing.ok_or_else(|| {
+                Error::refused(format!(
+                    "shift {shift} wrote no handoff ({})",
+                    path.display()
+                ))
+            })?,
+            false,
+        ),
+        Source::Abandoned => match existing {
+            Some(text) => (text, false),
+            None => (
+                format!(
+                    "Abandoned: the shift runner found the session gone at {} with no handoff written.\n",
+                    ctx.now.iso8601()
+                ),
+                true,
+            ),
+        },
+    };
+    if text.trim().is_empty() {
+        return Err(Error::refused(format!("the handoff for {shift} is empty")));
+    }
+    let mut entries: Vec<(String, Value)> = meta
+        .value
+        .as_object()
+        .map(<[(String, Value)]>::to_vec)
+        .unwrap_or_default();
+    entries.retain(|(key, _)| key != "ended" && key != "abandoned");
+    entries.push(("ended".to_owned(), Value::string(ctx.now.iso8601())));
+    if *source == Source::Abandoned {
+        entries.push(("abandoned".to_owned(), Value::Bool(true)));
+    }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    {
+        let _lock = trail::acquire(&ctx.data_root)?;
+        if write {
+            atomic::write(&path, &text)?;
+        }
+        atomic::write(
+            &dir.join("meta.json"),
+            &format!("{}\n", Value::Object(entries).render()),
+        )?;
+        let current = paths::shift_current(&ctx.data_root);
+        if read_current(&ctx.data_root)?
+            .is_some_and(|value| value.get("shift").and_then(Value::as_str) == Some(shift))
+        {
+            fs::remove_file(&current).map_err(|source| Error::io(&current, source))?;
+        }
+    }
+    let first = text
+        .lines()
+        .map(|line| line.trim_start_matches('#').trim())
+        .find(|line| !line.is_empty())
+        .unwrap_or("handoff");
+    let mut refs = vec![format!("handoff:{}", path.display())];
+    if *source == Source::Abandoned {
+        refs.push("abandoned".to_owned());
+    }
+    trail::append(
+        &ctx.data_root,
+        trail::Draft {
+            kind: "shift.handoff".to_owned(),
+            rationale: Some(first.to_owned()),
+            refs,
+            repo: meta.repo,
+            shift: Some(shift.to_owned()),
+            ..trail::Draft::default()
+        },
+    )
+}
+
+/// Record the session the runner started for the open shift in
+/// `current.json` — the runner learns the ids only after `brief` has run.
+pub fn attach(
+    ctx: &Context,
+    shift: &str,
+    bg_id: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<()> {
+    let _lock = trail::acquire(&ctx.data_root)?;
+    let current = read_current(&ctx.data_root)?
+        .filter(|value| value.get("shift").and_then(Value::as_str) == Some(shift))
+        .ok_or_else(|| Error::not_found("open shift", shift.to_owned()))?;
+    let mut entries: Vec<(String, Value)> = current
+        .as_object()
+        .map(<[(String, Value)]>::to_vec)
+        .unwrap_or_default();
+    for (key, value) in [("bg_id", bg_id), ("session_id", session_id)] {
+        if let Some(value) = value {
+            entries.retain(|(name, _)| name != key);
+            entries.push((key.to_owned(), Value::string(value)));
+        }
+    }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    atomic::write(
+        &paths::shift_current(&ctx.data_root),
+        &format!("{}\n", Value::Object(entries).render()),
+    )
+}
+
+/// `current.json`, one `key: value` per line; `None` between shifts.
+pub fn status(ctx: &Context) -> Result<Option<String>> {
+    Ok(read_current(&ctx.data_root)?.map(|current| {
+        current
+            .as_object()
+            .unwrap_or_default()
+            .iter()
+            .map(|(key, value)| match value.as_str() {
+                Some(text) => format!("{key}: {text}"),
+                None => format!("{key}: {}", value.render()),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Clock, Local, Window, fnv1a, new_york_offset_hours, shift_id, slot_names};
+    use crate::time::Timestamp;
+
+    fn at(text: &str) -> Timestamp {
+        Timestamp::parse_iso8601(text).expect("timestamp")
+    }
+
+    #[test]
+    fn daylight_time_follows_the_us_rule_at_the_2026_boundaries() {
+        assert_eq!(new_york_offset_hours(at("2026-03-08T06:59:59Z")), -5);
+        assert_eq!(new_york_offset_hours(at("2026-03-08T07:00:00Z")), -4);
+        assert_eq!(new_york_offset_hours(at("2026-11-01T05:59:59Z")), -4);
+        assert_eq!(new_york_offset_hours(at("2026-11-01T06:00:00Z")), -5);
+        assert_eq!(new_york_offset_hours(at("2026-01-15T12:00:00Z")), -5);
+        assert_eq!(new_york_offset_hours(at("2026-07-04T12:00:00Z")), -4);
+    }
+
+    #[test]
+    fn the_local_weekday_turns_at_new_york_midnight() {
+        // Saturday 2026-10-10, 23:30 EDT, is already Sunday in UTC.
+        let late = Local::at(at("2026-10-11T03:30:00Z"));
+        assert_eq!(late.day().name, "Saturday");
+        assert_eq!(late.ymd(), "2026-10-10");
+        let early = Local::at(at("2026-10-11T04:30:00Z"));
+        assert_eq!(early.day().name, "Sunday");
+        assert_eq!(early.day().theme, "Hunt");
+    }
+
+    #[test]
+    fn iso_weeks_match_the_calendar() {
+        assert_eq!(Local::at(at("2026-10-17T16:00:00Z")).iso_week, (2026, 42));
+        assert!(Local::at(at("2026-10-17T16:00:00Z")).shemitah());
+        assert_eq!(
+            Local::at(at("2026-10-10T16:00:00Z")).week_name(),
+            "2026-W41"
+        );
+        // 2027-01-01 is a Friday: it belongs to 2026-W53.
+        assert_eq!(Local::at(at("2027-01-01T17:00:00Z")).iso_week, (2026, 53));
+        assert_eq!(Local::at(at("2026-01-01T17:00:00Z")).iso_week, (2026, 1));
+    }
+
+    #[test]
+    fn shift_ids_are_stamped_to_the_minute() {
+        assert_eq!(shift_id(at("2026-10-09T23:00:41Z")), "s-20261009T2300Z");
+    }
+
+    #[test]
+    fn the_clock_reads_remaining_used_and_staleness() {
+        let now = at("2026-10-09T23:00:00Z");
+        let window = |left: i64, used: f64| Clock {
+            now,
+            window: Some(Window {
+                at: Some(now),
+                resets_at: Some(Timestamp::from_unix_seconds(now.unix_seconds() + left)),
+                used: Some(used),
+            }),
+        };
+        let clock = window(4 * 3600 + 7 * 60, 5.0);
+        assert_eq!(
+            clock.line(),
+            "remaining=4h7m used=5% resets_at=2026-10-10T03:07:00Z stale=false"
+        );
+        assert_eq!(clock.refusal(), None);
+        assert!(window(14 * 60, 5.0).refusal().is_some());
+        assert!(window(3600, 90.0).refusal().is_some());
+        assert_eq!(window(-60, 99.0).remaining_text(), "fresh");
+        assert_eq!(window(-60, 99.0).refusal(), None);
+        let blind = Clock { now, window: None };
+        assert_eq!(blind.line(), "remaining=unknown");
+        assert_eq!(blind.refusal(), None);
+        assert_eq!(blind.handoff_by(), at("2026-10-10T03:45:00Z"));
+    }
+
+    #[test]
+    fn slots_are_named_once_in_order() {
+        assert_eq!(
+            slot_names("{{a.b}} x {{c}} {{a.b}} {{ d }}"),
+            ["a.b", "c", "d"]
+        );
+    }
+
+    #[test]
+    fn fnv1a_matches_the_reference_vectors() {
+        assert_eq!(fnv1a(""), 0x811c_9dc5);
+        assert_eq!(fnv1a("a"), 0xe40c_292c);
+        assert_eq!(fnv1a("foobar"), 0xbf9c_f968);
+    }
+}

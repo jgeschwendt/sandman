@@ -136,7 +136,7 @@ impl Timestamp {
 ///
 /// Howard Hinnant's `civil_from_days`, exact for the whole proleptic Gregorian
 /// range this crate can represent.
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let shifted = days + DAYS_TO_CIVIL_EPOCH;
     let era = (if shifted >= 0 {
         shifted
@@ -161,7 +161,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 /// Civil `(year, month, day)` → days since 1970-01-01.
 ///
 /// Hinnant's `days_from_civil` — the exact inverse of [`civil_from_days`].
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = (if year >= 0 { year } else { year - 399 }) / 400;
     let year_of_era = year - era * 400;

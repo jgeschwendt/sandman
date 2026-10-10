@@ -24,7 +24,7 @@ use crate::memory::MemoryType;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
-use crate::verbs::{dream, forget, mcp, recall, reconcile, reflect, remember, take, trail};
+use crate::verbs::{dream, forget, mcp, recall, reconcile, reflect, remember, shift, take, trail};
 use crate::version::VERSION;
 
 /// A failure that ran a verb badly.
@@ -138,6 +138,36 @@ usage: sandman <verb> [args]
       event and lists the memories whose source: names a revoked event, for
       reflect to retire. --dry-run prints the plan and changes nothing.
 
+  shift attach --shift ID [--bg-id X] [--session-id S]
+  shift brief [--mind M] [--dry-run]
+  shift clock [--check]
+  shift handoff --shift ID (--from-session | --abandoned | --file PATH)
+  shift pick [--path] [--shift ID]
+  shift status
+      The perpetual machine's unit of work, bounded by the five-hour window.
+      brief picks the target, fills every {{slot}} of prompts/shift.md
+      ($SANDMAN_PROMPTS, else the sandman trunk's prompts/) under a
+      24,000-character cap, writes <root>/shifts/<id>/{brief.md,meta.json},
+      takes shifts/current.json, refreshes breath/problems.md, appends a
+      shift.start event whose refs fingerprint every slot, and prints the id;
+      --dry-run prints the brief and writes nothing. The theme is the
+      America/New_York weekday's: Sun Hunt, Mon Redesign, Tue Refactor, Wed
+      Measure, Thu Harden, Fri Ship, Sat Rest. pick is the rotation — the least
+      recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
+      (default jgeschwendt) and of ~, ~/.routines and the data root, ties
+      broken by a failing stele check, open threads and breaths; it skips the
+      open shift's repo and $SANDMAN_SHIFT_SKIP (colon-separated slugs);
+      --shift prints the target a shift was briefed on. clock reads the window
+      file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
+      ~/.local/state/claude/window.json); --check exits 1 under 15 minutes left
+      or at 90% used, 0 when the file is missing. handoff finalizes a shift —
+      copies --file in, accepts the handoff.md the session wrote, or records
+      --abandoned — appends shift.handoff and releases current.json; a shift
+      already handed off exits 1. attach records the session the runner
+      started in current.json. status prints current.json and the clock.
+      $SANDMAN_NOW (ISO-8601) fixes the instant; $SANDMAN_SHIFT_MIND (default
+      opus) and $SANDMAN_SHIFT_BUDGET_USD (default 15) fill the brief.
+
   trail append --kind K [--shift S] [--repo R] [--branch B] [--sha SHA]
                [--rationale TEXT] [--cost USD] [--model M] [--parent ID]
                [--ref X]... [--json '<object>']
@@ -217,6 +247,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "reconcile" => reconcile_verb(rest),
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
+        "shift" => shift_verb(rest),
         "take" => take_verb(rest),
         "trail" => trail_verb(rest),
         "version" => version_verb(rest),
@@ -1339,6 +1370,285 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
         );
         println!("\nevent: {}", event.id);
     }
+    Ok(())
+}
+
+/// `shift <subcommand> …`.
+fn shift_verb(args: &[String]) -> Result<(), Failure> {
+    let Some(sub) = args.first() else {
+        return Err(Failure::Usage("shift needs a subcommand".to_owned()));
+    };
+    let rest = &args[1..];
+    if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
+        return help();
+    }
+    match sub.as_str() {
+        "-h" | "--help" => help(),
+        "attach" => shift_attach(rest),
+        "brief" => shift_brief(rest),
+        "clock" => shift_clock(rest),
+        "handoff" => shift_handoff(rest),
+        "pick" => shift_pick(rest),
+        "status" => shift_status(rest),
+        other => Err(Failure::Usage(format!(
+            "unknown shift subcommand `{other}`"
+        ))),
+    }
+}
+
+/// Everything the shift verbs read from the environment, resolved once.
+fn shift_context() -> Result<shift::Context, Failure> {
+    let now = match env::var("SANDMAN_NOW").ok().filter(|now| !now.is_empty()) {
+        Some(text) => Timestamp::parse_iso8601(&text)
+            .ok_or_else(|| Failure::Usage(format!("$SANDMAN_NOW wants ISO-8601, got `{text}`")))?,
+        None => Timestamp::now()?,
+    };
+    let list = |name: &str, default: &[&str]| -> Vec<String> {
+        env::var(name).map_or_else(
+            |_| default.iter().map(|item| (*item).to_owned()).collect(),
+            |value| {
+                value
+                    .split(':')
+                    .filter(|item| !item.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect()
+            },
+        )
+    };
+    let home = paths::home()?;
+    Ok(shift::Context {
+        data_root: paths::data_root()?,
+        now,
+        owners: list("SANDMAN_SHIFT_OWNERS", &["jgeschwendt"]),
+        prompts: paths::prompts_dir()?,
+        roots: grove_roots()?,
+        skip: list("SANDMAN_SHIFT_SKIP", &[]),
+        threads: paths::threads_dir(&home),
+        window: paths::claude_window_file()?,
+        home,
+    })
+}
+
+/// A shift subcommand's parsed command line: `(flag, value)` pairs and the
+/// switches that were set.
+type ShiftArgs = (Vec<(String, String)>, Vec<String>);
+
+/// A shift subcommand's flags: each named flag takes a value, each switch
+/// none; positionals are refused.
+fn shift_flags(
+    args: &[String],
+    what: &str,
+    flags: &[&str],
+    switches: &[&str],
+) -> Result<ShiftArgs, Failure> {
+    let (mut values, mut set) = (Vec::new(), Vec::new());
+    let mut cursor = Cursor::new(args);
+    while let Some(arg) = cursor.next() {
+        if flags.contains(&arg) {
+            values.push((arg.to_owned(), cursor.value(arg)?));
+        } else if switches.contains(&arg) {
+            set.push(arg.to_owned());
+        } else if arg.starts_with("--") {
+            return Err(unknown_option(arg));
+        } else {
+            return Err(Failure::Usage(format!(
+                "{what} takes no positional arguments, got `{arg}`"
+            )));
+        }
+    }
+    Ok((values, set))
+}
+
+/// The last value given for `flag`.
+fn flag(values: &[(String, String)], flag: &str) -> Option<String> {
+    values
+        .iter()
+        .rev()
+        .find(|(name, _)| name == flag)
+        .map(|(_, value)| value.clone())
+}
+
+/// `shift attach --shift ID [--bg-id X] [--session-id S]`.
+fn shift_attach(args: &[String]) -> Result<(), Failure> {
+    let (values, _) = shift_flags(
+        args,
+        "shift attach",
+        &["--bg-id", "--session-id", "--shift"],
+        &[],
+    )?;
+    let id = flag(&values, "--shift")
+        .ok_or_else(|| Failure::Usage("shift attach needs --shift".to_owned()))?;
+    let ctx = shift_context()?;
+    let (bg_id, session_id) = (flag(&values, "--bg-id"), flag(&values, "--session-id"));
+    shift::attach(&ctx, &id, bg_id.as_deref(), session_id.as_deref())?;
+    note(
+        Some(&ctx.data_root),
+        "shift",
+        &format!(
+            "attached shift={id} bg={} session={}",
+            bg_id.as_deref().unwrap_or(EMPTY),
+            session_id.as_deref().unwrap_or(EMPTY)
+        ),
+    );
+    Ok(())
+}
+
+/// `shift brief [--mind M] [--dry-run]`.
+fn shift_brief(args: &[String]) -> Result<(), Failure> {
+    let (values, set) = shift_flags(args, "shift brief", &["--mind"], &["--dry-run"])?;
+    let ctx = shift_context()?;
+    let budget = env::var("SANDMAN_SHIFT_BUDGET_USD")
+        .ok()
+        .filter(|budget| !budget.is_empty());
+    let budget_usd = match budget {
+        None => 15.0,
+        Some(text) => text
+            .parse::<f64>()
+            .ok()
+            .filter(|budget| budget.is_finite() && *budget >= 0.0)
+            .ok_or_else(|| {
+                Failure::Usage(format!("$SANDMAN_SHIFT_BUDGET_USD wants USD, got `{text}`"))
+            })?,
+    };
+    let mind = flag(&values, "--mind")
+        .or_else(|| {
+            env::var("SANDMAN_SHIFT_MIND")
+                .ok()
+                .filter(|mind| !mind.is_empty())
+        })
+        .unwrap_or_else(|| "opus".to_owned());
+    let options = shift::BriefOptions {
+        budget_usd,
+        dry_run: set.iter().any(|switch| switch == "--dry-run"),
+        mind,
+    };
+    let briefed = shift::brief(&ctx, &options);
+    let briefed = match briefed {
+        Ok(briefed) => briefed,
+        Err(error) => {
+            note(
+                Some(&ctx.data_root),
+                "shift",
+                &format!("brief error: {error}"),
+            );
+            return Err(error.into());
+        }
+    };
+    if options.dry_run {
+        println!("{}", briefed.text);
+        return Ok(());
+    }
+    note(
+        Some(&ctx.data_root),
+        "shift",
+        &format!(
+            "briefed shift={} repo={} chars={} trimmed={} event={}",
+            briefed.shift,
+            briefed.target.label,
+            briefed.text.chars().count(),
+            if briefed.trimmed.is_empty() {
+                EMPTY.to_owned()
+            } else {
+                briefed.trimmed.join(",")
+            },
+            briefed
+                .event
+                .as_ref()
+                .map_or(EMPTY, |event| event.id.as_str()),
+        ),
+    );
+    println!("{}", briefed.shift);
+    Ok(())
+}
+
+/// `shift clock [--check]`.
+fn shift_clock(args: &[String]) -> Result<(), Failure> {
+    let (_, set) = shift_flags(args, "shift clock", &[], &["--check"])?;
+    let ctx = shift_context()?;
+    let clock = shift::clock(&ctx);
+    println!("{}", clock.line());
+    if set.iter().any(|switch| switch == "--check")
+        && let Some(refusal) = clock.refusal()
+    {
+        return Err(Error::refused(refusal).into());
+    }
+    Ok(())
+}
+
+/// `shift handoff --shift ID (--from-session | --abandoned | --file PATH)`.
+fn shift_handoff(args: &[String]) -> Result<(), Failure> {
+    let (values, set) = shift_flags(
+        args,
+        "shift handoff",
+        &["--file", "--shift"],
+        &["--abandoned", "--from-session"],
+    )?;
+    let id = flag(&values, "--shift")
+        .ok_or_else(|| Failure::Usage("shift handoff needs --shift".to_owned()))?;
+    let file = flag(&values, "--file");
+    let source = match (
+        set.iter().any(|switch| switch == "--abandoned"),
+        set.iter().any(|switch| switch == "--from-session"),
+        file,
+    ) {
+        (true, false, None) => shift::Source::Abandoned,
+        (false, true, None) => shift::Source::Session,
+        (false, false, Some(file)) => shift::Source::File(PathBuf::from(file)),
+        _ => {
+            return Err(Failure::Usage(
+                "shift handoff takes one of --from-session, --abandoned, --file PATH".to_owned(),
+            ));
+        }
+    };
+    let ctx = shift_context()?;
+    match shift::handoff(&ctx, &id, &source) {
+        Ok(event) => {
+            note(
+                Some(&ctx.data_root),
+                "shift",
+                &format!("handed off shift={id} event={}", event.id),
+            );
+            println!("{}", event.id);
+            Ok(())
+        }
+        Err(error) => {
+            note(
+                Some(&ctx.data_root),
+                "shift",
+                &format!("handoff shift={id} error: {error}"),
+            );
+            Err(error.into())
+        }
+    }
+}
+
+/// `shift pick [--path] [--shift ID]`.
+fn shift_pick(args: &[String]) -> Result<(), Failure> {
+    let (values, set) = shift_flags(args, "shift pick", &["--shift"], &["--path"])?;
+    let ctx = shift_context()?;
+    let target = match flag(&values, "--shift") {
+        Some(id) => shift::picked(&ctx, &id)?,
+        None => {
+            shift::pick(&ctx)?.ok_or_else(|| Error::not_found("repo to shift", "the rotation"))?
+        }
+    };
+    if set.iter().any(|switch| switch == "--path") {
+        println!("{}", target.path.display());
+    } else {
+        println!("{}", target.label);
+    }
+    Ok(())
+}
+
+/// `shift status`.
+fn shift_status(args: &[String]) -> Result<(), Failure> {
+    shift_flags(args, "shift status", &[], &[])?;
+    let ctx = shift_context()?;
+    match shift::status(&ctx)? {
+        Some(current) => println!("{current}"),
+        None => println!("no shift open"),
+    }
+    println!("clock: {}", shift::clock(&ctx).line());
     Ok(())
 }
 

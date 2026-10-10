@@ -501,7 +501,7 @@ pub fn append_event(data_root: &Path, mut event: Event, remint: bool) -> Result<
 }
 
 /// Take `.commit.lock`, waiting out a short-lived holder.
-fn acquire(data_root: &Path) -> Result<CommitLock> {
+pub(crate) fn acquire(data_root: &Path) -> Result<CommitLock> {
     let mut attempt = 1;
     loop {
         match CommitLock::acquire(data_root) {

@@ -113,6 +113,39 @@ pub fn manifest_repos(manifest: &Path) -> Vec<String> {
         .collect()
 }
 
+/// The `trunk = "…"` a manifest root table names, keyed by `owner/repo`. A
+/// root without one is absent here; its trunk is `main`.
+#[must_use]
+pub fn manifest_trunks(manifest: &Path) -> BTreeMap<String, String> {
+    let Ok(text) = fs::read_to_string(manifest) else {
+        return BTreeMap::new();
+    };
+    let mut trunks = BTreeMap::new();
+    let mut table: Option<String> = None;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            table = line
+                .strip_prefix("[roots.\"")
+                .and_then(|rest| rest.strip_suffix("\"]"))
+                .filter(|key| !key.contains('"'))
+                .map(ToOwned::to_owned);
+            continue;
+        }
+        let Some(repo) = &table else {
+            continue;
+        };
+        if let Some((key, value)) = line.split_once('=')
+            && key.trim() == "trunk"
+        {
+            let value = value.trim().trim_matches('"');
+            if !value.is_empty() {
+                trunks.insert(repo.clone(), value.to_owned());
+            }
+        }
+    }
+    trunks
+}
+
 /// A directory's subdirectories, sorted; none when it is missing.
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -168,10 +201,16 @@ pub fn git_ok(dir: &Path, args: &[&str]) -> bool {
 fn command(dir: &Path) -> Command {
     let mut command = Command::new("git");
     command.arg("-C").arg(dir);
+    scrub(&mut command);
+    command
+}
+
+/// Remove the repository-local git variables from a child's environment —
+/// for any tool that runs git underneath (`stele check`), not just git.
+pub fn scrub(command: &mut Command) {
     for variable in LOCAL_ENV {
         command.env_remove(variable);
     }
-    command
 }
 
 /// A commit whose `Event:` trailer names one of the events asked about.
@@ -273,7 +312,7 @@ pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>) -> Vec<Repo> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Roots, checkouts, manifest_repos};
+    use super::{Roots, checkouts, manifest_repos, manifest_trunks};
     use crate::testutil::TempDir;
     use std::fs;
 
@@ -288,6 +327,14 @@ mod tests {
         .expect("manifest");
         assert_eq!(manifest_repos(&manifest), ["o/a", "p/b"]);
         assert!(manifest_repos(&temp.path().join("absent.toml")).is_empty());
+        fs::write(
+            &manifest,
+            "[roots.\"o/a\"]\nurl = \"x\"\ntrunk = \"trunk\"\n\n[roots.\"o/a\".worktrees.dev]\ntrunk = \"no\"\n\n[roots.\"p/b\"]\n",
+        )
+        .expect("manifest");
+        let trunks = manifest_trunks(&manifest);
+        assert_eq!(trunks.len(), 1);
+        assert_eq!(trunks.get("o/a").map(String::as_str), Some("trunk"));
     }
 
     #[test]

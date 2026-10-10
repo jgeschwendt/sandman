@@ -10,6 +10,22 @@ JSONL file per UTC day under `<root>/trail/`, every machine commit joined to it 
 revoked event and its descendants across the grove, on a `reconcile/<event-id>` branch
 per repo. The contract is `docs/BANK-FORMAT.md` § trail.
 
+## Shift
+
+`sandman shift` runs the perpetual machine's unit of work, one five-hour session at a
+time; `~/.routines/shift.md` drives it every five minutes.
+
+```sh
+sandman shift clock --check     # remaining=3h56m used=6% … — exit 1 under 15 min or at 90 % used
+sandman shift pick              # the rotation's next repo; --path for its trunk checkout
+sandman shift brief             # compose prompts/shift.md into shifts/<id>/brief.md; prints the id
+sandman shift brief --dry-run   # print the brief, write nothing
+sandman shift handoff --shift <id> --from-session   # or --file PATH, or --abandoned
+sandman shift status            # the open shift and the clock
+```
+
+The contract is `docs/BANK-FORMAT.md` § shifts.
+
 ## MCP
 
 `sandman mcp` serves the banks as a tool server on stdio — JSON-RPC 2.0, one message

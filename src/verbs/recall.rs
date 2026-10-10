@@ -488,7 +488,7 @@ impl Memory {
 }
 
 /// Split a leading `---` fenced block off the front of a file.
-fn split_frontmatter(raw: &str) -> (Option<&str>, &str) {
+pub(crate) fn split_frontmatter(raw: &str) -> (Option<&str>, &str) {
     let Some(rest) = raw
         .strip_prefix("---\n")
         .or_else(|| raw.strip_prefix("---\r\n"))
@@ -506,7 +506,7 @@ fn split_frontmatter(raw: &str) -> (Option<&str>, &str) {
 }
 
 /// `key: value` lines, quotes stripped — frontmatter as recall reads it.
-fn frontmatter_fields(block: &str) -> Vec<(&str, &str)> {
+pub(crate) fn frontmatter_fields(block: &str) -> Vec<(&str, &str)> {
     block
         .lines()
         .filter_map(|line| {
@@ -676,6 +676,44 @@ fn graph_sections(data_root: &Path, home: &Path, cwd: &Path) -> Vec<GraphSection
             })
         })
         .collect()
+}
+
+/// The cwd's bank chain alone — no pointers, log or tool index — inside `cap`
+/// characters, for a caller composing its own prompt around it (`shift
+/// brief`). The same trim order recall applies to the graph: banks fall back to
+/// index lines from the most distant ancestor inward, then whole lines go off
+/// the tail. Empty when no bank in the chain has a memory.
+#[must_use]
+pub fn bearing(data_root: &Path, home: &Path, cwd: &Path, cap: usize) -> String {
+    let cwd = &crate::project::root(cwd);
+    let graph = graph_sections(data_root, home, cwd);
+    let render = |full: &[bool]| {
+        graph
+            .iter()
+            .zip(full)
+            .map(|(section, full)| rendering(section, *full))
+            .collect::<Vec<&str>>()
+            .join("\n\n")
+    };
+    let mut full = vec![true; graph.len()];
+    let mut text = render(&full);
+    for index in (0..graph.len()).rev() {
+        if text.chars().count() <= cap {
+            return text;
+        }
+        full[index] = false;
+        text = render(&full);
+    }
+    let (mut kept, mut chars) = (String::new(), 0);
+    for line in text.lines() {
+        chars += line.chars().count() + 1;
+        if chars > cap {
+            break;
+        }
+        kept.push_str(line);
+        kept.push('\n');
+    }
+    kept.trim_end().to_owned()
 }
 
 /// A bank at its floor: one line per memory, except a pinned one, which keeps
@@ -877,8 +915,8 @@ fn strip_comments(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        BUDGET_CHARS, INDEX_DESCRIPTION_CHARS, Recalled, compose, recall, split_frontmatter,
-        strip_comments,
+        BUDGET_CHARS, INDEX_DESCRIPTION_CHARS, Recalled, bearing, compose, recall,
+        split_frontmatter, strip_comments,
     };
     use crate::bank::Bank;
     use crate::testutil::TempDir;
@@ -1296,6 +1334,54 @@ mod tests {
         let text = root.recall();
         assert!(!text.is_empty(), "the bank still recalls");
         assert!(!text.contains("## Voyage log"));
+    }
+
+    #[test]
+    fn bearing_is_the_bank_chain_alone_under_its_cap() {
+        let root = Root::new("recall-bearing");
+        root.memory(
+            &root.bank(),
+            "feedback_here.md",
+            "name: here\ndescription: the cwd memory\ntype: feedback\n",
+            "fuzz the parser\n",
+        );
+        root.memory(
+            &root.home_bank(),
+            "user_home.md",
+            "name: home\ndescription: the home memory\ntype: user\n",
+            &format!("{}\n", "y".repeat(400)),
+        );
+        root.pointer("sid-fresh", "2026-08-06T09:00:00Z", "the fresh one", "/a");
+        let roomy = bearing(&root.path, &root.home, &root.cwd, 3_000);
+        assert!(
+            roomy.starts_with("## Long-term · this directory's bank"),
+            "{roomy}"
+        );
+        assert!(roomy.contains("fuzz the parser") && roomy.contains(&"y".repeat(400)));
+        assert!(
+            !roomy.contains("Recent sessions"),
+            "pointers are recall's, not bearing's"
+        );
+        // Tight: the home bank falls to its index line first, the cwd's keeps its body.
+        let tight = bearing(&root.path, &root.home, &root.cwd, 700);
+        assert!(tight.chars().count() <= 700, "{tight}");
+        assert!(tight.contains("fuzz the parser"), "{tight}");
+        assert!(tight.contains("- home (user) — the home memory"), "{tight}");
+        assert!(
+            bearing(&root.path, &root.home, &root.cwd, 10)
+                .chars()
+                .count()
+                <= 10
+        );
+        assert_eq!(
+            bearing(
+                &root.path,
+                &root.home,
+                std::path::Path::new("/nowhere"),
+                3_000
+            ),
+            ""
+        );
     }
 
     #[test]

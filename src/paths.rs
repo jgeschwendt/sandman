@@ -7,8 +7,9 @@
 //!
 //! Two tiers under the root, and the leading dot is the boundary. The hidden
 //! directories — `.archive/`, `.dream/`, `.trace/` — hold raw bytes the
-//! operator's `~/.sandman` repo gitignores; the visible ones — `log/`,
-//! `memories/`, `trail/` — hold the content it versions. The tiers were mixed until
+//! operator's `~/.sandman` repo gitignores; the visible ones — `breath/`,
+//! `log/`, `memories/`, `score/`, `shifts/`, `trail/` — hold the content it
+//! versions. The tiers were mixed until
 //! 2026-09-05, when 60 run journals went in with a commit because they shared
 //! `log/` with reflect's day pages; one gitignorable prefix is what stops the
 //! next one, and it only works if nothing raw is ever filed outside it.
@@ -47,6 +48,17 @@ pub const GROVE_CODE_ENV: &str = "SANDMAN_GROVE_CODE";
 /// The environment variable that replaces reconcile's extra repos,
 /// colon-separated.
 pub const RECONCILE_EXTRA_ENV: &str = "SANDMAN_RECONCILE_EXTRA";
+/// The ruach's breaths and the problems file it reads.
+pub const BREATH_DIR_NAME: &str = "breath";
+/// Where Claude Code's statusline persists the five-hour window; overrides
+/// `$XDG_STATE_HOME/claude/window.json`.
+pub const CLAUDE_WINDOW_ENV: &str = "CLAUDE_WINDOW_FILE";
+/// The environment variable that moves the machine's prompt templates.
+pub const PROMPTS_ENV: &str = "SANDMAN_PROMPTS";
+/// The week's score pages, `<iso-week>.md`.
+pub const SCORE_DIR_NAME: &str = "score";
+/// One directory per shift, plus `current.json` while one is open.
+pub const SHIFTS_DIR_NAME: &str = "shifts";
 /// Takes a live background job deferred — one file per session, cleared when
 /// the take finally happens.
 pub const PENDING_TAKES_DIR_NAME: &str = "pending-takes";
@@ -204,6 +216,77 @@ pub fn reconcile_extras() -> Result<Vec<PathBuf>> {
     Ok(vec![home.clone(), home.join(".routines"), data_root()?])
 }
 
+/// `<root>/breath` — the ruach's store.
+#[must_use]
+pub fn breath_dir(data_root: &Path) -> PathBuf {
+    data_root.join(BREATH_DIR_NAME)
+}
+
+/// `<root>/breath/problems.md` — what the shift engine knows is open, for the
+/// ruach to read against.
+#[must_use]
+pub fn breath_problems(data_root: &Path) -> PathBuf {
+    breath_dir(data_root).join("problems.md")
+}
+
+/// `<root>/score` — the weekly score pages.
+#[must_use]
+pub fn score_dir(data_root: &Path) -> PathBuf {
+    data_root.join(SCORE_DIR_NAME)
+}
+
+/// `<root>/shifts` — one directory per shift.
+#[must_use]
+pub fn shifts_dir(data_root: &Path) -> PathBuf {
+    data_root.join(SHIFTS_DIR_NAME)
+}
+
+/// `<root>/shifts/<id>` — a shift's brief, handoff and `meta.json`.
+#[must_use]
+pub fn shift_dir(data_root: &Path, shift: &str) -> PathBuf {
+    shifts_dir(data_root).join(shift)
+}
+
+/// `<root>/shifts/current.json` — the open shift; absent between shifts.
+#[must_use]
+pub fn shift_current(data_root: &Path) -> PathBuf {
+    shifts_dir(data_root).join("current.json")
+}
+
+/// The five-hour window file: `$CLAUDE_WINDOW_FILE`, else
+/// `$XDG_STATE_HOME/claude/window.json`, else `~/.local/state/claude/window.json`.
+pub fn claude_window_file() -> Result<PathBuf> {
+    if let Some(file) = env::var_os(CLAUDE_WINDOW_ENV).filter(|file| !file.is_empty()) {
+        return Ok(PathBuf::from(file));
+    }
+    let state = match env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => home()?.join(".local").join("state"),
+    };
+    Ok(state.join("claude").join("window.json"))
+}
+
+/// The machine's prompt templates: `$SANDMAN_PROMPTS`, else the `prompts/`
+/// directory of sandman's trunk checkout in the grove. Not the build's own
+/// source tree — the installed binary is built in a scratch worktree that is
+/// gone by the time it runs, and the trunk is where the Sabbath edits land.
+pub fn prompts_dir() -> Result<PathBuf> {
+    if let Some(dir) = env::var_os(PROMPTS_ENV).filter(|dir| !dir.is_empty()) {
+        return Ok(PathBuf::from(dir));
+    }
+    Ok(grove_code()?
+        .join("jgeschwendt")
+        .join("sandman")
+        .join("main")
+        .join("prompts"))
+}
+
+/// `~/.threads` — the operator's out-of-session message store.
+#[must_use]
+pub fn threads_dir(home: &Path) -> PathBuf {
+    home.join(".threads")
+}
+
 /// A path with `$HOME` folded back to `~`, for prose that a human reads.
 #[must_use]
 pub fn tildify(path: &Path, home: &Path) -> String {
@@ -216,9 +299,9 @@ pub fn tildify(path: &Path, home: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_claude_dir, archive_day_dir, claude_jobs_dir, claude_projects_dir, dream_dir,
-        grove_manifest, log_dir, pending_take, pending_takes_dir, recent_dir, run_log, tildify,
-        trace_dir, trail_day, trail_dir,
+        archive_claude_dir, archive_day_dir, breath_problems, claude_jobs_dir, claude_projects_dir,
+        dream_dir, grove_manifest, log_dir, pending_take, pending_takes_dir, recent_dir, run_log,
+        score_dir, shift_current, shift_dir, tildify, trace_dir, trail_day, trail_dir,
     };
     use crate::time::Timestamp;
     use std::path::Path;
@@ -245,6 +328,13 @@ mod tests {
             Path::new("/Users/you/.grove/manifest.toml")
         );
         assert_eq!(pending_takes_dir(root), Path::new("/data/pending-takes"));
+        assert_eq!(breath_problems(root), Path::new("/data/breath/problems.md"));
+        assert_eq!(score_dir(root), Path::new("/data/score"));
+        assert_eq!(
+            shift_dir(root, "s-20261009T2300Z"),
+            Path::new("/data/shifts/s-20261009T2300Z")
+        );
+        assert_eq!(shift_current(root), Path::new("/data/shifts/current.json"));
         assert_eq!(
             pending_take(root, "aaaabbbb-cccc"),
             Path::new("/data/pending-takes/aaaabbbb-cccc.json")

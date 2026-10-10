@@ -2,7 +2,7 @@
 
 ```stele
 kind: container
-purpose: integration tests — `cli.rs`, `mcp.rs` and `trail.rs` drive the built binary against a temp $HOME/$SANDMAN_ROOT (reconcile over fixture git repos); `real_banks.rs` reads the live banks (`--ignored`)
+purpose: integration tests — `cli` `mcp` `shift` `trail` drive the built binary against a temp $HOME/$SANDMAN_ROOT and fixture repos; `real_banks.rs` reads the live banks (`--ignored`)
 ```
 
 ## Working here

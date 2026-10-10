@@ -1,0 +1,802 @@
+//! The shift verbs, end to end: the built binary against a temp
+//! `$HOME`/`$SANDMAN_ROOT`, a fixture grove of checkouts, a fixture window file
+//! and the repo's own `prompts/shift.md` under `$SANDMAN_PROMPTS`.
+//!
+//! `$SANDMAN_NOW` pins the instant, so the weekday, the shift id and the clock
+//! are the test's to choose. Nothing here runs a model, git or `stele`: the
+//! fixture checkouts carry a `.git` directory and no `.stele/`.
+
+use std::env;
+use std::fmt::Write as _;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Disambiguates directories created within the same process.
+static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// The template the brief fills — the real one, so its slot contract is what
+/// the suite holds the composer to.
+const TEMPLATE: &str = include_str!("../prompts/shift.md");
+
+/// A fabricated machine: `$HOME` holding `.sandman`, `.grove`, `.threads`.
+struct Machine {
+    home: PathBuf,
+}
+
+impl Machine {
+    fn new(label: &str) -> Self {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let home = env::temp_dir().join(format!(
+            "sandman-shift-{label}-{}-{serial}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(home.join("prompts")).expect("create the fabricated home");
+        fs::write(home.join("prompts").join("shift.md"), TEMPLATE).expect("template");
+        Self { home }
+    }
+
+    fn root(&self) -> PathBuf {
+        self.home.join(".sandman")
+    }
+
+    fn grove_code(&self) -> PathBuf {
+        self.home.join(".grove").join("code")
+    }
+
+    fn window(&self) -> PathBuf {
+        self.home.join("window.json")
+    }
+
+    /// A grove checkout at `<code>/<slug>/main`.
+    fn repo(&self, slug: &str) -> PathBuf {
+        let checkout = self.grove_code().join(slug).join("main");
+        fs::create_dir_all(checkout.join(".git")).expect("checkout");
+        checkout
+    }
+
+    fn run(&self, now: &str, args: &[&str], extra: &[(&str, &str)]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_sandman"))
+            .args(args)
+            .env_clear()
+            .env("CLAUDE_WINDOW_FILE", self.window())
+            .env("HOME", &self.home)
+            .env("PATH", env::var("PATH").unwrap_or_default())
+            .env("SANDMAN_GROVE_CODE", self.grove_code())
+            .env("SANDMAN_NOW", now)
+            .env("SANDMAN_PROMPTS", self.home.join("prompts"))
+            .env("SANDMAN_RECONCILE_EXTRA", "")
+            .env("SANDMAN_ROOT", self.root())
+            .envs(extra.iter().copied())
+            .output()
+            .expect("run sandman")
+    }
+
+    /// Run the binary and hand back its stdout, asserting it exited 0.
+    fn ok(&self, now: &str, args: &[&str]) -> String {
+        let output = self.run(now, args, &[]);
+        assert_eq!(code(&output), 0, "{args:?}: {}", stderr(&output));
+        stdout(&output)
+    }
+
+    fn write(&self, relative: &str, text: &str) -> PathBuf {
+        let path = self.home.join(relative);
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(&path, text).expect("write");
+        path
+    }
+
+    fn read(&self, relative: &str) -> String {
+        fs::read_to_string(self.home.join(relative)).unwrap_or_default()
+    }
+
+    /// Every trail line, in file order.
+    fn trail(&self) -> Vec<String> {
+        let mut files = Vec::new();
+        let mut stack = vec![self.root().join("trail")];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    files.push(path);
+                }
+            }
+        }
+        files.sort();
+        files
+            .into_iter()
+            .flat_map(|path| {
+                fs::read_to_string(path)
+                    .expect("trail file")
+                    .lines()
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Trail events at chosen instants, written straight into their day file:
+    /// `trail append` stamps the real clock, and a brief reads the 24 h before
+    /// `$SANDMAN_NOW`. Each is `(hh:mm:ss on 2026-10-16, kind, rationale)`.
+    fn trail_fixture(&self, events: &[(String, &str, String)]) {
+        let mut text = self.read(".sandman/trail/2026/10/16.jsonl");
+        for (index, (time, kind, rationale)) in events.iter().enumerate() {
+            let compact = time.replace(':', "");
+            let _ = write!(
+                text,
+                r#"{{"at":"2026-10-16T{time}Z","id":"e-20261016T{compact}Z-{index:04x}","kind":"{kind}","parent":null,"rationale":"{rationale}","refs":[],"repo":"jgeschwendt/alpha"}}"#
+            );
+            text.push('\n');
+        }
+        self.write(".sandman/trail/2026/10/16.jsonl", &text);
+    }
+
+    /// A shift's `meta.json`, written by hand for the rotation to read.
+    fn meta(&self, shift: &str, repo: &str, started: &str) {
+        self.write(
+            &format!(".sandman/shifts/{shift}/meta.json"),
+            &format!(r#"{{"repo":"{repo}","shift":"{shift}","started":"{started}"}}"#),
+        );
+    }
+
+    /// An open thread whose body names `text`.
+    fn thread(&self, id: &str, title: &str, text: &str) {
+        self.write(
+            &format!(".threads/{id}.md"),
+            &format!("---\nstate: open\nwaiting: user\n---\n\n# {title}\n\n{text}\n"),
+        );
+    }
+}
+
+impl Drop for Machine {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.home);
+    }
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn code(output: &Output) -> i32 {
+    output.status.code().expect("an exit code")
+}
+
+/// The bank key recall derives for `dir` — every non-alphanumeric byte a dash.
+fn bank_key(dir: &Path) -> String {
+    dir.as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() {
+                char::from(*byte)
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Friday 2026-10-16, noon in New York (EDT).
+const FRIDAY: &str = "2026-10-16T16:00:00Z";
+
+#[test]
+fn clock_reads_the_window_and_check_gates_on_time_and_usage() {
+    let machine = Machine::new("clock");
+    let now = "2026-10-09T23:00:00Z";
+    // 1791586800 is the instant `now` names.
+    let window = |left: i64, used: &str| {
+        fs::write(
+            machine.window(),
+            format!(
+                r#"{{"at":"{now}","five_hour":{{"resets_at":{},"used_percentage":{used}}},"session_id":"x"}}"#,
+                1_791_586_800 + left
+            ),
+        )
+        .expect("window");
+    };
+
+    window(4 * 3600 + 7 * 60, "5.0");
+    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim(),
+        "remaining=4h7m used=5% resets_at=2026-10-10T03:07:00Z stale=false"
+    );
+
+    window(14 * 60, "5.0");
+    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
+    assert_eq!(code(&output), 1, "under fifteen minutes refuses");
+    assert!(stdout(&output).starts_with("remaining=0h14m "));
+    assert_eq!(code(&machine.run(now, &["shift", "clock"], &[])), 0);
+
+    window(3600, "90");
+    assert_eq!(
+        code(&machine.run(now, &["shift", "clock", "--check"], &[])),
+        1,
+        "ninety percent used refuses"
+    );
+
+    // Written an hour before it was read: stale, but still trusted for time.
+    let output = machine.run("2026-10-10T00:00:00Z", &["shift", "clock"], &[]);
+    assert!(
+        stdout(&output).ends_with("stale=true\n"),
+        "{}",
+        stdout(&output)
+    );
+
+    fs::remove_file(machine.window()).expect("remove");
+    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
+    assert_eq!(code(&output), 0, "a missing window never refuses");
+    assert_eq!(stdout(&output).trim(), "remaining=unknown");
+}
+
+#[test]
+fn pick_rotates_to_the_least_recently_shifted_trunk() {
+    let machine = Machine::new("pick");
+    let alpha = machine.repo("jgeschwendt/alpha");
+    machine.repo("jgeschwendt/beta");
+    // Not a trunk, and not an owner the rotation covers.
+    fs::create_dir_all(machine.grove_code().join("jgeschwendt/alpha/dev/.git")).expect("dev");
+    machine.repo("someone/aardvark");
+
+    // Never shifted, no signals: the tie goes by name.
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick"]).trim(),
+        "jgeschwendt/alpha"
+    );
+    // An open thread naming beta breaks the tie its way.
+    machine.thread("t1", "beta is red", "CI on jgeschwendt/beta fails");
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick"]).trim(),
+        "jgeschwendt/beta"
+    );
+
+    // Both shifted: the older meta.json is the one rested longest, and goes.
+    machine.meta(
+        "s-20261005T1200Z",
+        "jgeschwendt/alpha",
+        "2026-10-05T12:00:00Z",
+    );
+    machine.meta(
+        "s-20261001T1200Z",
+        "jgeschwendt/beta",
+        "2026-10-01T12:00:00Z",
+    );
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick"]).trim(),
+        "jgeschwendt/beta"
+    );
+    machine.meta(
+        "s-20261008T1200Z",
+        "jgeschwendt/beta",
+        "2026-10-08T12:00:00Z",
+    );
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick", "--path"]).trim(),
+        alpha.display().to_string()
+    );
+
+    // The open shift's repo is passed over, and so is anything in the skip list.
+    machine.write(
+        ".sandman/shifts/current.json",
+        r#"{"repo":"jgeschwendt/alpha","shift":"s-x"}"#,
+    );
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick"]).trim(),
+        "jgeschwendt/beta"
+    );
+    let output = machine.run(
+        FRIDAY,
+        &["shift", "pick"],
+        &[("SANDMAN_SHIFT_SKIP", "jgeschwendt/beta")],
+    );
+    assert_eq!(
+        code(&output),
+        1,
+        "nothing left to pick: {}",
+        stdout(&output)
+    );
+    let output = machine.run(
+        FRIDAY,
+        &["shift", "pick"],
+        &[("SANDMAN_SHIFT_OWNERS", "someone:jgeschwendt")],
+    );
+    assert_eq!(stdout(&output).trim(), "someone/aardvark");
+
+    // --shift answers what a shift was briefed on, rotation aside.
+    let meta = machine.root().join("shifts/s-20261005T1200Z/meta.json");
+    fs::write(
+        &meta,
+        format!(
+            r#"{{"path":"{}","repo":"jgeschwendt/alpha","shift":"s-20261005T1200Z","started":"2026-10-05T12:00:00Z"}}"#,
+            alpha.display()
+        ),
+    )
+    .expect("meta");
+    assert_eq!(
+        machine
+            .ok(
+                FRIDAY,
+                &["shift", "pick", "--path", "--shift", "s-20261005T1200Z"]
+            )
+            .trim(),
+        alpha.display().to_string()
+    );
+}
+
+#[test]
+fn brief_fills_every_slot_and_records_the_start() {
+    let machine = Machine::new("brief");
+    let alpha = machine.repo("jgeschwendt/alpha");
+    machine.write(
+        ".grove/code/jgeschwendt/alpha/main/docs/plan.md",
+        "# Alpha\n\nStatus: building.\n\n## What comes next\n\nShip the parser rewrite behind a flag.\nThen delete the old one.\n\n## Later\n\nNothing.\n",
+    );
+    machine.write(
+        &format!(".sandman/memories/{}/feedback_parsers.md", bank_key(&alpha)),
+        "---\nname: parsers\ndescription: parsers want fuzzing\ntype: feedback\n---\n\nFuzz every parser before merging.\n",
+    );
+    machine.thread(
+        "t1",
+        "alpha flakes on CI",
+        "seen in jgeschwendt/alpha twice",
+    );
+    machine.write(
+        ".sandman/breath/2026-10-15-fuzzing.md",
+        "---\nrepo: jgeschwendt/alpha\nstate: new\ntitle: Coverage-guided fuzzing for Rust parsers\nurl: https://example.com/fuzz\n---\n",
+    );
+    machine.write(
+        ".sandman/breath/2026-10-14-old.md",
+        "---\nrepo: jgeschwendt/alpha\nstate: dropped\ntitle: Dropped idea\n---\n",
+    );
+    machine.write(
+        ".sandman/score/2026-W42.md",
+        "# Score 2026-W42\n\ncoverage: 3 of 9 repos\n",
+    );
+    machine.meta(
+        "s-20261015T1200Z",
+        "jgeschwendt/other",
+        "2026-10-15T12:00:00Z",
+    );
+    machine.write(
+        ".sandman/shifts/s-20261015T1200Z/handoff.md",
+        "# Landed the lexer\n\nNext: the parser.\n",
+    );
+    machine.trail_fixture(&[(
+        "15:30:00".to_owned(),
+        "guard",
+        "denied a force push".to_owned(),
+    )]);
+
+    let id = machine.ok(FRIDAY, &["shift", "brief", "--mind", "fable"]);
+    assert_eq!(id.trim(), "s-20261016T1600Z");
+
+    let brief = machine.read(".sandman/shifts/s-20261016T1600Z/brief.md");
+    assert!(!brief.contains("{{"), "an unfilled slot:\n{brief}");
+    for expected in [
+        "Shift `s-20261016T1600Z` · Friday, Day 6 · Image; the work finished, very good · theme **Ship** · instrument `/gigareview`",
+        "Target `jgeschwendt/alpha`",
+        "last shifted never; picked because never shifted; 1 open thread(s); 1 breath(s) filed",
+        "Orchestrator model `fable`",
+        "Budget `15` USD; shifts have spent 0.00 USD today",
+        "From `s-20261015T1200Z`:\n\n# Landed the lexer",
+        "guard  jgeschwendt/alpha  -  denied a force push",
+        "### parsers (feedback)\nFuzz every parser before merging.",
+        "Ship the parser rewrite behind a flag.\nThen delete the old one.",
+        "- `t1` · alpha flakes on CI (waiting: user)",
+        "- `2026-10-15-fuzzing` · Coverage-guided fuzzing for Rust parsers · https://example.com/fuzz",
+        "coverage: 3 of 9 repos",
+    ] {
+        assert!(
+            brief.contains(expected),
+            "missing {expected:?} in:\n{brief}"
+        );
+    }
+    assert!(
+        !brief.contains("Dropped idea"),
+        "only new breaths are pending"
+    );
+
+    let meta = machine.read(".sandman/shifts/s-20261016T1600Z/meta.json");
+    for expected in [
+        r#""instrument":"/gigareview""#,
+        r#""mind":"fable""#,
+        r#""repo":"jgeschwendt/alpha""#,
+        r#""started":"2026-10-16T16:00:00Z""#,
+        r#""theme":"Ship""#,
+        r#""window":{"remaining":"unknown""#,
+    ] {
+        assert!(meta.contains(expected), "missing {expected} in {meta}");
+    }
+    let current = machine.read(".sandman/shifts/current.json");
+    assert!(
+        current.contains(r#""handoff_by":"2026-10-16T20:45:00Z""#),
+        "{current}"
+    );
+    assert!(
+        current.contains(r#""shift":"s-20261016T1600Z""#),
+        "{current}"
+    );
+
+    let problems = machine.read(".sandman/breath/problems.md");
+    assert!(
+        problems.contains("## jgeschwendt/alpha · 2026-10-16\n"),
+        "{problems}"
+    );
+    assert!(problems.contains("Ship the parser rewrite"), "{problems}");
+    assert!(problems.contains("denied a force push"), "{problems}");
+
+    let start = machine
+        .trail()
+        .into_iter()
+        .find(|line| line.contains(r#""kind":"shift.start""#))
+        .expect("a shift.start event");
+    assert!(start.contains(r#""shift":"s-20261016T1600Z""#), "{start}");
+    assert!(start.contains(r#""repo":"jgeschwendt/alpha""#), "{start}");
+    assert!(start.contains(r#""model":"fable""#), "{start}");
+    assert!(start.contains(r#""brief:"#), "{start}");
+    let slots = TEMPLATE.matches("{{").count();
+    let distinct: std::collections::BTreeSet<&str> = TEMPLATE
+        .split("{{")
+        .skip(1)
+        .filter_map(|rest| rest.split("}}").next())
+        .collect();
+    assert!(slots >= distinct.len());
+    assert!(
+        distinct.contains("shift.creation"),
+        "the template names the creation note"
+    );
+    assert_eq!(start.matches("\"fp:").count(), distinct.len(), "{start}");
+    for slot in &distinct {
+        assert!(
+            start.contains(&format!("\"fp:{slot}=")),
+            "no fingerprint for {slot}"
+        );
+    }
+    assert!(!start.contains("trimmed:"), "nothing was over the cap");
+
+    // A second brief while this one is open is refused, and changes nothing.
+    let output = machine.run("2026-10-16T16:05:00Z", &["shift", "brief"], &[]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("s-20261016T1600Z is open"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!machine.root().join("shifts/s-20261016T1605Z").exists());
+
+    // A second brief the same day for the same repo refreshes its section.
+    machine.ok(
+        "2026-10-16T16:10:00Z",
+        &[
+            "shift",
+            "handoff",
+            "--shift",
+            "s-20261016T1600Z",
+            "--abandoned",
+        ],
+    );
+    machine.ok("2026-10-16T16:10:00Z", &["shift", "brief"]);
+    let problems = machine.read(".sandman/breath/problems.md");
+    assert_eq!(problems.matches("## jgeschwendt/").count(), 1, "{problems}");
+}
+
+#[test]
+fn the_theme_follows_the_new_york_weekday() {
+    let machine = Machine::new("themes");
+    machine.repo("jgeschwendt/alpha");
+    for (now, weekday, theme, instrument) in [
+        (
+            "2026-10-11T16:00:00Z",
+            "Sunday",
+            "Hunt",
+            "/gigasweep → /gigadebug",
+        ),
+        (
+            "2026-10-12T16:00:00Z",
+            "Monday",
+            "Redesign",
+            "/gigaredesign → /execute-plan",
+        ),
+        ("2026-10-13T16:00:00Z", "Tuesday", "Refactor", "/gigarefine"),
+        (
+            "2026-10-14T16:00:00Z",
+            "Wednesday",
+            "Measure",
+            "sandman score · perf",
+        ),
+        (
+            "2026-10-15T16:00:00Z",
+            "Thursday",
+            "Harden",
+            "/security-review · coverage · deps",
+        ),
+        // 01:00Z Friday is still Thursday evening in New York.
+        (
+            "2026-10-16T01:00:00Z",
+            "Thursday",
+            "Harden",
+            "/security-review · coverage · deps",
+        ),
+        ("2026-10-16T16:00:00Z", "Friday", "Ship", "/gigareview"),
+        ("2026-10-10T16:00:00Z", "Saturday", "Rest", "self-pass"),
+    ] {
+        let brief = machine.ok(now, &["shift", "brief", "--dry-run"]);
+        assert!(!brief.contains("{{"), "{now}: an unfilled slot");
+        let identity = format!("· {weekday}, Day ");
+        assert!(brief.contains(&identity), "{now}: {identity:?} in\n{brief}");
+        assert!(
+            brief.contains(&format!("theme **{theme}** · instrument `{instrument}`")),
+            "{now}: {theme} in\n{brief}"
+        );
+        let sabbath = brief.contains("No code commits; remember, don't make.");
+        assert_eq!(sabbath, weekday == "Saturday", "{now}: the Sabbath note");
+        assert!(
+            !brief.contains("Shemitah"),
+            "{now}: week 41/42 weekdays are ordinary"
+        );
+    }
+
+    // Saturday of ISO week 42 — 42 is a multiple of seven.
+    let brief = machine.ok("2026-10-17T16:00:00Z", &["shift", "brief", "--dry-run"]);
+    assert!(brief.contains("No code commits; remember, don't make."));
+    assert!(
+        brief.contains(
+            "Shemitah: run the ablation prompt (~/.sandman/ablation.prompt.md) instead of the self-pass."
+        ),
+        "{brief}"
+    );
+
+    // A dry run writes nothing: no shift, no trail, no problems file.
+    assert!(!machine.root().join("shifts").exists());
+    assert!(!machine.root().join("trail").exists());
+    assert!(!machine.root().join("breath").exists());
+}
+
+#[test]
+fn the_brief_is_capped_and_the_cut_is_recorded() {
+    let machine = Machine::new("cap");
+    machine.repo("jgeschwendt/alpha");
+    let events: Vec<(String, &str, String)> = (0..45)
+        .map(|index| {
+            (
+                format!("15:{index:02}:00"),
+                "change",
+                format!("change number {index} with a rationale long enough to cost a line"),
+            )
+        })
+        .collect();
+    machine.trail_fixture(&events);
+    let title = "a thread title padded out toward the hundred and twenty characters the brief keeps, so that it costs";
+    let threads = |range: std::ops::Range<usize>| {
+        for index in range {
+            machine.thread(&format!("t{index:03}"), title, "about jgeschwendt/alpha");
+        }
+    };
+    let start_event = |shift: &str| {
+        machine
+            .trail()
+            .into_iter()
+            .find(|line| line.contains(r#""kind":"shift.start""#) && line.contains(shift))
+            .expect("a shift.start event")
+    };
+
+    // Over by a little: the trail alone gives, oldest lines first.
+    threads(0..125);
+    machine.ok(FRIDAY, &["shift", "brief"]);
+    let brief = machine.read(".sandman/shifts/s-20261016T1600Z/brief.md");
+    assert!(
+        brief.chars().count() <= 24_000,
+        "{} chars",
+        brief.chars().count()
+    );
+    assert!(!brief.contains("{{"));
+    assert!(
+        brief.contains("trimmed for the 24000-character cap"),
+        "the cut is marked ({} chars)",
+        brief.chars().count()
+    );
+    assert!(
+        brief.contains("change number 44 "),
+        "the newest trail line stays"
+    );
+    assert!(
+        !brief.contains("change number 5 "),
+        "the oldest trail lines go first"
+    );
+    assert!(brief.contains("- `t124` · "), "the threads were not needed");
+    let start = start_event("s-20261016T1600Z");
+    assert!(start.contains(r#""trimmed:trail.recent""#), "{start}");
+    assert!(!start.contains("trimmed:threads.open"), "{start}");
+    assert!(
+        !start.contains("trimmed:memories.bearing"),
+        "nothing to trim there: {start}"
+    );
+
+    // Over by a lot: the trail goes whole, then the threads from the tail.
+    machine.ok(
+        FRIDAY,
+        &[
+            "shift",
+            "handoff",
+            "--shift",
+            "s-20261016T1600Z",
+            "--abandoned",
+        ],
+    );
+    threads(125..300);
+    machine.ok("2026-10-16T16:01:00Z", &["shift", "brief"]);
+    let brief = machine.read(".sandman/shifts/s-20261016T1601Z/brief.md");
+    assert!(
+        brief.chars().count() <= 24_000,
+        "{} chars",
+        brief.chars().count()
+    );
+    assert!(!brief.contains("change number 44 "), "the trail went first");
+    assert!(
+        brief.contains("- `t000` · "),
+        "threads are cut from the tail"
+    );
+    assert!(
+        !brief.contains("- `t299` · "),
+        "threads are cut from the tail"
+    );
+    let start = start_event("s-20261016T1601Z");
+    assert!(start.contains(r#""trimmed:trail.recent""#), "{start}");
+    assert!(start.contains(r#""trimmed:threads.open""#), "{start}");
+    assert!(!start.contains(r#""trimmed:brief""#), "{start}");
+}
+
+#[test]
+fn handoff_finalizes_once_and_releases_the_open_shift() {
+    let machine = Machine::new("handoff");
+    machine.repo("jgeschwendt/alpha");
+    machine.repo("jgeschwendt/beta");
+
+    // A session that wrote nothing: --from-session refuses, --abandoned records it.
+    let first = "s-20261016T1600Z";
+    machine.ok(FRIDAY, &["shift", "brief"]);
+    let output = machine.run(
+        FRIDAY,
+        &["shift", "handoff", "--shift", first, "--from-session"],
+        &[],
+    );
+    assert_eq!(code(&output), 1, "nothing to hand off");
+    assert!(machine.root().join("shifts/current.json").exists());
+    machine.ok(
+        FRIDAY,
+        &["shift", "handoff", "--shift", first, "--abandoned"],
+    );
+    assert!(!machine.root().join("shifts/current.json").exists());
+    let handoff = machine.read(&format!(".sandman/shifts/{first}/handoff.md"));
+    assert!(
+        handoff.starts_with("Abandoned: the shift runner found the session gone"),
+        "{handoff}"
+    );
+    let meta = machine.read(&format!(".sandman/shifts/{first}/meta.json"));
+    assert!(
+        meta.contains(r#""abandoned":true"#) && meta.contains(r#""ended":"#),
+        "{meta}"
+    );
+    let again = machine.run(
+        FRIDAY,
+        &["shift", "handoff", "--shift", first, "--abandoned"],
+        &[],
+    );
+    assert_eq!(code(&again), 1, "a shift is handed off once");
+
+    // The next shift rotates to beta and hands off from a file.
+    let second = "s-20261016T1700Z";
+    let now = "2026-10-16T17:00:00Z";
+    assert_eq!(machine.ok(now, &["shift", "brief"]).trim(), second);
+    assert_eq!(
+        machine
+            .ok(now, &["shift", "pick", "--shift", second])
+            .trim(),
+        "jgeschwendt/beta"
+    );
+    machine.ok(
+        now,
+        &[
+            "shift",
+            "attach",
+            "--shift",
+            second,
+            "--bg-id",
+            "bb2d9a0e",
+            "--session-id",
+            "bb2d9a0e-1",
+        ],
+    );
+    let status = machine.ok(now, &["shift", "status"]);
+    assert!(status.contains("bg_id: bb2d9a0e\n"), "{status}");
+    assert!(status.contains(&format!("shift: {second}\n")), "{status}");
+    assert!(status.contains("clock: remaining=unknown"), "{status}");
+
+    let notes = machine.write("notes.md", "## Landed the parser\n\nabc1234 on shift/x.\n");
+    let event = machine.ok(
+        now,
+        &[
+            "shift",
+            "handoff",
+            "--shift",
+            second,
+            "--file",
+            &notes.display().to_string(),
+        ],
+    );
+    assert!(event.trim().starts_with("e-"), "{event}");
+    assert!(!machine.root().join("shifts/current.json").exists());
+    assert_eq!(
+        machine.read(&format!(".sandman/shifts/{second}/handoff.md")),
+        "## Landed the parser\n\nabc1234 on shift/x.\n"
+    );
+    let line = machine
+        .trail()
+        .into_iter()
+        .find(|line| line.contains(event.trim()))
+        .expect("the handoff event");
+    assert!(line.contains(r#""kind":"shift.handoff""#), "{line}");
+    assert!(
+        line.contains(r#""rationale":"Landed the parser""#),
+        "{line}"
+    );
+    assert!(line.contains(r#""repo":"jgeschwendt/beta""#), "{line}");
+    assert!(line.contains(&format!(r#""shift":"{second}""#)), "{line}");
+    let output = machine.run(
+        now,
+        &["shift", "handoff", "--shift", second, "--from-session"],
+        &[],
+    );
+    assert_eq!(code(&output), 1, "idempotent: the second handoff refuses");
+    assert_eq!(
+        machine.ok(now, &["shift", "status"]).lines().next(),
+        Some("no shift open")
+    );
+
+    // The third brief carries the newest handoff forward.
+    let brief = machine.ok("2026-10-16T18:00:00Z", &["shift", "brief", "--dry-run"]);
+    assert!(
+        brief.contains(&format!("From `{second}`:\n\n## Landed the parser")),
+        "{brief}"
+    );
+
+    let unknown = machine.run(
+        now,
+        &["shift", "handoff", "--shift", "s-nope", "--abandoned"],
+        &[],
+    );
+    assert_eq!(code(&unknown), 1);
+    let usage = machine.run(now, &["shift", "handoff", "--shift", second], &[]);
+    assert_eq!(code(&usage), 2, "a handoff names its source");
+}
+
+#[test]
+fn a_missing_template_fails_with_its_path() {
+    let machine = Machine::new("template");
+    machine.repo("jgeschwendt/alpha");
+    let output = machine.run(
+        FRIDAY,
+        &["shift", "brief"],
+        &[("SANDMAN_PROMPTS", "/nonexistent/prompts")],
+    );
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("/nonexistent/prompts/shift.md"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!machine.root().join("shifts").exists());
+}
