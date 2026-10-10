@@ -1116,7 +1116,21 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
         ),
         (
             r#"{"five_hour":{"resets_at":1791590400,"used_percentage":-1}}"#.to_owned(),
-            "negative",
+            "outside 0–100",
+        ),
+        (
+            r#"{"five_hour":{"resets_at":1791590400,"used_percentage":100.5}}"#.to_owned(),
+            "outside 0–100",
+        ),
+        (
+            r#"{"at":"yesterday","five_hour":{"resets_at":1791590400,"used_percentage":5}}"#
+                .to_owned(),
+            "ISO 8601",
+        ),
+        (
+            r#"{"at":1791586800,"five_hour":{"resets_at":1791590400,"used_percentage":5}}"#
+                .to_owned(),
+            "ISO 8601",
         ),
         // Written from a clock running ahead of ours.
         (
@@ -1169,6 +1183,15 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
         code(&machine.run(now, &["shift", "clock", "--check"], &[])),
         0
     );
+    // A negative zero is none used, and prints so.
+    fs::write(
+        machine.window(),
+        r#"{"five_hour":{"resets_at":1791590400,"used_percentage":-0.0}}"#,
+    )
+    .expect("window");
+    let output = machine.run(now, &["shift", "clock"], &[]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stdout(&output).contains(" used=0% "), "{}", stdout(&output));
 }
 
 #[test]

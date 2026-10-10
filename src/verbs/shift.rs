@@ -291,9 +291,9 @@ impl Window {
     /// Read the window file: `None` when it is absent — the only unknown —
     /// and an error when it is there but unreadable, not a JSON object, has
     /// no `five_hour` object holding numeric `resets_at` and
-    /// `used_percentage`, carries a negative `used_percentage`, is stamped
-    /// `at` more than five minutes after `now`, or resets more than six hours
-    /// after it.
+    /// `used_percentage`, carries a `used_percentage` outside 0–100 or an `at`
+    /// that is not an ISO 8601 instant, is stamped `at` more than five minutes
+    /// after `now`, or resets more than six hours after it.
     pub fn load(path: &Path, now: Timestamp) -> Result<Option<Self>> {
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
@@ -323,16 +323,21 @@ impl Window {
             reason = "a unix second count; `as` saturates, and the bound below refuses the absurd"
         )]
         let resets_at = number("resets_at")? as i64;
-        let used = number("used_percentage")?;
-        if used < 0.0 {
+        // `+ 0.0` folds `-0.0` to `0.0`, which would print `-0%`
+        let used = number("used_percentage")? + 0.0;
+        if !(0.0..=100.0).contains(&used) {
             return Err(fault(format!(
-                "`five_hour.used_percentage` {used} is negative"
+                "`five_hour.used_percentage` {used} is outside 0–100"
             )));
         }
         let at = value
             .get("at")
-            .and_then(Value::as_str)
-            .and_then(Timestamp::parse_iso8601);
+            .map(|at| {
+                at.as_str()
+                    .and_then(Timestamp::parse_iso8601)
+                    .ok_or_else(|| fault("`at` is not an ISO 8601 instant".to_owned()))
+            })
+            .transpose()?;
         if let Some(at) = at.filter(|at| at.unix_seconds() - now.unix_seconds() > MAX_SKEW_SECONDS)
         {
             return Err(fault(format!(
