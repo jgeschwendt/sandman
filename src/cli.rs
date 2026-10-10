@@ -223,11 +223,14 @@ usage: sandman <verb> [args]
       shift.start event whose refs fingerprint every slot, and prints the id;
       --dry-run prints the brief and writes nothing. The theme is the
       America/New_York weekday's: Sun Hunt, Mon Redesign, Tue Refactor, Wed
-      Measure, Thu Harden, Fri Ship, Sat Rest. pick is the rotation — the least
+      Measure, Thu Harden, Fri Ship, Sat Rest — the Sabbath, which fills
+      prompts/sabbath.md instead and works jgeschwendt/sandman's trunk; a
+      repo whose docs/plan.md names nothing next takes its line from the
+      Sabbath's score/<week>-targets.md. pick is the rotation — the least
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
-      (default jgeschwendt) — never ~, ~/.routines or the data root — ties
-      broken by a failing stele check, open threads and breaths; it skips the
-      open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs) and
+      (default jgeschwendt), Saturday shifts aside — never ~, ~/.routines or
+      the data root — ties broken by a failing stele check, open threads and
+      breaths; it skips the open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs) and
       every trunk Claude Code has not trusted ($SANDMAN_CLAUDE_JSON, else
       ~/.claude.json) — exit 1 listing them when no other is left, and brief
       exits 3; --untrusted lists those trunks; --shift prints the target a

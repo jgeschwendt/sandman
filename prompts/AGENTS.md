@@ -2,7 +2,7 @@
 
 ```stele
 kind: container
-purpose: the machine's prompt templates — `shift.md` (`sandman shift brief`) and `breathe.md` (`sandman breathe pass`); their slot names are the contract (`docs/BANK-FORMAT.md` § shifts, § breath)
+purpose: the machine's prompt templates — `shift.md`, Saturday's `sabbath.md` (`shift brief`) and `breathe.md` (`breathe pass`); their slot names are the contract (BANK-FORMAT § shifts, § breath)
 ```
 
 ## Working here
@@ -14,8 +14,8 @@ purpose: the machine's prompt templates — `shift.md` (`sandman shift brief`) a
 - The installed binary reads the trunk checkout's `prompts/` (`$SANDMAN_PROMPTS`
   overrides) — an edit here goes live for the next shift once it reaches trunk, with no
   rebuild; a new slot needs the binary that fills it installed first.
-- `tests/shift.rs` composes the real `shift.md` and `tests/breathe.rs` the real
-  `breathe.md`, so a template edit runs through the suite.
+- `tests/shift.rs` composes the real `shift.md` and `sabbath.md`, `tests/breathe.rs` the
+  real `breathe.md`, so a template edit runs through the suite.
 
 <!-- @stele -->
 <!-- @end -->
