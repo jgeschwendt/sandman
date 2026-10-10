@@ -24,7 +24,7 @@ The ruach's hourly pass. Research is its own perpetual engine, outside the creat
 
 - `unknown verb` (exit 2): the installed `~/.local/bin/sandman` predates `breathe`; install a trunk build as `sandman-reflect.md` describes.
 - `spawn` answering `{"error": …}`: the pass record stays without session ids and without `ended`; nothing else to undo. The next tick starts a fresh pass.
-- Two passes of the same kind in flight is not an error — passes are independent and the budget line in each prompt is the brake.
+- A second pass of the same kind while one is in flight is refused by `breathe pass` (exit 1, `pass in flight`) until the first closes or outlives its timeout, at which point it is marked dead and charged `SANDMAN_BREATH_DEAD_COST_USD` (default 2) against the day; a skim and a deep pass may run together.
 
 ```sh
 # open: unless paused, compose a skim pass and start its session
