@@ -62,6 +62,7 @@ Scope is every root under `~/.grove/code/jgeschwendt/`. The three home repos (`~
 ## Standing rails
 
 - A shift works in `shift/<id>` worktrees created through `grove tree add`; trunk never carries in-flight work.
+- A shift lands by fast-forward only — it rebases its own unpushed `shift/<id>` onto a moved trunk, then `git merge --ff-only`, never a merge commit — so reconcile reverts every landed commit on its own and refuses a trailered merge.
 - Merge to trunk only when the repo's test, lint and `stele check && stele emit --check` are green, coverage has not dropped — 100 % is table stakes, end-to-end style like jlg.io, and test code is source code (owner 2026-10-09: "code golf should be in the spirit of the refactor/tighten phases") — and a `/gigareview` says GO. Patch releases ship on their own; a minor or major opens a decision thread (release policy, unchanged).
 - History is never rewritten and nothing is force-pushed; the trail reconciles by revert.
 - The orchestrator model is a knob, `SANDMAN_SHIFT_MIND`, default `opus`. Fable takes the Sabbath self-pass and Friday's verdicts while quota allows; when the weekly limit is exhausted every spawned agent pins opus or below. Workers are always opus or below.

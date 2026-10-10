@@ -426,6 +426,7 @@ fn brief_fills_every_slot_and_records_the_start() {
         "- `t1` · alpha flakes on CI (waiting: user)",
         "- `2026-10-15-fuzzing` · Coverage-guided fuzzing for Rust parsers · https://example.com/fuzz",
         "coverage: 3 of 9 repos",
+        "`git merge --ff-only shift/s-20261016T1600Z`",
     ] {
         assert!(
             brief.contains(expected),
