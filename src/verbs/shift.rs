@@ -136,7 +136,7 @@ pub struct Context {
     pub home: PathBuf,
     /// The instant the verb acts at.
     pub now: Timestamp,
-    /// The grove owners whose repos rotate; extras always do.
+    /// The grove owners whose repos rotate; the extras never do.
     pub owners: Vec<String>,
     /// The directory holding `shift.md`.
     pub prompts: PathBuf,
@@ -385,7 +385,7 @@ pub fn clock(ctx: &Context) -> Clock {
 pub struct Target {
     /// When it was last shifted.
     pub last: Option<Timestamp>,
-    /// `owner/repo`, or `~`, `~/.routines`, … for an extra.
+    /// `owner/repo`.
     pub label: String,
     /// The trunk checkout.
     pub path: PathBuf,
@@ -484,22 +484,19 @@ fn read_current(data_root: &Path) -> Result<Option<Value>> {
 }
 
 /// Every trunk the rotation covers: each grove repo of an allowed owner at its
-/// trunk checkout (the manifest's `trunk`, else `main`), then the extras.
+/// trunk checkout (the manifest's `trunk`, else `main`). Only checkouts under
+/// `<grove code>/<owner>/` qualify — the home repos (`~`, `~/.routines`, the
+/// data root) are reconcile's to scan but never a shift's to work: home-sync
+/// commits them without trailers, and a shift there could edit the trail or
+/// the runner it answers to.
 fn trunks(ctx: &Context) -> Vec<(String, PathBuf)> {
     let named = grove::manifest_trunks(&ctx.roots.manifest);
     let mut found = Vec::new();
     for checkout in grove::checkouts(&ctx.roots) {
-        let extra = ctx.roots.extras.contains(&checkout.path);
-        if extra {
-            let label = match checkout.label.as_str() {
-                "~/" => "~".to_owned(),
-                label => label.to_owned(),
-            };
-            found.push((label, checkout.path));
-            continue;
-        }
         let owner = checkout.label.split('/').next().unwrap_or_default();
-        if !ctx.owners.iter().any(|allowed| allowed == owner) {
+        if !ctx.owners.iter().any(|allowed| allowed == owner)
+            || !checkout.path.starts_with(ctx.roots.grove_code.join(owner))
+        {
             continue;
         }
         let trunk = named.get(&checkout.label).map_or("main", String::as_str);

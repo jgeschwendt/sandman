@@ -57,7 +57,7 @@ Sources ──▶ Read ──▶ Judge ──▶ File ──▶ Spike ──▶ 
 
 ## Repo rotation
 
-Scope is every root under `~/.grove/code/jgeschwendt/` plus the three home repos (`~`, `~/.routines`, `~/.sandman`). `sandman shift pick` orders repos by least-recently-shifted, then weights by live signals: CI red, stale `graph.lock`, open findings, open threads, breaths filed against it. Invariant: every repo is shifted at least once a week; Wednesday's score reports coverage and a miss is a finding.
+Scope is every root under `~/.grove/code/jgeschwendt/`. The three home repos (`~`, `~/.routines`, `~/.sandman`) are out of the rotation: home-sync commits them without trailers every fifteen minutes, and a shift there could edit the trail or the live runner; reconcile still scans them. `sandman shift pick` orders repos by least-recently-shifted, then weights by live signals: CI red, stale `graph.lock`, open findings, open threads, breaths filed against it. Invariant: every repo is shifted at least once a week; Wednesday's score reports coverage and a miss is a finding.
 
 ## Standing rails
 
@@ -82,7 +82,7 @@ Retired drawing tools stripped (`design/*.tldr`, `docs/arch.tldr`, the `plan` ta
 
 ### 2 · Shift — built
 
-`sandman shift attach|brief|clock|handoff|pick|status`; the contract is BANK-FORMAT § shifts. The rotation covers `$SANDMAN_SHIFT_OWNERS` (default `jgeschwendt`) rather than every grove owner — the grove also holds client repos, and touching other people is a thread, not a shift — and weights ties by the cheap signals only (a failing `stele check`, open threads, breaths); CI red and open findings join when `score` (phase 5) records them. `attach` exists because `spawn` mints the session id only after `brief` has written `current.json`. The runner stays paused until the operator removes `PAUSE` and installs a binary carrying `shift`.
+`sandman shift attach|brief|clock|handoff|pick|status`; the contract is BANK-FORMAT § shifts. The rotation covers `$SANDMAN_SHIFT_OWNERS` (default `jgeschwendt`) rather than every grove owner — the grove also holds client repos, and touching other people is a thread, not a shift — never the home repos (§ Repo rotation), and weights ties by the cheap signals only (a failing `stele check`, open threads, breaths); CI red and open findings join when `score` (phase 5) records them. `attach` exists because `spawn` mints the session id only after `brief` has written `current.json`. The runner stays paused until the operator removes `PAUSE` and installs a binary carrying `shift`.
 
 
 - `sandman shift brief` composes the shift prompt — the dynamic prompt itself — from `prompts/shift.md` (a stele node the Sabbath edits): the charter, the day's theme and creation note, the previous handoff, the trail's last day, `shift pick`'s target, the bearing memories for that repo, its `docs/plan.md` "next", open threads, breaths filed against it, this week's score. Budgeted; every included item's fingerprint is logged in the `shift.start` event so Wednesday can attribute.

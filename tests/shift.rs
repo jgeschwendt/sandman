@@ -807,3 +807,42 @@ fn a_missing_template_fails_with_its_path() {
     );
     assert!(!machine.root().join("shifts").exists());
 }
+
+#[test]
+fn pick_never_returns_a_home_repo_even_when_it_rested_longest() {
+    let machine = Machine::new("home");
+    let alpha = machine.repo("jgeschwendt/alpha");
+    let routines = machine.home.join(".routines");
+    for home_repo in [&machine.home, &routines, &machine.root()] {
+        fs::create_dir_all(home_repo.join(".git")).expect("home repo");
+    }
+    // Alpha was shifted yesterday; the home repos never were.
+    machine.meta(
+        "s-20261015T1200Z",
+        "jgeschwendt/alpha",
+        "2026-10-15T12:00:00Z",
+    );
+    let extras = format!(
+        "{}:{}:{}",
+        machine.home.display(),
+        routines.display(),
+        machine.root().display()
+    );
+    let output = machine.run(
+        FRIDAY,
+        &["shift", "pick", "--path"],
+        &[("SANDMAN_RECONCILE_EXTRA", &extras)],
+    );
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(stdout(&output).trim(), alpha.display().to_string());
+    let brief = machine.run(
+        FRIDAY,
+        &["shift", "brief", "--dry-run"],
+        &[("SANDMAN_RECONCILE_EXTRA", &extras)],
+    );
+    assert!(
+        stdout(&brief).contains("Target `jgeschwendt/alpha`"),
+        "{}",
+        stdout(&brief)
+    );
+}

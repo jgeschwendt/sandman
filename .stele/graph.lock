@@ -30,7 +30,7 @@
           "text": "single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen",
           "verified": {
             "digest": "08ffd34819365da145ab6536764117600151de2829cd6bf0649d21b860fe5c54",
-            "sha": "ffa53208923a07119ef3ab349b85178193398555"
+            "sha": "071b4b73f901fdc7e3dca127e733e351159b10cf"
           }
         },
         {
@@ -42,7 +42,7 @@
           "text": "one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it",
           "verified": {
             "digest": null,
-            "sha": "ffa53208923a07119ef3ab349b85178193398555"
+            "sha": "071b4b73f901fdc7e3dca127e733e351159b10cf"
           }
         }
       ],
@@ -114,7 +114,7 @@
           "text": "dream owns what \"queued\" means — every reader of the queue goes through `dream::depth` / `dream::pending`, which count only undreamed pointers; nothing counts `.recent/*.json` off disk for itself. Take's dream trigger drifted from the run this way: spent pointers inflated the depth, so every ending past the tenth spawned a dream with nothing to route",
           "verified": {
             "digest": "4eafe897ac57350cea644152f5814d6f3aa2a2ded413528fb02e5b870b06d7f1",
-            "sha": "ffa53208923a07119ef3ab349b85178193398555"
+            "sha": "071b4b73f901fdc7e3dca127e733e351159b10cf"
           }
         },
         {
@@ -126,7 +126,7 @@
           "text": "a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive",
           "verified": {
             "digest": "e684890377098f3d13c736f070f75c9e5876a966fbb8d08456b43942bdeb6bcb",
-            "sha": "ffa53208923a07119ef3ab349b85178193398555"
+            "sha": "071b4b73f901fdc7e3dca127e733e351159b10cf"
           }
         }
       ],

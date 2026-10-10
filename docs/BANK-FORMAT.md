@@ -277,7 +277,7 @@ shifts/
 | `bg_id` | the background session's short id, once the runner has attached it |
 | `handoff_by` | when the shift must hand off — fifteen minutes before the window resets, or before five hours pass when the window is unknown |
 | `path` | the checkout the shift works |
-| `repo` | `owner/repo`, or `~`, `~/.routines`, `~/.sandman` for the home repos |
+| `repo` | `owner/repo` |
 | `session_id` | the session's full id, once attached |
 | `shift` | the shift id |
 | `started` | when the brief was composed, ISO-8601 Z |
@@ -293,9 +293,13 @@ from every `meta.json` to know which repo has rested longest.
 
 `shift pick` covers the trunk checkout of every grove repo whose owner is in
 `$SANDMAN_SHIFT_OWNERS` (colon-separated, default `jgeschwendt`) — the trunk is the
-checkout named by the manifest root's `trunk = "…"`, else `main` — plus `~`,
-`~/.routines` and the data root (`$SANDMAN_RECONCILE_EXTRA` replaces the three, as it
-does for reconcile). Least recently shifted first, never-shifted before any; a tie goes
+checkout named by the manifest root's `trunk = "…"`, else `main` — and nothing else:
+only checkouts under `$SANDMAN_GROVE_CODE/<owner>/` are candidates. The home repos
+(`~`, `~/.routines`, the data root) are never picked, though reconcile still scans
+them: home-sync commits them every fifteen minutes without trailers, so a shift's work
+there could not be told from the sync's or revoked cleanly, and a shift working
+`~/.sandman` or `~/.routines` could edit the trail it answers to or the live runner
+that supervises it. Least recently shifted first, never-shifted before any; a tie goes
 to a failing `stele check` (run only where `.stele/graph.lock` exists, 20 s timeout, a
 missing binary skipped), then the most open threads naming the slug, then the most
 untried breaths (`state: new` or `spiked`) filed against it, then the name. The open shift's repo and

@@ -192,7 +192,7 @@ usage: sandman <verb> [args]
       America/New_York weekday's: Sun Hunt, Mon Redesign, Tue Refactor, Wed
       Measure, Thu Harden, Fri Ship, Sat Rest. pick is the rotation — the least
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
-      (default jgeschwendt) and of ~, ~/.routines and the data root, ties
+      (default jgeschwendt) — never ~, ~/.routines or the data root — ties
       broken by a failing stele check, open threads and breaths; it skips the
       open shift's repo and $SANDMAN_SHIFT_SKIP (colon-separated slugs);
       --shift prints the target a shift was briefed on. clock reads the window
