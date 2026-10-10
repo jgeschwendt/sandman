@@ -182,7 +182,9 @@ alphabetical, newest last:
 other key is omitted when it has no value, never `null`.
 
 Kinds: `breath` · `change` · `correction` · `decay` · `guard` · `promote` · `reconcile`
-· `revoke` · `shift.handoff` · `shift.start`. Any other kind is refused.
+· `revoke` · `shift.handoff` · `shift.start`. Any other kind is refused. `promote` and
+`decay` are proposals: the Sabbath appends them through `trail append`, the owner acts
+on them, and no verb emits or reads them yet.
 
 ### The parent chain
 
