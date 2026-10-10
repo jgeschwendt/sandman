@@ -1719,7 +1719,8 @@ pub enum Source {
 }
 
 /// Finalize `shift`: its `handoff.md`, `ended` in `meta.json`, `current.json`
-/// released when it names this shift, and a `shift.handoff` event.
+/// released when it names this shift, and a `shift.handoff` event carrying
+/// `cost_usd`, the session's own total when it read one.
 ///
 /// A handoff over [`HANDOFF_CHARS`] is refused unless `truncate`, which keeps
 /// the head and notes the cut. An abandoned shift is always truncated: the
@@ -1729,6 +1730,7 @@ pub fn handoff(
     shift: &str,
     source: &Source,
     truncate: bool,
+    cost_usd: Option<f64>,
 ) -> Result<trail::Event> {
     let meta = read_meta(&ctx.data_root, shift)?;
     if let Some(ended) = &meta.ended {
@@ -1829,6 +1831,7 @@ pub fn handoff(
     trail::append(
         &ctx.data_root,
         trail::Draft {
+            cost_usd,
             kind: "shift.handoff".to_owned(),
             rationale: Some(first.to_owned()),
             refs,

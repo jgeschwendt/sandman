@@ -128,7 +128,7 @@ fn fixture() -> Home {
                     "2026-10-13T18:00:00Z",
                     "shift.handoff",
                     &format!(
-                        r#""rationale":"Landed the lexer","refs":[],"shift":"s-20261013T1400Z",{alpha}"#
+                        r#""cost_usd":3,"rationale":"Landed the lexer","refs":[],"shift":"s-20261013T1400Z",{alpha}"#
                     ),
                 ),
             ],
@@ -167,7 +167,13 @@ fn fixture() -> Home {
                     "breath",
                     r#""refs":["breath:b.md","state:adopted"]"#,
                 ),
-                event(13, "2026-10-15T16:40:00Z", "breath", r#""refs":["url:x"]"#),
+                // a pass close without its cost
+                event(
+                    13,
+                    "2026-10-15T16:40:00Z",
+                    "breath",
+                    r#""refs":["pass:p1"]"#,
+                ),
             ],
         ),
         // Sunday 23:30 in New York: the week's last hour
@@ -274,15 +280,15 @@ fn score_writes_the_weeks_page_worst_three_first() {
     let page = fs::read_to_string(path.trim()).expect("page");
     assert!(
         page.starts_with(
-            "---\nweek: 2026-W42\nwritten: 2026-10-16T16:00:00Z\nfrom: 2026-10-12\nto: 2026-10-18\n---\n\n## Worst three\n\n| metric | value | target |\n| --- | --- | --- |\n| cost unrecorded | 10 | 0 |\n| coverage | 1/3 | 3/3 |\n| abandoned shifts | 1 | 0 |\n\n## Coverage\n"
+            "---\nweek: 2026-W42\nwritten: 2026-10-16T16:00:00Z\nfrom: 2026-10-12\nto: 2026-10-18\n---\n\n## Worst three\n\n| metric | value | target |\n| --- | --- | --- |\n| cost unrecorded | 2 | 0 |\n| coverage | 1/3 | 3/3 |\n| abandoned shifts | 1 | 0 |\n\n## Coverage\n"
         ),
         "{page}"
     );
     for row in [
         "| jgeschwendt/alpha | 1 |\n| jgeschwendt/beta | 0 |\n| jgeschwendt/gamma | 0 |\n| covered | 1/3 |",
-        "| opened | handed off | abandoned | mean minutes |\n| --- | --- | --- | --- |\n| 2 | 1 | 1 | 150 |",
+        "| opened | handed off | abandoned | mean minutes | cost per shift |\n| --- | --- | --- | --- | --- |\n| 2 | 1 | 1 | 150 | 1.50 |",
         "| breath | 2 |\n| change | 3 |\n| correction | 2 |\n| decay | 0 |\n| guard | 1 |",
-        "| 12 | 1 | 2.00 | 10 |",
+        "| 12 | 1 | 5.00 | 2 |",
         "| - | 7 |\n| jgeschwendt/alpha | 4 |\n| jgeschwendt/beta | 1 |",
         "| - | 10 |\n| opus | 2 |",
         "| - | 1 |\n| adopted | 1 |",
@@ -314,10 +320,10 @@ fn score_json_prints_the_metrics_and_week_names_a_week() {
         r#""corrections":{"recurring":1,"total":2}"#,
         r#""coverage":{"jgeschwendt/alpha":1,"jgeschwendt/beta":0,"jgeschwendt/gamma":0}"#,
         r#""routines":{"breathe-skim":{"failed":0,"ticks":1},"shift":{"failed":1,"ticks":3}}"#,
-        r#""shifts":{"abandoned":1,"handed_off":1,"mean_minutes":150,"opened":2}"#,
+        r#""shifts":{"abandoned":1,"cost_per_shift":1.5,"handed_off":1,"mean_minutes":150,"opened":2}"#,
         r#""threads":{"by_kind":{"decision":1,"problem":1},"from_shifts":1}"#,
-        r#""changes_with_sha":1,"cost_unrecorded":10,"cost_usd":2,"events":12"#,
-        r#""week":"2026-W42","worst":[{"metric":"cost unrecorded","target":"0","value":"10"},{"metric":"coverage","target":"3/3","value":"1/3"},{"metric":"abandoned shifts","target":"0","value":"1"}]"#,
+        r#""changes_with_sha":1,"cost_unrecorded":2,"cost_usd":5,"events":12"#,
+        r#""week":"2026-W42","worst":[{"metric":"cost unrecorded","target":"0","value":"2"},{"metric":"coverage","target":"3/3","value":"1/3"},{"metric":"abandoned shifts","target":"0","value":"1"}]"#,
     ] {
         assert!(json.contains(expected), "missing {expected} in {json}");
     }
@@ -330,6 +336,9 @@ fn score_json_prints_the_metrics_and_week_names_a_week() {
         "{json}"
     );
     assert!(json.contains(r#""from":"2026-10-05""#), "{json}");
+    // A costless change is no edge; no handoff, no cost per shift.
+    assert!(json.contains(r#""cost_per_shift":null"#), "{json}");
+    assert!(json.contains(r#""cost_unrecorded":0,"#), "{json}");
     assert!(home.0.join(".sandman/score/2026-W41.md").is_file());
 
     for bad in ["2026-W54", "W42", "2027-W53"] {

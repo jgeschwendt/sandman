@@ -178,7 +178,9 @@ pub struct Score {
     pub context: (usize, usize),
     /// Corrections this week, and those echoing an earlier one.
     pub corrections: (usize, usize),
-    /// Events carrying no `cost_usd`.
+    /// Shift handoffs and breath pass closes — the edges a cost is read at.
+    pub cost_edges: usize,
+    /// Edges carrying no `cost_usd`.
     pub cost_unrecorded: usize,
     /// `cost_usd` summed.
     pub cost_usd: f64,
@@ -194,8 +196,9 @@ pub struct Score {
     pub repos: Tally,
     /// Per routine: ticks this week, non-zero exits.
     pub routines: Vec<(String, usize, usize)>,
-    /// Shifts opened, handed off, abandoned; mean minutes start to handoff.
-    pub shifts: (usize, usize, usize, Option<i64>),
+    /// Shifts opened, handed off, abandoned; mean minutes start to handoff;
+    /// `cost_usd` per handoff.
+    pub shifts: (usize, usize, usize, Option<i64>, Option<f64>),
     /// Open threads by kind.
     pub threads: Tally,
     /// Open threads a shift opened.
@@ -234,10 +237,11 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
             tally(&mut score.breath_states, state.unwrap_or("-"));
         }
         score.changes_with_sha += usize::from(draft.kind == "change" && draft.sha.is_some());
-        match draft.cost_usd {
-            Some(cost) => score.cost_usd += cost,
-            None => score.cost_unrecorded += 1,
-        }
+        score.cost_usd += draft.cost_usd.unwrap_or_default();
+        let edge = draft.kind == "shift.handoff"
+            || (draft.kind == "breath" && draft.refs.iter().any(|r| r.starts_with("pass:")));
+        score.cost_edges += usize::from(edge);
+        score.cost_unrecorded += usize::from(edge && draft.cost_usd.is_none());
     }
 
     let of_kind = |kind: &'static str| events.iter().copied().filter(move |e| e.draft.kind == kind);
@@ -263,11 +267,15 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
         .ok()
         .filter(|n| *n > 0)
         .map(|n| (minutes.iter().sum::<i64>() + n * 30) / (n * 60));
+    let spent: f64 = of_kind("shift.handoff")
+        .filter_map(|e| e.draft.cost_usd)
+        .sum();
     score.shifts = (
         of_kind("shift.start").count(),
         handoffs - abandoned,
         abandoned,
         mean,
+        (handoffs > 0).then(|| spent * share(1, handoffs)),
     );
 
     let corrections: Vec<&trail::Event> = all
@@ -424,7 +432,7 @@ impl Score {
                 self.corrections.1,
                 self.corrections.0,
             ),
-            count("cost unrecorded", self.cost_unrecorded, self.events),
+            count("cost unrecorded", self.cost_unrecorded, self.cost_edges),
             Miss {
                 distance: ((stale - STALE_TARGET) / STALE_TARGET).max(0.0),
                 metric: "stale context ratio",
@@ -523,6 +531,12 @@ impl Score {
                 "shifts",
                 Value::object([
                     ("abandoned", Value::count(self.shifts.2)),
+                    (
+                        "cost_per_shift",
+                        self.shifts
+                            .4
+                            .map_or(Value::Null, |c| Value::Number(cents(c))),
+                    ),
                     ("handed_off", Value::count(self.shifts.1)),
                     (
                         "mean_minutes",
@@ -604,16 +618,23 @@ impl Score {
             format!("{covered}/{}", self.coverage.len()),
         ]);
         table(&mut out, "Coverage", &["repo", "shifts"], coverage);
-        let (opened, handed, abandoned, mean) = self.shifts;
+        let (opened, handed, abandoned, mean, cost) = self.shifts;
         table(
             &mut out,
             "Shifts",
-            &["opened", "handed off", "abandoned", "mean minutes"],
+            &[
+                "opened",
+                "handed off",
+                "abandoned",
+                "mean minutes",
+                "cost per shift",
+            ],
             vec![vec![
                 opened.to_string(),
                 handed.to_string(),
                 abandoned.to_string(),
                 mean.map_or_else(|| "-".to_owned(), |m| m.to_string()),
+                cost.map_or_else(|| "-".to_owned(), |c| format!("{c:.2}")),
             ]],
         );
         let rows = |map: &Tally| {

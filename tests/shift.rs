@@ -477,6 +477,8 @@ fn brief_fills_every_slot_and_records_the_start() {
         "- `2026-10-15-fuzzing` · Coverage-guided fuzzing for Rust parsers · https://example.com/fuzz",
         "coverage: 3 of 9 repos",
         "`git merge --ff-only shift/s-20261016T1600Z`",
+        "runs as `mise x -C <repo path> -- <command>`",
+        "--from-session --cost <USD>",
     ] {
         assert!(
             brief.contains(expected),
@@ -805,6 +807,8 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
             second,
             "--file",
             &notes.display().to_string(),
+            "--cost",
+            "2.5",
         ],
     );
     assert!(event.trim().starts_with("e-"), "{event}");
@@ -824,6 +828,13 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
         "{line}"
     );
     assert!(line.contains(r#""repo":"jgeschwendt/beta""#), "{line}");
+    assert!(line.contains(r#""cost_usd":2.5"#), "{line}");
+    let abandoned = machine
+        .trail()
+        .into_iter()
+        .find(|line| line.contains(r#""kind":"shift.handoff""#))
+        .expect("the abandoned handoff");
+    assert!(!abandoned.contains("cost_usd"), "no --cost, no cost");
     assert!(line.contains(&format!(r#""shift":"{second}""#)), "{line}");
     let output = machine.run(
         now,
@@ -851,6 +862,20 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
     assert_eq!(code(&unknown), 1);
     let usage = machine.run(now, &["shift", "handoff", "--shift", second], &[]);
     assert_eq!(code(&usage), 2, "a handoff names its source");
+    let usage = machine.run(
+        now,
+        &[
+            "shift",
+            "handoff",
+            "--shift",
+            second,
+            "--abandoned",
+            "--cost",
+            "-1",
+        ],
+        &[],
+    );
+    assert_eq!(code(&usage), 2, "{}", stderr(&usage));
 }
 
 #[test]
@@ -959,7 +984,7 @@ fn a_long_handoff_never_cuts_the_template_tail() {
     for tail in [
         "## Procedure",
         "5. **Handoff.** Write `~/.sandman/shifts/s-20261016T1600Z/handoff.md`",
-        "--from-session`, and end the session with a `result:` line.",
+        "cannot read it), and end the session with a `result:` line.",
         "## Theme notes",
         "## Voice",
     ] {
@@ -1056,7 +1081,18 @@ fn handoff_refuses_an_oversized_file_unless_truncated() {
             shift,
             "--from-session",
             "--truncate",
+            "--cost",
+            "0",
         ],
+    );
+    let trace = fs::read_dir(machine.root().join(".trace"))
+        .expect("trace")
+        .flatten()
+        .map(|entry| fs::read_to_string(entry.path()).unwrap_or_default())
+        .collect::<String>();
+    assert!(
+        trace.contains(&format!("cost zero shift={shift}")),
+        "{trace}"
     );
     let kept = machine.read(&format!(".sandman/shifts/{shift}/handoff.md"));
     assert!(kept.chars().count() <= 2_000, "{}", kept.chars().count());
@@ -1457,6 +1493,8 @@ fn the_sabbath_brief_fills_its_own_template_and_works_sandman() {
         "filed 1 · spiked 0 · adopted 0 · dropped 0\n- new  jgeschwendt/alpha  2026-10-08-fuzz.md  Fuzzing",
         "- `s-20261006T1400Z` · jgeschwendt/alpha · Redesign · abandoned — the session died",
         "## jgeschwendt/alpha\nFuzz the parser first.",
+        "runs as `mise x -C <repo path> -- <command>`",
+        "--from-session --cost <USD>",
     ] {
         assert!(
             brief.contains(expected),

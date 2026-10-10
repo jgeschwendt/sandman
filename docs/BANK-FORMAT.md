@@ -440,9 +440,13 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
 - `trimmed:<slot>` — one per slot the cap cut, in the order it cut them.
 
 `shift handoff` appends one `shift.handoff` event — `rationale` the handoff's first line,
-`refs` `handoff:<path>` and `abandoned` when it was.
+`refs` `handoff:<path>` and `abandoned` when it was, `cost_usd` the `--cost` it was given.
 
 ### The handoff and the clock
+
+- **A handoff carries the shift's cost.** `--cost USD` is the session's own total, read
+  from its final `result:` turn, written as the event's `cost_usd`; `--cost 0` (it could
+  not read one) journals a `cost zero` note. The runner's `--abandoned` passes none.
 
 - **A handoff is at most 2,000 characters.** `shift handoff` refuses a longer
   `handoff.md` (or `--file`) — exit 1 with the count, nothing written, the shift still
@@ -692,8 +696,8 @@ year does not have exits 2. A rerun at the same instant writes the same bytes.
 | section | from | numbers |
 | --- | --- | --- |
 | Coverage | the rotation's trunks (§ shifts, trusted or not) against `shifts/*/meta.json` `repo` and `started` | each trunk's shifts this week, Saturday's aside, and `covered N/M` — the spine's every repo once a week |
-| Shifts | `shift.start` and `shift.handoff` events | opened, handed off, abandoned (ref `abandoned` or a rationale opening `Abandoned:`), mean minutes from a start to its shift's handoff |
-| Trail | every event this week | by kind (every kind listed), by repo, by model; `breath` events by their `state:` ref; `change` events with a `sha`; `cost_usd` summed and the events carrying none |
+| Shifts | `shift.start` and `shift.handoff` events | opened, handed off, abandoned (ref `abandoned` or a rationale opening `Abandoned:`), mean minutes from a start to its shift's handoff, cost per shift (`cost_usd` summed over handoffs, over handoffs) |
+| Trail | every event this week | by kind (every kind listed), by repo, by model; `breath` events by their `state:` ref; `change` events with a `sha`; `cost_usd` summed; cost unrecorded — `shift.handoff` and breath `close` events carrying none, the edges a session reads its cost at |
 | Corrections | `correction` events | this week's, and those recurring — rationale title-token Jaccard ≥ 0.6 (breath's dedupe measure) with an earlier correction this week or last |
 | Context | `shift.start` refs `fp:<slot>=<hash>` of Context slots | fingerprints, those not seen in an earlier shift this week (fresh), the fresh ratio |
 | Breath | `breath/*.md` stamps; `breath/sources.toml` | filed (`filed`), spiked and dropped (`state` with `updated`), adopted (`adopted`) this week; per source its weight and lifetime `filed`/`adopted` |
@@ -704,7 +708,7 @@ The page is frontmatter — `week`, `written` (the instant), `from` and `to` (Mo
 Sunday) — then `## Worst three`, then one table per section, numbers only. The worst
 three are the metrics furthest from target, each measured as a share: coverage under
 M/M (the uncovered share), abandoned shifts over 0 (of shifts opened), recurring
-corrections over 0 (of corrections), cost unrecorded over 0 (of events), the stale
+corrections over 0 (of corrections), cost unrecorded over 0 (of handoffs and closes), the stale
 context ratio over 0.5 (its excess over 0.5, of 0.5), open shift threads over 0 (of
 open threads); ties go by name, and a week on target lists `none`. The order puts the
 worst three inside the first 20 lines, the ones a weekday brief's `score.week` carries.

@@ -209,7 +209,7 @@ usage: sandman <verb> [args]
   shift brief [--mind M] [--dry-run]
   shift clock [--check]
   shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] |
-                --file PATH) [--truncate]
+                --file PATH) [--cost USD] [--truncate]
   shift pick [--path] [--shift ID | --untrusted]
   shift profile [--kind shift|breath]
   shift status
@@ -246,7 +246,8 @@ usage: sandman <verb> [args]
       copies --file in, accepts the handoff.md the session wrote, or records
       --abandoned (--reason TEXT, only beside --abandoned, heads the handoff
       and is the event's rationale as `Abandoned: <reason>`) — appends
-      shift.handoff and releases current.json; a shift already handed off
+      shift.handoff (--cost, the session's own total, as its cost_usd; 0
+      journals a cost zero note) and releases current.json; a shift already handed off
       exits 1, and so does a handoff over 2,000 characters
       unless --truncate keeps its head and notes the cut (--abandoned always
       truncates). attach records the session the runner
@@ -2227,14 +2228,24 @@ fn shift_clock(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] | --file PATH)`.
+/// `shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] | --file PATH)
+/// [--cost USD] [--truncate]`.
 fn shift_handoff(args: &[String]) -> Result<(), Failure> {
     let (values, set) = shift_flags(
         args,
         "shift handoff",
-        &["--file", "--reason", "--shift"],
+        &["--cost", "--file", "--reason", "--shift"],
         &["--abandoned", "--from-session", "--truncate"],
     )?;
+    let cost = flag(&values, "--cost")
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .ok()
+                .filter(|cost| cost.is_finite() && *cost >= 0.0)
+                .ok_or_else(|| Failure::Usage(format!("--cost wants USD, got `{value}`")))
+        })
+        .transpose()?;
     let reason = flag(&values, "--reason");
     let id = flag(&values, "--shift")
         .ok_or_else(|| Failure::Usage("shift handoff needs --shift".to_owned()))?;
@@ -2263,8 +2274,15 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
     };
     let ctx = shift_context()?;
     let truncate = set.iter().any(|switch| switch == "--truncate");
-    match shift::handoff(&ctx, &id, &source, truncate) {
+    match shift::handoff(&ctx, &id, &source, truncate, cost) {
         Ok(event) => {
+            if cost.is_some_and(|cost| cost <= 0.0) {
+                note(
+                    Some(&ctx.data_root),
+                    "shift",
+                    &format!("cost zero shift={id}: the session could not read its cost"),
+                );
+            }
             note(
                 Some(&ctx.data_root),
                 "shift",
