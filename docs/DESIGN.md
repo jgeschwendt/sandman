@@ -18,15 +18,16 @@ Six memory verbs. Sandman never sees a hook event; it reads transcripts.
 | `remember "<body>"` | commit one memory now — the in-session path |
 | `take <session>` | archive the session by move + drop a pointer |
 
-Three machine verbs sit beside them, for the machine that commits on the operator's behalf:
+Four machine verbs sit beside them, for the machine that commits on the operator's behalf:
 
 | verb | duty |
 | --- | --- |
+| `breathe init\|sources\|file\|list\|spike\|adopt\|drop\|pass\|attach\|close\|reweight` | the ruach — the research engine's store of feeds and breaths, the pass prompt it composes for a reading session, and the weights adoption and silence move |
 | `reconcile <event>` | revert every commit carrying a revoked event or its descendants, on `reconcile/<event>` per repo |
 | `shift attach\|brief\|clock\|handoff\|pick\|status` | one five-hour shift: the rotation's target, the dynamic prompt composed from the trail, banks and calendar, the window clock, the handoff |
 | `trail append\|log\|show\|revoke\|today\|trailers` | the append-only event log; every machine commit names its event by `Event:` trailer |
 
-Their contract is `BANK-FORMAT.md` § trail and § shifts.
+Their contract is `BANK-FORMAT.md` § trail, § shifts and § breath.
 
 `recall` composes four surfaces into one 9,000-character budget — the cwd's bank and its
 ancestors', `.recent` pointers, the voyage log tail, the tool index. The voyage log has a
@@ -54,10 +55,13 @@ contract is `MCP.md`.
 │   └── claude/<yyyy>/<mm>/<dd>/<HHMMSS>-<relpath>    bytes at rest — take's target
 ├── .dream/<claude project>/<session-id>.jsonl        dream mind transcripts — kept to evaluate
 ├── .trace/<verb>-<date>.log                          the journal — one line per decision
+├── breath/                                           the ruach — sources.toml, breaths, passes/, ledger/, problems.md
 ├── log/
 │   ├── <yyyy-mm-dd>.md                               the voyage log — one entry a day, derived from the banks
 │   └── INDEX.md                                      regenerated — ascending, began fixed once
 ├── pending-takes/<sid>.json                          takes a live job deferred — {declined, job, session}
+├── shifts/<id>/                                      one shift's brief, handoff and meta.json; current.json while one is open
+├── trail/<yyyy>/<mm>/<dd>.jsonl                      the event log — one line per autonomous decision
 └── memories/
     ├── .recent/<sid>.json                            pointers — the short-term surface (3 days)
     └── <bank>/

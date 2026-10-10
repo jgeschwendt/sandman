@@ -26,6 +26,25 @@ sandman shift status            # the open shift and the clock
 
 The contract is `docs/BANK-FORMAT.md` § shifts.
 
+## Breathe
+
+`sandman breathe` is the ruach's store — the feeds in `<root>/breath/sources.toml`, the
+breaths filed from them, and the pass prompt a reading session starts from. It never
+calls a model or the network; the session does the reading.
+
+```sh
+sandman breathe init                         # breath/, ledger/, passes/; seeds sources.toml
+sandman breathe sources --due                # the feeds a skim reads now (unread for an hour)
+sandman breathe pass --kind skim             # compose prompts/breathe.md into passes/<id>/; prints the id
+sandman breathe file --url U --repo owner/name --title T --problem P --summary S --source NAME
+sandman breathe list --repo owner/name       # state  repo  file  title
+sandman breathe adopt <file>                 # or spike <file>, drop <file> --reason TEXT
+sandman breathe close --id <id> --read N --filed M --dropped K --cost USD --cursor NAME=VALUE
+sandman breathe reweight --dry-run           # +0.1 per adoption (cap 2.0), −0.1 per silent month (floor 0.2)
+```
+
+The contract is `docs/BANK-FORMAT.md` § breath.
+
 ## MCP
 
 `sandman mcp` serves the banks as a tool server on stdio — JSON-RPC 2.0, one message

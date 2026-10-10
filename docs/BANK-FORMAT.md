@@ -274,7 +274,7 @@ checkout named by the manifest root's `trunk = "…"`, else `main` — plus `~`,
 does for reconcile). Least recently shifted first, never-shifted before any; a tie goes
 to a failing `stele check` (run only where `.stele/graph.lock` exists, 20 s timeout, a
 missing binary skipped), then the most open threads naming the slug, then the most
-`state: new` breaths filed against it, then the name. The open shift's repo and
+untried breaths (`state: new` or `spiked`) filed against it, then the name. The open shift's repo and
 `$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over.
 
 ### The brief and its slots
@@ -288,7 +288,7 @@ computed); `$SANDMAN_NOW` pins the instant.
 | slot | filled with |
 | --- | --- |
 | `brief.at` | the instant, ISO-8601 Z |
-| `breath.pending` | `breath/*.md` with `repo:` the target and `state: new`, one line each |
+| `breath.pending` | `breath/*.md` with `repo:` the target and `state: new` or `spiked` (marked), one line each |
 | `budget.spent` | `cost_usd` summed over today's UTC trail events whose `shift` is a shift id |
 | `budget.usd` | `$SANDMAN_SHIFT_BUDGET_USD`, default 15 |
 | `clock.handoff_by` | as in `current.json` |
@@ -337,7 +337,144 @@ per repo per local day — the target's plan-next, its open threads, and the new
 `guard`/`correction` events touching it — replaced in place when the same heading is
 briefed again.
 
+## breath/ — the ruach
+
+Not a bank. The ruach is the research engine beside the shifts: a Claude session reads
+the feeds against the open problems and files what bears on a repo as a **breath**.
+`sandman breathe` is the store and the prompt composer; it never calls a model or the
+network.
+
+```
+breath/
+  sources.toml                    # the feeds and their learned state
+  problems.md                     # written by `shift brief` (§ shifts); read-only here
+  <yyyy-mm-dd>-<slug>.md          # one breath
+  ledger/                         # /gigaresearch's claim ledger
+  passes/<pass-id>/pass.json      # one record per pass
+  passes/<pass-id>/prompt.md      # the prompt the pass's session got
+```
+
+`breathe init` creates `breath/`, `ledger/` and `passes/` and copies the seed — the
+repo's `breath/sources.toml`, compiled into the binary — when `sources.toml` is absent.
+
+### sources.toml
+
+Flat TOML: an optional root key `reweighted` (ISO-8601 Z, when `reweight` last ran),
+then one `[name]` table per feed, a bare key. Values are strings, integers, floats and
+one-line string arrays; anything else — a dotted or nested table, an inline table, a
+boolean, a date, a multi-line value, an unknown key — is refused with its line.
+
+| key | what |
+| --- | --- |
+| `kind` | `atom` · `rss` · `json` · `html` — how a reader parses the feed |
+| `url` | the feed |
+| `weight` | learned, ≥ 0; `reweight` moves it |
+| `budget` | items a pass reads from it at most |
+| `bears_on` | repo slugs (`owner/name`) or `"*"` |
+| `cursor` | where the last pass stopped, in the feed's own terms — written by `close` |
+| `last_read` | when a pass last read it, ISO-8601 Z — written by `close` |
+| `filed` | breaths filed from it — counted by `file` |
+| `adopted` | breaths from it adopted — counted by `adopt` |
+| `silent_since` | since when it has gone without an adoption — set by `close` and `drop` when absent, restarted by `adopt` and by a silence penalty |
+
+The first five are required. Any rewrite — `file --source`, `adopt`, `drop`, `close`,
+`reweight` — sorts the tables by name, writes the keys in the order above with the
+state keys only when set, and drops comments.
+
+A source is **due** for a skim when its `last_read` is absent or at least an hour old;
+a deep pass reads every source.
+
+### A breath
+
+`<yyyy-mm-dd>-<slug>.md` — the UTC date `file` ran, the title slugged with dashes (cut
+at 60 characters, `breath` when nothing is left), `-2`, `-3`, … on a collision.
+Frontmatter in this order, one line per key, newlines in a value folded to spaces:
+
+| key | what |
+| --- | --- |
+| `title` | the idea |
+| `url` | its primary source |
+| `source` | the `sources.toml` table it came from, when named |
+| `repo` | the repo it bears on, `owner/name` or `*` |
+| `problem` | the open problem it speaks to |
+| `state` | `new` · `spiked` · `adopted` · `dropped` |
+| `bearing` | 0–1, the judge's "does it bear on the repo", when given |
+| `novelty` | 0–1, the judge's "is it new to us", when given |
+| `filed` | when it was filed, ISO-8601 Z |
+| `updated` | when it last changed |
+| `seen_again` | later filings that matched it |
+| `reason` | why it was dropped — `dropped` only |
+
+The body is the four-line summary.
+
+**Dedupe.** `file` matches a new filing against every breath in the store — the same
+URL (one trailing `/` aside), else a title whose token Jaccard (lowercase alphanumeric
+runs) is at least 0.6. A match bumps that breath's `seen_again` and `updated`, prints
+`seen_again <path>` and appends nothing to the trail.
+
+**Transitions.** `spike` takes `new`; `adopt` takes `new` or `spiked`; `drop` takes
+anything not yet dropped and requires `--reason`. Each stamps `updated`.
+
+### passes/
+
+`breathe pass --kind skim|deep` composes the pass prompt and writes
+`passes/<id>/pass.json`, keys alphabetical:
+
+| key | what |
+| --- | --- |
+| `bg_id` | the background session's short id, once `attach` records it |
+| `cost_usd` | what the pass cost, US dollars — `null` until `close` |
+| `dropped` · `filed` · `read` | the pass's counters — `null` until `close` |
+| `ended` | when `close` ran — `null` until then |
+| `id` | `b-<yyyymmddThhmmss>Z-<kind>`, the UTC instant `pass` ran |
+| `kind` | `skim` or `deep` |
+| `session_id` | the session's full id, once attached |
+| `sources` | the due sources the prompt listed, by name |
+| `started` | when the prompt was composed |
+
+`pass` refuses (exit 1) when no source is due or when today's passes — those whose
+`started` falls on the UTC day — have spent `$SANDMAN_BREATH_BUDGET_USD` (default 10);
+`--dry-run` prints the prompt and writes nothing. `close` refuses a pass already closed
+and a `--cursor` for a source the pass did not list.
+
+### The pass prompt and its slots
+
+`pass` fills `prompts/breathe.md` from the same directory as `shift.md` and refuses a
+template naming a slot outside this table:
+
+| slot | filled with |
+| --- | --- |
+| `budget.spent` | `cost_usd` summed over today's passes, two decimals |
+| `budget.usd` | `$SANDMAN_BREATH_BUDGET_USD`, default 10 |
+| `pass.cadence` | `hourly skim` or `daily deep` |
+| `pass.id` | the pass id |
+| `pass.kind` | `skim` or `deep` |
+| `problems` | `breath/problems.md` verbatim, cut at 6,000 characters, else `none` |
+| `sources.due` | one line per due source — name, feed, cursor (`none` before the first), budget |
+
+### Reweight
+
+Per source: `+0.1` for each breath from it in state `adopted` whose `updated` is after
+`reweighted` (every one, the first time), capped at 2.0; `−0.1` when `silent_since` is
+over thirty days old, floored at 0.2, and the silence clock restarts. Weights keep two
+decimals. `reweight` prints `name  old → new  why` for each source it touched, stamps
+`reweighted`, rewrites the file and appends one event; `--dry-run` prints the table only.
+
+### Trail events
+
+Every event is kind `breath`, appended after the store's write, with `shift` from
+`$SANDMAN_SHIFT` when it is set:
+
+| verb | `repo` | `rationale` | `refs` |
+| --- | --- | --- | --- |
+| `file` | the breath's | `filed: <title>` | `url:<url>`, `breath:<file>` |
+| `adopt` · `drop` | the breath's | `adopted: <title>` · `dropped: <title>`, then ` — <reason>` when one was given | `breath:<file>`, `state:<new state>`, and `adopted-by:<shift>` on an adopt in a shift |
+| `close` | — | `pass <kind>: read N filed M dropped K` | `pass:<id>`; `cost_usd` the pass's cost |
+| `reweight` | — | `reweight: N source(s) moved` | `weight:<name>=<old>→<new>` per source touched |
+
+`spike` and a `seen_again` append none. `breathe` journals to `.trace/breathe-<date>.log`.
+
 ## Concurrency
 
-All bank, trail and shift writes happen under `.commit.lock` at the data root; every file write is
+All bank, trail, shift and breath writes happen under `.commit.lock` at the data root; every file write is
 atomic (tmp → rename in the same directory).
