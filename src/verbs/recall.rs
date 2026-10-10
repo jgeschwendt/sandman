@@ -1349,7 +1349,7 @@ mod tests {
             &root.home_bank(),
             "user_home.md",
             "name: home\ndescription: the home memory\ntype: user\n",
-            &format!("{}\n", "y".repeat(400)),
+            &format!("{}\n", "y".repeat(700)),
         );
         root.pointer("sid-fresh", "2026-08-06T09:00:00Z", "the fresh one", "/a");
         let roomy = bearing(&root.path, &root.home, &root.cwd, 3_000);
@@ -1357,7 +1357,7 @@ mod tests {
             roomy.starts_with("## Long-term · this directory's bank"),
             "{roomy}"
         );
-        assert!(roomy.contains("fuzz the parser") && roomy.contains(&"y".repeat(400)));
+        assert!(roomy.contains("fuzz the parser") && roomy.contains(&"y".repeat(700)));
         assert!(
             !roomy.contains("Recent sessions"),
             "pointers are recall's, not bearing's"
