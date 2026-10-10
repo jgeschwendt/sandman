@@ -1136,14 +1136,18 @@ fn write_pass(path: &Path, mut entries: Vec<(String, Value)>) -> Result<()> {
     atomic::write(path, &format!("{}\n", Value::Object(entries).render()))
 }
 
-/// `cost_usd` over the passes started on `now`'s UTC day.
-fn spent_today(data_root: &Path, now: Timestamp) -> f64 {
+/// The passes started on `now`'s UTC day: `cost_usd` summed over the closed
+/// ones, and the ids of those still open — in flight, counted as 0 until
+/// `close` records what they cost.
+fn spent_today(data_root: &Path, now: Timestamp) -> (f64, Vec<String>) {
     let (year, month, day, ..) = now.parts();
     let today = format!("{year:04}-{month:02}-{day:02}");
     let Ok(entries) = fs::read_dir(paths::breath_passes(data_root)) else {
-        return 0.0;
+        return (0.0, Vec::new());
     };
-    entries
+    let mut spent = 0.0;
+    let mut in_flight = Vec::new();
+    for pass in entries
         .flatten()
         .map(|entry| entry.path().join("pass.json"))
         .filter_map(|path| json::parse(&fs::read_to_string(path).ok()?).ok())
@@ -1152,15 +1156,28 @@ fn spent_today(data_root: &Path, now: Timestamp) -> f64 {
                 .and_then(Value::as_str)
                 .is_some_and(|started| started.starts_with(&today))
         })
-        .filter_map(|pass| pass.get("cost_usd").and_then(Value::as_number))
-        .fold(0.0, |total, cost| total + cost)
+    {
+        if pass.get("ended").and_then(Value::as_str).is_none() {
+            in_flight.extend(
+                pass.get("id")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            );
+        } else if let Some(cost) = pass.get("cost_usd").and_then(Value::as_number) {
+            spent += cost;
+        }
+    }
+    in_flight.sort();
+    (spent, in_flight)
 }
 
 /// Compose the pass prompt from `prompts/breathe.md`; unless `dry_run`, write
 /// `passes/<id>/pass.json` and `passes/<id>/prompt.md`.
 ///
-/// Refuses when the day's budget is spent or no source is due — the runner
-/// then starts no session.
+/// Refuses ([`Error::Refused`]) when no source is due — `nothing due` — or
+/// the day's budget is spent — `budget spent` — and the runner then starts
+/// no session; any other error (a missing template, an invalid
+/// `sources.toml`) is a fault for the runner to report.
 pub fn pass(ctx: &Context, kind: PassKind, budget_usd: f64, dry_run: bool) -> Result<Composed> {
     let template_path = ctx.prompts.join("breathe.md");
     let template = fs::read_to_string(&template_path).map_err(|source| {
@@ -1174,14 +1191,14 @@ pub fn pass(ctx: &Context, kind: PassKind, budget_usd: f64, dry_run: bool) -> Re
     let due: Vec<Source> = sources(ctx, Some(kind))?;
     if due.is_empty() {
         return Err(Error::refused(format!(
-            "no source is due for a {} pass",
+            "nothing due: no source is due for a {} pass",
             kind.name()
         )));
     }
-    let spent = spent_today(&ctx.data_root, ctx.now);
+    let (spent, in_flight) = spent_today(&ctx.data_root, ctx.now);
     if spent >= budget_usd {
         return Err(Error::refused(format!(
-            "the ruach's budget is spent today: {spent:.2} of {budget_usd} USD"
+            "budget spent: {spent:.2} of {budget_usd} USD today"
         )));
     }
     let problems = fs::read_to_string(paths::breath_problems(&ctx.data_root))
@@ -1205,21 +1222,27 @@ pub fn pass(ctx: &Context, kind: PassKind, budget_usd: f64, dry_run: bool) -> Re
     slots.insert("pass.cadence", kind.cadence().to_owned());
     slots.insert("pass.id", id.clone());
     slots.insert("pass.kind", kind.name().to_owned());
-    slots.insert("problems", problems);
+    slots.insert("problems", shift::fenced("breath/problems.md", &problems));
+    let mut due_lines: Vec<String> = Vec::new();
+    if !in_flight.is_empty() {
+        due_lines.push(format!(
+            "in flight, not yet in spent: {}",
+            in_flight.join(", ")
+        ));
+        due_lines.push(String::new());
+    }
+    due_lines.extend(due.iter().map(|source| {
+        format!(
+            "- `{}` · {} · cursor {} · budget {}",
+            source.name,
+            source.url,
+            source.cursor.as_deref().unwrap_or("none"),
+            source.budget
+        )
+    }));
     slots.insert(
         "sources.due",
-        due.iter()
-            .map(|source| {
-                format!(
-                    "- `{}` · {} · cursor {} · budget {}",
-                    source.name,
-                    source.url,
-                    source.cursor.as_deref().unwrap_or("none"),
-                    source.budget
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        shift::fenced("breath/sources.toml", &due_lines.join("\n")),
     );
     let unknown: Vec<String> = shift::slot_names(&template)
         .into_iter()
@@ -1289,8 +1312,8 @@ pub fn attach(
 /// What `close` records.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Closing {
-    /// What the pass cost, US dollars.
-    pub cost_usd: Option<f64>,
+    /// What the pass cost, US dollars — required.
+    pub cost_usd: f64,
     /// `(source, cursor)` pairs to advance.
     pub cursors: Vec<(String, String)>,
     /// Candidates dropped.
@@ -1304,14 +1327,8 @@ pub struct Closing {
 /// Close pass `id`: its counters and `ended`, `last_read` (and any cursor) on
 /// the sources it listed, and a `breath` event.
 pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event> {
-    if closing
-        .cost_usd
-        .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
-    {
-        return Err(Error::invalid(
-            "cost",
-            closing.cost_usd.unwrap_or_default().to_string(),
-        ));
+    if !closing.cost_usd.is_finite() || closing.cost_usd < 0.0 {
+        return Err(Error::invalid("cost", closing.cost_usd.to_string()));
     }
     let kind = {
         let _lock = trail::acquire(&ctx.data_root)?;
@@ -1365,11 +1382,7 @@ pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event>
                 }
             }
         }
-        set(
-            &mut entries,
-            "cost_usd",
-            closing.cost_usd.map_or(Value::Null, Value::Number),
-        );
+        set(&mut entries, "cost_usd", Value::Number(closing.cost_usd));
         set(&mut entries, "dropped", count(closing.dropped));
         set(&mut entries, "ended", Value::string(ctx.now.iso8601()));
         set(&mut entries, "filed", count(closing.filed));
@@ -1381,7 +1394,7 @@ pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event>
     trail::append(
         &ctx.data_root,
         trail::Draft {
-            cost_usd: closing.cost_usd,
+            cost_usd: Some(closing.cost_usd),
             kind: "breath".to_owned(),
             rationale: Some(format!(
                 "pass {kind}: read {} filed {} dropped {}",

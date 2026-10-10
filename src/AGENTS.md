@@ -27,7 +27,7 @@ hazards:
 | --- | --- |
 | `atomic.rs` `lock.rs` | tmp→rename writes, log appends; the data root's `.commit.lock` |
 | `bank.rs` `commit.rs` `memory.rs` `slug.rs` | the format authority — bank keys, index regen, frontmatter, naming |
-| `cli.rs` | the dispatcher: parsing, exit codes (0 ran · 1 failed · 2 command line · 3 `shift clock` cannot read its window file), the usage screen, take's detached dream spawn |
+| `cli.rs` | the dispatcher: parsing, exit codes (0 ran · 1 failed · 2 command line · 3 a runner's fault: `shift clock`'s window file, `breathe pass`'s template or `sources.toml`), the usage screen, take's detached dream spawn |
 | `consensus.rs` | 2-of-3 — deterministic claim grouping: connected components of a name-and-description-slug Jaccard; no model, no wording rewrite |
 | `error.rs` `time.rs` | typed errors; UTC timestamps, both directions |
 | `grove.rs` | the repos the machine commits into — grove checkouts (manifest roots plus the tree) and the extras; scrubbed-env git calls; `Event:` and `Shift:` trailer scans, one pass per repository |

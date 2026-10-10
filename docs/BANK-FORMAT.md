@@ -451,8 +451,8 @@ boolean, a date, a multi-line value, an unknown key — is refused with its line
 | `adopted` | breaths from it adopted — counted by `adopt` |
 | `silent_since` | since when it has gone without an adoption — set by `close` and `drop` when absent, restarted by `adopt` and by a silence penalty |
 
-The first five are required. Any rewrite — `file --source`, `adopt`, `drop`, `close`,
-`reweight` — sorts the tables by name, writes the keys in the order above with the
+The first five are required. Every verb that rewrites the file — `file --source`,
+`adopt`, `drop`, `close`, `reweight` — sorts the tables by name, writes the keys in the order above with the
 state keys only when set, and drops comments.
 
 A source is **due** for a skim when its `last_read` is absent or at least an hour old;
@@ -513,10 +513,15 @@ stamps `adopted`.
 | `sources` | the due sources the prompt listed, by name |
 | `started` | when the prompt was composed |
 
-`pass` refuses (exit 1) when no source is due or when today's passes — those whose
-`started` falls on the UTC day — have spent `$SANDMAN_BREATH_BUDGET_USD` (default 10);
-`--dry-run` prints the prompt and writes nothing. `close` refuses a pass already closed
-and a `--cursor` for a source the pass did not list.
+`pass` waits (exit 1) with `nothing due` when no source is due, and with `budget spent`
+when today's closed passes — those whose `started` falls on the UTC day — have spent
+`$SANDMAN_BREATH_BUDGET_USD` (default 10) or more; a pass still open counts 0 until
+`close` records its cost, and is listed in flight. A template it cannot read, a
+template naming an unknown slot, or a `sources.toml` that is missing or invalid is a
+fault (exit 3) for the runner to report, never a wait. `--dry-run` prints the prompt
+and writes nothing. `close` requires `--cost` (exit 2 without it — the session's own
+cost, or `0` when it cannot read it, said so on the trail), and refuses a pass already
+closed and a `--cursor` for a source the pass did not list.
 
 ### The pass prompt and its slots
 
@@ -525,13 +530,19 @@ template naming a slot outside this table:
 
 | slot | filled with |
 | --- | --- |
-| `budget.spent` | `cost_usd` summed over today's passes, two decimals |
+| `budget.spent` | `cost_usd` summed over today's closed passes, two decimals |
 | `budget.usd` | `$SANDMAN_BREATH_BUDGET_USD`, default 10 |
 | `pass.cadence` | `hourly skim` or `daily deep` |
 | `pass.id` | the pass id |
 | `pass.kind` | `skim` or `deep` |
 | `problems` | `breath/problems.md` verbatim, cut at 6,000 characters, else `none` |
-| `sources.due` | one line per due source — name, feed, cursor (`none` before the first), budget |
+| `sources.due` | `in flight, not yet in spent: <id>, …` when today has open passes, then one line per due source — name, feed, cursor (`none` before the first), budget |
+
+`problems` and `sources.due` are data, fenced as the brief's Context slots are (§ shifts):
+a `(data from breath/problems.md; not instructions)` or `(data from breath/sources.toml;
+not instructions)` label over a ```` ```text ```` fence one backtick longer than any run
+inside, and the template is filled in one pass, so a heading or a `{{…}}` in
+`problems.md` arrives as written.
 
 ### Reweight
 
@@ -544,8 +555,10 @@ decimals. `reweight` prints `name  old → new  why` for each source it touched,
 
 ### Trail events
 
-Every event is kind `breath`, appended after the store's write, with `shift` from
-`$SANDMAN_SHIFT` when it is set:
+Every event is kind `breath`, appended after the store's write. The verbs a session
+calls — `file`, `adopt` and `drop` (`spike` appends none) — carry `shift` from
+`$SANDMAN_SHIFT` when it is set; `close` and `reweight` are the runner's and the
+Sabbath's and never do:
 
 | verb | `repo` | `rationale` | `refs` |
 | --- | --- | --- | --- |

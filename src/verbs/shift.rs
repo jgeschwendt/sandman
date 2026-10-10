@@ -896,7 +896,7 @@ pub(crate) fn fill(template: &str, slots: &BTreeMap<&'static str, String>) -> St
 /// `value` as data: a one-line label naming `source`, then a ```` ```text ````
 /// fence one backtick longer than any run inside it, so nothing in the value
 /// can close the fence and speak as the template.
-fn fenced(source: &str, value: &str) -> String {
+pub(crate) fn fenced(source: &str, value: &str) -> String {
     let mut longest = 0;
     let mut run = 0;
     for c in value.chars() {

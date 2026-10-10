@@ -1,8 +1,9 @@
 # The ruach's feeds — the seed `sandman breathe init` copies to
 # ~/.sandman/breath/sources.toml when it is absent. Weight is learned there:
 # adoption raises a source, a month of silence lowers it (`sandman breathe
-# reweight`, which rewrites the file without these comments). Budget is items
-# a pass reads from the source. kind: atom | rss | json | html. bears_on: repo
+# reweight`). Every verb that rewrites the file — file --source, adopt, drop,
+# close, reweight — drops these comments. Budget is items a pass reads from
+# the source. kind: atom | rss | json | html. bears_on: repo
 # slugs or "*". The schema is docs/BANK-FORMAT.md § breath.
 
 [anthropic-claude-code]

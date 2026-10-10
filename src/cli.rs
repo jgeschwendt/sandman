@@ -3,8 +3,9 @@
 //! Hand-rolled parsing, std only. Four exit codes and nothing else — 0 for a
 //! verb that ran, 1 for a failure (one line on stderr), 2 for anything the
 //! operator has to fix in the command line itself, unbuilt verbs included, and
-//! 3 for `shift clock` finding its window file there but unreadable — a fault
-//! the runner must tell apart from a refusal.
+//! 3 for a fault a runner must tell apart from a refusal — `shift clock`
+//! finding its window file there but unreadable, `breathe pass` without a
+//! template or a valid `sources.toml`.
 //!
 //! This is the only place that resolves the real roots (`crate::paths`); every
 //! verb below it takes them as arguments.
@@ -35,7 +36,8 @@ use crate::version::VERSION;
 const EXIT_ERROR: u8 = 1;
 /// A failure in the command line itself.
 const EXIT_USAGE: u8 = 2;
-/// A clock that cannot read its window file.
+/// A fault a runner reports rather than waits on: a clock that cannot read
+/// its window file, a pass that cannot read its template or sources.
 const EXIT_FAULT: u8 = 3;
 
 /// Set by the dream pass on the minds it spawns. A memory-blind run recalls
@@ -118,7 +120,7 @@ usage: sandman <verb> [args]
   breathe spike|adopt|drop <file> [--reason TEXT]
   breathe pass --kind skim|deep [--dry-run]
   breathe attach --id ID [--bg-id X] [--session-id S]
-  breathe close --id ID --read N --filed M --dropped K [--cost USD]
+  breathe close --id ID --read N --filed M --dropped K --cost USD
                 [--cursor NAME=VALUE]...
   breathe reweight [--dry-run]
       The ruach's store under <root>/breath/; never calls a model or the
@@ -133,15 +135,18 @@ usage: sandman <verb> [args]
       takes new|spiked; drop needs --reason; adopt and drop append a breath
       event ($SANDMAN_SHIFT adds adopted-by:<shift>). pass fills every
       {{slot}} of prompts/breathe.md, writes passes/<id>/pass.json and
-      passes/<id>/prompt.md, and prints the id; it exits 1 when no source is
-      due or $SANDMAN_BREATH_BUDGET_USD (default 10) is spent today; --dry-run
-      prints the prompt and writes nothing. attach records the pass's
-      session; close records its counters, advances last_read (and each
-      --cursor) on the sources it listed, and appends a breath event.
+      passes/<id>/prompt.md, and prints the id; it exits 1 with `nothing due`
+      when no source is due or `budget spent` when today's closed passes have
+      spent $SANDMAN_BREATH_BUDGET_USD (default 10; open passes count 0 and
+      are listed in flight), and 3 when the template or sources.toml cannot
+      be read; --dry-run prints the prompt and writes nothing. attach records
+      the pass's session; close requires --cost, records its counters,
+      advances last_read (and each --cursor) on the sources it listed, and
+      appends a breath event.
       reweight moves each weight +0.1 per breath whose adopted: stamp is
       after the last reweight (cap 2.0) and -0.1 after 30 days of silence (floor 0.2),
-      rewrites sources.toml (comments are not kept) and appends a breath
-      event; --dry-run prints the table only. $SANDMAN_NOW pins the instant.
+      rewrites sources.toml (every rewrite drops its comments) and appends a
+      breath event; --dry-run prints the table only. $SANDMAN_NOW pins the instant.
 
   dream [--now]
       Route the queue: for each undreamed pointer, three minds (sonnet, opus,
@@ -277,7 +282,8 @@ pub fn main() -> ExitCode {
 enum Failure {
     /// The verb ran and failed.
     Error(Error),
-    /// The clock could not read its window file.
+    /// A runner's fault: the clock's window file, the pass's template or
+    /// sources.
     Fault(Error),
     /// The command line itself is wrong.
     Usage(String),
@@ -1897,7 +1903,15 @@ fn breathe_pass(args: &[String]) -> Result<(), Failure> {
     };
     let dry_run = parsed.set("--dry-run");
     let ctx = breathe_context()?;
-    let composed = breathe_journal(&ctx, "pass", breathe::pass(&ctx, kind, budget_usd, dry_run))?;
+    // nothing due and budget spent are waits (1); anything else is a fault (3)
+    let composed = breathe_journal(&ctx, "pass", breathe::pass(&ctx, kind, budget_usd, dry_run))
+        .map_err(|failure| match failure {
+            Failure::Error(error @ (Error::Refused { .. } | Error::LockHeld { .. })) => {
+                Failure::Error(error)
+            }
+            Failure::Error(error) => Failure::Fault(error),
+            other => other,
+        })?;
     if dry_run {
         println!("{}", composed.text);
         return Ok(());
@@ -1977,7 +1991,12 @@ fn breathe_close(args: &[String]) -> Result<(), Failure> {
         })
         .collect::<Result<Vec<_>, Failure>>()?;
     let closing = breathe::Closing {
-        cost_usd: parsed.number("--cost")?,
+        cost_usd: parsed.number("--cost")?.ok_or_else(|| {
+            Failure::Usage(
+                "breathe close needs --cost (the session's own cost, or 0 when it cannot read it)"
+                    .to_owned(),
+            )
+        })?,
         cursors,
         dropped: parsed.count("--dropped", what)?,
         filed: parsed.count("--filed", what)?,
