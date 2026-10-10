@@ -11,7 +11,7 @@ The ruach's hourly pass. Research is its own perpetual engine, outside the creat
 ## State
 
 - `~/.sandman/breath/sources.toml` — the feeds, their weights, budgets and cursors; `sandman breathe reweight` (the Sabbath) rewrites it.
-- `~/.sandman/breath/passes/<id>/` — one record per pass: `pass.json` with `started`, the sources it was given, and after `close` the counters and `ended`; `prompt.md`, the prompt the session got. A pass without `ended` older than its timeout died; the Sabbath sweeps those, this routine does not.
+- `~/.sandman/breath/passes/<id>/` — one record per pass: `pass.json` with `started`, the sources it was given, and after `close` the counters and `ended`; `prompt.md`, the prompt the session got. A pass without `ended` older than its timeout (skim 15 min, deep 60 min) is dead: the next `breathe pass` marks it so and charges `SANDMAN_BREATH_DEAD_COST_USD` (default 2) to the day it started.
 - `~/.sandman/breath/<date>-<slug>.md` — the breaths. `~/.sandman/breath/problems.md` — what the shift engine wants answered, written by `sandman shift brief`.
 - `~/.sandman/shifts/PAUSE` — the machine's one off switch; while it exists no pass starts.
 
@@ -33,7 +33,7 @@ root="${SANDMAN_ROOT:-$HOME/.sandman}"
 sm="$HOME/.local/bin/sandman"
 rc=0
 id=$("$sm" breathe pass --kind skim) || rc=$?
-[ "$rc" -ne 1 ] || exit 0   # nothing due, or the day's budget is spent: wait
+[ "$rc" -ne 1 ] || exit 0   # nothing due, budget spent, a pass of this kind in flight, or the lock held: wait
 [ "$rc" -eq 0 ] || exit "$rc"   # 2 or 3: a fault — unknown verb, bad sources.toml, missing template
 req=$(python3 -I -c '
 import json, sys

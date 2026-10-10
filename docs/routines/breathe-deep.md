@@ -11,7 +11,7 @@ The ruach's daily pass. Research is its own perpetual engine, outside the creati
 ## State
 
 - `~/.sandman/breath/sources.toml` — the feeds, their weights, budgets and cursors; `sandman breathe reweight` (the Sabbath) rewrites it.
-- `~/.sandman/breath/passes/<id>/` — one record per pass: `pass.json` with `started`, the sources it was given, and after `close` the counters and `ended`; `prompt.md`, the prompt the session got. A pass without `ended` older than its timeout died; the Sabbath sweeps those, this routine does not.
+- `~/.sandman/breath/passes/<id>/` — one record per pass: `pass.json` with `started`, the sources it was given, and after `close` the counters and `ended`; `prompt.md`, the prompt the session got. A pass without `ended` older than its timeout (skim 15 min, deep 60 min) is dead: the next `breathe pass` marks it so and charges `SANDMAN_BREATH_DEAD_COST_USD` (default 2) to the day it started.
 - `~/.sandman/breath/<date>-<slug>.md` — the breaths. `~/.sandman/breath/ledger/` — `/gigaresearch`'s claim ledger. `~/.sandman/breath/problems.md` — what the shift engine wants answered, written by `sandman shift brief`.
 - `~/.sandman/shifts/PAUSE` — the machine's one off switch; while it exists no pass starts.
 
@@ -23,7 +23,7 @@ The ruach's daily pass. Research is its own perpetual engine, outside the creati
 ## Repair
 
 - `unknown verb` (exit 2): the installed `~/.local/bin/sandman` predates `breathe`; install a trunk build as `sandman-reflect.md` describes.
-- `spawn` answering `{"error": …}`: the pass record stays without session ids and without `ended`; nothing else to undo. Tomorrow's tick starts a fresh pass; run `routine run breathe-deep` by hand to retry today.
+- `spawn` answering `{"error": …}`: the pass record stays without session ids and without `ended`; nothing else to undo. Tomorrow's tick starts a fresh pass. A hand retry today (`routine run breathe-deep`) is refused as `pass in flight` until the failed pass outlives its hour, is marked dead and charged; then it runs.
 - A second pass of the same kind while one is in flight is refused by `breathe pass` (exit 1, `pass in flight`) until the first closes or outlives its timeout, at which point it is marked dead and charged `SANDMAN_BREATH_DEAD_COST_USD` (default 2) against the day; a skim and a deep pass may run together.
 
 ```sh
@@ -33,7 +33,7 @@ root="${SANDMAN_ROOT:-$HOME/.sandman}"
 sm="$HOME/.local/bin/sandman"
 rc=0
 id=$("$sm" breathe pass --kind deep) || rc=$?
-[ "$rc" -ne 1 ] || exit 0   # nothing due, or the day's budget is spent: wait
+[ "$rc" -ne 1 ] || exit 0   # nothing due, budget spent, a pass of this kind in flight, or the lock held: wait
 [ "$rc" -eq 0 ] || exit "$rc"   # 2 or 3: a fault — unknown verb, bad sources.toml, missing template
 req=$(python3 -I -c '
 import json, sys
