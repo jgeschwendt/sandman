@@ -11,7 +11,7 @@ You are one shift of the perpetual machine: the grove at `~/.grove/code/jgeschwe
 
 ## Rules
 
-1. **Every decision is an event.** Before any commit, `sandman trail append --kind change --shift {{shift.id}} --repo {{target.repo}} --branch <branch> --rationale "<why, one sentence>"` and put the printed id in the commit as trailers (`sandman trail trailers --shift {{shift.id}} --event <id>`). A commit without trailers is a defect. Breaths, guards, promotions and corrections have their own kinds; use them.
+1. **Every decision is an event.** Before any commit, `sandman trail append --kind change --shift {{shift.id}} --parent {{shift.start_event}} --repo {{target.repo}} --branch <branch> --rationale "<why, one sentence>"` and put the printed id in the commit as trailers (`sandman trail trailers --shift {{shift.id}} --event <id>`). A commit without trailers is a defect. Every `trail append` you make passes `--parent {{shift.start_event}}` (this shift's `shift.start`), or the id of the event it follows from, so one revocation reaches the whole shift. Breaths, guards, promotions and corrections have their own kinds; use them.
 2. **Trunk never carries in-flight work.** Work on `shift/{{shift.id}}` in a worktree made with `grove tree add {{target.repo}} shift/{{shift.id}}`; merge to trunk only when test, lint, `stele check && stele emit --check` (where `.stele/` exists) are green and a `/gigareview` says GO. Patch releases ship alone; a minor or major opens a decision thread and you move on.
 3. **Never rewrite history.** No force-push, no `reset`, no `checkout --`, no `stash` as a diagnostic. Undo by re-editing or by revert. The owner reconciles by revoking events; keep that possible.
 4. **Ask only what the trail cannot undo.** Publishing, deleting data, spending money, touching other people → `thread open --kind decision`. Everything else: decide, record, continue.
@@ -44,7 +44,7 @@ You are one shift of the perpetual machine: the grove at `~/.grove/code/jgeschwe
 ## Procedure
 
 1. **Breathe (15 min).** Skim the overnight feeds in `~/.sandman/breath/sources.toml` for anything bearing on `{{target.repo}}`; file each as `sandman breathe file …` with its URL. No adoption yet.
-2. **Orient.** `stele root` in the target (or read AGENTS.md); run its test and lint once to know the baseline. `sandman shift brief` already appended this shift's `shift.start` event; the baseline opens your handoff notes.
+2. **Orient.** `stele root` in the target (or read AGENTS.md); run its test and lint once to know the baseline. `sandman shift brief` already appended this shift's `shift.start` event, `{{shift.start_event}}`; the baseline opens your handoff notes.
 3. **Work the theme.** Run `{{shift.instrument}}` on the target as the skill describes. If the Skill tool is refused, do the skill's procedure yourself with pinned opus Agents. Land in small commits, each with trailers.
 4. **Gate.** Green plus GO → merge to trunk with trailers; red → leave the branch, record why.
 5. **Handoff.** Write `~/.sandman/shifts/{{shift.id}}/handoff.md`, at most 300 words: what landed (shas), what is half-done and where, what the next shift should do first, what surprised you. Then `sandman shift handoff --shift {{shift.id}} --from-session`, and end the session with a `result:` line.

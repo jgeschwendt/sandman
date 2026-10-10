@@ -23,7 +23,7 @@ Four machine verbs sit beside them, for the machine that commits on the operator
 | verb | duty |
 | --- | --- |
 | `breathe init\|sources\|file\|list\|spike\|adopt\|drop\|pass\|attach\|close\|reweight` | the ruach — the research engine's store of feeds and breaths, the pass prompt it composes for a reading session, and the weights adoption and silence move |
-| `reconcile <event>` | revert every commit carrying a revoked event or its descendants, on `reconcile/<event>` per repo |
+| `reconcile <event\|shift>` | revert every commit carrying a revoked event or its descendants — or every event of a revoked shift — that the repo's trunk reaches, on `reconcile/<id>` per repo cut from trunk |
 | `shift attach\|brief\|clock\|handoff\|pick\|status` | one five-hour shift: the rotation's target, the dynamic prompt composed from the trail, banks and calendar, the window clock, the handoff |
 | `trail append\|log\|show\|revoke\|today\|trailers` | the append-only event log; every machine commit names its event by `Event:` trailer |
 

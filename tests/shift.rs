@@ -447,6 +447,13 @@ fn brief_fills_every_slot_and_records_the_start() {
     assert!(start.contains(r#""repo":"jgeschwendt/alpha""#), "{start}");
     assert!(start.contains(r#""model":"fable""#), "{start}");
     assert!(start.contains(r#""brief:"#), "{start}");
+    // The brief names its own shift.start, so every append can descend from it.
+    let id_at = start.find(r#""id":""#).expect("id") + 6;
+    let start_id = &start[id_at..id_at + start[id_at..].find('"').expect("id end")];
+    assert!(
+        brief.contains(&format!("--parent {start_id}")),
+        "{start_id} not in:\n{brief}"
+    );
     let slots = TEMPLATE.matches("{{").count();
     let distinct: std::collections::BTreeSet<&str> = TEMPLATE
         .split("{{")

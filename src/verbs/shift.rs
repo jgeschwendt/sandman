@@ -747,7 +747,8 @@ pub struct BriefOptions {
 /// What `brief` composed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Briefed {
-    /// The `shift.start` event — `None` on a dry run.
+    /// The `shift.start` event — `None` on a dry run, whose brief names an
+    /// id that never reaches the trail.
     pub event: Option<trail::Event>,
     /// The shift id.
     pub shift: String,
@@ -994,6 +995,24 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
     })
     .filter(|text| !text.trim().is_empty());
     let memories = recall::bearing(&ctx.data_root, &ctx.home, &target.path, MEMORIES_CHARS);
+    // The id is minted before the text is composed so the brief can name it
+    // (`--parent {{shift.start_event}}`); the event itself is appended under
+    // that id, never re-minted, once the fingerprints of what it was primed
+    // with are known — so a brief that fails to compose leaves no trace.
+    let start = trail::Event::new(
+        trail::Draft {
+            kind: "shift.start".to_owned(),
+            model: Some(options.mind.clone()),
+            rationale: Some(format!(
+                "{} ({}) on {}: {}",
+                day.theme, day.instrument, target.label, target.reason
+            )),
+            repo: Some(target.label.clone()),
+            shift: Some(shift.clone()),
+            ..trail::Draft::default()
+        },
+        Timestamp::now()?,
+    );
 
     let mut slots: BTreeMap<&'static str, String> = BTreeMap::new();
     slots.insert("brief.at", ctx.now.iso8601());
@@ -1022,6 +1041,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
     slots.insert("shift.id", shift.clone());
     slots.insert("shift.instrument", day.instrument.to_owned());
     slots.insert("shift.mind", options.mind.clone());
+    slots.insert("shift.start_event", start.id.clone());
     slots.insert("shift.theme", day.theme.to_owned());
     slots.insert("shift.theme_notes", theme_notes(ctx, local));
     slots.insert("shift.weekday", day.name.to_owned());
@@ -1140,21 +1160,9 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         }
     }
     refs.extend(trimmed.iter().map(|slot| format!("trimmed:{slot}")));
-    let event = trail::append(
-        &ctx.data_root,
-        trail::Draft {
-            kind: "shift.start".to_owned(),
-            model: Some(options.mind.clone()),
-            rationale: Some(format!(
-                "{} ({}) on {}: {}",
-                day.theme, day.instrument, target.label, target.reason
-            )),
-            refs,
-            repo: Some(target.label.clone()),
-            shift: Some(shift.clone()),
-            ..trail::Draft::default()
-        },
-    )?;
+    let mut start = start;
+    start.draft.refs = refs;
+    let event = trail::append_event(&ctx.data_root, start, false)?;
     Ok(Briefed {
         event: Some(event),
         shift,

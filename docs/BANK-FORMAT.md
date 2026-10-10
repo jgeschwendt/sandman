@@ -207,12 +207,22 @@ to a message or for `git commit --trailer`.
 ### Revoke and reconcile
 
 - **Revoke** appends a `revoke` event with `parent: <id>` and the reason as its
-  `rationale`. Nothing is edited or deleted; revoking a revoked event appends nothing.
+  `rationale`. Nothing is edited or deleted; revoking a revoked event appends nothing —
+  the check and the append share one hold of `.commit.lock`, so racing revokes write
+  one event.
+- **A shift id revokes the whole shift.** `revoke` and `reconcile` take an `s-…` id as
+  readily as an `e-…` one: the revoked set is every event whose `shift` is that id
+  (`revoke` and `reconcile` events aside) plus all their descendants, and a commit is a
+  hit when its `Event:` is in the set *or* its `Shift:` is the id — so a commit whose
+  event never reached the trail is still caught. `revoke s-…` appends one `revoke`
+  event with `parent: null` and `refs: ["shift:<id>"]`; the `reconcile` event it leads
+  to carries the same ref and no parent, on `reconcile/<shift-id>`.
 - **Reconcile** `<id>` takes the event and its descendants as the revoked set. In every
   repo it reaches — each checkout under `~/.grove/code/<owner>/<repo>/<branch>/` (repos
   from the grove manifest's `[roots."owner/repo"]` tables and from the tree itself), plus
   `~`, `~/.routines` and the data root — it selects the commits whose `Event:` trailer is
-  in the set, one pass per repository however many worktrees it has.
+  in the set (or, for a shift id, whose `Shift:` names it), one pass per repository
+  however many worktrees it has.
 - The base is the repo's **trunk**: the manifest root's `trunk = "…"`, else `main`, else
   the branch `refs/remotes/origin/HEAD` names, else `HEAD` with a note in the report and
   the journal — never the `HEAD` of whichever checkout reaches the hits, since a
@@ -314,6 +324,7 @@ computed); `$SANDMAN_NOW` pins the instant.
 | `shift.id` | the shift id |
 | `shift.instrument` | the day's instrument |
 | `shift.mind` | `--mind`, else `$SANDMAN_SHIFT_MIND`, else `opus` |
+| `shift.start_event` | the id of this shift's `shift.start` event — the `--parent` of every `trail append` the shift makes |
 | `shift.theme` | Hunt · Redesign · Refactor · Measure · Harden · Ship · Rest, Sunday first |
 | `shift.theme_notes` | the day's work; on Saturday "No code commits; remember, don't make.", and in an ISO week divisible by seven the Shemitah's ablation instead of the self-pass |
 | `shift.weekday` | the local weekday's name |
@@ -333,7 +344,10 @@ cap.
 ### Attribution
 
 `shift brief` appends one `shift.start` event — `shift` the id, `repo` the target,
-`model` the mind, `rationale` the theme and the rotation's reason — whose `refs` are:
+`model` the mind, `rationale` the theme and the rotation's reason. Its id is minted
+before the text is composed, so the brief can name it as `{{shift.start_event}}`, and the
+event is appended under that id (never re-minted) once the brief is written — a brief
+that fails to compose leaves nothing on the trail. Its `refs` are:
 
 - `brief:<path>` — the brief it wrote;
 - `fp:<slot>=<8 hex>` — one per slot the template names, the 32-bit FNV-1a of the text

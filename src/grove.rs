@@ -213,10 +213,12 @@ pub fn scrub(command: &mut Command) {
     }
 }
 
-/// A commit whose `Event:` trailer names one of the events asked about.
+/// A commit whose `Event:` trailer names one of the events asked about, or
+/// whose `Shift:` trailer names the shift asked about.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Hit {
-    /// The event it names.
+    /// The event it names — the asked-about one when it names several, else
+    /// its first `Event:` value, empty when it carries none.
     pub event: String,
     /// The full sha.
     pub sha: String,
@@ -225,8 +227,9 @@ pub struct Hit {
 }
 
 /// Every commit reachable from any ref in the checkout's repository whose
-/// `Event:` trailer is in `events`, newest first.
-pub fn hits(dir: &Path, events: &BTreeSet<String>) -> Result<Vec<Hit>> {
+/// `Event:` trailer is in `events` or whose `Shift:` trailer is `shift`,
+/// newest first.
+pub fn hits(dir: &Path, events: &BTreeSet<String>, shift: Option<&str>) -> Result<Vec<Hit>> {
     let log = git(
         dir,
         &[
@@ -239,22 +242,34 @@ pub fn hits(dir: &Path, events: &BTreeSet<String>) -> Result<Vec<Hit>> {
     let mut found = Vec::new();
     for record in log.split('\0') {
         let mut fields = record.trim_start_matches('\n').split('\x1f');
-        let (Some(sha), Some(event), shift) = (fields.next(), fields.next(), fields.next()) else {
+        let (Some(sha), Some(named), carried) = (fields.next(), fields.next(), fields.next())
+        else {
             continue;
         };
-        let shift = shift
+        let carried = carried
             .map(str::trim)
-            .filter(|shift| !shift.is_empty())
+            .filter(|carried| !carried.is_empty())
             .map(ToOwned::to_owned);
-        for event in event.split(',').map(str::trim) {
-            if events.contains(event) {
-                found.push(Hit {
-                    event: event.to_owned(),
-                    sha: sha.trim().to_owned(),
-                    shift: shift.clone(),
-                });
-                break;
-            }
+        let named: Vec<&str> = named
+            .split(',')
+            .map(str::trim)
+            .filter(|event| !event.is_empty())
+            .collect();
+        let asked = named.iter().find(|event| events.contains(**event));
+        let by_shift = shift.is_some_and(|shift| {
+            carried
+                .as_deref()
+                .is_some_and(|carried| carried.split(',').any(|one| one.trim() == shift))
+        });
+        if asked.is_some() || by_shift {
+            found.push(Hit {
+                event: asked
+                    .or_else(|| named.first())
+                    .map(|event| (*event).to_owned())
+                    .unwrap_or_default(),
+                sha: sha.trim().to_owned(),
+                shift: carried,
+            });
         }
     }
     Ok(found)
@@ -272,10 +287,11 @@ pub struct Repo {
     pub label: String,
 }
 
-/// The repos holding a commit that names one of `events`, keyed by the git
-/// common directory their checkouts share. A checkout git refuses is skipped.
+/// The repos holding a commit that names one of `events` (or `shift`), keyed
+/// by the git common directory their checkouts share. A checkout git refuses
+/// is skipped.
 #[must_use]
-pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>) -> Vec<Repo> {
+pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>, shift: Option<&str>) -> Vec<Repo> {
     let mut repos: BTreeMap<String, Repo> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     for checkout in checkouts(roots) {
@@ -290,7 +306,7 @@ pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>) -> Vec<Repo> {
             repo.checkouts.push(checkout);
             continue;
         }
-        let Ok(hits) = hits(&checkout.path, events) else {
+        let Ok(hits) = hits(&checkout.path, events, shift) else {
             continue;
         };
         order.push(common.clone());

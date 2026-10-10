@@ -8,7 +8,15 @@ Memory engine for Claude sessions — sandman-format banks, session archiving, a
 JSONL file per UTC day under `<root>/trail/`, every machine commit joined to it by
 `Shift:`/`Event:` trailers. `sandman reconcile <event-id>` reverts the commits of a
 revoked event and its descendants across the grove, on a `reconcile/<event-id>` branch
-per repo. The contract is `docs/BANK-FORMAT.md` § trail.
+cut from each repo's trunk; a shift id (`s-…`) in place of the event takes back the
+whole shift.
+
+```sh
+sandman trail revoke s-20261016T1600Z --reason "wrong path"   # or an e-… event id
+sandman reconcile s-20261016T1600Z --dry-run                  # the plan, nothing changed; exit 1 on a conflict or failure
+```
+
+The contract is `docs/BANK-FORMAT.md` § trail.
 
 ## Shift
 

@@ -631,3 +631,48 @@ fn hits_off_trunk_are_skipped_and_the_branch_starts_from_trunk() {
     let history = git(&main, &["rev-list", &branch]);
     assert!(!history.contains(&unrelated), "{history}");
 }
+
+#[test]
+fn revoking_a_shift_reverts_every_commit_it_made() {
+    let machine = Machine::new("shift-wide");
+    let first = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let second = machine.append(&["--kind", "change", "--shift", "s-test"]);
+    let stranger = machine.append(&["--kind", "change", "--shift", "s-other"]);
+    // The third commit's event never reached the trail; its Shift: still counts.
+    let (checkout, shas) = fixture(
+        &machine,
+        &[("one", &first), ("two", &second), ("three", "e-unlogged")],
+    );
+
+    let revocation = machine.ok(&["trail", "revoke", "s-test", "--reason", "the whole shift"]);
+    let again = machine.ok(&["trail", "revoke", "s-test", "--reason", "twice"]);
+    assert_eq!(again, revocation, "a shift is revoked once");
+    let revokes = machine.ok(&["trail", "log", "--kind", "revoke", "--json"]);
+    assert_eq!(revokes.lines().count(), 1, "{revokes}");
+    assert!(revokes.contains(r#""parent":null"#), "{revokes}");
+    assert!(revokes.contains(r#""refs":["shift:s-test"]"#), "{revokes}");
+    assert_eq!(
+        code(&machine.run(&["trail", "revoke", "s-nope", "--reason", "x"])),
+        1
+    );
+
+    let report = machine.ok(&["reconcile", "s-test"]);
+    for sha in &shas {
+        assert!(report.contains(&format!("reverted: {sha}")), "{report}");
+    }
+    assert!(
+        report.contains(&first) && report.contains(&second),
+        "{report}"
+    );
+    assert!(!report.contains(&stranger), "{report}");
+    assert_eq!(
+        git(&checkout, &["show", "reconcile/s-test:file.txt"]),
+        "base\n"
+    );
+    let events = machine.ok(&["trail", "log", "--kind", "reconcile", "--json"]);
+    assert!(events.contains(r#""parent":null"#), "{events}");
+    assert!(
+        events.contains(r#""refs":["shift:s-test","o/fixture@"#),
+        "{events}"
+    );
+}

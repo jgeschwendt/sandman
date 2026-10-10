@@ -161,10 +161,11 @@ usage: sandman <verb> [args]
       verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
       Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
 
-  reconcile <event-id> [--dry-run]
+  reconcile <event-id|shift-id> [--dry-run]
       Walk the trail back past a wrong turn: the event and every event whose
-      parent chain reaches it are revoked; every commit carrying one of them
-      in an Event: trailer — in each checkout under ~/.grove/code
+      parent chain reaches it are revoked — for a shift id, every event of the
+      shift and theirs; every commit carrying one of them in an Event: trailer
+      (or, for a shift id, naming it in Shift:) — in each checkout under ~/.grove/code
       ($SANDMAN_GROVE_CODE) and in ~, ~/.routines and the data root
       ($SANDMAN_RECONCILE_EXTRA, colon-separated) — that the repo's trunk
       reaches is reverted newest-first (a merge with -m 1) on a
@@ -210,13 +211,14 @@ usage: sandman <verb> [args]
                [--ref X]... [--json '<object>']
   trail log [--since yyyy-mm-dd] [--kind K] [--shift S] [--repo R] [--json]
   trail show <id>
-  trail revoke <id> --reason TEXT
+  trail revoke <event-id|shift-id> --reason TEXT
   trail today
   trail trailers --shift S --event E
       The append-only event log, one JSONL file per UTC day under
       <root>/trail/<yyyy>/<mm>/<dd>.jsonl. append prints the new id; log
       prints newest last; show adds the event's descendants and the commits
-      carrying it; revoke appends a revoke event (once — a second is a note);
+      carrying it; revoke appends a revoke event (once — a second is a note),
+      parent the event, or ref shift:<id> for a whole shift;
       today prints today's file; trailers prints the Shift:/Event: lines every
       machine commit carries. Kinds: breath change correction decay guard
       promote reconcile revoke shift.handoff shift.start.
@@ -1236,7 +1238,7 @@ fn trail_show(args: &[String]) -> Result<(), Failure> {
         descendants.iter().map(|event| event.id.clone()).collect();
     events.insert(id);
     println!("\ncommits:");
-    let repos = grove::repos_with_hits(&grove_roots()?, &events);
+    let repos = grove::repos_with_hits(&grove_roots()?, &events, None);
     if repos.is_empty() {
         println!("  -");
     }
@@ -1346,13 +1348,13 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
             option if option.starts_with("--") => return Err(unknown_option(option)),
             positional => {
                 if id.is_some() {
-                    return Err(Failure::Usage("reconcile takes one event id".to_owned()));
+                    return Err(Failure::Usage("reconcile takes one id".to_owned()));
                 }
                 id = Some(positional.to_owned());
             }
         }
     }
-    let id = id.ok_or_else(|| Failure::Usage("reconcile needs an event id".to_owned()))?;
+    let id = id.ok_or_else(|| Failure::Usage("reconcile needs an event or shift id".to_owned()))?;
     let data_root = paths::data_root()?;
     let home = paths::home()?;
     let report = reconcile::reconcile(&data_root, &grove_roots()?, &id, dry_run)?;

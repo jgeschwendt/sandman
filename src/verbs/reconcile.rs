@@ -1,8 +1,9 @@
-//! `reconcile <event-id>` — walk the trail back past a wrong turn.
+//! `reconcile <event-id|shift-id>` — walk the trail back past a wrong turn.
 //!
-//! The revoked set is the event and everything its `parent` chains reach.
-//! Every repo the roots hold is asked for commits whose `Event:` trailer names
-//! one of them; the hits its trunk reaches are reverted newest-first — a
+//! The revoked set is the event and everything its `parent` chains reach —
+//! for a shift id, every event of the shift and theirs. Every repo the roots
+//! hold is asked for commits whose `Event:` trailer names one of them (or
+//! whose `Shift:` trailer names the shift); the hits its trunk reaches are reverted newest-first — a
 //! merge against its first parent — on a `reconcile/<event-id>` branch cut
 //! from that trunk, one per repo: new commits, never a reset, never a force,
 //! never the repo's commit hooks. Then one
@@ -80,28 +81,22 @@ pub struct Report {
     pub memories: Vec<PathBuf>,
     /// One per repository holding a hit.
     pub repos: Vec<RepoReport>,
-    /// The revoked set: the event, then its descendants in trail order.
+    /// The revoked set, in trail order.
     pub revoked: Vec<String>,
 }
 
-/// Reconcile the trail past `target`.
+/// Reconcile the trail past `target` — an event id, or a shift id whose every
+/// event is revoked at once.
 pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -> Result<Report> {
     let entries = trail::read(data_root, None)?;
-    if trail::find(&entries, target).is_none() {
-        return Err(Error::not_found("event", target.to_owned()));
-    }
-    let mut revoked = vec![target.to_owned()];
-    revoked.extend(
-        trail::descendants(&entries, target)
-            .into_iter()
-            .map(|event| event.id.clone()),
-    );
+    let revoked = trail::revoked_set(&entries, target)?;
     let set: BTreeSet<String> = revoked.iter().cloned().collect();
+    let shift = trail::is_shift_id(target).then_some(target);
 
     let event = Event::new(
         Draft {
             kind: "reconcile".to_owned(),
-            parent: Some(target.to_owned()),
+            parent: shift.is_none().then(|| target.to_owned()),
             shift: Some(SHIFT.to_owned()),
             ..Draft::default()
         },
@@ -109,7 +104,7 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
     );
     let branch = format!("reconcile/{target}");
     let trunks = grove::manifest_trunks(&roots.manifest);
-    let repos: Vec<RepoReport> = grove::repos_with_hits(roots, &set)
+    let repos: Vec<RepoReport> = grove::repos_with_hits(roots, &set, shift)
         .iter()
         .map(|repo| reconcile_repo(repo, &trunks, &branch, &event.id, dry_run))
         .collect();
@@ -124,13 +119,14 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
         });
     }
     let mut event = event;
-    event.draft.refs = repos
-        .iter()
-        .flat_map(|repo| {
+    event.draft.refs = shift
+        .map(trail::shift_ref)
+        .into_iter()
+        .chain(repos.iter().flat_map(|repo| {
             repo.reverted
                 .iter()
                 .map(move |sha| format!("{}@{sha}", repo.label))
-        })
+        }))
         .collect();
     event.draft.rationale = Some(rationale(&repos));
     let event = trail::append_event(data_root, event, false)?;

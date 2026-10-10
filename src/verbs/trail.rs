@@ -432,13 +432,75 @@ pub fn descendants<'a>(entries: &'a [Entry], id: &str) -> Vec<&'a Event> {
         .collect()
 }
 
-/// The `revoke` events naming `id`, in trail order.
+/// Whether `id` names a shift (`s-…`) rather than an event (`e-…`).
+#[must_use]
+pub fn is_shift_id(id: &str) -> bool {
+    id.starts_with("s-")
+}
+
+/// The ref a shift-wide `revoke` carries in place of a parent.
+#[must_use]
+pub fn shift_ref(shift: &str) -> String {
+    format!("shift:{shift}")
+}
+
+/// What revoking `id` takes back, in trail order: an event and its
+/// descendants, or — for a shift id — every event of that shift and their
+/// descendants. `revoke` and `reconcile` events are never in it.
+pub fn revoked_set(entries: &[Entry], id: &str) -> Result<Vec<String>> {
+    let roots: Vec<&str> = if is_shift_id(id) {
+        entries
+            .iter()
+            .map(|entry| &entry.event)
+            .filter(|event| {
+                event.draft.shift.as_deref() == Some(id)
+                    && !META_KINDS.contains(&event.draft.kind.as_str())
+            })
+            .map(|event| event.id.as_str())
+            .collect()
+    } else {
+        find(entries, id)
+            .map(|event| event.id.as_str())
+            .into_iter()
+            .collect()
+    };
+    if roots.is_empty() {
+        return Err(Error::not_found(
+            if is_shift_id(id) { "shift" } else { "event" },
+            id.to_owned(),
+        ));
+    }
+    let mut set: BTreeSet<&str> = roots.iter().copied().collect();
+    for root in &roots {
+        set.extend(
+            descendants(entries, root)
+                .iter()
+                .map(|event| event.id.as_str()),
+        );
+    }
+    Ok(entries
+        .iter()
+        .map(|entry| entry.event.id.clone())
+        .filter(|event| set.contains(event.as_str()))
+        .collect())
+}
+
+/// The `revoke` events naming `id`, in trail order — by `parent` for an
+/// event, by a `shift:<id>` ref for a shift.
 #[must_use]
 pub fn revocations<'a>(entries: &'a [Entry], id: &str) -> Vec<&'a Event> {
+    let by_ref = shift_ref(id);
     entries
         .iter()
         .map(|entry| &entry.event)
-        .filter(|event| event.draft.kind == "revoke" && event.draft.parent.as_deref() == Some(id))
+        .filter(|event| event.draft.kind == "revoke")
+        .filter(|event| {
+            if is_shift_id(id) {
+                event.draft.refs.contains(&by_ref)
+            } else {
+                event.draft.parent.as_deref() == Some(id)
+            }
+        })
         .collect()
 }
 
@@ -453,7 +515,7 @@ pub fn append(data_root: &Path, draft: Draft) -> Result<Event> {
 /// trail does not hold. An id already in the day's file is re-minted when
 /// `remint` allows it, else refused — a caller that stamped the id into
 /// commits already cannot have it change underneath.
-pub fn append_event(data_root: &Path, mut event: Event, remint: bool) -> Result<Event> {
+pub fn append_event(data_root: &Path, event: Event, remint: bool) -> Result<Event> {
     let draft = &event.draft;
     if !is_kind(&draft.kind) {
         return Err(Error::invalid("kind", draft.kind.clone()));
@@ -468,6 +530,11 @@ pub fn append_event(data_root: &Path, mut event: Event, remint: bool) -> Result<
         ));
     }
     let _lock = acquire(data_root)?;
+    append_locked(data_root, event, remint)
+}
+
+/// [`append_event`]'s body, for a caller already holding `.commit.lock`.
+fn append_locked(data_root: &Path, mut event: Event, remint: bool) -> Result<Event> {
     if let Some(parent) = &event.draft.parent
         && find(&read(data_root, None)?, parent).is_none()
     {
@@ -523,25 +590,29 @@ pub enum Revoked {
     Now(Event),
 }
 
-/// Append a `revoke` naming `id`, unless one already does.
+/// Append a `revoke` naming `id` — an event as `parent`, a shift as a
+/// `shift:<id>` ref — unless one already does. The check and the append
+/// share one hold of `.commit.lock`, so two revokes racing write one event.
 pub fn revoke(data_root: &Path, id: &str, reason: &str) -> Result<Revoked> {
+    let _lock = acquire(data_root)?;
     let entries = read(data_root, None)?;
-    if find(&entries, id).is_none() {
-        return Err(Error::not_found("event", id.to_owned()));
-    }
+    revoked_set(&entries, id)?;
     if let Some(earlier) = revocations(&entries, id).first() {
         return Ok(Revoked::Already((*earlier).clone()));
     }
-    append(
-        data_root,
-        Draft {
-            kind: "revoke".to_owned(),
-            parent: Some(id.to_owned()),
-            rationale: Some(reason.to_owned()),
-            ..Draft::default()
-        },
-    )
-    .map(Revoked::Now)
+    let (parent, refs) = if is_shift_id(id) {
+        (None, vec![shift_ref(id)])
+    } else {
+        (Some(id.to_owned()), Vec::new())
+    };
+    let draft = Draft {
+        kind: "revoke".to_owned(),
+        parent,
+        rationale: Some(reason.to_owned()),
+        refs,
+        ..Draft::default()
+    };
+    append_locked(data_root, Event::new(draft, Timestamp::now()?), true).map(Revoked::Now)
 }
 
 /// Today's file — its parents created, the file itself not.
@@ -563,7 +634,7 @@ pub fn trailers(shift: &str, event: &str) -> String {
 mod tests {
     use super::{
         Draft, Event, KINDS, Revoked, append, append_event, descendants, mint, read, revoke,
-        trailers,
+        revoked_set, trailers,
     };
     use crate::error::Error;
     use crate::testutil::TempDir;
@@ -666,6 +737,56 @@ mod tests {
             .map(|event| event.id.as_str())
             .collect();
         assert_eq!(found, [child.id.as_str(), grandchild.id.as_str()]);
+    }
+
+    #[test]
+    fn racing_revokes_write_one_event() {
+        let temp = TempDir::new("trail-race");
+        let target = append(temp.path(), draft("change", None)).expect("target");
+        let root = temp.path().to_path_buf();
+        let racers: Vec<_> = (0..8)
+            .map(|_| {
+                let (root, id) = (root.clone(), target.id.clone());
+                std::thread::spawn(move || revoke(&root, &id, "race").expect("revoke"))
+            })
+            .collect();
+        let fresh = racers
+            .into_iter()
+            .map(|racer| racer.join().expect("join"))
+            .filter(|outcome| matches!(outcome, Revoked::Now(_)))
+            .count();
+        assert_eq!(fresh, 1);
+        let entries = read(temp.path(), None).expect("read");
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.event.draft.kind == "revoke")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_shift_id_revokes_its_events_and_their_descendants() {
+        let temp = TempDir::new("trail-shift-set");
+        let shifted = |parent: Option<&str>| Draft {
+            shift: Some("s-1".to_owned()),
+            ..draft("change", parent)
+        };
+        let first = append(temp.path(), shifted(None)).expect("first");
+        let other = append(temp.path(), draft("change", None)).expect("other");
+        let child = append(temp.path(), draft("change", Some(&first.id))).expect("child");
+        let second = append(temp.path(), shifted(Some(&other.id))).expect("second");
+        let entries = read(temp.path(), None).expect("read");
+        assert_eq!(
+            revoked_set(&entries, "s-1").expect("set"),
+            [first.id.clone(), child.id, second.id]
+        );
+        assert!(matches!(
+            revoked_set(&entries, "s-2"),
+            Err(Error::NotFound { .. })
+        ));
+        assert_eq!(revoked_set(&entries, &other.id).expect("set").len(), 2);
     }
 
     #[test]
