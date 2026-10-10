@@ -37,10 +37,11 @@ The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 
 ## Map
 
-| node  | kind      | purpose                                                                                                                                                                                                 | unfold                                           |
-| ----- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| src   | container | crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call | `stele unfold src` · or read `src/AGENTS.md`     |
-| tests | container | integration tests — `cli` `mcp` `shift` `trail` drive the built binary against a temp $HOME/$SANDMAN_ROOT and fixture repos; `real_banks.rs` reads the live banks (`--ignored`)                         | `stele unfold tests` · or read `tests/AGENTS.md` |
+| node    | kind      | purpose                                                                                                                                                                                                 | unfold                                               |
+| ------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| prompts | container | the machine's prompt templates — `shift.md` is the dynamic shift prompt `sandman shift brief` fills; its slot names are the contract (`docs/BANK-FORMAT.md` § shifts)                                   | `stele unfold prompts` · or read `prompts/AGENTS.md` |
+| src     | container | crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call | `stele unfold src` · or read `src/AGENTS.md`         |
+| tests   | container | integration tests — `cli` `mcp` `shift` `trail` drive the built binary against a temp $HOME/$SANDMAN_ROOT and fixture repos; `real_banks.rs` reads the live banks (`--ignored`)                         | `stele unfold tests` · or read `tests/AGENTS.md`     |
 
 ## Indexes
 
