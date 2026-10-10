@@ -189,9 +189,10 @@ usage: sandman <verb> [args]
       trunk does not reach are reported off trunk. A conflict ends that repo,
       and so does a trailered merge: the machine lands by fast-forward only,
       so merges are never reverted but left to the operator. Appends one
-      reconcile event and lists the memories whose source: names a revoked
-      event, for reflect to retire; exits 1 when any repo ended in a conflict
-      or a failure. --dry-run prints the plan and changes nothing.
+      reconcile event — none when nothing new was reverted — and lists the
+      memories whose source: names a revoked event, for reflect to retire;
+      exits 1 when any repo ended in a conflict or a failure. --dry-run
+      prints the plan and changes nothing.
 
   shift attach --shift ID [--bg-id X] [--session-id S]
   shift brief [--mind M] [--dry-run]
@@ -1422,7 +1423,11 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
             if dry_run && label == "reverted" {
                 continue;
             }
-            for sha in shas {
+            // a conflicting hit prints under `conflict:` alone
+            for sha in shas
+                .iter()
+                .filter(|sha| label != "planned" || !repo.conflicts.contains(sha))
+            {
                 println!("  {label}: {sha}");
             }
         }
@@ -1452,6 +1457,8 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
             ),
         );
         println!("\nevent: {}", event.id);
+    } else if !dry_run {
+        println!("\nevent: none — nothing new to revert, the trail is unchanged");
     }
     for repo in &report.repos {
         for line in &repo.notes {

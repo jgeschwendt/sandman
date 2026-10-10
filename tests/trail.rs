@@ -425,8 +425,12 @@ fn reconcile_reverts_the_revoked_line_and_names_the_memories_to_retire() {
     assert!(!listed.contains("project_kept.md"), "{report}");
     assert!(doomed.is_file());
 
-    // A second run finds the work done: no new commits, both hits already reverted.
+    // A second run finds the work done: no new commits, both hits already
+    // reverted, and no second event on the trail.
+    let trail = machine.trail_bytes();
     let rerun = machine.ok(&["reconcile", &first]);
+    assert_eq!(machine.trail_bytes(), trail, "{rerun}");
+    assert!(rerun.contains("event: none"), "{rerun}");
     assert_eq!(
         git(&checkout, &["rev-list", "--count", &branch]),
         "5\n",
@@ -478,6 +482,11 @@ fn a_conflicting_revert_is_aborted_and_reported() {
     let output = machine.run(&["reconcile", &first]);
     assert_eq!(code(&output), 1, "a conflict fails the pass");
     let report = stdout(&output);
+    assert_eq!(
+        report.matches(shas[0].as_str()).count(),
+        1,
+        "the hit prints once, under conflict: {report}"
+    );
     assert!(
         report.contains(&format!("conflict: {}", shas[0])),
         "{report}"
@@ -844,6 +853,7 @@ fn a_hand_revert_without_gits_line_is_already_reverted() {
     let (checkout, shas) = fixture(&machine, &[("one", &first)]);
     fs::write(checkout.join("file.txt"), "base\n").expect("undo");
     commit(&checkout, "Revert \"change 0\"", None);
+    let trail = machine.trail_bytes();
 
     let report = machine.ok(&["reconcile", &first]);
     assert!(
@@ -857,6 +867,7 @@ fn a_hand_revert_without_gits_line_is_already_reverted() {
     );
     assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
     assert_eq!(git(&checkout, &["status", "--porcelain"]), "");
+    assert_eq!(machine.trail_bytes(), trail);
 }
 
 #[test]

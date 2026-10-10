@@ -77,7 +77,8 @@ impl RepoReport {
 /// The whole pass.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Report {
-    /// The `reconcile` event appended; `None` on a dry run.
+    /// The `reconcile` event appended; `None` on a dry run, or when the pass
+    /// reverted nothing and met no trouble — a rerun leaves the trail alone.
     pub event: Option<Event>,
     /// Memory files whose `source:` names a revoked event — for reflect.
     pub memories: Vec<PathBuf>,
@@ -112,7 +113,11 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
         .collect();
     let memories = memories_naming(data_root, &set);
 
-    if dry_run {
+    if dry_run
+        || repos
+            .iter()
+            .all(|repo| repo.reverted.is_empty() && !repo.troubled())
+    {
         return Ok(Report {
             event: None,
             memories,

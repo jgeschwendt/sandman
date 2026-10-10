@@ -259,7 +259,9 @@ to a message or for `git commit --trailer`.
   and lists the memories under `memories/` whose `source:` names a revoked event, for
   reflect to retire. It modifies no memory. Every repo is worked before the verdict:
   reconcile exits 1 when any repo ended in a conflict or a failure, after the report has
-  listed them all. `--dry-run` prints the plan and writes nothing.
+  listed them all. A pass that reverts nothing and meets no conflict or failure appends
+  no event, so a rerun leaves the trail as it was. `--dry-run` prints the plan and
+  writes nothing.
 
 `$SANDMAN_GROVE_CODE` moves the grove's code directory (the manifest is read beside it,
 `<code>/../manifest.toml`, and may be absent); `$SANDMAN_RECONCILE_EXTRA`
