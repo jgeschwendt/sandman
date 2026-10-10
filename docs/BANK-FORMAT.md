@@ -396,7 +396,7 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
 - **An abandoned handoff says why when the runner does.** `--abandoned` alone keeps a
   `handoff.md` the session wrote, else writes `Abandoned: the shift runner found the
   session gone at <instant> with no handoff written.` With `--reason TEXT` (only beside
-  `--abandoned`; the runner's overrun path passes `stopped at <time>: still working <n>
+  `--abandoned` — without it, even an empty one exits 2; the runner's overrun path passes `stopped at <time>: still working <n>
   min past handoff_by`) the handoff opens with the line `Abandoned: <reason>` — above
   whatever the session wrote — and so the `shift.handoff` event's `rationale` reads the
   same.
@@ -409,9 +409,10 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   that is there is a fault — exit 3 from plain `shift clock` and from `--check`, for the
   runner to report rather than wait on — when it cannot be read or parsed, is not a JSON
   object, has no `five_hour` object, carries a `five_hour.resets_at` or
-  `five_hour.used_percentage` that is missing, `null` or not a number, or resets more
-  than six hours after now (a five-hour window cannot; a days-ahead or millisecond
-  `resets_at` is a writer's bug). `shift brief` and `shift status` read a faulty window
+  `five_hour.used_percentage` that is missing, `null` or not a number, a negative
+  `used_percentage`, an `at` more than five minutes after now (a writer whose clock runs
+  ahead), or resets more than six hours after now (a five-hour window cannot; a
+  days-ahead or millisecond `resets_at` is a writer's bug). `shift brief` and `shift status` read a faulty window
   as unknown.
 
 ### breath/problems.md

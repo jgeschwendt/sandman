@@ -221,12 +221,13 @@ usage: sandman <verb> [args]
       $SANDMAN_SHIFT_MIN_WINDOW_MIN (default 60) minutes left or at 90% used,
       0 when the file is missing; clock and --check exit 3 when the file is
       there but cannot be read, is not a five_hour object with numeric
-      resets_at and used_percentage, or resets more than 6 h ahead. handoff finalizes a shift —
+      resets_at and non-negative used_percentage, is stamped at more than
+      5 min ahead, or resets more than 6 h ahead. handoff finalizes a shift —
       copies --file in, accepts the handoff.md the session wrote, or records
-      --abandoned (--reason TEXT heads the handoff and is the event's
-      rationale as `Abandoned: <reason>`) — appends shift.handoff and
-      releases current.json; a shift
-      already handed off exits 1, and so does a handoff over 2,000 characters
+      --abandoned (--reason TEXT, only beside --abandoned, heads the handoff
+      and is the event's rationale as `Abandoned: <reason>`) — appends
+      shift.handoff and releases current.json; a shift already handed off
+      exits 1, and so does a handoff over 2,000 characters
       unless --truncate keeps its head and notes the cut (--abandoned always
       truncates). attach records the session the runner
       started in current.json. status prints current.json and the clock.
@@ -2176,7 +2177,7 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
         &["--file", "--reason", "--shift"],
         &["--abandoned", "--from-session", "--truncate"],
     )?;
-    let reason = flag(&values, "--reason").filter(|reason| !reason.trim().is_empty());
+    let reason = flag(&values, "--reason");
     let id = flag(&values, "--shift")
         .ok_or_else(|| Failure::Usage("shift handoff needs --shift".to_owned()))?;
     let file = flag(&values, "--file");
@@ -2191,7 +2192,9 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
         set.iter().any(|switch| switch == "--from-session"),
         file,
     ) {
-        (true, false, None) => shift::Source::Abandoned(reason),
+        (true, false, None) => {
+            shift::Source::Abandoned(reason.filter(|reason| !reason.trim().is_empty()))
+        }
         (false, true, None) => shift::Source::Session,
         (false, false, Some(file)) => shift::Source::File(PathBuf::from(file)),
         _ => {

@@ -1114,6 +1114,16 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
             r#"{"five_hour":{"resets_at":1791590400,"used_percentage":"5%"}}"#.to_owned(),
             "used_percentage",
         ),
+        (
+            r#"{"five_hour":{"resets_at":1791590400,"used_percentage":-1}}"#.to_owned(),
+            "negative",
+        ),
+        // Written from a clock running ahead of ours.
+        (
+            r#"{"at":"2026-10-09T23:05:01Z","five_hour":{"resets_at":1791590400,"used_percentage":5}}"#
+                .to_owned(),
+            "five minutes",
+        ),
         // Eight days out, and in milliseconds: absurd for a five-hour window.
         (
             format!(
@@ -1146,11 +1156,11 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
             );
         }
     }
-    // Six hours to the second is still a window.
+    // Six hours to the second, stamped five minutes ahead, is still a window.
     fs::write(
         machine.window(),
         format!(
-            r#"{{"five_hour":{{"resets_at":{},"used_percentage":5}}}}"#,
+            r#"{{"at":"2026-10-09T23:05:00Z","five_hour":{{"resets_at":{},"used_percentage":5}}}}"#,
             1_791_586_800 + 6 * 3600
         ),
     )
@@ -1203,6 +1213,12 @@ fn an_abandoned_handoff_says_why_when_the_runner_does() {
         &[],
     );
     assert_eq!(code(&output), 2, "--reason needs --abandoned");
+    let output = machine.run(
+        now,
+        &["shift", "handoff", "--shift", second, "--reason", ""],
+        &[],
+    );
+    assert_eq!(code(&output), 2, "an empty --reason needs --abandoned too");
     machine.ok(
         now,
         &[

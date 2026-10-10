@@ -43,6 +43,8 @@ const HANDOFF_MARGIN_SECONDS: i64 = 15 * 60;
 pub const DEFAULT_MIN_WINDOW_MINUTES: i64 = 60;
 /// The furthest ahead a five-hour window's reset can sanely be.
 const MAX_REMAINING_SECONDS: i64 = 6 * 3600;
+/// How far ahead of now a window file's `at` may be before it is a fault.
+const MAX_SKEW_SECONDS: i64 = 300;
 /// `--check` refuses at or above this share of the window used.
 const CHECK_USED_PERCENT: f64 = 90.0;
 /// The brief's Context slots, each fenced as data under a label naming
@@ -289,7 +291,9 @@ impl Window {
     /// Read the window file: `None` when it is absent — the only unknown —
     /// and an error when it is there but unreadable, not a JSON object, has
     /// no `five_hour` object holding numeric `resets_at` and
-    /// `used_percentage`, or resets more than six hours after `now`.
+    /// `used_percentage`, carries a negative `used_percentage`, is stamped
+    /// `at` more than five minutes after `now`, or resets more than six hours
+    /// after it.
     pub fn load(path: &Path, now: Timestamp) -> Result<Option<Self>> {
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
@@ -320,6 +324,23 @@ impl Window {
         )]
         let resets_at = number("resets_at")? as i64;
         let used = number("used_percentage")?;
+        if used < 0.0 {
+            return Err(fault(format!(
+                "`five_hour.used_percentage` {used} is negative"
+            )));
+        }
+        let at = value
+            .get("at")
+            .and_then(Value::as_str)
+            .and_then(Timestamp::parse_iso8601);
+        if let Some(at) = at.filter(|at| at.unix_seconds() - now.unix_seconds() > MAX_SKEW_SECONDS)
+        {
+            return Err(fault(format!(
+                "`at` {} is more than five minutes after {}",
+                at.iso8601(),
+                now.iso8601()
+            )));
+        }
         if resets_at <= 0 || resets_at.saturating_sub(now.unix_seconds()) > MAX_REMAINING_SECONDS {
             return Err(fault(format!(
                 "`five_hour.resets_at` {resets_at} is more than six hours after {}",
@@ -327,10 +348,7 @@ impl Window {
             )));
         }
         Ok(Some(Self {
-            at: value
-                .get("at")
-                .and_then(Value::as_str)
-                .and_then(Timestamp::parse_iso8601),
+            at,
             resets_at: Some(Timestamp::from_unix_seconds(resets_at)),
             used: Some(used),
         }))
