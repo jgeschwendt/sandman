@@ -652,25 +652,27 @@ pub fn jaccard(left: &str, right: &str) -> f64 {
     share
 }
 
-/// Whether two titles name the same release: their tokens holding a digit
-/// agree, so `Claude Code 2.0.15` is never a repeat of `2.0.14`.
+/// Whether two titles name the same release: their numbers — `\d+(\.\d+)*`
+/// runs — agree in order, so `Release 1.0.0` is never a repeat of `1.1.0`.
 fn same_numbers(left: &str, right: &str) -> bool {
-    let numeric = |title: &str| -> BTreeSet<String> {
-        tokens(title)
-            .into_iter()
-            .filter(|token| token.chars().any(|ch| ch.is_ascii_digit()))
-            .collect()
-    };
-    numeric(left) == numeric(right)
+    fn numbers(title: &str) -> impl Iterator<Item = &str> {
+        title
+            .split(|ch: char| !ch.is_ascii_digit() && ch != '.')
+            .flat_map(|run| run.split(".."))
+            .map(|run| run.trim_matches('.'))
+            .filter(|run| !run.is_empty())
+    }
+    numbers(left).eq(numbers(right))
 }
 
 /// A URL as dedupe compares it: `http` read as `https`, the scheme and host
-/// lowercased, the fragment, trailing `/`, `utm_*` and `ref` query
-/// parameters dropped, and an arXiv id's version suffix (`v2`) cut.
+/// lowercased, a trailing `/` and the `utm_*` query parameters dropped, and
+/// an arXiv id's version suffix (`v2`) cut. The fragment and `ref` stay: a
+/// `#/post/1` route or a `?ref=v1` tag names a different page.
 #[must_use]
 pub fn normal_url(url: &str) -> String {
     let url = url.trim();
-    let url = url.split_once('#').map_or(url, |(head, _)| head);
+    let (url, fragment) = url.split_at(url.find('#').unwrap_or(url.len()));
     let (scheme, rest) = match url.split_once("://") {
         Some((scheme, rest)) => (scheme.to_ascii_lowercase(), rest),
         None => (String::new(), url),
@@ -691,7 +693,7 @@ pub fn normal_url(url: &str) -> String {
         .split('&')
         .filter(|pair| {
             let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
-            !key.is_empty() && key != "ref" && !key.starts_with("utm_")
+            !key.is_empty() && !key.starts_with("utm_")
         })
         .collect();
     let scheme = if scheme.is_empty() {
@@ -704,7 +706,7 @@ pub fn normal_url(url: &str) -> String {
     } else {
         format!("?{}", query.join("&"))
     };
-    format!("{scheme}{host}{path}{query}")
+    format!("{scheme}{host}{path}{query}{fragment}")
 }
 
 /// An arXiv path with the version cut off its id: `/abs/2510.01234v2` →
@@ -1548,7 +1550,8 @@ fn ensure_parent(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Breath, PassKind, SEED, Sources, is_breath_name, jaccard, normal_url, pass_id, valid_repo,
+        Breath, PassKind, SEED, Sources, is_breath_name, jaccard, normal_url, pass_id,
+        same_numbers, valid_repo,
     };
     use crate::time::Timestamp;
 
@@ -1572,14 +1575,28 @@ mod tests {
             "http://example.com/post",
             "https://EXAMPLE.com/post/",
             "https://example.com/post?utm_source=hn&utm_medium=x",
-            "https://example.com/post?ref=hn",
-            "https://example.com/post#comments",
         ] {
             assert_eq!(normal_url(url), same, "{url}");
         }
         assert_eq!(
             normal_url("https://example.com/p?id=3&utm_campaign=z&ref=y"),
-            "https://example.com/p?id=3"
+            "https://example.com/p?id=3&ref=y"
+        );
+        for (left, right) in [
+            (
+                "https://example.com/#/post/1",
+                "https://example.com/#/post/2",
+            ),
+            (
+                "https://example.com/p?ref=v1",
+                "https://example.com/p?ref=v2",
+            ),
+        ] {
+            assert_ne!(normal_url(left), normal_url(right), "{left}");
+        }
+        assert_eq!(
+            normal_url("https://example.com/p/?utm_source=x#top"),
+            "https://example.com/p#top"
         );
         assert_eq!(
             normal_url("https://example.com/Post"),
@@ -1602,6 +1619,14 @@ mod tests {
             "https://example.com/release/v2",
             "the version cut is arXiv's alone"
         );
+    }
+
+    #[test]
+    fn numbers_agree_in_order() {
+        assert!(!same_numbers("Release 1.0.0", "Release 1.1.0"));
+        assert!(!same_numbers("Claude Code 2.0.15", "Claude Code 2.0.14"));
+        assert!(!same_numbers("2 of 10", "10 of 2"));
+        assert!(same_numbers("v1.2. notes, 3 ways", "notes v1.2 in 3 ways."));
     }
 
     #[test]

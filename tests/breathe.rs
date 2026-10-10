@@ -367,7 +367,6 @@ fn dedupe_normalizes_urls_and_keeps_titles_and_drops_to_their_repo() {
         "http://example.com/post",
         "https://EXAMPLE.com/post/",
         "https://example.com/post?utm_source=hn&utm_medium=feed",
-        "https://example.com/post?ref=changelog",
     ] {
         seen(
             &machine.file_for(NOW, alpha, url, "Unrelated words entirely", &[]),

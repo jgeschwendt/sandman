@@ -493,11 +493,13 @@ Frontmatter in this order, one line per key, newlines in a value folded to space
 The body is the four-line summary.
 
 **Dedupe.** `file` matches a new filing against the breaths in the store — the same URL
-once both are normalized (`http` read as `https`, scheme and host lowercased, the
-fragment, trailing `/`, `utm_*` and `ref` query parameters dropped, an arXiv id's
-version suffix such as `v2` cut), else, **within the same `repo` only**, a title whose
-token Jaccard (lowercase alphanumeric runs) is at least 0.6 and whose tokens holding a
-digit all agree — so `Claude Code 2.0.15` is never a repeat of `2.0.14`. A `dropped`
+once both are normalized (`http` read as `https`, scheme and host lowercased, a
+trailing `/` and the `utm_*` query parameters dropped, an arXiv id's version suffix
+such as `v2` cut; the fragment and every other query parameter, `ref` included, are
+kept — `/#/post/1` and `?ref=v1` name pages of their own), else, **within the same
+`repo` only**, a title whose token Jaccard (lowercase alphanumeric runs) is at least 0.6
+and whose numbers — the `\d+(\.\d+)*` runs, in order — are the same list — so
+`Release 1.1.0` is never a repeat of `1.0.0`, nor `2 of 10` of `10 of 2`. A `dropped`
 breath is matched only by a filing for its own repo: a drop never blocks another repo.
 A match bumps that breath's `seen_again` and `updated`, prints `seen_again <path>` and
 appends nothing to the trail.
