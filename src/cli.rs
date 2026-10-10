@@ -138,8 +138,8 @@ usage: sandman <verb> [args]
       prints the prompt and writes nothing. attach records the pass's
       session; close records its counters, advances last_read (and each
       --cursor) on the sources it listed, and appends a breath event.
-      reweight moves each weight +0.1 per breath adopted since the last
-      reweight (cap 2.0) and -0.1 after 30 days of silence (floor 0.2),
+      reweight moves each weight +0.1 per breath whose adopted: stamp is
+      after the last reweight (cap 2.0) and -0.1 after 30 days of silence (floor 0.2),
       rewrites sources.toml (comments are not kept) and appends a breath
       event; --dry-run prints the table only. $SANDMAN_NOW pins the instant.
 

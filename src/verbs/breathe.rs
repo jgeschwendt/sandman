@@ -440,6 +440,8 @@ pub fn init(data_root: &Path) -> Result<Vec<PathBuf>> {
 /// One breath file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Breath {
+    /// When `adopt` ran, ISO-8601 Z — what `reweight` counts by.
+    pub adopted: Option<String>,
     /// 0–1, the judge's "does it bear on the repo".
     pub bearing: Option<f64>,
     /// `<date>-<slug>.md`.
@@ -493,6 +495,9 @@ impl Breath {
         }
         lines.push(format!("filed: {}", self.filed));
         lines.push(format!("updated: {}", self.updated));
+        if let Some(adopted) = &self.adopted {
+            lines.push(format!("adopted: {adopted}"));
+        }
         lines.push(format!("seen_again: {}", self.seen_again));
         if let Some(reason) = &self.reason {
             lines.push(format!("reason: {reason}"));
@@ -509,6 +514,7 @@ impl Breath {
         let text = |key: &str| fields.get(key).map(|value| (*value).to_owned());
         let score = |key: &str| fields.get(key).and_then(|value| value.parse::<f64>().ok());
         Some(Self {
+            adopted: text("adopted"),
             bearing: score("bearing"),
             file: file.to_owned(),
             filed: text("filed").unwrap_or_default(),
@@ -543,6 +549,7 @@ impl Breath {
         let text = |value: &Option<String>| value.clone().map_or(Value::Null, Value::string);
         let score = |value: Option<f64>| value.map_or(Value::Null, Value::Number);
         Value::object([
+            ("adopted", text(&self.adopted)),
             ("bearing", score(self.bearing)),
             ("file", Value::string(self.file.clone())),
             ("filed", Value::string(self.filed.clone())),
@@ -847,6 +854,7 @@ pub fn file(ctx: &Context, filing: &Filing) -> Result<Filed> {
                 filename: format!("{stem}.md"),
             })?;
         let breath = Breath {
+            adopted: None,
             bearing,
             file: name.clone(),
             filed: now.clone(),
@@ -984,6 +992,9 @@ pub fn transition(
         breath.updated = ctx.now.iso8601();
         if to == Transition::Drop {
             breath.reason.clone_from(&reason);
+        }
+        if to == Transition::Adopt {
+            breath.adopted = Some(breath.updated.clone());
         }
         atomic::write(&path, &breath.render())?;
         if to != Transition::Spike
@@ -1425,7 +1436,8 @@ fn cents(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-/// Per source: `+0.1` per breath adopted since the last reweight (cap 2.0),
+/// Per source: `+0.1` per breath whose `adopted` stamp is after the last
+/// reweight — never `updated`, which a `seen_again` moves — (cap 2.0),
 /// `−0.1` when `silent_since` is over thirty days old (floor 0.2, and the
 /// silence clock restarts). Unless `dry_run`, rewrite `sources.toml` with
 /// `reweighted` stamped and append one `breath` event.
@@ -1442,10 +1454,13 @@ pub fn reweight(ctx: &Context, dry_run: bool) -> Result<(Vec<Change>, Option<tra
                 .filter(|breath| {
                     breath.state == "adopted"
                         && breath.source.as_deref() == Some(source.name.as_str())
-                        && since.is_none_or(|since| {
-                            Timestamp::parse_iso8601(&breath.updated)
-                                .is_some_and(|at| at.unix_seconds() > since.unix_seconds())
-                        })
+                        && breath
+                            .adopted
+                            .as_deref()
+                            .and_then(Timestamp::parse_iso8601)
+                            .is_some_and(|at| {
+                                since.is_none_or(|since| at.unix_seconds() > since.unix_seconds())
+                            })
                 })
                 .count();
             let count = u64::try_from(count).unwrap_or(u64::MAX);
@@ -1606,6 +1621,7 @@ mod tests {
     #[test]
     fn breaths_render_and_parse_back() {
         let breath = Breath {
+            adopted: Some("2026-10-09T13:00:00Z".to_owned()),
             bearing: Some(0.8),
             file: "2026-10-09-a-thing.md".to_owned(),
             filed: "2026-10-09T12:00:00Z".to_owned(),

@@ -476,6 +476,7 @@ Frontmatter in this order, one line per key, newlines in a value folded to space
 | `novelty` | 0–1, the judge's "is it new to us", when given |
 | `filed` | when it was filed, ISO-8601 Z |
 | `updated` | when it last changed |
+| `adopted` | when `adopt` ran, ISO-8601 Z — `adopted` only; what `reweight` counts by |
 | `seen_again` | later filings that matched it |
 | `reason` | why it was dropped — `dropped` only |
 
@@ -492,7 +493,8 @@ A match bumps that breath's `seen_again` and `updated`, prints `seen_again <path
 appends nothing to the trail.
 
 **Transitions.** `spike` takes `new`; `adopt` takes `new` or `spiked`; `drop` takes
-anything not yet dropped and requires `--reason`. Each stamps `updated`.
+anything not yet dropped and requires `--reason`. Each stamps `updated`; `adopt` also
+stamps `adopted`.
 
 ### passes/
 
@@ -533,8 +535,9 @@ template naming a slot outside this table:
 
 ### Reweight
 
-Per source: `+0.1` for each breath from it in state `adopted` whose `updated` is after
-`reweighted` (every one, the first time), capped at 2.0; `−0.1` when `silent_since` is
+Per source: `+0.1` for each breath from it in state `adopted` whose `adopted` stamp is
+after `reweighted` (every one, the first time) — never `updated`, which a `seen_again`
+moves, so an adoption counts once however often it is seen again — capped at 2.0; `−0.1` when `silent_since` is
 over thirty days old, floored at 0.2, and the silence clock restarts. Weights keep two
 decimals. `reweight` prints `name  old → new  why` for each source it touched, stamps
 `reweighted`, rewrites the file and appends one event; `--dry-run` prints the table only.

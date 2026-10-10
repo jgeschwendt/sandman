@@ -793,7 +793,7 @@ fn reweight_raises_to_the_cap_and_lowers_to_the_floor() {
     for (file, source) in [("2026-10-10-a.md", "hot"), ("2026-10-11-b.md", "hot")] {
         machine.write(
             &format!(".sandman/breath/{file}"),
-            &format!("---\ntitle: {file}\nurl: https://x/{file}\nsource: {source}\nrepo: *\nproblem: p\nstate: adopted\nfiled: 2026-10-10T00:00:00Z\nupdated: 2026-10-12T00:00:00Z\nseen_again: 0\n---\n\nsummary\n"),
+            &format!("---\ntitle: {file}\nurl: https://x/{file}\nsource: {source}\nrepo: *\nproblem: p\nstate: adopted\nfiled: 2026-10-10T00:00:00Z\nupdated: 2026-10-12T00:00:00Z\nadopted: 2026-10-12T00:00:00Z\nseen_again: 0\n---\n\nsummary\n"),
         );
     }
 
@@ -865,4 +865,50 @@ fn a_filed_breath_reaches_the_shift_brief_for_its_repo() {
         brief.contains("· Incremental lexing · https://example.com/lexing"),
         "{brief}"
     );
+}
+
+#[test]
+fn an_adoption_counts_once_however_often_the_breath_is_seen_again() {
+    let machine = Machine::new("reweight-once");
+    machine.ok(NOW, &["breathe", "init"]);
+    let weight = || {
+        machine
+            .sources()
+            .sources
+            .into_iter()
+            .find(|source| source.name == "releases-oxc")
+            .map(|source| source.weight)
+            .expect("oxc")
+    };
+    let before = weight();
+    let url = "https://example.com/oxc-lexer";
+    let breath = filed_name(&machine.file(
+        NOW,
+        url,
+        "Oxc ships a faster lexer",
+        &["--source", "releases-oxc"],
+    ));
+    machine.ok("2026-10-17T12:00:00Z", &["breathe", "adopt", &breath]);
+    assert!(
+        machine
+            .read(&format!(".sandman/breath/{breath}"))
+            .contains("updated: 2026-10-17T12:00:00Z\nadopted: 2026-10-17T12:00:00Z\n")
+    );
+    let raised = machine.ok("2026-10-18T12:00:00Z", &["breathe", "reweight"]);
+    assert!(raised.contains("releases-oxc"), "{raised}");
+    // A later repeat moves `updated`, never `adopted`.
+    let output = machine.file("2026-10-19T12:00:00Z", url, "Oxc ships a faster lexer", &[]);
+    assert!(
+        stdout(&output).starts_with("seen_again "),
+        "{}",
+        stdout(&output)
+    );
+    let text = machine.read(&format!(".sandman/breath/{breath}"));
+    assert!(text.contains("updated: 2026-10-19T12:00:00Z\n"), "{text}");
+    assert!(text.contains("adopted: 2026-10-17T12:00:00Z\n"), "{text}");
+    assert_eq!(
+        machine.ok("2026-10-20T12:00:00Z", &["breathe", "reweight"]),
+        "no change\n"
+    );
+    assert!((weight() - (before + 0.1)).abs() < 1e-9, "{}", weight());
 }
