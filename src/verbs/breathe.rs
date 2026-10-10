@@ -645,10 +645,96 @@ pub fn jaccard(left: &str, right: &str) -> f64 {
     share
 }
 
-/// A URL compared for sameness: trimmed, one trailing `/` dropped.
-fn same_url(left: &str, right: &str) -> bool {
-    let norm = |url: &str| url.trim().trim_end_matches('/').to_owned();
-    norm(left) == norm(right)
+/// Whether two titles name the same release: their tokens holding a digit
+/// agree, so `Claude Code 2.0.15` is never a repeat of `2.0.14`.
+fn same_numbers(left: &str, right: &str) -> bool {
+    let numeric = |title: &str| -> BTreeSet<String> {
+        tokens(title)
+            .into_iter()
+            .filter(|token| token.chars().any(|ch| ch.is_ascii_digit()))
+            .collect()
+    };
+    numeric(left) == numeric(right)
+}
+
+/// A URL as dedupe compares it: `http` read as `https`, the scheme and host
+/// lowercased, the fragment, trailing `/`, `utm_*` and `ref` query
+/// parameters dropped, and an arXiv id's version suffix (`v2`) cut.
+#[must_use]
+pub fn normal_url(url: &str) -> String {
+    let url = url.trim();
+    let url = url.split_once('#').map_or(url, |(head, _)| head);
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest)) => (scheme.to_ascii_lowercase(), rest),
+        None => (String::new(), url),
+    };
+    let scheme = if scheme == "http" {
+        "https".to_owned()
+    } else {
+        scheme
+    };
+    let (rest, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let (host, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let host = host.to_ascii_lowercase();
+    let mut path = path.trim_end_matches('/').to_owned();
+    if host == "arxiv.org" || host.ends_with(".arxiv.org") {
+        path = unversioned(&path);
+    }
+    let query: Vec<&str> = query
+        .split('&')
+        .filter(|pair| {
+            let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
+            !key.is_empty() && key != "ref" && !key.starts_with("utm_")
+        })
+        .collect();
+    let scheme = if scheme.is_empty() {
+        String::new()
+    } else {
+        format!("{scheme}://")
+    };
+    let query = if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", query.join("&"))
+    };
+    format!("{scheme}{host}{path}{query}")
+}
+
+/// An arXiv path with the version cut off its id: `/abs/2510.01234v2` →
+/// `/abs/2510.01234`, a `.pdf` suffix kept.
+fn unversioned(path: &str) -> String {
+    let (stem, pdf) = path
+        .strip_suffix(".pdf")
+        .map_or((path, ""), |stem| (stem, ".pdf"));
+    let digits = stem.trim_end_matches(|ch: char| ch.is_ascii_digit());
+    match digits.strip_suffix('v') {
+        Some(id) if digits.len() < stem.len() && id.ends_with(|ch: char| ch.is_ascii_digit()) => {
+            format!("{id}{pdf}")
+        }
+        _ => path.to_owned(),
+    }
+}
+
+/// The breath a new filing repeats, if any: the same [`normal_url`], else —
+/// within the same repo only — a title whose token Jaccard reaches
+/// [`JACCARD_SAME`] with no numeric token differing. A dropped breath is
+/// matched only for its own repo, so a drop never blocks another repo.
+fn repeat_of<'a>(existing: &'a [Breath], repo: &str, url: &str, title: &str) -> Option<&'a Breath> {
+    let url = normal_url(url);
+    let live = || {
+        existing
+            .iter()
+            .filter(move |breath| breath.state != "dropped" || breath.repo == repo)
+    };
+    live()
+        .find(|breath| normal_url(&breath.url) == url)
+        .or_else(|| {
+            live().find(|breath| {
+                breath.repo == repo
+                    && jaccard(&breath.title, title) >= JACCARD_SAME
+                    && same_numbers(&breath.title, title)
+            })
+        })
 }
 
 /// What `file` was handed.
@@ -698,8 +784,7 @@ fn unit(what: &'static str, value: Option<f64>) -> Result<Option<f64>> {
     }
 }
 
-/// File a breath, or count it seen again: dedupe by URL, then by title-token
-/// Jaccard ≥ 0.6, against every breath in the store.
+/// File a breath, or count it seen again — see [`repeat_of`].
 pub fn file(ctx: &Context, filing: &Filing) -> Result<Filed> {
     let title = one_line(&filing.title);
     let url = one_line(&filing.url);
@@ -722,15 +807,7 @@ pub fn file(ctx: &Context, filing: &Filing) -> Result<Filed> {
     let (path, name) = {
         let _lock = trail::acquire(&ctx.data_root)?;
         let existing = breaths(&ctx.data_root)?;
-        let matched = existing
-            .iter()
-            .find(|breath| same_url(&breath.url, &url))
-            .or_else(|| {
-                existing
-                    .iter()
-                    .find(|breath| jaccard(&breath.title, &title) >= JACCARD_SAME)
-            });
-        if let Some(matched) = matched {
+        if let Some(matched) = repeat_of(&existing, &filing.repo, &url, &title) {
             let mut breath = matched.clone();
             breath.seen_again += 1;
             breath.updated.clone_from(&now);
@@ -1442,7 +1519,9 @@ fn ensure_parent(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Breath, PassKind, SEED, Sources, is_breath_name, jaccard, pass_id, valid_repo};
+    use super::{
+        Breath, PassKind, SEED, Sources, is_breath_name, jaccard, normal_url, pass_id, valid_repo,
+    };
     use crate::time::Timestamp;
 
     #[test]
@@ -1456,6 +1535,45 @@ mod tests {
         assert!((jaccard("a b c d", "a-b-c-e") - 0.6).abs() < 1e-9);
         assert!(jaccard("", "") < f64::EPSILON);
         assert!(jaccard("one", "two") < f64::EPSILON);
+    }
+
+    #[test]
+    fn urls_normalize_scheme_host_slash_tracking_and_arxiv_versions() {
+        let same = "https://example.com/post";
+        for url in [
+            "http://example.com/post",
+            "https://EXAMPLE.com/post/",
+            "https://example.com/post?utm_source=hn&utm_medium=x",
+            "https://example.com/post?ref=hn",
+            "https://example.com/post#comments",
+        ] {
+            assert_eq!(normal_url(url), same, "{url}");
+        }
+        assert_eq!(
+            normal_url("https://example.com/p?id=3&utm_campaign=z&ref=y"),
+            "https://example.com/p?id=3"
+        );
+        assert_eq!(
+            normal_url("https://example.com/Post"),
+            "https://example.com/Post"
+        );
+        assert_eq!(
+            normal_url("http://arxiv.org/abs/2510.01234v2"),
+            "https://arxiv.org/abs/2510.01234"
+        );
+        assert_eq!(
+            normal_url("https://arxiv.org/pdf/2510.01234v11.pdf"),
+            "https://arxiv.org/pdf/2510.01234.pdf"
+        );
+        assert_eq!(
+            normal_url("https://arxiv.org/abs/cs/0101001v1"),
+            "https://arxiv.org/abs/cs/0101001"
+        );
+        assert_eq!(
+            normal_url("https://example.com/release/v2"),
+            "https://example.com/release/v2",
+            "the version cut is arXiv's alone"
+        );
     }
 
     #[test]

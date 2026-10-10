@@ -123,13 +123,18 @@ impl Machine {
 
     /// `breathe file` with the four required texts and `extra` flags.
     fn file(&self, now: &str, url: &str, title: &str, extra: &[&str]) -> Output {
+        self.file_for(now, "jgeschwendt/alpha", url, title, extra)
+    }
+
+    /// `file` against `repo`.
+    fn file_for(&self, now: &str, repo: &str, url: &str, title: &str, extra: &[&str]) -> Output {
         let mut args = vec![
             "breathe",
             "file",
             "--url",
             url,
             "--repo",
-            "jgeschwendt/alpha",
+            repo,
             "--title",
             title,
             "--problem",
@@ -334,6 +339,106 @@ fn file_dedupes_by_url_and_by_title_jaccard_and_counts_seen_again() {
     // Two breaths filed, so two trail events — a seen_again appends none.
     let events = machine.trail();
     assert_eq!(events.len(), 2, "{events:#?}");
+}
+
+#[test]
+fn dedupe_normalizes_urls_and_keeps_titles_and_drops_to_their_repo() {
+    let machine = Machine::new("dedupe-rules");
+    machine.ok(NOW, &["breathe", "init"]);
+    let (alpha, beta) = ("jgeschwendt/alpha", "jgeschwendt/beta");
+    let seen = |output: &Output, file: &str| {
+        assert_eq!(code(output), 0, "{}", stderr(output));
+        assert_eq!(
+            stdout(output).trim(),
+            format!(
+                "seen_again {}",
+                machine.root().join("breath").join(file).display()
+            )
+        );
+    };
+    let post = filed_name(&machine.file_for(
+        NOW,
+        alpha,
+        "https://example.com/post",
+        "Claude Code 2.0.14 ships hooks",
+        &[],
+    ));
+    for url in [
+        "http://example.com/post",
+        "https://EXAMPLE.com/post/",
+        "https://example.com/post?utm_source=hn&utm_medium=feed",
+        "https://example.com/post?ref=changelog",
+    ] {
+        seen(
+            &machine.file_for(NOW, alpha, url, "Unrelated words entirely", &[]),
+            &post,
+        );
+    }
+    let paper = filed_name(&machine.file_for(
+        NOW,
+        alpha,
+        "https://arxiv.org/abs/2510.01234v1",
+        "Agents that remember",
+        &[],
+    ));
+    seen(
+        &machine.file_for(
+            NOW,
+            alpha,
+            "http://arxiv.org/abs/2510.01234v2",
+            "A revised abstract",
+            &[],
+        ),
+        &paper,
+    );
+
+    // A differing version number is a new release, however alike the titles.
+    let next = filed_name(&machine.file_for(
+        NOW,
+        alpha,
+        "https://example.com/post-15",
+        "Claude Code 2.0.15 ships hooks",
+        &[],
+    ));
+    assert_ne!(next, post);
+    // A title repeats only within its repo.
+    let elsewhere = filed_name(&machine.file_for(
+        NOW,
+        beta,
+        "https://example.com/beta-post",
+        "Claude Code 2.0.14 ships hooks",
+        &[],
+    ));
+    assert_ne!(elsewhere, post);
+    assert!(
+        machine
+            .read(&format!(".sandman/breath/{elsewhere}"))
+            .contains("repo: jgeschwendt/beta\n")
+    );
+
+    // A drop blocks its own repo, never another.
+    machine.ok(
+        NOW,
+        &["breathe", "drop", &paper, "--reason", "not for alpha"],
+    );
+    seen(
+        &machine.file_for(
+            NOW,
+            alpha,
+            "https://arxiv.org/abs/2510.01234",
+            "Agents that remember",
+            &[],
+        ),
+        &paper,
+    );
+    let for_beta = filed_name(&machine.file_for(
+        NOW,
+        beta,
+        "https://arxiv.org/abs/2510.01234v3",
+        "Agents that remember",
+        &[],
+    ));
+    assert_ne!(for_beta, paper);
 }
 
 #[test]

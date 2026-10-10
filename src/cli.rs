@@ -126,9 +126,10 @@ usage: sandman <verb> [args]
       sources lists the feeds; --due (or --kind) only those a pass reads now —
       a skim those unread for an hour, a deep pass all. file writes
       breath/<date>-<slug>.md (state new, or spiked with --spike), counts it
-      on its --source and appends a breath event — unless the URL or a title
-      with token Jaccard >= 0.6 matches an existing breath, which then counts
-      seen_again instead. --repo is * or owner/name. spike takes new; adopt
+      on its --source and appends a breath event — unless the normalized URL,
+      or within the same repo a title with token Jaccard >= 0.6 and the same
+      numbers, matches an existing breath (a dropped one only for its own
+      repo), which then counts seen_again instead. --repo is * or owner/name. spike takes new; adopt
       takes new|spiked; drop needs --reason; adopt and drop append a breath
       event ($SANDMAN_SHIFT adds adopted-by:<shift>). pass fills every
       {{slot}} of prompts/breathe.md, writes passes/<id>/pass.json and
