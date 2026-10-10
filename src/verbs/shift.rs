@@ -59,6 +59,12 @@ const CONTEXT_SOURCES: [(&str, &str); 7] = [
     ("threads.open", "~/.threads"),
     ("trail.recent", "the trail"),
 ];
+
+/// Whether `slot` is a Context slot — data fenced in the brief.
+#[must_use]
+pub fn is_context(slot: &str) -> bool {
+    CONTEXT_SOURCES.iter().any(|(name, _)| *name == slot)
+}
 /// A handoff's ceiling — `shift handoff` refuses a longer one.
 pub const HANDOFF_CHARS: usize = 2_000;
 
@@ -287,6 +293,12 @@ impl Local {
     }
 }
 
+/// Whether `at` falls on the Sabbath, Saturday in New York.
+#[must_use]
+pub fn sabbath(at: Timestamp) -> bool {
+    Local::at(at).weekday == 6
+}
+
 /// `s-<yyyymmddThhmm>Z` — the instant to the minute, UTC.
 #[must_use]
 pub fn shift_id(at: Timestamp) -> String {
@@ -508,19 +520,19 @@ pub struct Target {
     pub reason: String,
 }
 
-/// One shift's `meta.json`, as far as the rotation reads it.
+/// One shift's `meta.json`, as far as the rotation and the score read it.
 #[derive(Clone, Debug, PartialEq)]
-struct Meta {
+pub(crate) struct Meta {
     /// When it was handed off.
     ended: Option<String>,
     /// The checkout it worked.
     path: Option<String>,
     /// Its repo slug.
-    repo: Option<String>,
+    pub(crate) repo: Option<String>,
     /// Its id.
     shift: String,
     /// When it started.
-    started: Option<Timestamp>,
+    pub(crate) started: Option<Timestamp>,
     /// The whole object, for a rewrite.
     value: Value,
 }
@@ -570,13 +582,18 @@ fn shift_ids(data_root: &Path) -> Vec<String> {
     ids
 }
 
+/// Every readable `meta.json`, oldest shift first.
+pub(crate) fn metas(data_root: &Path) -> Vec<Meta> {
+    shift_ids(data_root)
+        .iter()
+        .filter_map(|id| read_meta(data_root, id).ok())
+        .collect()
+}
+
 /// The newest `started` per repo.
 fn last_shifted(data_root: &Path) -> BTreeMap<String, Timestamp> {
     let mut last: BTreeMap<String, Timestamp> = BTreeMap::new();
-    for id in shift_ids(data_root) {
-        let Ok(meta) = read_meta(data_root, &id) else {
-            continue;
-        };
+    for meta in metas(data_root) {
         if let (Some(repo), Some(started)) = (meta.repo, meta.started) {
             let entry = last.entry(repo).or_insert(started);
             *entry = (*entry).max(started);
@@ -604,7 +621,7 @@ fn read_current(data_root: &Path) -> Result<Option<Value>> {
 /// data root) are reconcile's to scan but never a shift's to work: home-sync
 /// commits them without trailers, and a shift there could edit the trail or
 /// the runner it answers to.
-fn trunks(ctx: &Context) -> Vec<(String, PathBuf)> {
+pub(crate) fn trunks(ctx: &Context) -> Vec<(String, PathBuf)> {
     let named = grove::manifest_trunks(&ctx.roots.manifest);
     let mut found = Vec::new();
     for checkout in grove::checkouts(&ctx.roots) {
@@ -727,7 +744,7 @@ fn stele_fails(dir: &Path) -> bool {
 }
 
 /// Every `*.md` in `dir` with its frontmatter fields and body, by file stem.
-fn front_files(dir: &Path) -> Vec<(String, BTreeMap<String, String>, String)> {
+pub(crate) fn front_files(dir: &Path) -> Vec<(String, BTreeMap<String, String>, String)> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };

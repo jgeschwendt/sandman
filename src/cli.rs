@@ -28,7 +28,7 @@ use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 use crate::verbs::{
-    breathe, dream, forget, mcp, recall, reconcile, reflect, remember, shift, take, trail,
+    breathe, dream, forget, mcp, recall, reconcile, reflect, remember, score, shift, take, trail,
 };
 use crate::version::VERSION;
 
@@ -194,6 +194,17 @@ usage: sandman <verb> [args]
       exits 1 when any repo ended in a conflict or a failure. --dry-run
       prints the plan and changes nothing.
 
+  score [--week yyyy-Www] [--json]
+      The week's numbers from the trail, shifts/*/meta.json, the breath
+      store, ~/.threads ($SANDMAN_THREADS) and the shift and breathe-*
+      runs.jsonl under ~/.routines/.state ($SANDMAN_ROUTINES_STATE): repo
+      coverage, shift outcomes, events by kind/repo/model, cost, recurring
+      corrections, fresh context, breaths, open threads, routine ticks. The
+      week is ISO, its days New York's, the current one by default
+      ($SANDMAN_NOW pins it). Rewrites <root>/score/<yyyy>-W<ww>.md —
+      frontmatter, the worst three, a table per section — and prints its
+      path; --json prints the metrics object instead. No model, no git.
+
   shift attach --shift ID [--bg-id X] [--session-id S]
   shift brief [--mind M] [--dry-run]
   shift clock [--check]
@@ -329,6 +340,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "reconcile" => reconcile_verb(rest),
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
+        "score" => score_verb(rest),
         "shift" => shift_verb(rest),
         "take" => take_verb(rest),
         "trail" => trail_verb(rest),
@@ -1487,6 +1499,30 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
             troubled.join(", ")
         ))
         .into());
+    }
+    Ok(())
+}
+
+/// `score [--week YYYY-Www] [--json]`.
+fn score_verb(args: &[String]) -> Result<(), Failure> {
+    let (values, set) = shift_flags(args, "score", &["--week"], &["--json"])?;
+    let ctx = shift_context()?;
+    let week = match flag(&values, "--week") {
+        None => score::Week::of(ctx.now),
+        Some(text) => score::Week::parse(&text)
+            .ok_or_else(|| Failure::Usage(format!("--week wants yyyy-Www, got `{text}`")))?,
+    };
+    let scored = score::score(&ctx, &paths::routines_state()?, week)?;
+    let path = score::write(&ctx, &scored)?;
+    note(
+        Some(&ctx.data_root),
+        "score",
+        &format!("scored week={} path={}", week.name(), path.display()),
+    );
+    if set.iter().any(|switch| switch == "--json") {
+        println!("{}", scored.json());
+    } else {
+        println!("{}", path.display());
     }
     Ok(())
 }

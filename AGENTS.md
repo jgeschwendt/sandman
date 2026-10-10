@@ -21,7 +21,7 @@ invariants:
 | docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875); `plates/` holds the page plates and `plates/perpetual-shift/` the plan plate's Claude Design source |
 | profiles/ | `session.json`, the Claude Code settings shift and breath sessions run under — the strict Bash sandbox and deny rules `sandman shift profile` prints, compiled into the binary; the contract is `docs/BANK-FORMAT.md` § shifts, The sandbox |
 | prompts/ | the machine's prompt templates — `shift.md` is the dynamic shift prompt `sandman shift brief` fills, `breathe.md` the ruach's pass prompt `sandman breathe pass` fills; their slot names are the contract in `docs/BANK-FORMAT.md` § shifts and § breath |
-| src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep, the MCP tool server (recall · remember · banks over stdio), the trail and reconcile, the shift engine, the ruach's store |
+| src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep, the MCP tool server (recall · remember · banks over stdio), the trail and reconcile, the shift engine, the ruach's store, the week's score |
 
 The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 
@@ -45,7 +45,7 @@ The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
 | profiles | container | the Claude Code settings in `session.json` that shift and breath sessions run under (`sandman shift profile`); the contract is `docs/BANK-FORMAT.md` § shifts, The sandbox                              | `stele unfold profiles` · or read `profiles/AGENTS.md` |
 | prompts  | container | the machine's prompt templates — `shift.md` (`sandman shift brief`) and `breathe.md` (`sandman breathe pass`); their slot names are the contract (`docs/BANK-FORMAT.md` § shifts, § breath)             | `stele unfold prompts` · or read `prompts/AGENTS.md`   |
 | src      | container | crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call | `stele unfold src` · or read `src/AGENTS.md`           |
-| tests    | container | integration tests — `breathe` `cli` `mcp` `shift` `trail` drive the built binary against a temp $HOME/$SANDMAN_ROOT and fixture repos; `real_banks.rs` reads the live banks (`--ignored`)               | `stele unfold tests` · or read `tests/AGENTS.md`       |
+| tests    | container | integration tests — `breathe` `cli` `mcp` `score` `shift` `trail` drive the built binary against a temp $HOME/$SANDMAN_ROOT and fixture repos; `real_banks.rs` reads the live banks (`--ignored`)       | `stele unfold tests` · or read `tests/AGENTS.md`       |
 
 ## Indexes
 

@@ -638,7 +638,36 @@ Sabbath's and never do:
 
 `spike` and a `seen_again` append none. `breathe` journals to `.trace/breathe-<date>.log`.
 
+## score/ — the week's numbers
+
+Not a bank. `sandman score [--week yyyy-Www] [--json]` derives one ISO week's metrics —
+the current week by default, its days counted in America/New_York, `$SANDMAN_NOW`
+pinning the instant — from what the machine already keeps, with no model, network or
+git call, and rewrites `score/<yyyy>-W<ww>.md` whole under `.commit.lock`. It prints the
+page's path, or with `--json` the metrics object (keys alphabetical); a `--week` its
+year does not have exits 2. A rerun at the same instant writes the same bytes.
+
+| section | from | numbers |
+| --- | --- | --- |
+| Coverage | the rotation's trunks (§ shifts, trusted or not) against `shifts/*/meta.json` `repo` and `started` | each trunk's shifts this week, Saturday's aside, and `covered N/M` — the spine's every repo once a week |
+| Shifts | `shift.start` and `shift.handoff` events | opened, handed off, abandoned (ref `abandoned` or a rationale opening `Abandoned:`), mean minutes from a start to its shift's handoff |
+| Trail | every event this week | by kind (every kind listed), by repo, by model; `breath` events by their `state:` ref; `change` events with a `sha`; `cost_usd` summed and the events carrying none |
+| Corrections | `correction` events | this week's, and those recurring — rationale title-token Jaccard ≥ 0.6 (breath's dedupe measure) with an earlier correction this week or last |
+| Context | `shift.start` refs `fp:<slot>=<hash>` of Context slots | fingerprints, those not seen in an earlier shift this week (fresh), the fresh ratio |
+| Breath | `breath/*.md` stamps; `breath/sources.toml` | filed (`filed`), spiked and dropped (`state` with `updated`), adopted (`adopted`) this week; per source its weight and lifetime `filed`/`adopted` |
+| Threads | `~/.threads/*.md` (`$SANDMAN_THREADS`) | open threads by `kind`, and those a shift opened (`anchor` or `key` starting `shift:`) |
+| Routines | `shift/` and `breathe-*/` `runs.jsonl` under `~/.routines/.state` (`$SANDMAN_ROUTINES_STATE`) | ticks this week (by `started`) and non-zero exits |
+
+The page is frontmatter — `week`, `written` (the instant), `from` and `to` (Monday and
+Sunday) — then `## Worst three`, then one table per section, numbers only. The worst
+three are the metrics furthest from target, each measured as a share: coverage under
+M/M (the uncovered share), abandoned shifts over 0 (of shifts opened), recurring
+corrections over 0 (of corrections), cost unrecorded over 0 (of events), the stale
+context ratio over 0.5 (its excess over 0.5, of 0.5), open shift threads over 0 (of
+open threads); ties go by name, and a week on target lists `none`. The order puts the
+worst three inside the first 20 lines, the ones a weekday brief's `score.week` carries.
+
 ## Concurrency
 
-All bank, trail, shift and breath writes happen under `.commit.lock` at the data root; every file write is
+All bank, trail, shift, breath and score writes happen under `.commit.lock` at the data root; every file write is
 atomic (tmp → rename in the same directory).

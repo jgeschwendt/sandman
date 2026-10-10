@@ -57,8 +57,13 @@ pub const BREATH_DIR_NAME: &str = "breath";
 pub const CLAUDE_WINDOW_ENV: &str = "CLAUDE_WINDOW_FILE";
 /// The environment variable that moves the machine's prompt templates.
 pub const PROMPTS_ENV: &str = "SANDMAN_PROMPTS";
-/// The week's score pages, `<iso-week>.md`.
+/// The environment variable that moves the routines' run state.
+pub const ROUTINES_STATE_ENV: &str = "SANDMAN_ROUTINES_STATE";
+/// The week's score pages, `<iso-week>.md`, and the Sabbath's
+/// `<iso-week>-targets.md`.
 pub const SCORE_DIR_NAME: &str = "score";
+/// The environment variable that moves `~/.threads`.
+pub const THREADS_ENV: &str = "SANDMAN_THREADS";
 /// One directory per shift, plus `current.json` while one is open.
 pub const SHIFTS_DIR_NAME: &str = "shifts";
 /// Takes a live background job deferred — one file per session, cleared when
@@ -316,10 +321,22 @@ pub fn prompts_dir() -> Result<PathBuf> {
         .join("prompts"))
 }
 
-/// `~/.threads` — the operator's out-of-session message store.
+/// The operator's out-of-session message store: `$SANDMAN_THREADS`, else
+/// `~/.threads`.
 #[must_use]
 pub fn threads_dir(home: &Path) -> PathBuf {
-    home.join(".threads")
+    env::var_os(THREADS_ENV)
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(|| home.join(".threads"), PathBuf::from)
+}
+
+/// The routines' run state, one directory per routine holding `runs.jsonl`:
+/// `$SANDMAN_ROUTINES_STATE`, else `~/.routines/.state`.
+pub fn routines_state() -> Result<PathBuf> {
+    match env::var_os(ROUTINES_STATE_ENV).filter(|dir| !dir.is_empty()) {
+        Some(dir) => Ok(PathBuf::from(dir)),
+        None => Ok(home()?.join(".routines").join(".state")),
+    }
 }
 
 /// A path with `$HOME` folded back to `~`, for prose that a human reads.

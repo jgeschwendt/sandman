@@ -2,7 +2,7 @@
 
 ```stele
 kind: container
-purpose: integration tests — `breathe` `cli` `mcp` `shift` `trail` drive the built binary against a temp $HOME/$SANDMAN_ROOT and fixture repos; `real_banks.rs` reads the live banks (`--ignored`)
+purpose: integration tests — `breathe` `cli` `mcp` `score` `shift` `trail` drive the built binary against a temp $HOME/$SANDMAN_ROOT and fixture repos; `real_banks.rs` reads the live banks (`--ignored`)
 ```
 
 ## Working here
