@@ -1215,7 +1215,15 @@ fn an_abandoned_handoff_says_why_when_the_runner_does() {
     assert_eq!(code(&output), 2, "--reason needs --abandoned");
     let output = machine.run(
         now,
-        &["shift", "handoff", "--shift", second, "--reason", ""],
+        &[
+            "shift",
+            "handoff",
+            "--shift",
+            second,
+            "--from-session",
+            "--reason",
+            "",
+        ],
         &[],
     );
     assert_eq!(code(&output), 2, "an empty --reason needs --abandoned too");
