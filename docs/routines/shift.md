@@ -27,7 +27,7 @@ Local time, America/New_York; Sunday is Day 1, Saturday the Sabbath. `sandman sh
 - `~/.sandman/shifts/current.json` — the lock: `{bg_id, handoff_by, path, repo, session_id, shift, started, theme}` while a shift is open, absent otherwise. `sandman shift brief` writes it, `sandman shift attach` adds the session ids, `sandman shift handoff` removes it. Never delete it by hand: `handoff --abandoned` is the release, and it records the abandonment on the trail.
 - `~/.sandman/shifts/<id>/` — `brief.md` (the prompt the session got), `handoff.md` (the session writes it, then runs `sandman shift handoff --shift <id> --from-session` itself), `meta.json`.
 - `~/.sandman/shifts/PAUSE` — the owner's off switch. While it exists no shift opens; an open one still closes. Only the owner removes it.
-- `~/.local/state/claude/window.json` — the five-hour window as the harness statusline last saw it; `sandman shift clock --check` exits 1 under fifteen minutes left or at 90 % used, 3 when the file cannot be read or parsed, and 0 when the file is missing (the session then runs until the window cuts it off).
+- `~/.local/state/claude/window.json` — the five-hour window as the harness statusline last saw it; `sandman shift clock --check` exits 1 with under `SANDMAN_SHIFT_MIN_WINDOW_MIN` minutes left or at 90 % used, 3 when the file is unreadable or of the wrong shape, and 0 when the file is missing (the session then runs until the window cuts it off).
 
 ## Knobs
 
@@ -37,6 +37,7 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 - `SANDMAN_SHIFT_BUDGET_USD` — per-shift cost cap the brief states, default `15`.
 - `SANDMAN_SHIFT_SKIP` — colon-separated repo slugs the rotation passes over.
 - `SANDMAN_SHIFT_GRACE_MIN` — minutes past `handoff_by` before a still-working shift is stopped, default `20`.
+- `SANDMAN_SHIFT_MIN_WINDOW_MIN` — the least window a shift may open with, default `60`; `handoff_by` is the reset minus fifteen, so a shift always has at least 45 minutes.
 
 ## Spawn's answers
 
@@ -68,10 +69,15 @@ print(v if isinstance(v, str) and v else "-")
 }
 id=$(field shift); bg=$(field bg_id); due=$(field handoff_by)
 [ "$id" != "-" ] || { echo "current.json names no shift: $(cat "$cur")" >&2; exit 1; }
-ask() {   # one spawn request; prints the answer; exit 1 when spawn answers an error
-  answer=$(printf '%s\n' "$1" | "$sp" run)
+ask() {   # one spawn request; prints the answer; returns 1 when spawn fails, says nothing, or answers an error
+  answer=$(printf '%s\n' "$1" | "$sp" run) || return 1
+  [ -n "$answer" ] || return 1
   printf '%s\n' "$answer"
-  printf '%s' "$answer" | python3 -I -c 'import json,sys; a=json.loads(sys.stdin.readline() or "{}"); sys.exit(1 if "error" in a else 0)'
+  printf '%s' "$answer" | python3 -I -c '
+import json, sys
+a = json.loads(sys.stdin.readline())
+sys.exit(1 if "error" in a or not ("sessions" in a or "id" in a or a.get("ok")) else 0)
+'
 }
 stop_session() {   # stop one bg session; a failed stop is a fault — never release the lock over a running session
   req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"stop","id":sys.argv[1]}))' "$1")
@@ -117,7 +123,8 @@ print(int((datetime.datetime.now(datetime.timezone.utc) - d).total_seconds() // 
 ' "$due")
     if [ "$late" -gt "${SANDMAN_SHIFT_GRACE_MIN:-20}" ]; then
       stop_session "$bg"
-      "$sm" shift handoff --shift "$id" --from-session || "$sm" shift handoff --shift "$id" --abandoned --reason "stopped at $(date -u +%FT%TZ): still $state $late min past handoff_by"
+      # always abandoned-with-reason: a handoff.md the session wrote is kept beneath the Abandoned line
+      "$sm" shift handoff --shift "$id" --abandoned --reason "stopped at $(date -u +%FT%TZ): still $state $late min past handoff_by"
     fi
     ;;
   *)
