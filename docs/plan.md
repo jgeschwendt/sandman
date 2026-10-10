@@ -53,7 +53,7 @@ Sources ──▶ Read ──▶ Judge ──▶ File ──▶ Spike ──▶ 
 - **File** — `sandman breathe file --url … --repo … --title …` writes `breath/<date>-<slug>.md` with provenance, the judge's scores and state `new`; a `breath` trail event.
 - **Spike** — the shift brief carries the breaths filed against its target; a shift spikes at most one and marks it `adopted` or `dropped` with the reason.
 - **Reweight** — adoption raises the source and the query that found it; a month of silence lowers them. The ruach's Sabbath rewrites `sources.toml` and its own prompt from its score.
-- **Runner** — `~/.routines/breathe.md`: hourly, a cheap read-and-judge pass over the feeds' new items; a daily deep pass (`/gigaresearch` in a `--bg` session, cwd `~/.sandman/breath`) at 06:00 local. Both stop at the daily budget.
+- **Runners** — `~/.routines/breathe-skim.md` (hourly at :17, a cheap read-and-judge pass over the due feeds) and `~/.routines/breathe-deep.md` (daily at 10:00 UTC, `/gigaresearch` over every feed), both `--bg` sessions with cwd `~/.sandman/breath`, both exiting on PAUSE and when `breathe pass` says nothing is due or the budget is spent. Their text lives in `docs/routines/` until installed.
 
 ## Repo rotation
 
