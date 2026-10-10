@@ -212,17 +212,31 @@ to a message or for `git commit --trailer`.
   repo it reaches — each checkout under `~/.grove/code/<owner>/<repo>/<branch>/` (repos
   from the grove manifest's `[roots."owner/repo"]` tables and from the tree itself), plus
   `~`, `~/.routines` and the data root — it selects the commits whose `Event:` trailer is
-  in the set, one pass per repository however many worktrees it has. Those reachable
-  from the checkout's `HEAD` are reverted newest-first onto `reconcile/<id>` (reused if
-  it exists, already-reverted commits skipped), in a scratch worktree so no checkout is
-  switched. Each revert commit carries `Shift: reconcile` and `Event: <the reconcile
-  event's id>`. A conflicting revert is aborted and ends that repo's pass. History is
-  never reset or forced.
+  in the set, one pass per repository however many worktrees it has.
+- The base is the repo's **trunk**: the manifest root's `trunk = "…"`, else `main`, else
+  the branch `refs/remotes/origin/HEAD` names, else `HEAD` with a note in the report and
+  the journal — never the `HEAD` of whichever checkout reaches the hits, since a
+  `shift/…` checkout would carry the shift's other commits onto the reconcile branch.
+  A hit trunk does not reach is reported `off trunk` and left alone: its branch is
+  simply never merged.
+- The hits trunk reaches are reverted newest-first onto `reconcile/<id>` — cut from
+  trunk, or reused if it exists and still contains trunk (a reconcile branch trunk has
+  moved past fails that repo: merge trunk in or delete the branch, then rerun);
+  already-reverted commits are skipped. A merge commit is reverted with `-m 1`, against
+  the line it was merged into, and the hits it brought in are reported `in reverted
+  merge` rather than reverted twice. The reverts happen in a scratch worktree, so no
+  checkout is switched, and it is removed with `--force` however the pass ends. The
+  repo's commit hooks are switched off (`core.hooksPath=/dev/null`, `--no-verify`): a
+  revert is the owner's reconcile, not a shift's work, so a repo's hook suite neither
+  blocks nor slows it. Each revert commit carries `Shift: reconcile` and `Event: <the
+  reconcile event's id>`. A conflicting revert is aborted and ends that repo's pass.
+  History is never reset or forced.
 - Reconcile then appends one `reconcile` event — `parent: <id>`, `shift: reconcile`,
   `refs` every reverted commit as `repo@sha`, `rationale` the count and every conflict —
   and lists the memories under `memories/` whose `source:` names a revoked event, for
-  reflect to retire. It modifies no memory. `--dry-run` prints the plan and writes
-  nothing.
+  reflect to retire. It modifies no memory. Every repo is worked before the verdict:
+  reconcile exits 1 when any repo ended in a conflict or a failure, after the report has
+  listed them all. `--dry-run` prints the plan and writes nothing.
 
 `$SANDMAN_GROVE_CODE` moves the grove's code directory (the manifest is read beside it,
 `<code>/../manifest.toml`, and may be absent); `$SANDMAN_RECONCILE_EXTRA`

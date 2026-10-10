@@ -166,11 +166,14 @@ usage: sandman <verb> [args]
       parent chain reaches it are revoked; every commit carrying one of them
       in an Event: trailer — in each checkout under ~/.grove/code
       ($SANDMAN_GROVE_CODE) and in ~, ~/.routines and the data root
-      ($SANDMAN_RECONCILE_EXTRA, colon-separated) — is reverted newest-first
-      on a reconcile/<event-id> branch per repo, in a scratch worktree; a
-      conflict is aborted, reported and ends that repo. Appends one reconcile
-      event and lists the memories whose source: names a revoked event, for
-      reflect to retire. --dry-run prints the plan and changes nothing.
+      ($SANDMAN_RECONCILE_EXTRA, colon-separated) — that the repo's trunk
+      reaches is reverted newest-first (a merge with -m 1) on a
+      reconcile/<event-id> branch cut from trunk, in a scratch worktree, with
+      the repo's hooks off; hits trunk does not reach are reported off trunk.
+      A conflict is aborted, reported and ends that repo. Appends one
+      reconcile event and lists the memories whose source: names a revoked
+      event, for reflect to retire; exits 1 when any repo ended in a conflict
+      or a failure. --dry-run prints the plan and changes nothing.
 
   shift attach --shift ID [--bg-id X] [--session-id S]
   shift brief [--mind M] [--dry-run]
@@ -1359,17 +1362,26 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
     println!("revoked: {}", report.revoked.join(" "));
     for repo in &report.repos {
         println!(
-            "\n{} ({}) on {}",
+            "\n{} ({}) on {} from {}",
             repo.label,
             paths::tildify(&repo.checkout, &home),
-            repo.branch
+            repo.branch,
+            if repo.base.is_empty() {
+                "-"
+            } else {
+                &repo.base
+            }
         );
+        for line in &repo.notes {
+            println!("  note: {line}");
+        }
         for (label, shas) in [
             ("planned", &repo.planned),
             ("reverted", &repo.reverted),
             ("conflict", &repo.conflicts),
             ("already reverted", &repo.already),
-            ("off head", &repo.off_head),
+            ("in reverted merge", &repo.covered),
+            ("off trunk", &repo.off_trunk),
         ] {
             if dry_run && label == "reverted" {
                 continue;
@@ -1404,6 +1416,28 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
             ),
         );
         println!("\nevent: {}", event.id);
+    }
+    for repo in &report.repos {
+        for line in &repo.notes {
+            note(
+                Some(&data_root),
+                "reconcile",
+                &format!("repo={} {line}", repo.label),
+            );
+        }
+    }
+    let troubled: Vec<&str> = report
+        .repos
+        .iter()
+        .filter(|repo| repo.troubled())
+        .map(|repo| repo.label.as_str())
+        .collect();
+    if !troubled.is_empty() {
+        return Err(Error::refused(format!(
+            "reconcile left a conflict or failure in {}",
+            troubled.join(", ")
+        ))
+        .into());
     }
     Ok(())
 }

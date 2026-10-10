@@ -2,17 +2,19 @@
 //!
 //! The revoked set is the event and everything its `parent` chains reach.
 //! Every repo the roots hold is asked for commits whose `Event:` trailer names
-//! one of them; the hits are reverted newest-first on a `reconcile/<event-id>`
-//! branch per repo — new commits, never a reset, never a force. Then one
+//! one of them; the hits its trunk reaches are reverted newest-first — a
+//! merge against its first parent — on a `reconcile/<event-id>` branch cut
+//! from that trunk, one per repo: new commits, never a reset, never a force,
+//! never the repo's commit hooks. Then one
 //! `reconcile` event goes on the trail, and the memories whose `source:` names
 //! a revoked event are listed for reflect to retire; reconcile itself never
 //! touches a bank.
 //!
 //! The reverts happen in a temporary linked worktree on the reconcile branch,
 //! so the operator's own checkouts — and whatever is uncommitted in them —
-//! are never switched or touched.
+//! are never switched or touched; it is removed however the pass ends.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,7 +23,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::bank::MEMORIES_DIR_NAME;
 use crate::error::{Error, Result};
-use crate::grove::{self, Checkout, Repo, Roots, git, git_ok};
+use crate::grove::{self, Repo, Roots, git, git_ok};
 use crate::time::Timestamp;
 use crate::verbs::trail::{self, Draft, Event};
 
@@ -36,23 +38,37 @@ static SCRATCH: AtomicU32 = AtomicU32::new(0);
 pub struct RepoReport {
     /// Hits the branch already reverts — a rerun skips them.
     pub already: Vec<String>,
+    /// The trunk ref the branch starts from.
+    pub base: String,
     /// `reconcile/<event-id>`.
     pub branch: String,
-    /// The checkout whose `HEAD` the branch started from.
+    /// The checkout the repo was worked through.
     pub checkout: PathBuf,
     /// The hit whose revert conflicted and was aborted; the repo stops there.
     pub conflicts: Vec<String>,
+    /// Hits a reverted merge brought in: its revert undoes them already.
+    pub covered: Vec<String>,
     /// Why the repo could not be worked at all, when it could not.
     pub failed: Option<String>,
     /// `owner/repo`, or the `~`-folded path.
     pub label: String,
-    /// Hits on no branch the reconcile branch descends from: nothing to
-    /// revert, the branch carrying them is simply left unmerged.
-    pub off_head: Vec<String>,
+    /// What the operator should know, such as a repo with no trunk ref.
+    pub notes: Vec<String>,
+    /// Hits trunk does not reach: nothing to revert, the branch carrying
+    /// them is simply left unmerged.
+    pub off_trunk: Vec<String>,
     /// Hits to revert, newest first — what `--dry-run` reports.
     pub planned: Vec<String>,
     /// Hits reverted, newest first.
     pub reverted: Vec<String>,
+}
+
+impl RepoReport {
+    /// Whether the repo ended in a conflict or a failure.
+    #[must_use]
+    pub fn troubled(&self) -> bool {
+        self.failed.is_some() || !self.conflicts.is_empty()
+    }
 }
 
 /// The whole pass.
@@ -92,9 +108,10 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
         Timestamp::now()?,
     );
     let branch = format!("reconcile/{target}");
+    let trunks = grove::manifest_trunks(&roots.manifest);
     let repos: Vec<RepoReport> = grove::repos_with_hits(roots, &set)
         .iter()
-        .map(|repo| reconcile_repo(repo, &branch, &event.id, dry_run))
+        .map(|repo| reconcile_repo(repo, &trunks, &branch, &event.id, dry_run))
         .collect();
     let memories = memories_naming(data_root, &set);
 
@@ -151,7 +168,18 @@ fn rationale(repos: &[RepoReport]) -> String {
 }
 
 /// Revert one repository's hits, or plan to.
-fn reconcile_repo(repo: &Repo, branch: &str, event_id: &str, dry_run: bool) -> RepoReport {
+///
+/// The branch starts from the repo's trunk, never from whichever checkout's
+/// `HEAD` reaches the hits: a `shift/…` HEAD would carry the shift's other
+/// commits onto the reconcile branch. Hits trunk does not reach are left
+/// alone — their branch is simply never merged.
+fn reconcile_repo(
+    repo: &Repo,
+    trunks: &BTreeMap<String, String>,
+    branch: &str,
+    event_id: &str,
+    dry_run: bool,
+) -> RepoReport {
     let mut report = RepoReport {
         branch: branch.to_owned(),
         label: repo.label.clone(),
@@ -161,36 +189,59 @@ fn reconcile_repo(repo: &Repo, branch: &str, event_id: &str, dry_run: bool) -> R
         report.failed = Some("no checkout".to_owned());
         return report;
     };
+    let dir = &first.path;
+    report.checkout.clone_from(dir);
+    let trunk = trunk_ref(dir, trunks.get(&repo.label).map(String::as_str));
+    if trunk == "HEAD" {
+        report.notes.push(format!(
+            "no trunk ref (manifest trunk, main, origin/HEAD); based on HEAD of {}",
+            dir.display()
+        ));
+    }
+    report.base.clone_from(&trunk);
     let branch_ref = format!("refs/heads/{branch}");
-    let reused = git_ok(
-        &first.path,
-        &["rev-parse", "--verify", "--quiet", &branch_ref],
-    );
-    let (checkout, base) = if reused {
-        (first, branch)
-    } else {
-        (best_checkout(repo), "HEAD")
-    };
-    report.checkout.clone_from(&checkout.path);
+    let reused = git_ok(dir, &["rev-parse", "--verify", "--quiet", &branch_ref]);
+    if reused && !git_ok(dir, &["merge-base", "--is-ancestor", &trunk, &branch_ref]) {
+        report.failed = Some(format!(
+            "{branch} does not contain {trunk}; merge it in or delete the branch, then rerun"
+        ));
+        return report;
+    }
 
-    let history = match git(&checkout.path, &["rev-list", base]) {
+    let history = match git(dir, &["rev-list", &trunk]) {
         Ok(history) => history,
         Err(error) => {
             report.failed = Some(error.to_string());
             return report;
         }
     };
-    let already = reverted_by(&checkout.path, base);
+    let already = reverted_by(dir, if reused { &branch_ref } else { &trunk });
     let hits: BTreeSet<&str> = repo.hits.iter().map(|hit| hit.sha.as_str()).collect();
     let reachable: Vec<&str> = history.lines().filter(|sha| hits.contains(sha)).collect();
     for hit in &repo.hits {
         if !reachable.contains(&hit.sha.as_str()) {
-            report.off_head.push(hit.sha.clone());
+            report.off_trunk.push(hit.sha.clone());
+        }
+    }
+    // A merge's revert (`-m 1`) undoes everything it brought in, so the hits
+    // inside it are not reverted a second time.
+    let mut inside: BTreeSet<String> = BTreeSet::new();
+    for sha in &reachable {
+        if is_merge(dir, sha) {
+            let brought = git(dir, &["rev-list", &format!("{sha}^1..{sha}")]).unwrap_or_default();
+            inside.extend(
+                brought
+                    .lines()
+                    .filter(|inner| inner != sha)
+                    .map(ToOwned::to_owned),
+            );
         }
     }
     for sha in reachable {
         if already.contains(sha) {
             report.already.push(sha.to_owned());
+        } else if inside.contains(sha) {
+            report.covered.push(sha.to_owned());
         } else {
             report.planned.push(sha.to_owned());
         }
@@ -199,26 +250,15 @@ fn reconcile_repo(repo: &Repo, branch: &str, event_id: &str, dry_run: bool) -> R
         return report;
     }
 
-    let scratch = env::temp_dir().join(format!(
-        "sandman-reconcile-{}-{}",
-        process::id(),
-        SCRATCH.fetch_add(1, Ordering::Relaxed)
-    ));
-    let scratch_arg = scratch.to_string_lossy().into_owned();
-    let added = if reused {
-        git(&checkout.path, &["worktree", "add", &scratch_arg, branch])
-    } else {
-        git(
-            &checkout.path,
-            &["worktree", "add", "-b", branch, &scratch_arg, "HEAD"],
-        )
+    let scratch = match Scratch::add(dir, branch, if reused { None } else { Some(&trunk) }) {
+        Ok(scratch) => scratch,
+        Err(error) => {
+            report.failed = Some(error.to_string());
+            return report;
+        }
     };
-    if let Err(error) = added {
-        report.failed = Some(error.to_string());
-        return report;
-    }
     for sha in report.planned.clone() {
-        match revert_one(&scratch, &sha, event_id) {
+        match revert_one(&scratch.path, &sha, event_id) {
             Ok(()) => report.reverted.push(sha),
             Err(Undone::Conflict) => {
                 report.conflicts.push(sha);
@@ -230,27 +270,103 @@ fn reconcile_repo(repo: &Repo, branch: &str, event_id: &str, dry_run: bool) -> R
             }
         }
     }
-    if let Err(error) = git(&checkout.path, &["worktree", "remove", &scratch_arg]) {
+    if let Err(error) = scratch.remove() {
         report.failed.get_or_insert_with(|| error.to_string());
     }
     report
 }
 
-/// The checkout whose `HEAD` reaches the most hits; the first on a tie.
-fn best_checkout(repo: &Repo) -> &Checkout {
-    let hits: BTreeSet<&str> = repo.hits.iter().map(|hit| hit.sha.as_str()).collect();
-    let mut best = &repo.checkouts[0];
-    let mut most = None;
-    for checkout in &repo.checkouts {
-        let reached = git(&checkout.path, &["rev-list", "HEAD"])
-            .map(|history| history.lines().filter(|sha| hits.contains(sha)).count())
-            .unwrap_or(0);
-        if most.is_none_or(|most| reached > most) {
-            most = Some(reached);
-            best = checkout;
+/// The ref a repo's reconcile branch starts from: the manifest's `trunk`,
+/// else `main`, else what `origin/HEAD` names, else `HEAD`.
+fn trunk_ref(dir: &Path, manifest: Option<&str>) -> String {
+    let verified = |name: &str| git_ok(dir, &["rev-parse", "--verify", "--quiet", name]);
+    if let Some(trunk) = manifest.map(|trunk| format!("refs/heads/{trunk}"))
+        && verified(&trunk)
+    {
+        return trunk;
+    }
+    if verified("refs/heads/main") {
+        return "refs/heads/main".to_owned();
+    }
+    if let Ok(origin) = git(
+        dir,
+        &["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+    ) {
+        let origin = origin.trim();
+        if !origin.is_empty() && verified(origin) {
+            return origin.to_owned();
         }
     }
-    best
+    "HEAD".to_owned()
+}
+
+/// Whether `sha` has more than one parent.
+fn is_merge(dir: &Path, sha: &str) -> bool {
+    git(dir, &["rev-list", "--parents", "-n", "1", sha])
+        .is_ok_and(|line| line.split_whitespace().count() > 2)
+}
+
+/// `git` with the repository's hooks switched off. A revert is the owner's
+/// reconcile, not a shift's work: a repo's pre-commit suite must neither
+/// block nor slow it, and `worktree add` must not run a post-checkout hook.
+fn hookless(dir: &Path, args: &[&str]) -> Result<String> {
+    let mut full = vec!["-c", "core.hooksPath=/dev/null"];
+    full.extend_from_slice(args);
+    git(dir, &full)
+}
+
+/// A temporary linked worktree on the reconcile branch, removed with
+/// `--force` however the pass ends — an early return or a panic included —
+/// so a rerun never finds the branch checked out somewhere stale.
+struct Scratch {
+    /// The checkout it was added from.
+    checkout: PathBuf,
+    /// Its working tree.
+    path: PathBuf,
+    /// Whether it still has to be removed.
+    live: bool,
+}
+
+impl Scratch {
+    /// Add it on `branch` — created at `start` when given, else reused.
+    fn add(checkout: &Path, branch: &str, start: Option<&str>) -> Result<Self> {
+        let path = env::temp_dir().join(format!(
+            "sandman-reconcile-{}-{}",
+            process::id(),
+            SCRATCH.fetch_add(1, Ordering::Relaxed)
+        ));
+        let arg = path.to_string_lossy().into_owned();
+        let mut args = vec!["worktree", "add", "--quiet"];
+        match start {
+            Some(start) => args.extend(["-b", branch, &arg, start]),
+            None => args.extend([arg.as_str(), branch]),
+        }
+        let scratch = Self {
+            checkout: checkout.to_path_buf(),
+            path,
+            live: true,
+        };
+        hookless(checkout, &args)?;
+        Ok(scratch)
+    }
+
+    /// Remove it now, reporting a failure.
+    fn remove(mut self) -> Result<()> {
+        self.live = false;
+        let arg = self.path.to_string_lossy().into_owned();
+        hookless(&self.checkout, &["worktree", "remove", "--force", &arg]).map(drop)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if self.live {
+            let arg = self.path.to_string_lossy().into_owned();
+            let _ = hookless(&self.checkout, &["worktree", "remove", "--force", &arg]);
+            let _ = fs::remove_dir_all(&self.path);
+            let _ = git(&self.checkout, &["worktree", "prune"]);
+        }
+    }
 }
 
 /// The shas `base`'s history already reverts, read off the
@@ -277,11 +393,17 @@ enum Undone {
     Failed(Error),
 }
 
-/// Revert `sha` in the scratch worktree as one commit carrying the trailers.
+/// Revert `sha` in the scratch worktree as one commit carrying the trailers;
+/// a merge against its first parent, the line it was merged into.
 fn revert_one(scratch: &Path, sha: &str, event_id: &str) -> std::result::Result<(), Undone> {
     let subject = git(scratch, &["log", "-1", "--format=%s", sha]).map_err(Undone::Failed)?;
-    if git(scratch, &["revert", "--no-commit", sha]).is_err() {
-        git(scratch, &["revert", "--abort"]).map_err(Undone::Failed)?;
+    let mut args = vec!["revert", "--no-commit"];
+    if is_merge(scratch, sha) {
+        args.extend(["-m", "1"]);
+    }
+    args.push(sha);
+    if hookless(scratch, &args).is_err() {
+        hookless(scratch, &["revert", "--abort"]).map_err(Undone::Failed)?;
         return Err(Undone::Conflict);
     }
     let message = format!(
@@ -289,7 +411,11 @@ fn revert_one(scratch: &Path, sha: &str, event_id: &str) -> std::result::Result<
         subject.trim(),
         trail::trailers(SHIFT, event_id)
     );
-    git(scratch, &["commit", "--quiet", "-m", &message]).map_err(Undone::Failed)?;
+    hookless(
+        scratch,
+        &["commit", "--no-verify", "--quiet", "-m", &message],
+    )
+    .map_err(Undone::Failed)?;
     Ok(())
 }
 
