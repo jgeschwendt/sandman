@@ -36,8 +36,13 @@ use crate::verbs::trail;
 
 /// The composed brief's hard ceiling.
 pub const BRIEF_CHARS: usize = 24_000;
-/// How long `--check` insists the window still has.
-const CHECK_MARGIN_SECONDS: i64 = 15 * 60;
+/// How long before the window resets a shift must hand off.
+const HANDOFF_MARGIN_SECONDS: i64 = 15 * 60;
+/// `$SANDMAN_SHIFT_MIN_WINDOW_MIN`'s default: how many minutes `--check`
+/// insists the window still has, so a shift always has 45 of work.
+pub const DEFAULT_MIN_WINDOW_MINUTES: i64 = 60;
+/// The furthest ahead a five-hour window's reset can sanely be.
+const MAX_REMAINING_SECONDS: i64 = 6 * 3600;
 /// `--check` refuses at or above this share of the window used.
 const CHECK_USED_PERCENT: f64 = 90.0;
 /// The brief's Context slots, each fenced as data under a label naming
@@ -161,6 +166,9 @@ pub struct Context {
     pub home: PathBuf,
     /// The instant the verb acts at.
     pub now: Timestamp,
+    /// `$SANDMAN_SHIFT_MIN_WINDOW_MIN` in seconds: the least window
+    /// `clock --check` lets a shift open into.
+    pub min_window_seconds: i64,
     /// The grove owners whose repos rotate; the extras never do.
     pub owners: Vec<String>,
     /// The directory holding `shift.md`.
@@ -278,43 +286,53 @@ pub struct Window {
 }
 
 impl Window {
-    /// Read the window file: `None` when it is absent, an error when it is
-    /// there but unreadable or not a JSON object.
-    pub fn load(path: &Path) -> Result<Option<Self>> {
+    /// Read the window file: `None` when it is absent — the only unknown —
+    /// and an error when it is there but unreadable, not a JSON object, has
+    /// no `five_hour` object holding numeric `resets_at` and
+    /// `used_percentage`, or resets more than six hours after `now`.
+    pub fn load(path: &Path, now: Timestamp) -> Result<Option<Self>> {
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
             Err(source) if source.kind() == ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(Error::io(path, source)),
         };
-        let value = json::parse(&text).map_err(|error| Error::Json {
+        let fault = |message: String| Error::Json {
             path: Some(path.to_path_buf()),
-            message: error.to_string(),
-        })?;
+            message,
+        };
+        let value = json::parse(&text).map_err(|error| fault(error.to_string()))?;
         if value.as_object().is_none() {
-            return Err(Error::Json {
-                path: Some(path.to_path_buf()),
-                message: "not an object".to_owned(),
-            });
+            return Err(fault("not an object".to_owned()));
         }
-        let five = value.get("five_hour");
-        let resets_at = five
-            .and_then(|five| five.get("resets_at"))
-            .and_then(Value::as_number)
-            .filter(|seconds| seconds.is_finite() && *seconds > 0.0);
+        let five = value
+            .get("five_hour")
+            .filter(|five| five.as_object().is_some())
+            .ok_or_else(|| fault("`five_hour` is not an object".to_owned()))?;
+        let number = |key: &str| {
+            five.get(key)
+                .and_then(Value::as_number)
+                .filter(|number| number.is_finite())
+                .ok_or_else(|| fault(format!("`five_hour.{key}` is not a number")))
+        };
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "a unix second count; `as` saturates, and the bound below refuses the absurd"
+        )]
+        let resets_at = number("resets_at")? as i64;
+        let used = number("used_percentage")?;
+        if resets_at <= 0 || resets_at.saturating_sub(now.unix_seconds()) > MAX_REMAINING_SECONDS {
+            return Err(fault(format!(
+                "`five_hour.resets_at` {resets_at} is more than six hours after {}",
+                now.iso8601()
+            )));
+        }
         Ok(Some(Self {
             at: value
                 .get("at")
                 .and_then(Value::as_str)
                 .and_then(Timestamp::parse_iso8601),
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "a unix second count, finite and positive, well inside i64"
-            )]
-            resets_at: resets_at.map(|seconds| Timestamp::from_unix_seconds(seconds as i64)),
-            used: five
-                .and_then(|five| five.get("used_percentage"))
-                .and_then(Value::as_number)
-                .filter(|used| used.is_finite()),
+            resets_at: Some(Timestamp::from_unix_seconds(resets_at)),
+            used: Some(used),
         }))
     }
 }
@@ -377,15 +395,20 @@ impl Clock {
         )
     }
 
-    /// Why a shift must not start now, if it must not: under fifteen minutes
-    /// left, or ninety percent used. An unknown window never refuses — the
-    /// runner's five-hour timeout is the bound then.
+    /// Why a shift must not start now, if it must not: under `floor_seconds`
+    /// left — the reset would cut it short — or ninety percent used. An
+    /// unknown window never refuses: the runner's five-hour timeout is the
+    /// bound then.
     #[must_use]
-    pub fn refusal(&self) -> Option<String> {
+    pub fn refusal(&self, floor_seconds: i64) -> Option<String> {
         if let Some(Some(left)) = self.remaining()
-            && left < CHECK_MARGIN_SECONDS
+            && left < floor_seconds
         {
-            return Some(format!("window: {} left", self.remaining_text()));
+            return Some(format!(
+                "window: {} left, under the {}-minute floor",
+                self.remaining_text(),
+                floor_seconds / 60
+            ));
         }
         if self.remaining() != Some(None)
             && let Some(used) = self.window.and_then(|window| window.used)
@@ -404,7 +427,7 @@ impl Clock {
             Some(Some(left)) => self.now.unix_seconds() + left,
             _ => self.now.unix_seconds() + WINDOW_SECONDS,
         };
-        Timestamp::from_unix_seconds(end - CHECK_MARGIN_SECONDS)
+        Timestamp::from_unix_seconds(end - HANDOFF_MARGIN_SECONDS)
     }
 }
 
@@ -413,7 +436,7 @@ impl Clock {
 pub fn clock(ctx: &Context) -> Clock {
     Clock {
         now: ctx.now,
-        window: Window::load(&ctx.window).ok().flatten(),
+        window: Window::load(&ctx.window, ctx.now).ok().flatten(),
     }
 }
 
@@ -423,7 +446,7 @@ pub fn clock(ctx: &Context) -> Clock {
 pub fn read_clock(ctx: &Context) -> Result<Clock> {
     Ok(Clock {
         now: ctx.now,
-        window: Window::load(&ctx.window)?,
+        window: Window::load(&ctx.window, ctx.now)?,
     })
 }
 
@@ -1610,14 +1633,15 @@ mod tests {
             clock.line(),
             "remaining=4h7m used=5% resets_at=2026-10-10T03:07:00Z stale=false"
         );
-        assert_eq!(clock.refusal(), None);
-        assert!(window(14 * 60, 5.0).refusal().is_some());
-        assert!(window(3600, 90.0).refusal().is_some());
+        assert_eq!(clock.refusal(3600), None);
+        assert!(window(59 * 60, 5.0).refusal(3600).is_some());
+        assert_eq!(window(3600, 5.0).refusal(3600), None);
+        assert!(window(3600, 90.0).refusal(3600).is_some());
         assert_eq!(window(-60, 99.0).remaining_text(), "fresh");
-        assert_eq!(window(-60, 99.0).refusal(), None);
+        assert_eq!(window(-60, 99.0).refusal(3600), None);
         let blind = Clock { now, window: None };
         assert_eq!(blind.line(), "remaining=unknown");
-        assert_eq!(blind.refusal(), None);
+        assert_eq!(blind.refusal(3600), None);
         assert_eq!(blind.handoff_by(), at("2026-10-10T03:45:00Z"));
     }
 

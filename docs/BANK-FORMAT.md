@@ -390,11 +390,19 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   open — unless `--truncate`, which keeps the head and appends a note of how many
   characters went, the whole within the cap. `--abandoned` always truncates: the runner
   recording a dead session has nobody to send back to shorten the file.
-- **`shift clock --check`** exits 0 when a shift may start, 1 when it must not (under
-  fifteen minutes left, or 90 % of the window used), and 3 when the window file is there
-  but cannot be read or parsed — a fault for the runner to report, not a wait. A missing
-  window file is unknown, never a refusal. Plain `shift clock` exits 3 on the same
-  fault; `shift brief` and `shift status` read an unreadable window as unknown.
+- **`shift clock --check`** exits 0 when a shift may start, 1 when it must not — under
+  `$SANDMAN_SHIFT_MIN_WINDOW_MIN` (default 60) minutes left, or 90 % of the window used —
+  and 3 on a fault. `handoff_by` stays fifteen minutes before the reset, so with the
+  default floor **a shift always has at least 45 minutes of work**: one the reset would
+  cut shorter is never opened.
+- **The window file's faults.** Only a missing file is unknown, never a refusal. A file
+  that is there is a fault — exit 3 from plain `shift clock` and from `--check`, for the
+  runner to report rather than wait on — when it cannot be read or parsed, is not a JSON
+  object, has no `five_hour` object, carries a `five_hour.resets_at` or
+  `five_hour.used_percentage` that is missing, `null` or not a number, or resets more
+  than six hours after now (a five-hour window cannot; a days-ahead or millisecond
+  `resets_at` is a writer's bug). `shift brief` and `shift status` read a faulty window
+  as unknown.
 
 ### breath/problems.md
 

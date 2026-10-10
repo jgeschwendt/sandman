@@ -206,9 +206,11 @@ usage: sandman <verb> [args]
       open shift's repo and $SANDMAN_SHIFT_SKIP (colon-separated slugs);
       --shift prints the target a shift was briefed on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
-      ~/.local/state/claude/window.json); --check exits 1 under 15 minutes left
-      or at 90% used, 0 when the file is missing; clock exits 3 when the file
-      is there but cannot be read or parsed. handoff finalizes a shift —
+      ~/.local/state/claude/window.json); --check exits 1 under
+      $SANDMAN_SHIFT_MIN_WINDOW_MIN (default 60) minutes left or at 90% used,
+      0 when the file is missing; clock and --check exit 3 when the file is
+      there but cannot be read, is not a five_hour object with numeric
+      resets_at and used_percentage, or resets more than 6 h ahead. handoff finalizes a shift —
       copies --file in, accepts the handoff.md the session wrote, or records
       --abandoned — appends shift.handoff and releases current.json; a shift
       already handed off exits 1, and so does a handoff over 2,000 characters
@@ -1504,6 +1506,7 @@ fn shift_context() -> Result<shift::Context, Failure> {
     Ok(shift::Context {
         data_root: paths::data_root()?,
         now,
+        min_window_seconds: min_window_minutes()? * 60,
         owners: list("SANDMAN_SHIFT_OWNERS", &["jgeschwendt"]),
         prompts: paths::prompts_dir()?,
         roots: grove_roots()?,
@@ -1512,6 +1515,22 @@ fn shift_context() -> Result<shift::Context, Failure> {
         window: paths::claude_window_file()?,
         home,
     })
+}
+
+/// `$SANDMAN_SHIFT_MIN_WINDOW_MIN`, else the default: whole minutes, ≥ 0.
+fn min_window_minutes() -> Result<i64, Failure> {
+    match env::var("SANDMAN_SHIFT_MIN_WINDOW_MIN") {
+        Ok(text) if !text.is_empty() => text
+            .parse::<i64>()
+            .ok()
+            .filter(|minutes| (0..=300).contains(minutes))
+            .ok_or_else(|| {
+                Failure::Usage(format!(
+                    "$SANDMAN_SHIFT_MIN_WINDOW_MIN wants minutes 0–300, got `{text}`"
+                ))
+            }),
+        _ => Ok(shift::DEFAULT_MIN_WINDOW_MINUTES),
+    }
 }
 
 /// A shift subcommand's parsed command line: `(flag, value)` pairs and the
@@ -2102,7 +2121,7 @@ fn shift_clock(args: &[String]) -> Result<(), Failure> {
     let clock = shift::read_clock(&ctx).map_err(Failure::Fault)?;
     println!("{}", clock.line());
     if set.iter().any(|switch| switch == "--check")
-        && let Some(refusal) = clock.refusal()
+        && let Some(refusal) = clock.refusal(ctx.min_window_seconds)
     {
         return Err(Error::refused(refusal).into());
     }

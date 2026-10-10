@@ -215,11 +215,39 @@ fn clock_reads_the_window_and_check_gates_on_time_and_usage() {
         "remaining=4h7m used=5% resets_at=2026-10-10T03:07:00Z stale=false"
     );
 
-    window(14 * 60, "5.0");
+    // The floor is an hour, so a shift always has 45 minutes before handoff_by.
+    window(3600, "5.0");
     let output = machine.run(now, &["shift", "clock", "--check"], &[]);
-    assert_eq!(code(&output), 1, "under fifteen minutes refuses");
-    assert!(stdout(&output).starts_with("remaining=0h14m "));
+    assert_eq!(code(&output), 0, "an hour left opens: {}", stderr(&output));
+    window(3599, "5.0");
+    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
+    assert_eq!(code(&output), 1, "under an hour refuses");
+    assert!(stdout(&output).starts_with("remaining=0h59m "));
+    assert!(
+        stderr(&output).contains("60-minute floor"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(code(&machine.run(now, &["shift", "clock"], &[])), 0);
+    let lowered = [("SANDMAN_SHIFT_MIN_WINDOW_MIN", "30")];
+    assert_eq!(
+        code(&machine.run(now, &["shift", "clock", "--check"], &lowered)),
+        0,
+        "the floor is a knob"
+    );
+    window(29 * 60, "5.0");
+    assert_eq!(
+        code(&machine.run(now, &["shift", "clock", "--check"], &lowered)),
+        1
+    );
+    assert_eq!(
+        code(&machine.run(
+            now,
+            &["shift", "clock", "--check"],
+            &[("SANDMAN_SHIFT_MIN_WINDOW_MIN", "an hour")]
+        )),
+        2
+    );
 
     window(3600, "90");
     assert_eq!(
@@ -1054,4 +1082,80 @@ fn the_clock_exits_3_when_the_window_file_is_unreadable() {
     machine.repo("jgeschwendt/alpha");
     let status = machine.ok(now, &["shift", "status"]);
     assert!(status.contains("clock: remaining=unknown"), "{status}");
+}
+
+#[test]
+fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
+    let machine = Machine::new("clock-shape");
+    let now = "2026-10-09T23:00:00Z";
+    // 1791586800 is the instant `now` names.
+    for (shape, why) in [
+        (r#"{"at":"x"}"#.to_owned(), "five_hour"),
+        (r#"{"five_hour":3}"#.to_owned(), "five_hour"),
+        (r#"{"five_hour":null}"#.to_owned(), "five_hour"),
+        (
+            r#"{"five_hour":{"used_percentage":5}}"#.to_owned(),
+            "resets_at",
+        ),
+        (
+            r#"{"five_hour":{"resets_at":"soon","used_percentage":5}}"#.to_owned(),
+            "resets_at",
+        ),
+        (
+            r#"{"five_hour":{"resets_at":null,"used_percentage":5}}"#.to_owned(),
+            "resets_at",
+        ),
+        (
+            r#"{"five_hour":{"resets_at":1791590400,"used_percentage":null}}"#.to_owned(),
+            "used_percentage",
+        ),
+        (
+            r#"{"five_hour":{"resets_at":1791590400,"used_percentage":"5%"}}"#.to_owned(),
+            "used_percentage",
+        ),
+        // Eight days out, and in milliseconds: absurd for a five-hour window.
+        (
+            format!(
+                r#"{{"five_hour":{{"resets_at":{},"used_percentage":5}}}}"#,
+                1_791_586_800 + 8 * 86_400
+            ),
+            "six hours",
+        ),
+        (
+            r#"{"five_hour":{"resets_at":1791590400000,"used_percentage":5}}"#.to_owned(),
+            "six hours",
+        ),
+        // Just past six hours left.
+        (
+            format!(
+                r#"{{"five_hour":{{"resets_at":{},"used_percentage":5}}}}"#,
+                1_791_586_800 + 6 * 3600 + 1
+            ),
+            "six hours",
+        ),
+    ] {
+        fs::write(machine.window(), &shape).expect("window");
+        for args in [&["shift", "clock"][..], &["shift", "clock", "--check"]] {
+            let output = machine.run(now, args, &[]);
+            assert_eq!(code(&output), 3, "{shape} {args:?}: {}", stderr(&output));
+            assert!(
+                stderr(&output).contains(why),
+                "{shape}: {}",
+                stderr(&output)
+            );
+        }
+    }
+    // Six hours to the second is still a window.
+    fs::write(
+        machine.window(),
+        format!(
+            r#"{{"five_hour":{{"resets_at":{},"used_percentage":5}}}}"#,
+            1_791_586_800 + 6 * 3600
+        ),
+    )
+    .expect("window");
+    assert_eq!(
+        code(&machine.run(now, &["shift", "clock", "--check"], &[])),
+        0
+    );
 }
