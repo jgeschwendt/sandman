@@ -420,6 +420,27 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   days-ahead or millisecond `resets_at` is a writer's bug). `shift brief` and `shift status` read a faulty window
   as unknown.
 
+### The sandbox
+
+Shift and breath sessions run `permission_mode: bypassPermissions` inside Claude Code's
+strict Bash sandbox, under the settings `sandman shift profile [--kind shift|breath]`
+prints — `profiles/session.json`, compiled into the binary, one profile for both kinds
+today (`--kind` is there so they can diverge). Strict means
+`allowUnsandboxedCommands: false`: a command the sandbox refuses fails rather than
+retrying outside it. Writes reach only `~/.grove/code`, `~/.local/state/claude`,
+`~/.routines` and `~/.sandman`; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
+cannot be read; the network reaches only the profile's `allowedDomains`.
+
+- **Git's network commands run outside the sandbox.** `git fetch`, `git pull`, `git push`
+  and `grove sync` are `excludedCommands`, run with the host's own git auth: git over SSH
+  fails inside the macOS sandbox, and a `--bg` session inherits no environment to carry
+  a token in.
+- **Installing a binary stays the owner's act.** `~/.local/bin` is not writable, so a
+  shift builds and tests its binary but never replaces the installed one.
+- **Deny rules and the mod's guards hold in every mode.** `bypassPermissions` skips the
+  prompts, not `permissions.deny` — the profile denies `git checkout --`, `git clean`,
+  `git reset`, `git stash`, force pushes and `pkill -f` — nor the mod's tool-call hooks.
+
 ### breath/problems.md
 
 The ruach's reading list, kept by `shift brief`: one `## <repo> · <yyyy-mm-dd>` section

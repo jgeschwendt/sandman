@@ -200,6 +200,7 @@ usage: sandman <verb> [args]
   shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] |
                 --file PATH) [--truncate]
   shift pick [--path] [--shift ID]
+  shift profile [--kind shift|breath]
   shift status
       The perpetual machine's unit of work, bounded by the five-hour window.
       brief picks the target, fills every {{slot}} of prompts/shift.md
@@ -232,6 +233,8 @@ usage: sandman <verb> [args]
       unless --truncate keeps its head and notes the cut (--abandoned always
       truncates). attach records the session the runner
       started in current.json. status prints current.json and the clock.
+      profile prints the Claude Code settings a shift or breath session runs
+      under (profiles/session.json, compiled in; one profile for both kinds).
       $SANDMAN_NOW (ISO-8601) fixes the instant; $SANDMAN_SHIFT_MIND (default
       opus) and $SANDMAN_SHIFT_BUDGET_USD (default 15) fill the brief.
 
@@ -1501,6 +1504,7 @@ fn shift_verb(args: &[String]) -> Result<(), Failure> {
         "clock" => shift_clock(rest),
         "handoff" => shift_handoff(rest),
         "pick" => shift_pick(rest),
+        "profile" => shift_profile(rest),
         "status" => shift_status(rest),
         other => Err(Failure::Usage(format!(
             "unknown shift subcommand `{other}`"
@@ -2248,6 +2252,20 @@ fn shift_pick(args: &[String]) -> Result<(), Failure> {
     } else {
         println!("{}", target.label);
     }
+    Ok(())
+}
+
+/// `shift profile [--kind shift|breath]`.
+fn shift_profile(args: &[String]) -> Result<(), Failure> {
+    let (values, _) = shift_flags(args, "shift profile", &["--kind"], &[])?;
+    let kind = flag(&values, "--kind").unwrap_or_else(|| "shift".to_owned());
+    let profile = shift::profile(&kind).ok_or_else(|| {
+        Failure::Usage(format!(
+            "shift profile --kind wants one of {}, got `{kind}`",
+            shift::PROFILE_KINDS.join(", ")
+        ))
+    })?;
+    print!("{profile}");
     Ok(())
 }
 

@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git checkout -- *)",
+      "Bash(git clean*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset*)",
+      "Bash(git stash*)",
+      "Bash(pkill -f*)"
+    ]
+  },
+  "sandbox": {
+    "allowUnsandboxedCommands": false,
+    "enabled": true,
+    "excludedCommands": ["git fetch *", "git pull *", "git push *", "grove sync *"],
+    "filesystem": {
+      "allowWrite": ["~/.grove/code", "~/.local/state/claude", "~/.routines", "~/.sandman"],
+      "denyRead": ["~/.aws", "~/.netrc", "~/.npmrc", "~/.ssh", "~/Codes"]
+    },
+    "network": {
+      "allowedDomains": [
+        "127.0.0.1:1701",
+        "127.0.0.1:1703",
+        "127.0.0.1:7777",
+        "api.github.com",
+        "builds.hex.pm",
+        "export.arxiv.org",
+        "github.com",
+        "hacker-news.firebaseio.com",
+        "index.crates.io",
+        "news.ycombinator.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "registry.npmjs.org",
+        "repo.hex.pm",
+        "static.crates.io",
+        "vercel.com",
+        "www.anthropic.com"
+      ]
+    }
+  }
+}

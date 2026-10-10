@@ -60,6 +60,23 @@ const CONTEXT_SOURCES: [(&str, &str); 7] = [
 ];
 /// A handoff's ceiling — `shift handoff` refuses a longer one.
 pub const HANDOFF_CHARS: usize = 2_000;
+
+/// The Claude Code settings a shift or breath session starts under — the
+/// strict Bash sandbox and the deny rules (BANK-FORMAT § shifts, The sandbox).
+/// Compiled in, so a profile change reaches a session only through a rebuilt
+/// binary.
+pub const PROFILE: &str = include_str!("../../profiles/session.json");
+
+/// The session kinds `shift profile --kind` takes. One profile serves both
+/// today; the flag is there so they can diverge without a new verb.
+pub const PROFILE_KINDS: [&str; 2] = ["breath", "shift"];
+
+/// The settings profile for a `kind` session, `None` for a kind there is none
+/// for.
+#[must_use]
+pub fn profile(kind: &str) -> Option<&'static str> {
+    PROFILE_KINDS.contains(&kind).then_some(PROFILE)
+}
 /// What the cap leaves of the previous handoff, at the least.
 const HANDOFF_FLOOR: usize = 1_500;
 /// The order the cap cuts slots in, and how each gives.
@@ -1604,10 +1621,45 @@ pub fn status(ctx: &Context) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Clock, Local, Window, fenced, fill, fnv1a, names, new_york_offset_hours, shift_id,
-        slot_names,
+        Clock, Local, PROFILE, Window, fenced, fill, fnv1a, names, new_york_offset_hours, profile,
+        shift_id, slot_names,
     };
+    use crate::json::{self, Value};
     use crate::time::Timestamp;
+
+    /// Every object's keys, at every depth, in sorted order.
+    fn sorted(value: &Value) -> bool {
+        match value {
+            Value::Object(entries) => {
+                entries.windows(2).all(|pair| pair[0].0 < pair[1].0)
+                    && entries.iter().all(|(_, value)| sorted(value))
+            }
+            Value::Array(items) => items.iter().all(sorted),
+            _ => true,
+        }
+    }
+
+    #[test]
+    fn the_profile_is_json_with_sorted_keys_and_both_kinds_share_it() {
+        let value = json::parse(PROFILE).expect("valid JSON");
+        let Value::Object(entries) = &value else {
+            panic!("an object: {value:?}");
+        };
+        let keys: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(keys, ["permissions", "sandbox"]);
+        assert!(sorted(&value), "keys out of order");
+        let sandbox = value.get("sandbox").expect("sandbox");
+        assert_eq!(sandbox.get("enabled").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            sandbox
+                .get("allowUnsandboxedCommands")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(profile("shift"), Some(PROFILE));
+        assert_eq!(profile("breath"), Some(PROFILE));
+        assert_eq!(profile("dream"), None);
+    }
 
     fn at(text: &str) -> Timestamp {
         Timestamp::parse_iso8601(text).expect("timestamp")

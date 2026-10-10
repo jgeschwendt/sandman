@@ -30,6 +30,7 @@ sandman shift pick              # the rotation's next repo; --path for its trunk
 sandman shift brief             # compose prompts/shift.md into shifts/<id>/brief.md; prints the id
 sandman shift brief --dry-run   # print the brief, write nothing
 sandman shift handoff --shift <id> --from-session   # or --file PATH, or --abandoned; over 2,000 chars needs --truncate
+sandman shift profile           # the Claude Code settings (sandbox, deny rules) a session runs under
 sandman shift status            # the open shift and the clock
 ```
 

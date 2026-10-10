@@ -192,6 +192,32 @@ fn bank_key(dir: &Path) -> String {
 const FRIDAY: &str = "2026-10-16T16:00:00Z";
 
 #[test]
+fn profile_prints_the_session_settings_for_either_kind() {
+    let machine = Machine::new("profile");
+    let now = "2026-10-09T23:00:00Z";
+    let shift = machine.ok(now, &["shift", "profile"]);
+    assert_eq!(shift, include_str!("../profiles/session.json"));
+    let text = shift.trim();
+    assert!(text.starts_with("{\n  \"permissions\": {") && text.ends_with('}'));
+    assert!(text.contains("\n  \"sandbox\": {"), "{text}");
+    assert_eq!(
+        machine.ok(now, &["shift", "profile", "--kind", "shift"]),
+        shift
+    );
+    assert_eq!(
+        machine.ok(now, &["shift", "profile", "--kind", "breath"]),
+        shift
+    );
+    let output = machine.run(now, &["shift", "profile", "--kind", "dream"], &[]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("breath, shift"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn clock_reads_the_window_and_check_gates_on_time_and_usage() {
     let machine = Machine::new("clock");
     let now = "2026-10-09T23:00:00Z";
