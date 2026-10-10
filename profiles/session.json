@@ -1,5 +1,30 @@
 {
   "permissions": {
+    "additionalDirectories": ["~/.grove/code", "~/.routines", "~/.sandman"],
+    "allow": [
+      "Agent",
+      "Bash",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Read",
+      "Skill",
+      "TaskCreate",
+      "TaskList",
+      "TaskUpdate",
+      "WebFetch",
+      "WebSearch",
+      "Write",
+      "mcp__sandman__banks",
+      "mcp__sandman__recall",
+      "mcp__sandman__remember",
+      "mcp__threads__list",
+      "mcp__threads__open",
+      "mcp__threads__reply",
+      "mcp__threads__resolve",
+      "mcp__threads__show",
+      "mcp__threads__wait"
+    ],
     "deny": [
       "Bash(git checkout -- *)",
       "Bash(git clean*)",
