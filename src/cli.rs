@@ -1,8 +1,10 @@
 //! The dispatcher: `sandman <verb> [args]`.
 //!
-//! Hand-rolled parsing, std only. Three exit codes and nothing else — 0 for a
+//! Hand-rolled parsing, std only. Four exit codes and nothing else — 0 for a
 //! verb that ran, 1 for a failure (one line on stderr), 2 for anything the
-//! operator has to fix in the command line itself, unbuilt verbs included.
+//! operator has to fix in the command line itself, unbuilt verbs included, and
+//! 3 for `shift clock` finding its window file there but unreadable — a fault
+//! the runner must tell apart from a refusal.
 //!
 //! This is the only place that resolves the real roots (`crate::paths`); every
 //! verb below it takes them as arguments.
@@ -33,6 +35,8 @@ use crate::version::VERSION;
 const EXIT_ERROR: u8 = 1;
 /// A failure in the command line itself.
 const EXIT_USAGE: u8 = 2;
+/// A clock that cannot read its window file.
+const EXIT_FAULT: u8 = 3;
 
 /// Set by the dream pass on the minds it spawns. A memory-blind run recalls
 /// nothing: extraction and judging must never echo existing memories.
@@ -180,12 +184,15 @@ usage: sandman <verb> [args]
   shift brief [--mind M] [--dry-run]
   shift clock [--check]
   shift handoff --shift ID (--from-session | --abandoned | --file PATH)
+                [--truncate]
   shift pick [--path] [--shift ID]
   shift status
       The perpetual machine's unit of work, bounded by the five-hour window.
       brief picks the target, fills every {{slot}} of prompts/shift.md
       ($SANDMAN_PROMPTS, else the sandman trunk's prompts/) under a
-      24,000-character cap, writes <root>/shifts/<id>/{brief.md,meta.json},
+      24,000-character cap (the Context slots fenced as data, cut in a fixed
+      order, the template's own text never — exit 1 when it still will not
+      fit), writes <root>/shifts/<id>/{brief.md,meta.json},
       takes shifts/current.json, refreshes breath/problems.md, appends a
       shift.start event whose refs fingerprint every slot, and prints the id;
       --dry-run prints the brief and writes nothing. The theme is the
@@ -198,10 +205,13 @@ usage: sandman <verb> [args]
       --shift prints the target a shift was briefed on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
       ~/.local/state/claude/window.json); --check exits 1 under 15 minutes left
-      or at 90% used, 0 when the file is missing. handoff finalizes a shift —
+      or at 90% used, 0 when the file is missing; clock exits 3 when the file
+      is there but cannot be read or parsed. handoff finalizes a shift —
       copies --file in, accepts the handoff.md the session wrote, or records
       --abandoned — appends shift.handoff and releases current.json; a shift
-      already handed off exits 1. attach records the session the runner
+      already handed off exits 1, and so does a handoff over 2,000 characters
+      unless --truncate keeps its head and notes the cut (--abandoned always
+      truncates). attach records the session the runner
       started in current.json. status prints current.json and the clock.
       $SANDMAN_NOW (ISO-8601) fixes the instant; $SANDMAN_SHIFT_MIND (default
       opus) and $SANDMAN_SHIFT_BUDGET_USD (default 15) fill the brief.
@@ -247,6 +257,10 @@ pub fn main() -> ExitCode {
             eprintln!("sandman: {error}");
             ExitCode::from(EXIT_ERROR)
         }
+        Err(Failure::Fault(error)) => {
+            eprintln!("sandman: {error}");
+            ExitCode::from(EXIT_FAULT)
+        }
         Err(Failure::Usage(message)) => {
             eprintln!("sandman: {message}\n\n{USAGE}");
             ExitCode::from(EXIT_USAGE)
@@ -258,6 +272,8 @@ pub fn main() -> ExitCode {
 enum Failure {
     /// The verb ran and failed.
     Error(Error),
+    /// The clock could not read its window file.
+    Fault(Error),
     /// The command line itself is wrong.
     Usage(String),
 }
@@ -2081,7 +2097,7 @@ fn shift_brief(args: &[String]) -> Result<(), Failure> {
 fn shift_clock(args: &[String]) -> Result<(), Failure> {
     let (_, set) = shift_flags(args, "shift clock", &[], &["--check"])?;
     let ctx = shift_context()?;
-    let clock = shift::clock(&ctx);
+    let clock = shift::read_clock(&ctx).map_err(Failure::Fault)?;
     println!("{}", clock.line());
     if set.iter().any(|switch| switch == "--check")
         && let Some(refusal) = clock.refusal()
@@ -2097,7 +2113,7 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
         args,
         "shift handoff",
         &["--file", "--shift"],
-        &["--abandoned", "--from-session"],
+        &["--abandoned", "--from-session", "--truncate"],
     )?;
     let id = flag(&values, "--shift")
         .ok_or_else(|| Failure::Usage("shift handoff needs --shift".to_owned()))?;
@@ -2117,7 +2133,8 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
         }
     };
     let ctx = shift_context()?;
-    match shift::handoff(&ctx, &id, &source) {
+    let truncate = set.iter().any(|switch| switch == "--truncate");
+    match shift::handoff(&ctx, &id, &source, truncate) {
         Ok(event) => {
             note(
                 Some(&ctx.data_root),

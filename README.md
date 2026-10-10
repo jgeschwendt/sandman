@@ -24,11 +24,11 @@ The contract is `docs/BANK-FORMAT.md` § trail.
 time; `~/.routines/shift.md` drives it every five minutes.
 
 ```sh
-sandman shift clock --check     # remaining=3h56m used=6% … — exit 1 under 15 min or at 90 % used
+sandman shift clock --check     # remaining=3h56m used=6% … — exit 1 under 15 min or at 90 % used, 3 on an unreadable window file
 sandman shift pick              # the rotation's next repo; --path for its trunk checkout
 sandman shift brief             # compose prompts/shift.md into shifts/<id>/brief.md; prints the id
 sandman shift brief --dry-run   # print the brief, write nothing
-sandman shift handoff --shift <id> --from-session   # or --file PATH, or --abandoned
+sandman shift handoff --shift <id> --from-session   # or --file PATH, or --abandoned; over 2,000 chars needs --truncate
 sandman shift status            # the open shift and the clock
 ```
 
