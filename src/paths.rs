@@ -229,6 +229,30 @@ pub fn breath_problems(data_root: &Path) -> PathBuf {
     breath_dir(data_root).join("problems.md")
 }
 
+/// `<root>/breath/sources.toml` — the ruach's feeds and their learned state.
+#[must_use]
+pub fn breath_sources(data_root: &Path) -> PathBuf {
+    breath_dir(data_root).join("sources.toml")
+}
+
+/// `<root>/breath/ledger` — `/gigaresearch`'s claim ledger.
+#[must_use]
+pub fn breath_ledger(data_root: &Path) -> PathBuf {
+    breath_dir(data_root).join("ledger")
+}
+
+/// `<root>/breath/passes` — one directory per ruach pass.
+#[must_use]
+pub fn breath_passes(data_root: &Path) -> PathBuf {
+    breath_dir(data_root).join("passes")
+}
+
+/// `<root>/breath/passes/<id>` — a pass's `pass.json` and `prompt.md`.
+#[must_use]
+pub fn breath_pass(data_root: &Path, id: &str) -> PathBuf {
+    breath_passes(data_root).join(id)
+}
+
 /// `<root>/score` — the weekly score pages.
 #[must_use]
 pub fn score_dir(data_root: &Path) -> PathBuf {
@@ -299,9 +323,10 @@ pub fn tildify(path: &Path, home: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        archive_claude_dir, archive_day_dir, breath_problems, claude_jobs_dir, claude_projects_dir,
-        dream_dir, grove_manifest, log_dir, pending_take, pending_takes_dir, recent_dir, run_log,
-        score_dir, shift_current, shift_dir, tildify, trace_dir, trail_day, trail_dir,
+        archive_claude_dir, archive_day_dir, breath_ledger, breath_pass, breath_passes,
+        breath_problems, breath_sources, claude_jobs_dir, claude_projects_dir, dream_dir,
+        grove_manifest, log_dir, pending_take, pending_takes_dir, recent_dir, run_log, score_dir,
+        shift_current, shift_dir, tildify, trace_dir, trail_day, trail_dir,
     };
     use crate::time::Timestamp;
     use std::path::Path;
@@ -328,7 +353,14 @@ mod tests {
             Path::new("/Users/you/.grove/manifest.toml")
         );
         assert_eq!(pending_takes_dir(root), Path::new("/data/pending-takes"));
+        assert_eq!(breath_ledger(root), Path::new("/data/breath/ledger"));
+        assert_eq!(breath_passes(root), Path::new("/data/breath/passes"));
+        assert_eq!(
+            breath_pass(root, "b-20261016T160000Z-skim"),
+            Path::new("/data/breath/passes/b-20261016T160000Z-skim")
+        );
         assert_eq!(breath_problems(root), Path::new("/data/breath/problems.md"));
+        assert_eq!(breath_sources(root), Path::new("/data/breath/sources.toml"));
         assert_eq!(score_dir(root), Path::new("/data/score"));
         assert_eq!(
             shift_dir(root, "s-20261009T2300Z"),

@@ -630,13 +630,17 @@ fn open_threads(ctx: &Context, slug: &str) -> Vec<String> {
         .collect()
 }
 
-/// Breaths filed against `slug` and still `state: new`.
+/// Breaths filed against `slug` and not yet tried — `state: new`, or
+/// `spiked` when the ruach marked one the strongest candidate.
 fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
     front_files(&paths::breath_dir(&ctx.data_root))
         .into_iter()
         .filter(|(_, fields, _)| {
             fields.get("repo").map(String::as_str) == Some(slug)
-                && fields.get("state").map(String::as_str) == Some("new")
+                && matches!(
+                    fields.get("state").map(String::as_str),
+                    Some("new" | "spiked")
+                )
         })
         .map(|(stem, fields, body)| {
             let name = fields
@@ -648,7 +652,12 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
                 .get("url")
                 .map(|url| format!(" · {url}"))
                 .unwrap_or_default();
-            format!("- `{stem}` · {name}{url}")
+            let spiked = if fields.get("state").map(String::as_str) == Some("spiked") {
+                " (spiked)"
+            } else {
+                ""
+            };
+            format!("- `{stem}`{spiked} · {name}{url}")
         })
         .collect()
 }
@@ -759,7 +768,7 @@ pub fn fnv1a(text: &str) -> u32 {
 }
 
 /// The slots a template names, in order of first appearance.
-fn slot_names(template: &str) -> Vec<String> {
+pub(crate) fn slot_names(template: &str) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let mut rest = template;
     while let Some(open) = rest.find("{{") {
@@ -777,7 +786,7 @@ fn slot_names(template: &str) -> Vec<String> {
 }
 
 /// The template with every slot filled.
-fn fill(template: &str, slots: &BTreeMap<&'static str, String>) -> String {
+pub(crate) fn fill(template: &str, slots: &BTreeMap<&'static str, String>) -> String {
     let mut text = template.to_owned();
     for (name, value) in slots {
         text = text.replace(&format!("{{{{{name}}}}}"), value);

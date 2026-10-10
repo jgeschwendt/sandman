@@ -1,0 +1,118 @@
+# The ruach's feeds — the seed `sandman breathe init` copies to
+# ~/.sandman/breath/sources.toml when it is absent. Weight is learned there:
+# adoption raises a source, a month of silence lowers it (`sandman breathe
+# reweight`, which rewrites the file without these comments). Budget is items
+# a pass reads from the source. kind: atom | rss | json | html. bears_on: repo
+# slugs or "*". The schema is docs/BANK-FORMAT.md § breath.
+
+[anthropic-claude-code]
+kind = "atom"
+url = "https://github.com/anthropics/claude-code/releases.atom"
+weight = 1.3
+budget = 10
+bears_on = ["jgeschwendt/bridge", "jgeschwendt/claude", "jgeschwendt/sandman", "jgeschwendt/spawn"]
+
+[anthropic-engineering]
+kind = "rss"
+url = "https://www.anthropic.com/rss.xml"
+weight = 1.0
+budget = 10
+bears_on = ["jgeschwendt/claude", "jgeschwendt/sandman", "jgeschwendt/stele"]
+
+[arxiv-cs-ai]
+kind = "atom"
+url = "https://export.arxiv.org/api/query?search_query=cat:cs.AI+AND+(abs:agent+OR+abs:memory+OR+abs:prompt)&sortBy=submittedDate&sortOrder=descending&max_results=50"
+weight = 1.0
+budget = 50
+bears_on = ["jgeschwendt/claude", "jgeschwendt/sandman", "jgeschwendt/stele"]
+
+[arxiv-cs-se]
+kind = "atom"
+url = "https://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=50"
+weight = 1.0
+budget = 50
+bears_on = ["*"]
+
+[github-trending-elixir]
+kind = "html"
+url = "https://github.com/trending/elixir?since=daily"
+weight = 0.7
+budget = 25
+bears_on = ["jgeschwendt/bifrost", "jgeschwendt/bridge", "jgeschwendt/pty", "jgeschwendt/visor"]
+
+[github-trending-rust]
+kind = "html"
+url = "https://github.com/trending/rust?since=daily"
+weight = 0.7
+budget = 25
+bears_on = ["jgeschwendt/grove", "jgeschwendt/routines", "jgeschwendt/sandman", "jgeschwendt/spawn", "jgeschwendt/stele", "jgeschwendt/threads", "jgeschwendt/voice"]
+
+[github-trending-typescript]
+kind = "html"
+url = "https://github.com/trending/typescript?since=daily"
+weight = 0.7
+budget = 25
+bears_on = ["jgeschwendt/gigantic.dev", "jgeschwendt/jlg.io", "jgeschwendt/typescript", "jgeschwendt/ui"]
+
+[hacker-news-front]
+kind = "json"
+url = "https://hacker-news.firebaseio.com/v0/topstories.json"
+weight = 0.8
+budget = 60
+bears_on = ["*"]
+
+[releases-bun]
+kind = "atom"
+url = "https://github.com/oven-sh/bun/releases.atom"
+weight = 1.0
+budget = 10
+bears_on = ["jgeschwendt/jlg.io", "jgeschwendt/typescript", "jgeschwendt/ui"]
+
+[releases-elixir]
+kind = "atom"
+url = "https://github.com/elixir-lang/elixir/releases.atom"
+weight = 0.9
+budget = 10
+bears_on = ["jgeschwendt/bridge", "jgeschwendt/pty", "jgeschwendt/visor"]
+
+[releases-jdx]
+kind = "atom"
+url = "https://github.com/jdx/mise/releases.atom"
+weight = 1.2
+budget = 10
+bears_on = ["*"]
+
+[releases-mr-boxington]
+kind = "atom"
+url = "https://github.com/jdx/mr-boxington/releases.atom"
+weight = 1.1
+budget = 10
+bears_on = ["*"]
+
+[releases-oxc]
+kind = "atom"
+url = "https://github.com/oxc-project/oxc/releases.atom"
+weight = 1.0
+budget = 10
+bears_on = ["jgeschwendt/claude", "jgeschwendt/jlg.io", "jgeschwendt/typescript", "jgeschwendt/ui"]
+
+[releases-phoenix]
+kind = "atom"
+url = "https://github.com/phoenixframework/phoenix/releases.atom"
+weight = 0.9
+budget = 10
+bears_on = ["jgeschwendt/bridge"]
+
+[releases-tauri]
+kind = "atom"
+url = "https://github.com/tauri-apps/tauri/releases.atom"
+weight = 0.9
+budget = 10
+bears_on = ["jgeschwendt/bifrost"]
+
+[vercel-changelog]
+kind = "rss"
+url = "https://vercel.com/atom"
+weight = 0.8
+budget = 10
+bears_on = ["jgeschwendt/jlg.io", "jgeschwendt/typescript"]

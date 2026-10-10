@@ -4,6 +4,7 @@
 //! roots once (`crate::paths`) and hands them down, which is what lets the
 //! tests drive every verb against a temp directory.
 
+pub mod breathe;
 pub mod dream;
 pub mod forget;
 pub mod mcp;

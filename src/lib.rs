@@ -27,6 +27,7 @@ pub mod paths;
 pub mod project;
 pub mod slug;
 pub mod time;
+pub mod toml;
 pub mod transcript;
 pub mod verbs;
 pub mod version;

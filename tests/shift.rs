@@ -406,7 +406,7 @@ fn brief_fills_every_slot_and_records_the_start() {
     }
     assert!(
         !brief.contains("Dropped idea"),
-        "only new breaths are pending"
+        "only untried breaths are pending"
     );
 
     let meta = machine.read(".sandman/shifts/s-20261016T1600Z/meta.json");

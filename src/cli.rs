@@ -24,7 +24,9 @@ use crate::memory::MemoryType;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
-use crate::verbs::{dream, forget, mcp, recall, reconcile, reflect, remember, shift, take, trail};
+use crate::verbs::{
+    breathe, dream, forget, mcp, recall, reconcile, reflect, remember, shift, take, trail,
+};
 use crate::version::VERSION;
 
 /// A failure that ran a verb badly.
@@ -103,6 +105,38 @@ usage: sandman <verb> [args]
   forget <session-id>
       The privacy ending: destroy every copy — transcript, subagent directory,
       archives, pointer. Never touches a bank.
+
+  breathe init
+  breathe sources [--due] [--kind skim|deep] [--json]
+  breathe file --url U --repo R --title T --problem P --summary S
+               [--source NAME] [--bearing F] [--novelty F] [--spike]
+  breathe list [--repo R] [--state new|spiked|adopted|dropped] [--json]
+  breathe spike|adopt|drop <file> [--reason TEXT]
+  breathe pass --kind skim|deep [--dry-run]
+  breathe attach --id ID [--bg-id X] [--session-id S]
+  breathe close --id ID --read N --filed M --dropped K [--cost USD]
+                [--cursor NAME=VALUE]...
+  breathe reweight [--dry-run]
+      The ruach's store under <root>/breath/; never calls a model or the
+      network. init makes breath/, ledger/ and passes/ and seeds sources.toml.
+      sources lists the feeds; --due (or --kind) only those a pass reads now —
+      a skim those unread for an hour, a deep pass all. file writes
+      breath/<date>-<slug>.md (state new, or spiked with --spike), counts it
+      on its --source and appends a breath event — unless the URL or a title
+      with token Jaccard >= 0.6 matches an existing breath, which then counts
+      seen_again instead. --repo is * or owner/name. spike takes new; adopt
+      takes new|spiked; drop needs --reason; adopt and drop append a breath
+      event ($SANDMAN_SHIFT adds adopted-by:<shift>). pass fills every
+      {{slot}} of prompts/breathe.md, writes passes/<id>/pass.json and
+      passes/<id>/prompt.md, and prints the id; it exits 1 when no source is
+      due or $SANDMAN_BREATH_BUDGET_USD (default 10) is spent today; --dry-run
+      prints the prompt and writes nothing. attach records the pass's
+      session; close records its counters, advances last_read (and each
+      --cursor) on the sources it listed, and appends a breath event.
+      reweight moves each weight +0.1 per breath adopted since the last
+      reweight (cap 2.0) and -0.1 after 30 days of silence (floor 0.2),
+      rewrites sources.toml (comments are not kept) and appends a breath
+      event; --dry-run prints the table only. $SANDMAN_NOW pins the instant.
 
   dream [--now]
       Route the queue: for each undreamed pointer, three minds (sonnet, opus,
@@ -240,6 +274,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
             println!("{USAGE}");
             Ok(())
         }
+        "breathe" => breathe_verb(rest),
         "dream" => dream_verb(rest),
         "forget" => forget_verb(rest),
         "mcp" => mcp_verb(rest),
@@ -1398,11 +1433,7 @@ fn shift_verb(args: &[String]) -> Result<(), Failure> {
 
 /// Everything the shift verbs read from the environment, resolved once.
 fn shift_context() -> Result<shift::Context, Failure> {
-    let now = match env::var("SANDMAN_NOW").ok().filter(|now| !now.is_empty()) {
-        Some(text) => Timestamp::parse_iso8601(&text)
-            .ok_or_else(|| Failure::Usage(format!("$SANDMAN_NOW wants ISO-8601, got `{text}`")))?,
-        None => Timestamp::now()?,
-    };
+    let now = pinned_now()?;
     let list = |name: &str, default: &[&str]| -> Vec<String> {
         env::var(name).map_or_else(
             |_| default.iter().map(|item| (*item).to_owned()).collect(),
@@ -1466,6 +1497,455 @@ fn flag(values: &[(String, String)], flag: &str) -> Option<String> {
         .rev()
         .find(|(name, _)| name == flag)
         .map(|(_, value)| value.clone())
+}
+
+/// `breathe <init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight> …`.
+fn breathe_verb(args: &[String]) -> Result<(), Failure> {
+    let Some(sub) = args.first() else {
+        return Err(Failure::Usage("breathe needs a subcommand".to_owned()));
+    };
+    let rest = &args[1..];
+    if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
+        return help();
+    }
+    match sub.as_str() {
+        "-h" | "--help" => help(),
+        "adopt" => breathe_transition(rest, breathe::Transition::Adopt),
+        "attach" => breathe_attach(rest),
+        "close" => breathe_close(rest),
+        "drop" => breathe_transition(rest, breathe::Transition::Drop),
+        "file" => breathe_file(rest),
+        "init" => breathe_init(rest),
+        "list" => breathe_list(rest),
+        "pass" => breathe_pass(rest),
+        "reweight" => breathe_reweight(rest),
+        "sources" => breathe_sources(rest),
+        "spike" => breathe_transition(rest, breathe::Transition::Spike),
+        other => Err(Failure::Usage(format!(
+            "unknown breathe subcommand `{other}`"
+        ))),
+    }
+}
+
+/// Everything the breathe verbs read from the environment, resolved once.
+fn breathe_context() -> Result<breathe::Context, Failure> {
+    Ok(breathe::Context {
+        data_root: paths::data_root()?,
+        now: pinned_now()?,
+        prompts: paths::prompts_dir()?,
+        shift: env::var("SANDMAN_SHIFT")
+            .ok()
+            .filter(|shift| !shift.is_empty()),
+    })
+}
+
+/// `$SANDMAN_NOW`, else the clock.
+fn pinned_now() -> Result<Timestamp, Failure> {
+    match env::var("SANDMAN_NOW").ok().filter(|now| !now.is_empty()) {
+        Some(text) => Timestamp::parse_iso8601(&text)
+            .ok_or_else(|| Failure::Usage(format!("$SANDMAN_NOW wants ISO-8601, got `{text}`"))),
+        None => Ok(Timestamp::now()?),
+    }
+}
+
+/// A breathe subcommand's parsed command line: `(flag, value)` pairs in
+/// order (a flag may repeat), the switches set, and the positionals.
+struct BreatheArgs {
+    positionals: Vec<String>,
+    switches: Vec<String>,
+    values: Vec<(String, String)>,
+}
+
+impl BreatheArgs {
+    /// Parse `args`: each named flag takes a value, each switch none, and at
+    /// most `positionals` bare arguments are accepted.
+    fn parse(
+        args: &[String],
+        what: &str,
+        flags: &[&str],
+        switches: &[&str],
+        positionals: usize,
+    ) -> Result<Self, Failure> {
+        let mut parsed = Self {
+            positionals: Vec::new(),
+            switches: Vec::new(),
+            values: Vec::new(),
+        };
+        let mut cursor = Cursor::new(args);
+        while let Some(arg) = cursor.next() {
+            if flags.contains(&arg) {
+                parsed.values.push((arg.to_owned(), cursor.value(arg)?));
+            } else if switches.contains(&arg) {
+                parsed.switches.push(arg.to_owned());
+            } else if arg.starts_with("--") {
+                return Err(unknown_option(arg));
+            } else if parsed.positionals.len() < positionals {
+                parsed.positionals.push(arg.to_owned());
+            } else {
+                return Err(Failure::Usage(format!(
+                    "{what} takes {positionals} positional argument(s), got `{arg}`"
+                )));
+            }
+        }
+        Ok(parsed)
+    }
+
+    /// The last value given for `flag`.
+    fn flag(&self, name: &str) -> Option<String> {
+        flag(&self.values, name)
+    }
+
+    /// The value for `flag`, which must be there.
+    fn required(&self, name: &str, what: &str) -> Result<String, Failure> {
+        self.flag(name)
+            .ok_or_else(|| Failure::Usage(format!("{what} needs {name}")))
+    }
+
+    /// Whether `switch` was set.
+    fn set(&self, switch: &str) -> bool {
+        self.switches.iter().any(|set| set == switch)
+    }
+
+    /// `flag` as a number, when given.
+    fn number(&self, name: &str) -> Result<Option<f64>, Failure> {
+        self.flag(name)
+            .map(|text| {
+                text.parse::<f64>()
+                    .ok()
+                    .filter(|number| number.is_finite())
+                    .ok_or_else(|| Failure::Usage(format!("{name} wants a number, got `{text}`")))
+            })
+            .transpose()
+    }
+
+    /// `flag` as a count, which must be there.
+    fn count(&self, name: &str, what: &str) -> Result<u64, Failure> {
+        let text = self.required(name, what)?;
+        text.parse::<u64>()
+            .map_err(|_| Failure::Usage(format!("{name} wants a count, got `{text}`")))
+    }
+}
+
+/// Run a breathe verb, journalling a failure before passing it on.
+fn breathe_journal<T>(
+    ctx: &breathe::Context,
+    what: &str,
+    result: crate::error::Result<T>,
+) -> Result<T, Failure> {
+    result.map_err(|error| {
+        note(
+            Some(&ctx.data_root),
+            "breathe",
+            &format!("{what} error: {error}"),
+        );
+        error.into()
+    })
+}
+
+/// `breathe init`.
+fn breathe_init(args: &[String]) -> Result<(), Failure> {
+    BreatheArgs::parse(args, "breathe init", &[], &[], 0)?;
+    let ctx = breathe_context()?;
+    let made = breathe_journal(&ctx, "init", breathe::init(&ctx.data_root))?;
+    note(
+        Some(&ctx.data_root),
+        "breathe",
+        &format!("init made={}", made.len()),
+    );
+    for path in made {
+        println!("{}", path.display());
+    }
+    Ok(())
+}
+
+/// `breathe sources [--due] [--kind skim|deep] [--json]`.
+fn breathe_sources(args: &[String]) -> Result<(), Failure> {
+    let parsed = BreatheArgs::parse(
+        args,
+        "breathe sources",
+        &["--kind"],
+        &["--due", "--json"],
+        0,
+    )?;
+    let kind = match parsed.flag("--kind") {
+        Some(kind) => breathe::PassKind::parse(&kind)?,
+        None => breathe::PassKind::Skim,
+    };
+    let due = (parsed.set("--due") || parsed.flag("--kind").is_some()).then_some(kind);
+    let ctx = breathe_context()?;
+    let sources = breathe::sources(&ctx, due)?;
+    if parsed.set("--json") {
+        println!("{}", breathe::sources_json(&sources));
+    } else {
+        for source in &sources {
+            println!("{}", source.line());
+        }
+    }
+    Ok(())
+}
+
+/// `breathe file --url U --repo R --title T --problem P --summary S [--source
+/// NAME] [--bearing F] [--novelty F] [--spike]`.
+fn breathe_file(args: &[String]) -> Result<(), Failure> {
+    let what = "breathe file";
+    let parsed = BreatheArgs::parse(
+        args,
+        what,
+        &[
+            "--bearing",
+            "--novelty",
+            "--problem",
+            "--repo",
+            "--source",
+            "--summary",
+            "--title",
+            "--url",
+        ],
+        &["--spike"],
+        0,
+    )?;
+    let filing = breathe::Filing {
+        bearing: parsed.number("--bearing")?,
+        novelty: parsed.number("--novelty")?,
+        problem: parsed.required("--problem", what)?,
+        repo: parsed.required("--repo", what)?,
+        source: parsed.flag("--source"),
+        spike: parsed.set("--spike"),
+        summary: parsed.required("--summary", what)?,
+        title: parsed.required("--title", what)?,
+        url: parsed.required("--url", what)?,
+    };
+    if !breathe::valid_repo(&filing.repo) {
+        return Err(Failure::Usage(format!(
+            "--repo wants `*` or owner/name, got `{}`",
+            filing.repo
+        )));
+    }
+    let ctx = breathe_context()?;
+    match breathe_journal(&ctx, "file", breathe::file(&ctx, &filing))? {
+        breathe::Filed::New(path, event) => {
+            note(
+                Some(&ctx.data_root),
+                "breathe",
+                &format!(
+                    "filed {} repo={} event={}",
+                    path.display(),
+                    filing.repo,
+                    event.id
+                ),
+            );
+            println!("{}", path.display());
+        }
+        breathe::Filed::Seen(path) => {
+            note(
+                Some(&ctx.data_root),
+                "breathe",
+                &format!("seen_again {}", path.display()),
+            );
+            println!("seen_again {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+/// `breathe list [--repo R] [--state S] [--json]`.
+fn breathe_list(args: &[String]) -> Result<(), Failure> {
+    let parsed = BreatheArgs::parse(args, "breathe list", &["--repo", "--state"], &["--json"], 0)?;
+    let ctx = breathe_context()?;
+    let breaths = breathe::list(
+        &ctx.data_root,
+        parsed.flag("--repo").as_deref(),
+        parsed.flag("--state").as_deref(),
+    )?;
+    if parsed.set("--json") {
+        println!("{}", breathe::list_json(&breaths));
+    } else {
+        for breath in &breaths {
+            println!("{}", breath.line());
+        }
+    }
+    Ok(())
+}
+
+/// `breathe spike|adopt|drop <file> [--reason TEXT]`.
+fn breathe_transition(args: &[String], to: breathe::Transition) -> Result<(), Failure> {
+    let what = format!("breathe {}", to.verb());
+    let parsed = BreatheArgs::parse(args, &what, &["--reason"], &[], 1)?;
+    let file = parsed
+        .positionals
+        .first()
+        .cloned()
+        .ok_or_else(|| Failure::Usage(format!("{what} needs a breath file")))?;
+    let reason = parsed.flag("--reason");
+    if to == breathe::Transition::Drop
+        && reason.as_deref().is_none_or(|text| text.trim().is_empty())
+    {
+        return Err(Failure::Usage("breathe drop needs --reason".to_owned()));
+    }
+    let ctx = breathe_context()?;
+    let (breath, event) = breathe_journal(
+        &ctx,
+        to.verb(),
+        breathe::transition(&ctx, &file, to, reason.as_deref()),
+    )?;
+    note(
+        Some(&ctx.data_root),
+        "breathe",
+        &format!(
+            "{} {} event={}",
+            breath.state,
+            breath.file,
+            event.as_ref().map_or(EMPTY, |event| event.id.as_str())
+        ),
+    );
+    println!("{}  {}", breath.state, breath.file);
+    Ok(())
+}
+
+/// `breathe pass --kind skim|deep [--dry-run]`.
+fn breathe_pass(args: &[String]) -> Result<(), Failure> {
+    let parsed = BreatheArgs::parse(args, "breathe pass", &["--kind"], &["--dry-run"], 0)?;
+    let kind = breathe::PassKind::parse(&parsed.required("--kind", "breathe pass")?)?;
+    let budget = env::var("SANDMAN_BREATH_BUDGET_USD")
+        .ok()
+        .filter(|budget| !budget.is_empty());
+    let budget_usd = match budget {
+        None => breathe::DEFAULT_BUDGET_USD,
+        Some(text) => text
+            .parse::<f64>()
+            .ok()
+            .filter(|budget| budget.is_finite() && *budget >= 0.0)
+            .ok_or_else(|| {
+                Failure::Usage(format!(
+                    "$SANDMAN_BREATH_BUDGET_USD wants USD, got `{text}`"
+                ))
+            })?,
+    };
+    let dry_run = parsed.set("--dry-run");
+    let ctx = breathe_context()?;
+    let composed = breathe_journal(&ctx, "pass", breathe::pass(&ctx, kind, budget_usd, dry_run))?;
+    if dry_run {
+        println!("{}", composed.text);
+        return Ok(());
+    }
+    note(
+        Some(&ctx.data_root),
+        "breathe",
+        &format!(
+            "pass {} sources={} chars={}",
+            composed.id,
+            composed.sources.len(),
+            composed.text.chars().count()
+        ),
+    );
+    println!("{}", composed.id);
+    Ok(())
+}
+
+/// `breathe attach --id ID [--bg-id X] [--session-id S]`.
+fn breathe_attach(args: &[String]) -> Result<(), Failure> {
+    let parsed = BreatheArgs::parse(
+        args,
+        "breathe attach",
+        &["--bg-id", "--id", "--session-id"],
+        &[],
+        0,
+    )?;
+    let id = parsed.required("--id", "breathe attach")?;
+    let (bg_id, session_id) = (parsed.flag("--bg-id"), parsed.flag("--session-id"));
+    let ctx = breathe_context()?;
+    breathe_journal(
+        &ctx,
+        "attach",
+        breathe::attach(&ctx, &id, bg_id.as_deref(), session_id.as_deref()),
+    )?;
+    note(
+        Some(&ctx.data_root),
+        "breathe",
+        &format!(
+            "attached pass={id} bg={} session={}",
+            bg_id.as_deref().unwrap_or(EMPTY),
+            session_id.as_deref().unwrap_or(EMPTY)
+        ),
+    );
+    Ok(())
+}
+
+/// `breathe close --id ID --read N --filed M --dropped K [--cost F]
+/// [--cursor NAME=VALUE]…`.
+fn breathe_close(args: &[String]) -> Result<(), Failure> {
+    let what = "breathe close";
+    let parsed = BreatheArgs::parse(
+        args,
+        what,
+        &[
+            "--cost",
+            "--cursor",
+            "--dropped",
+            "--filed",
+            "--id",
+            "--read",
+        ],
+        &[],
+        0,
+    )?;
+    let id = parsed.required("--id", what)?;
+    let cursors = parsed
+        .values
+        .iter()
+        .filter(|(name, _)| name == "--cursor")
+        .map(|(_, value)| {
+            value
+                .split_once('=')
+                .filter(|(name, _)| !name.is_empty())
+                .map(|(name, cursor)| (name.to_owned(), cursor.to_owned()))
+                .ok_or_else(|| Failure::Usage(format!("--cursor wants NAME=VALUE, got `{value}`")))
+        })
+        .collect::<Result<Vec<_>, Failure>>()?;
+    let closing = breathe::Closing {
+        cost_usd: parsed.number("--cost")?,
+        cursors,
+        dropped: parsed.count("--dropped", what)?,
+        filed: parsed.count("--filed", what)?,
+        read: parsed.count("--read", what)?,
+    };
+    let ctx = breathe_context()?;
+    let event = breathe_journal(&ctx, "close", breathe::close(&ctx, &id, &closing))?;
+    note(
+        Some(&ctx.data_root),
+        "breathe",
+        &format!(
+            "closed pass={id} read={} filed={} dropped={} event={}",
+            closing.read, closing.filed, closing.dropped, event.id
+        ),
+    );
+    println!("{}", event.id);
+    Ok(())
+}
+
+/// `breathe reweight [--dry-run]`.
+fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
+    let parsed = BreatheArgs::parse(args, "breathe reweight", &[], &["--dry-run"], 0)?;
+    let ctx = breathe_context()?;
+    let (changes, event) = breathe_journal(
+        &ctx,
+        "reweight",
+        breathe::reweight(&ctx, parsed.set("--dry-run")),
+    )?;
+    if changes.is_empty() {
+        println!("no change");
+    }
+    for change in &changes {
+        println!("{}", change.line());
+    }
+    if let Some(event) = event {
+        note(
+            Some(&ctx.data_root),
+            "breathe",
+            &format!("reweighted changes={} event={}", changes.len(), event.id),
+        );
+    }
+    Ok(())
 }
 
 /// `shift attach --shift ID [--bg-id X] [--session-id S]`.

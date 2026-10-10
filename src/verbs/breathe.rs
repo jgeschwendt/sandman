@@ -1,0 +1,1520 @@
+//! `breathe` — the ruach's store and the pass composer.
+//!
+//! The ruach is the research engine that runs beside the shifts: a Claude
+//! session reads the feeds in `breath/sources.toml` against the problems the
+//! shift engine keeps in `breath/problems.md`, and files what bears on a repo
+//! as a **breath** — `breath/<date>-<slug>.md`, an idea with provenance and a
+//! state (`new`, `spiked`, `adopted`, `dropped`). This module is the store and
+//! the prompt composer only: it never calls a model or the network. `pass`
+//! fills `prompts/breathe.md` for the session the runner starts; `file`,
+//! `spike`, `adopt` and `drop` are what that session and the shifts call;
+//! `close` and `reweight` feed what happened back into the sources.
+//!
+//! Every write holds `.commit.lock` and goes tmp → rename; the `breath` trail
+//! events are appended after the lock is released, through the trail's own
+//! append. The contract is `docs/BANK-FORMAT.md` § breath.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+
+use crate::atomic;
+use crate::error::{Error, Result};
+use crate::json::{self, Value};
+use crate::paths;
+use crate::slug::{slug, truncate_chars};
+use crate::time::Timestamp;
+use crate::toml;
+use crate::verbs::recall;
+use crate::verbs::shift;
+use crate::verbs::trail;
+
+/// The seed `breathe init` copies in when the store has no `sources.toml`.
+pub const SEED: &str = include_str!("../../breath/sources.toml");
+/// `$SANDMAN_BREATH_BUDGET_USD`'s default.
+pub const DEFAULT_BUDGET_USD: f64 = 10.0;
+/// Title-token Jaccard at or above this is the same breath.
+pub const JACCARD_SAME: f64 = 0.6;
+/// The problems slot's ceiling.
+const PROBLEMS_CHARS: usize = 6_000;
+/// A skim reads a source again once its `last_read` is this old.
+const SKIM_SECONDS: i64 = 3_600;
+/// `silent_since` older than this lowers a source.
+const SILENCE_SECONDS: i64 = 30 * 86_400;
+/// What one breath name's slug is cut to.
+const SLUG_CHARS: usize = 60;
+/// How many `-<n>` suffixes a breath name tries.
+const MAX_COLLISIONS: u32 = 1_000;
+/// Adoption raises a weight no higher than this.
+const WEIGHT_CAP: f64 = 2.0;
+/// Silence lowers a weight no lower than this.
+const WEIGHT_FLOOR: f64 = 0.2;
+/// What one adoption, or one month of silence, moves a weight by.
+const WEIGHT_STEP: f64 = 0.1;
+
+/// Every state a breath may be in.
+pub const STATES: [&str; 4] = ["adopted", "dropped", "new", "spiked"];
+
+/// Everything the breathe verbs read, resolved by the caller.
+#[derive(Clone, Debug)]
+pub struct Context {
+    /// The data root.
+    pub data_root: PathBuf,
+    /// The instant the verb acts at.
+    pub now: Timestamp,
+    /// The directory holding `breathe.md`.
+    pub prompts: PathBuf,
+    /// `$SANDMAN_SHIFT` — the shift a transition is made in, if any.
+    pub shift: Option<String>,
+}
+
+// ─── the sources ─────────────────────────────────────────────────────────
+
+/// One feed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Source {
+    /// Breaths from it adopted, ever.
+    pub adopted: u64,
+    /// Repo slugs it bears on, or `*`.
+    pub bears_on: Vec<String>,
+    /// Items a pass reads from it at most.
+    pub budget: u64,
+    /// Where the last pass stopped, in the feed's own terms.
+    pub cursor: Option<String>,
+    /// Breaths filed from it, ever.
+    pub filed: u64,
+    /// `atom` · `rss` · `json` · `html` — how a reader parses it.
+    pub kind: String,
+    /// When a pass last read it.
+    pub last_read: Option<Timestamp>,
+    /// The table name.
+    pub name: String,
+    /// Since when it has gone without an adoption.
+    pub silent_since: Option<Timestamp>,
+    /// The feed.
+    pub url: String,
+    /// Its learned weight.
+    pub weight: f64,
+}
+
+/// The keys a source table may carry, in the order they are written.
+const SOURCE_KEYS: [&str; 10] = [
+    "kind",
+    "url",
+    "weight",
+    "budget",
+    "bears_on",
+    "cursor",
+    "last_read",
+    "filed",
+    "adopted",
+    "silent_since",
+];
+
+impl Source {
+    /// Whether a pass of `kind` reads it at `now`: a deep pass reads every
+    /// source, a skim those unread for an hour.
+    #[must_use]
+    pub fn due(&self, kind: PassKind, now: Timestamp) -> bool {
+        kind == PassKind::Deep
+            || self
+                .last_read
+                .is_none_or(|at| now.unix_seconds() - at.unix_seconds() >= SKIM_SECONDS)
+    }
+
+    /// The `sources --json` object.
+    fn json(&self) -> Value {
+        let text = |value: &Option<String>| value.clone().map_or(Value::Null, Value::string);
+        let at =
+            |value: Option<Timestamp>| value.map_or(Value::Null, |at| Value::string(at.iso8601()));
+        Value::object([
+            ("adopted", count(self.adopted)),
+            (
+                "bears_on",
+                Value::array(self.bears_on.iter().cloned().map(Value::string)),
+            ),
+            ("budget", count(self.budget)),
+            ("cursor", text(&self.cursor)),
+            ("filed", count(self.filed)),
+            ("kind", Value::string(self.kind.clone())),
+            ("last_read", at(self.last_read)),
+            ("name", Value::string(self.name.clone())),
+            ("silent_since", at(self.silent_since)),
+            ("url", Value::string(self.url.clone())),
+            ("weight", Value::Number(self.weight)),
+        ])
+    }
+
+    /// The `sources` line.
+    #[must_use]
+    pub fn line(&self) -> String {
+        format!(
+            "{}  weight={}  budget={}  cursor={}  last_read={}",
+            self.name,
+            weight_text(self.weight),
+            self.budget,
+            self.cursor.as_deref().unwrap_or("-"),
+            self.last_read
+                .map_or_else(|| "never".to_owned(), Timestamp::iso8601)
+        )
+    }
+}
+
+/// A count as a JSON number.
+fn count(value: u64) -> Value {
+    Value::count(usize::try_from(value).unwrap_or(usize::MAX))
+}
+
+/// A weight with at least one decimal.
+fn weight_text(weight: f64) -> String {
+    let text = format!("{weight}");
+    if text.contains('.') {
+        text
+    } else {
+        format!("{text}.0")
+    }
+}
+
+/// `sources.toml`, read.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Sources {
+    /// When `reweight` last ran — the root key `reweighted`.
+    pub reweighted: Option<Timestamp>,
+    /// The feeds, sorted by name.
+    pub sources: Vec<Source>,
+}
+
+impl Sources {
+    /// Read `<root>/breath/sources.toml`.
+    pub fn read(data_root: &Path) -> Result<Self> {
+        let path = paths::breath_sources(data_root);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(source) if source.kind() == ErrorKind::NotFound => {
+                return Err(Error::not_found(
+                    "sources.toml",
+                    format!("{} — run `sandman breathe init`", path.display()),
+                ));
+            }
+            Err(source) => return Err(Error::io(&path, source)),
+        };
+        Self::parse(&text).map_err(|message| {
+            Error::invalid("sources.toml", format!("{}: {message}", path.display()))
+        })
+    }
+
+    /// The flat TOML, checked against the schema.
+    pub fn parse(text: &str) -> std::result::Result<Self, String> {
+        let document = toml::parse(text).map_err(|error| error.to_string())?;
+        let mut reweighted = None;
+        for (key, value) in &document.root {
+            match (key.as_str(), value) {
+                ("reweighted", toml::Value::String(at)) => {
+                    reweighted = Some(instant(at, "reweighted")?);
+                }
+                _ => return Err(format!("unknown root key `{key}`")),
+            }
+        }
+        let mut sources = document
+            .tables
+            .iter()
+            .map(source)
+            .collect::<std::result::Result<Vec<_>, String>>()?;
+        sources.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(Self {
+            reweighted,
+            sources,
+        })
+    }
+
+    /// The TOML document: root key, then the tables alpha-sorted, keys in
+    /// [`SOURCE_KEYS`] order, state keys only when set.
+    #[must_use]
+    pub fn document(&self) -> toml::Document {
+        let mut sources: Vec<&Source> = self.sources.iter().collect();
+        sources.sort_by(|left, right| left.name.cmp(&right.name));
+        let tables = sources
+            .into_iter()
+            .map(|source| {
+                let mut entries = vec![
+                    ("kind", toml::Value::String(source.kind.clone())),
+                    ("url", toml::Value::String(source.url.clone())),
+                    ("weight", toml::Value::Float(source.weight)),
+                    ("budget", toml::Value::Integer(integer(source.budget))),
+                    ("bears_on", toml::Value::Strings(source.bears_on.clone())),
+                ];
+                if let Some(cursor) = &source.cursor {
+                    entries.push(("cursor", toml::Value::String(cursor.clone())));
+                }
+                if let Some(at) = source.last_read {
+                    entries.push(("last_read", toml::Value::String(at.iso8601())));
+                }
+                if source.filed > 0 {
+                    entries.push(("filed", toml::Value::Integer(integer(source.filed))));
+                }
+                if source.adopted > 0 {
+                    entries.push(("adopted", toml::Value::Integer(integer(source.adopted))));
+                }
+                if let Some(at) = source.silent_since {
+                    entries.push(("silent_since", toml::Value::String(at.iso8601())));
+                }
+                toml::Table {
+                    entries: entries
+                        .into_iter()
+                        .map(|(key, value)| (key.to_owned(), value))
+                        .collect(),
+                    name: source.name.clone(),
+                }
+            })
+            .collect();
+        toml::Document {
+            root: self
+                .reweighted
+                .map(|at| ("reweighted".to_owned(), toml::Value::String(at.iso8601())))
+                .into_iter()
+                .collect(),
+            tables,
+        }
+    }
+
+    /// The file as `write` puts it on disk.
+    #[must_use]
+    pub fn render(&self) -> String {
+        format!(
+            "# The ruach's feeds — rewritten by `sandman breathe`; the schema is docs/BANK-FORMAT.md § breath.\n\n{}",
+            self.document().render()
+        )
+    }
+
+    /// Replace `sources.toml`. The caller holds the lock.
+    fn write(&self, data_root: &Path) -> Result<()> {
+        let path = paths::breath_sources(data_root);
+        ensure_parent(&path)?;
+        atomic::write(&path, &self.render())
+    }
+
+    /// The source named `name`.
+    fn get_mut(&mut self, name: &str) -> Option<&mut Source> {
+        self.sources.iter_mut().find(|source| source.name == name)
+    }
+}
+
+/// A count as a TOML integer.
+fn integer(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+/// An ISO-8601 Z instant out of a TOML string.
+fn instant(text: &str, key: &str) -> std::result::Result<Timestamp, String> {
+    Timestamp::parse_iso8601(text).ok_or_else(|| format!("`{key}` wants ISO-8601, got `{text}`"))
+}
+
+/// One `[name]` table as a source.
+fn source(table: &toml::Table) -> std::result::Result<Source, String> {
+    let name = &table.name;
+    if let Some((key, _)) = table
+        .entries
+        .iter()
+        .find(|(key, _)| !SOURCE_KEYS.contains(&key.as_str()))
+    {
+        return Err(format!("[{name}]: unknown key `{key}`"));
+    }
+    let wrong = |key: &str, want: &str| format!("[{name}]: `{key}` wants {want}");
+    let text = |key: &str| -> std::result::Result<Option<String>, String> {
+        table.get(key).map_or(Ok(None), |value| {
+            value
+                .as_str()
+                .map(|text| Some(text.to_owned()))
+                .ok_or_else(|| wrong(key, "a string"))
+        })
+    };
+    let counter = |key: &str| -> std::result::Result<u64, String> {
+        table.get(key).map_or(Ok(0), |value| {
+            value
+                .as_i64()
+                .and_then(|number| u64::try_from(number).ok())
+                .ok_or_else(|| wrong(key, "a non-negative integer"))
+        })
+    };
+    let at = |key: &str| -> std::result::Result<Option<Timestamp>, String> {
+        text(key)?
+            .map(|value| instant(&value, key).map_err(|message| format!("[{name}]: {message}")))
+            .transpose()
+    };
+    let required = |key: &str| format!("[{name}]: `{key}` is required");
+    let weight = table
+        .get("weight")
+        .ok_or_else(|| required("weight"))?
+        .as_f64()
+        .filter(|weight| weight.is_finite() && *weight >= 0.0)
+        .ok_or_else(|| wrong("weight", "a non-negative number"))?;
+    let bears_on = table
+        .get("bears_on")
+        .ok_or_else(|| required("bears_on"))?
+        .as_strings()
+        .ok_or_else(|| wrong("bears_on", "an array of strings"))?
+        .to_vec();
+    if let Some(bad) = bears_on.iter().find(|repo| !valid_repo(repo)) {
+        return Err(format!(
+            "[{name}]: `bears_on` names `{bad}`, not `*` or an owner/name slug"
+        ));
+    }
+    if table.get("budget").is_none() {
+        return Err(required("budget"));
+    }
+    Ok(Source {
+        adopted: counter("adopted")?,
+        bears_on,
+        budget: counter("budget")?,
+        cursor: text("cursor")?,
+        filed: counter("filed")?,
+        kind: text("kind")?.ok_or_else(|| required("kind"))?,
+        last_read: at("last_read")?,
+        name: name.clone(),
+        silent_since: at("silent_since")?,
+        url: text("url")?.ok_or_else(|| required("url"))?,
+        weight,
+    })
+}
+
+/// `*`, or an `owner/name` slug of ASCII letters, digits, `.`, `_`, `-`.
+#[must_use]
+pub fn valid_repo(repo: &str) -> bool {
+    if repo == "*" {
+        return true;
+    }
+    let part = |part: &str| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    };
+    matches!(repo.split_once('/'), Some((owner, name)) if part(owner) && part(name))
+}
+
+/// The sources a pass of `kind` reads now, sorted by name.
+pub fn sources(ctx: &Context, due: Option<PassKind>) -> Result<Vec<Source>> {
+    Ok(Sources::read(&ctx.data_root)?
+        .sources
+        .into_iter()
+        .filter(|source| due.is_none_or(|kind| source.due(kind, ctx.now)))
+        .collect())
+}
+
+/// The `sources --json` array.
+#[must_use]
+pub fn sources_json(sources: &[Source]) -> String {
+    Value::array(sources.iter().map(Source::json)).render()
+}
+
+// ─── init ────────────────────────────────────────────────────────────────
+
+/// Create the store's directories and seed `sources.toml` if absent; the
+/// paths it created.
+pub fn init(data_root: &Path) -> Result<Vec<PathBuf>> {
+    let _lock = trail::acquire(data_root)?;
+    let mut made = Vec::new();
+    for dir in [
+        paths::breath_dir(data_root),
+        paths::breath_ledger(data_root),
+        paths::breath_passes(data_root),
+    ] {
+        if !dir.is_dir() {
+            fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
+            made.push(dir);
+        }
+    }
+    let sources = paths::breath_sources(data_root);
+    if !sources.exists() {
+        atomic::write(&sources, SEED)?;
+        made.push(sources);
+    }
+    Ok(made)
+}
+
+// ─── breaths ─────────────────────────────────────────────────────────────
+
+/// One breath file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Breath {
+    /// 0–1, the judge's "does it bear on the repo".
+    pub bearing: Option<f64>,
+    /// `<date>-<slug>.md`.
+    pub file: String,
+    /// When it was filed, ISO-8601 Z.
+    pub filed: String,
+    /// 0–1, the judge's "is it new to us".
+    pub novelty: Option<f64>,
+    /// The open problem it speaks to.
+    pub problem: String,
+    /// Why it was dropped — `dropped` only.
+    pub reason: Option<String>,
+    /// The repo it bears on, `owner/name` or `*`.
+    pub repo: String,
+    /// How many later filings matched it.
+    pub seen_again: u64,
+    /// The `sources.toml` table it came from.
+    pub source: Option<String>,
+    /// One of [`STATES`].
+    pub state: String,
+    /// The four-line summary — the body.
+    pub summary: String,
+    /// Its title.
+    pub title: String,
+    /// When it last changed, ISO-8601 Z.
+    pub updated: String,
+    /// The primary source.
+    pub url: String,
+}
+
+impl Breath {
+    /// The file's text: frontmatter in the contract's order, then the summary.
+    #[must_use]
+    pub fn render(&self) -> String {
+        let mut lines = vec![
+            "---".to_owned(),
+            format!("title: {}", self.title),
+            format!("url: {}", self.url),
+        ];
+        if let Some(source) = &self.source {
+            lines.push(format!("source: {source}"));
+        }
+        lines.push(format!("repo: {}", self.repo));
+        lines.push(format!("problem: {}", self.problem));
+        lines.push(format!("state: {}", self.state));
+        if let Some(bearing) = self.bearing {
+            lines.push(format!("bearing: {bearing}"));
+        }
+        if let Some(novelty) = self.novelty {
+            lines.push(format!("novelty: {novelty}"));
+        }
+        lines.push(format!("filed: {}", self.filed));
+        lines.push(format!("updated: {}", self.updated));
+        lines.push(format!("seen_again: {}", self.seen_again));
+        if let Some(reason) = &self.reason {
+            lines.push(format!("reason: {reason}"));
+        }
+        lines.push("---".to_owned());
+        format!("{}\n\n{}\n", lines.join("\n"), self.summary.trim_end())
+    }
+
+    /// Read one file back; `None` when it is not a breath.
+    #[must_use]
+    pub fn parse(file: &str, raw: &str) -> Option<Self> {
+        let (front, body) = recall::split_frontmatter(raw);
+        let fields: BTreeMap<&str, &str> = recall::frontmatter_fields(front?).into_iter().collect();
+        let text = |key: &str| fields.get(key).map(|value| (*value).to_owned());
+        let score = |key: &str| fields.get(key).and_then(|value| value.parse::<f64>().ok());
+        Some(Self {
+            bearing: score("bearing"),
+            file: file.to_owned(),
+            filed: text("filed").unwrap_or_default(),
+            novelty: score("novelty"),
+            problem: text("problem").unwrap_or_default(),
+            reason: text("reason"),
+            repo: text("repo")?,
+            seen_again: fields
+                .get("seen_again")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0),
+            source: text("source"),
+            state: text("state")?,
+            summary: body.trim().to_owned(),
+            title: text("title")?,
+            updated: text("updated").unwrap_or_default(),
+            url: text("url")?,
+        })
+    }
+
+    /// The `list` line: `state  repo  file  title`.
+    #[must_use]
+    pub fn line(&self) -> String {
+        format!(
+            "{}  {}  {}  {}",
+            self.state, self.repo, self.file, self.title
+        )
+    }
+
+    /// The `list --json` object.
+    fn json(&self) -> Value {
+        let text = |value: &Option<String>| value.clone().map_or(Value::Null, Value::string);
+        let score = |value: Option<f64>| value.map_or(Value::Null, Value::Number);
+        Value::object([
+            ("bearing", score(self.bearing)),
+            ("file", Value::string(self.file.clone())),
+            ("filed", Value::string(self.filed.clone())),
+            ("novelty", score(self.novelty)),
+            ("problem", Value::string(self.problem.clone())),
+            ("reason", text(&self.reason)),
+            ("repo", Value::string(self.repo.clone())),
+            ("seen_again", count(self.seen_again)),
+            ("source", text(&self.source)),
+            ("state", Value::string(self.state.clone())),
+            ("summary", Value::string(self.summary.clone())),
+            ("title", Value::string(self.title.clone())),
+            ("updated", Value::string(self.updated.clone())),
+            ("url", Value::string(self.url.clone())),
+        ])
+    }
+}
+
+/// Every breath in the store, by file name.
+pub fn breaths(data_root: &Path) -> Result<Vec<Breath>> {
+    let dir = paths::breath_dir(data_root);
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => return Err(Error::io(&dir, source)),
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str().map(ToOwned::to_owned))
+        .filter(|name| is_breath_name(name))
+        .collect();
+    names.sort();
+    let mut found = Vec::new();
+    for name in names {
+        let path = dir.join(&name);
+        let raw = fs::read_to_string(&path).map_err(|source| Error::io(&path, source))?;
+        if let Some(breath) = Breath::parse(&name, &raw) {
+            found.push(breath);
+        }
+    }
+    Ok(found)
+}
+
+/// `yyyy-mm-dd-<slug>.md` — what a breath is named, and `problems.md` is not.
+fn is_breath_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let dated = bytes.len() > 14
+        && bytes[..11].iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 4 | 7 | 10) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+    dated
+        && Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+}
+
+/// The breaths `list` shows.
+pub fn list(data_root: &Path, repo: Option<&str>, state: Option<&str>) -> Result<Vec<Breath>> {
+    if let Some(state) = state
+        && !STATES.contains(&state)
+    {
+        return Err(Error::invalid("state", state.to_owned()));
+    }
+    Ok(breaths(data_root)?
+        .into_iter()
+        .filter(|breath| repo.is_none_or(|repo| breath.repo == repo))
+        .filter(|breath| state.is_none_or(|state| breath.state == state))
+        .collect())
+}
+
+/// The `list --json` array.
+#[must_use]
+pub fn list_json(breaths: &[Breath]) -> String {
+    Value::array(breaths.iter().map(Breath::json)).render()
+}
+
+/// Lowercase alphanumeric runs.
+fn tokens(title: &str) -> BTreeSet<String> {
+    title
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// `|A ∩ B| / |A ∪ B|` over title tokens; 0 when both are empty.
+#[must_use]
+pub fn jaccard(left: &str, right: &str) -> f64 {
+    let (left, right) = (tokens(left), tokens(right));
+    let union = left.union(&right).count();
+    if union == 0 {
+        return 0.0;
+    }
+    #[allow(clippy::cast_precision_loss, reason = "title token counts are tiny")]
+    let share = left.intersection(&right).count() as f64 / union as f64;
+    share
+}
+
+/// A URL compared for sameness: trimmed, one trailing `/` dropped.
+fn same_url(left: &str, right: &str) -> bool {
+    let norm = |url: &str| url.trim().trim_end_matches('/').to_owned();
+    norm(left) == norm(right)
+}
+
+/// What `file` was handed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Filing {
+    /// 0–1.
+    pub bearing: Option<f64>,
+    /// 0–1.
+    pub novelty: Option<f64>,
+    /// The open problem it speaks to.
+    pub problem: String,
+    /// `owner/name` or `*`.
+    pub repo: String,
+    /// The `sources.toml` table it came from.
+    pub source: Option<String>,
+    /// File it `spiked` rather than `new`.
+    pub spike: bool,
+    /// The four-line summary.
+    pub summary: String,
+    /// Its title.
+    pub title: String,
+    /// The primary source.
+    pub url: String,
+}
+
+/// What `file` did.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Filed {
+    /// A new breath at this path, and its trail event.
+    New(PathBuf, Box<trail::Event>),
+    /// An existing breath matched; its `seen_again` went up.
+    Seen(PathBuf),
+}
+
+/// One line, newlines folded — frontmatter values are single-line.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A judge score in 0–1.
+fn unit(what: &'static str, value: Option<f64>) -> Result<Option<f64>> {
+    match value {
+        Some(score) if !(0.0..=1.0).contains(&score) => {
+            Err(Error::invalid(what, score.to_string()))
+        }
+        other => Ok(other),
+    }
+}
+
+/// File a breath, or count it seen again: dedupe by URL, then by title-token
+/// Jaccard ≥ 0.6, against every breath in the store.
+pub fn file(ctx: &Context, filing: &Filing) -> Result<Filed> {
+    let title = one_line(&filing.title);
+    let url = one_line(&filing.url);
+    let problem = one_line(&filing.problem);
+    for (what, value) in [("title", &title), ("url", &url), ("problem", &problem)] {
+        if value.is_empty() {
+            return Err(Error::invalid(what, "empty"));
+        }
+    }
+    if filing.summary.trim().is_empty() {
+        return Err(Error::invalid("summary", "empty"));
+    }
+    if !valid_repo(&filing.repo) {
+        return Err(Error::invalid("repo", filing.repo.clone()));
+    }
+    let bearing = unit("bearing", filing.bearing)?;
+    let novelty = unit("novelty", filing.novelty)?;
+    let dir = paths::breath_dir(&ctx.data_root);
+    let now = ctx.now.iso8601();
+    let (path, name) = {
+        let _lock = trail::acquire(&ctx.data_root)?;
+        let existing = breaths(&ctx.data_root)?;
+        let matched = existing
+            .iter()
+            .find(|breath| same_url(&breath.url, &url))
+            .or_else(|| {
+                existing
+                    .iter()
+                    .find(|breath| jaccard(&breath.title, &title) >= JACCARD_SAME)
+            });
+        if let Some(matched) = matched {
+            let mut breath = matched.clone();
+            breath.seen_again += 1;
+            breath.updated.clone_from(&now);
+            let path = dir.join(&breath.file);
+            atomic::write(&path, &breath.render())?;
+            return Ok(Filed::Seen(path));
+        }
+        let mut sources = match &filing.source {
+            Some(name) => {
+                let mut sources = Sources::read(&ctx.data_root)?;
+                let source = sources
+                    .get_mut(name)
+                    .ok_or_else(|| Error::not_found("source", name.clone()))?;
+                source.filed += 1;
+                Some(sources)
+            }
+            None => None,
+        };
+        let (year, month, day, ..) = ctx.now.parts();
+        let cut = slug(&title).replace('_', "-");
+        let cut = truncate_chars(&cut, SLUG_CHARS).trim_end_matches('-');
+        let stem = format!(
+            "{year:04}-{month:02}-{day:02}-{}",
+            if cut.is_empty() { "breath" } else { cut }
+        );
+        let taken: BTreeSet<&str> = existing.iter().map(|breath| breath.file.as_str()).collect();
+        let name = (1..=MAX_COLLISIONS)
+            .map(|nth| {
+                if nth == 1 {
+                    format!("{stem}.md")
+                } else {
+                    format!("{stem}-{nth}.md")
+                }
+            })
+            .find(|name| !taken.contains(name.as_str()) && !dir.join(name).exists())
+            .ok_or_else(|| Error::TooManyCollisions {
+                filename: format!("{stem}.md"),
+            })?;
+        let breath = Breath {
+            bearing,
+            file: name.clone(),
+            filed: now.clone(),
+            novelty,
+            problem,
+            reason: None,
+            repo: filing.repo.clone(),
+            seen_again: 0,
+            source: filing.source.clone(),
+            state: if filing.spike { "spiked" } else { "new" }.to_owned(),
+            summary: filing.summary.trim().to_owned(),
+            title: title.clone(),
+            updated: now.clone(),
+            url: url.clone(),
+        };
+        fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
+        let path = dir.join(&name);
+        atomic::write(&path, &breath.render())?;
+        if let Some(sources) = sources.as_mut() {
+            sources.write(&ctx.data_root)?;
+        }
+        (path, name)
+    };
+    let event = trail::append(
+        &ctx.data_root,
+        trail::Draft {
+            kind: "breath".to_owned(),
+            rationale: Some(format!("filed: {title}")),
+            refs: vec![format!("url:{url}"), format!("breath:{name}")],
+            repo: Some(filing.repo.clone()),
+            shift: ctx.shift.clone(),
+            ..trail::Draft::default()
+        },
+    )?;
+    Ok(Filed::New(path, Box::new(event)))
+}
+
+/// A state change `spike`, `adopt` or `drop` asks for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Transition {
+    /// `new` or `spiked` → `adopted`.
+    Adopt,
+    /// anything not yet dropped → `dropped`, with a reason.
+    Drop,
+    /// `new` → `spiked`.
+    Spike,
+}
+
+impl Transition {
+    /// The state it lands in.
+    #[must_use]
+    pub fn state(self) -> &'static str {
+        match self {
+            Self::Adopt => "adopted",
+            Self::Drop => "dropped",
+            Self::Spike => "spiked",
+        }
+    }
+
+    /// The subcommand's name.
+    #[must_use]
+    pub fn verb(self) -> &'static str {
+        match self {
+            Self::Adopt => "adopt",
+            Self::Drop => "drop",
+            Self::Spike => "spike",
+        }
+    }
+
+    /// The states it may leave.
+    fn from(self) -> &'static [&'static str] {
+        match self {
+            Self::Adopt => &["new", "spiked"],
+            Self::Drop => &["adopted", "new", "spiked"],
+            Self::Spike => &["new"],
+        }
+    }
+}
+
+/// `file` as a breath name: a path or a bare name, `.md` optional.
+fn breath_name(file: &str) -> Result<String> {
+    let name = Path::new(file)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| Error::invalid("breath", file.to_owned()))?;
+    let name = if Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    {
+        name.to_owned()
+    } else {
+        format!("{name}.md")
+    };
+    if is_breath_name(&name) {
+        Ok(name)
+    } else {
+        Err(Error::invalid("breath", file.to_owned()))
+    }
+}
+
+/// Move a breath along; `adopt` and `drop` also touch its source and append a
+/// `breath` event, which is returned.
+pub fn transition(
+    ctx: &Context,
+    file: &str,
+    to: Transition,
+    reason: Option<&str>,
+) -> Result<(Breath, Option<trail::Event>)> {
+    let name = breath_name(file)?;
+    let reason = reason.map(one_line).filter(|reason| !reason.is_empty());
+    if to == Transition::Drop && reason.is_none() {
+        return Err(Error::refused("drop needs --reason"));
+    }
+    let breath = {
+        let _lock = trail::acquire(&ctx.data_root)?;
+        let path = paths::breath_dir(&ctx.data_root).join(&name);
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(source) if source.kind() == ErrorKind::NotFound => {
+                return Err(Error::not_found("breath", name));
+            }
+            Err(source) => return Err(Error::io(&path, source)),
+        };
+        let mut breath =
+            Breath::parse(&name, &raw).ok_or_else(|| Error::invalid("breath", name.clone()))?;
+        if !to.from().contains(&breath.state.as_str()) {
+            return Err(Error::refused(format!(
+                "{name} is {}; {} takes only {}",
+                breath.state,
+                to.state(),
+                to.from().join("|")
+            )));
+        }
+        to.state().clone_into(&mut breath.state);
+        breath.updated = ctx.now.iso8601();
+        if to == Transition::Drop {
+            breath.reason.clone_from(&reason);
+        }
+        atomic::write(&path, &breath.render())?;
+        if to != Transition::Spike
+            && let Some(name) = &breath.source
+        {
+            let mut sources = Sources::read(&ctx.data_root)?;
+            if let Some(source) = sources.get_mut(name) {
+                if to == Transition::Adopt {
+                    source.adopted += 1;
+                    source.silent_since = Some(ctx.now);
+                } else if source.silent_since.is_none() {
+                    source.silent_since = Some(ctx.now);
+                }
+                sources.write(&ctx.data_root)?;
+            }
+        }
+        breath
+    };
+    if to == Transition::Spike {
+        return Ok((breath, None));
+    }
+    let mut refs = vec![
+        format!("breath:{}", breath.file),
+        format!("state:{}", to.state()),
+    ];
+    if to == Transition::Adopt
+        && let Some(shift) = &ctx.shift
+    {
+        refs.push(format!("adopted-by:{shift}"));
+    }
+    let rationale = match &reason {
+        Some(reason) => format!("{}: {} — {reason}", to.state(), breath.title),
+        None => format!("{}: {}", to.state(), breath.title),
+    };
+    let event = trail::append(
+        &ctx.data_root,
+        trail::Draft {
+            kind: "breath".to_owned(),
+            rationale: Some(rationale),
+            refs,
+            repo: Some(breath.repo.clone()),
+            shift: ctx.shift.clone(),
+            ..trail::Draft::default()
+        },
+    )?;
+    Ok((breath, Some(event)))
+}
+
+// ─── passes ──────────────────────────────────────────────────────────────
+
+/// A pass's depth.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PassKind {
+    /// The daily `/gigaresearch` pass over every source.
+    Deep,
+    /// The hourly read-and-judge pass over the sources due.
+    Skim,
+}
+
+impl PassKind {
+    /// `skim` or `deep`.
+    pub fn parse(text: &str) -> Result<Self> {
+        match text {
+            "deep" => Ok(Self::Deep),
+            "skim" => Ok(Self::Skim),
+            other => Err(Error::invalid("pass kind", other.to_owned())),
+        }
+    }
+
+    /// Its name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Deep => "deep",
+            Self::Skim => "skim",
+        }
+    }
+
+    /// The `pass.cadence` slot.
+    #[must_use]
+    pub fn cadence(self) -> &'static str {
+        match self {
+            Self::Deep => "daily deep",
+            Self::Skim => "hourly skim",
+        }
+    }
+}
+
+/// `b-<yyyymmddThhmmss>Z-<kind>`.
+#[must_use]
+pub fn pass_id(at: Timestamp, kind: PassKind) -> String {
+    format!("b-{}Z-{}", at.stamp(), kind.name())
+}
+
+/// What `pass` composed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Composed {
+    /// The pass id.
+    pub id: String,
+    /// The sources it lists.
+    pub sources: Vec<String>,
+    /// The prompt.
+    pub text: String,
+}
+
+/// One pass file, read.
+fn read_pass(data_root: &Path, id: &str) -> Result<(PathBuf, Vec<(String, Value)>)> {
+    if id.contains(['/', '\\']) || id.starts_with('.') {
+        return Err(Error::invalid("pass id", id.to_owned()));
+    }
+    let path = paths::breath_pass(data_root, id).join("pass.json");
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(source) if source.kind() == ErrorKind::NotFound => {
+            return Err(Error::not_found("pass", id.to_owned()));
+        }
+        Err(source) => return Err(Error::io(&path, source)),
+    };
+    let value = json::parse(&text).map_err(|error| Error::Json {
+        path: Some(path.clone()),
+        message: error.to_string(),
+    })?;
+    let entries = value
+        .as_object()
+        .map(<[(String, Value)]>::to_vec)
+        .ok_or_else(|| Error::invalid("pass", id.to_owned()))?;
+    Ok((path, entries))
+}
+
+/// Set `key` in a pass object.
+fn set(entries: &mut Vec<(String, Value)>, key: &str, value: Value) {
+    entries.retain(|(name, _)| name != key);
+    entries.push((key.to_owned(), value));
+}
+
+/// Write a pass object, keys alphabetical. The caller holds the lock.
+fn write_pass(path: &Path, mut entries: Vec<(String, Value)>) -> Result<()> {
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    atomic::write(path, &format!("{}\n", Value::Object(entries).render()))
+}
+
+/// `cost_usd` over the passes started on `now`'s UTC day.
+fn spent_today(data_root: &Path, now: Timestamp) -> f64 {
+    let (year, month, day, ..) = now.parts();
+    let today = format!("{year:04}-{month:02}-{day:02}");
+    let Ok(entries) = fs::read_dir(paths::breath_passes(data_root)) else {
+        return 0.0;
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path().join("pass.json"))
+        .filter_map(|path| json::parse(&fs::read_to_string(path).ok()?).ok())
+        .filter(|pass| {
+            pass.get("started")
+                .and_then(Value::as_str)
+                .is_some_and(|started| started.starts_with(&today))
+        })
+        .filter_map(|pass| pass.get("cost_usd").and_then(Value::as_number))
+        .fold(0.0, |total, cost| total + cost)
+}
+
+/// Compose the pass prompt from `prompts/breathe.md`; unless `dry_run`, write
+/// `passes/<id>/pass.json` and `passes/<id>/prompt.md`.
+///
+/// Refuses when the day's budget is spent or no source is due — the runner
+/// then starts no session.
+pub fn pass(ctx: &Context, kind: PassKind, budget_usd: f64, dry_run: bool) -> Result<Composed> {
+    let template_path = ctx.prompts.join("breathe.md");
+    let template = fs::read_to_string(&template_path).map_err(|source| {
+        if source.kind() == ErrorKind::NotFound {
+            Error::not_found("breathe template", template_path.display().to_string())
+        } else {
+            Error::io(&template_path, source)
+        }
+    })?;
+    let id = pass_id(ctx.now, kind);
+    let due: Vec<Source> = sources(ctx, Some(kind))?;
+    if due.is_empty() {
+        return Err(Error::refused(format!(
+            "no source is due for a {} pass",
+            kind.name()
+        )));
+    }
+    let spent = spent_today(&ctx.data_root, ctx.now);
+    if spent >= budget_usd {
+        return Err(Error::refused(format!(
+            "the ruach's budget is spent today: {spent:.2} of {budget_usd} USD"
+        )));
+    }
+    let problems = fs::read_to_string(paths::breath_problems(&ctx.data_root))
+        .ok()
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty())
+        .map_or_else(
+            || "none".to_owned(),
+            |text| {
+                let cut = truncate_chars(&text, PROBLEMS_CHARS);
+                if cut.len() < text.len() {
+                    format!("{cut}\n… cut at {PROBLEMS_CHARS} characters")
+                } else {
+                    text
+                }
+            },
+        );
+    let mut slots: BTreeMap<&'static str, String> = BTreeMap::new();
+    slots.insert("budget.spent", format!("{spent:.2}"));
+    slots.insert("budget.usd", format!("{budget_usd}"));
+    slots.insert("pass.cadence", kind.cadence().to_owned());
+    slots.insert("pass.id", id.clone());
+    slots.insert("pass.kind", kind.name().to_owned());
+    slots.insert("problems", problems);
+    slots.insert(
+        "sources.due",
+        due.iter()
+            .map(|source| {
+                format!(
+                    "- `{}` · {} · cursor {} · budget {}",
+                    source.name,
+                    source.url,
+                    source.cursor.as_deref().unwrap_or("none"),
+                    source.budget
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let unknown: Vec<String> = shift::slot_names(&template)
+        .into_iter()
+        .filter(|name| !slots.contains_key(name.as_str()))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(Error::invalid("breathe template slot", unknown.join(", ")));
+    }
+    let text = shift::fill(&template, &slots);
+    let names: Vec<String> = due.into_iter().map(|source| source.name).collect();
+    if dry_run {
+        return Ok(Composed {
+            id,
+            sources: names,
+            text,
+        });
+    }
+    let _lock = trail::acquire(&ctx.data_root)?;
+    let dir = paths::breath_pass(&ctx.data_root, &id);
+    let path = dir.join("pass.json");
+    if dir.exists() {
+        return Err(Error::refused(format!("pass {id} already exists")));
+    }
+    fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
+    atomic::write(&dir.join("prompt.md"), &text)?;
+    write_pass(
+        &path,
+        vec![
+            ("cost_usd".to_owned(), Value::Null),
+            ("dropped".to_owned(), Value::Null),
+            ("ended".to_owned(), Value::Null),
+            ("filed".to_owned(), Value::Null),
+            ("id".to_owned(), Value::string(id.clone())),
+            ("kind".to_owned(), Value::string(kind.name())),
+            ("read".to_owned(), Value::Null),
+            (
+                "sources".to_owned(),
+                Value::array(names.iter().cloned().map(Value::string)),
+            ),
+            ("started".to_owned(), Value::string(ctx.now.iso8601())),
+        ],
+    )?;
+    Ok(Composed {
+        id,
+        sources: names,
+        text,
+    })
+}
+
+/// Record the session the runner started for pass `id`.
+pub fn attach(
+    ctx: &Context,
+    id: &str,
+    bg_id: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<()> {
+    let _lock = trail::acquire(&ctx.data_root)?;
+    let (path, mut entries) = read_pass(&ctx.data_root, id)?;
+    for (key, value) in [("bg_id", bg_id), ("session_id", session_id)] {
+        if let Some(value) = value {
+            set(&mut entries, key, Value::string(value));
+        }
+    }
+    write_pass(&path, entries)
+}
+
+/// What `close` records.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Closing {
+    /// What the pass cost, US dollars.
+    pub cost_usd: Option<f64>,
+    /// `(source, cursor)` pairs to advance.
+    pub cursors: Vec<(String, String)>,
+    /// Candidates dropped.
+    pub dropped: u64,
+    /// Breaths filed.
+    pub filed: u64,
+    /// Items read.
+    pub read: u64,
+}
+
+/// Close pass `id`: its counters and `ended`, `last_read` (and any cursor) on
+/// the sources it listed, and a `breath` event.
+pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event> {
+    if closing
+        .cost_usd
+        .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+    {
+        return Err(Error::invalid(
+            "cost",
+            closing.cost_usd.unwrap_or_default().to_string(),
+        ));
+    }
+    let kind = {
+        let _lock = trail::acquire(&ctx.data_root)?;
+        let (path, mut entries) = read_pass(&ctx.data_root, id)?;
+        let field = |key: &str| {
+            entries
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        };
+        if let Some(ended) = field("ended").as_ref().and_then(Value::as_str) {
+            return Err(Error::refused(format!("pass {id} closed at {ended}")));
+        }
+        let kind = field("kind")
+            .as_ref()
+            .and_then(Value::as_str)
+            .unwrap_or("skim")
+            .to_owned();
+        let listed: Vec<String> = field("sources")
+            .as_ref()
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect();
+        if let Some((name, _)) = closing
+            .cursors
+            .iter()
+            .find(|(name, _)| !listed.contains(name))
+        {
+            return Err(Error::invalid(
+                "cursor source (not in the pass)",
+                name.clone(),
+            ));
+        }
+        let mut sources = Sources::read(&ctx.data_root)?;
+        for name in &listed {
+            if let Some(source) = sources.get_mut(name) {
+                source.last_read = Some(ctx.now);
+                if let Some((_, cursor)) = closing
+                    .cursors
+                    .iter()
+                    .rev()
+                    .find(|(cursor_of, _)| cursor_of == name)
+                {
+                    source.cursor = Some(cursor.clone());
+                }
+                if source.silent_since.is_none() {
+                    source.silent_since = Some(ctx.now);
+                }
+            }
+        }
+        set(
+            &mut entries,
+            "cost_usd",
+            closing.cost_usd.map_or(Value::Null, Value::Number),
+        );
+        set(&mut entries, "dropped", count(closing.dropped));
+        set(&mut entries, "ended", Value::string(ctx.now.iso8601()));
+        set(&mut entries, "filed", count(closing.filed));
+        set(&mut entries, "read", count(closing.read));
+        write_pass(&path, entries)?;
+        sources.write(&ctx.data_root)?;
+        kind
+    };
+    trail::append(
+        &ctx.data_root,
+        trail::Draft {
+            cost_usd: closing.cost_usd,
+            kind: "breath".to_owned(),
+            rationale: Some(format!(
+                "pass {kind}: read {} filed {} dropped {}",
+                closing.read, closing.filed, closing.dropped
+            )),
+            refs: vec![format!("pass:{id}")],
+            ..trail::Draft::default()
+        },
+    )
+}
+
+// ─── reweight ────────────────────────────────────────────────────────────
+
+/// One source's weight moved.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Change {
+    /// Adoptions counted.
+    pub adopted: u64,
+    /// The source.
+    pub name: String,
+    /// Its weight after.
+    pub new: f64,
+    /// Its weight before.
+    pub old: f64,
+    /// Whether a month of silence lowered it.
+    pub silent: bool,
+}
+
+impl Change {
+    /// The table row.
+    #[must_use]
+    pub fn line(&self) -> String {
+        let mut why = Vec::new();
+        if self.adopted > 0 {
+            why.push(format!("+{} adopted", self.adopted));
+        }
+        if self.silent {
+            why.push("30 days silent".to_owned());
+        }
+        format!(
+            "{}  {} → {}  {}",
+            self.name,
+            weight_text(self.old),
+            weight_text(self.new),
+            why.join(", ")
+        )
+    }
+}
+
+/// Two decimals — weights move in tenths, and float drift must not show.
+fn cents(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+/// Per source: `+0.1` per breath adopted since the last reweight (cap 2.0),
+/// `−0.1` when `silent_since` is over thirty days old (floor 0.2, and the
+/// silence clock restarts). Unless `dry_run`, rewrite `sources.toml` with
+/// `reweighted` stamped and append one `breath` event.
+pub fn reweight(ctx: &Context, dry_run: bool) -> Result<(Vec<Change>, Option<trail::Event>)> {
+    let changes = {
+        let _lock = trail::acquire(&ctx.data_root)?;
+        let mut sources = Sources::read(&ctx.data_root)?;
+        let since = sources.reweighted;
+        let adopted = breaths(&ctx.data_root)?;
+        let mut changes = Vec::new();
+        for source in &mut sources.sources {
+            let count = adopted
+                .iter()
+                .filter(|breath| {
+                    breath.state == "adopted"
+                        && breath.source.as_deref() == Some(source.name.as_str())
+                        && since.is_none_or(|since| {
+                            Timestamp::parse_iso8601(&breath.updated)
+                                .is_some_and(|at| at.unix_seconds() > since.unix_seconds())
+                        })
+                })
+                .count();
+            let count = u64::try_from(count).unwrap_or(u64::MAX);
+            let silent = source
+                .silent_since
+                .is_some_and(|at| ctx.now.unix_seconds() - at.unix_seconds() > SILENCE_SECONDS);
+            let old = source.weight;
+            let mut new = old;
+            if count > 0 {
+                #[allow(clippy::cast_precision_loss, reason = "adoption counts are tiny")]
+                let raise = WEIGHT_STEP * count as f64;
+                new = cents(new + raise).min(WEIGHT_CAP.max(old));
+            }
+            if silent {
+                new = cents(new - WEIGHT_STEP).max(WEIGHT_FLOOR.min(old));
+                source.silent_since = Some(ctx.now);
+            }
+            if (new - old).abs() > f64::EPSILON || silent || count > 0 {
+                source.weight = new;
+                changes.push(Change {
+                    adopted: count,
+                    name: source.name.clone(),
+                    new,
+                    old,
+                    silent,
+                });
+            }
+        }
+        if !dry_run {
+            sources.reweighted = Some(ctx.now);
+            sources.write(&ctx.data_root)?;
+        }
+        changes
+    };
+    if dry_run {
+        return Ok((changes, None));
+    }
+    let moved = changes
+        .iter()
+        .filter(|change| (change.new - change.old).abs() > f64::EPSILON)
+        .count();
+    let event = trail::append(
+        &ctx.data_root,
+        trail::Draft {
+            kind: "breath".to_owned(),
+            rationale: Some(format!("reweight: {moved} source(s) moved")),
+            refs: changes
+                .iter()
+                .map(|change| {
+                    format!(
+                        "weight:{}={}→{}",
+                        change.name,
+                        weight_text(change.old),
+                        weight_text(change.new)
+                    )
+                })
+                .collect(),
+            ..trail::Draft::default()
+        },
+    )?;
+    Ok((changes, Some(event)))
+}
+
+/// Create `path`'s directory.
+fn ensure_parent(path: &Path) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Breath, PassKind, SEED, Sources, is_breath_name, jaccard, pass_id, valid_repo};
+    use crate::time::Timestamp;
+
+    #[test]
+    fn jaccard_counts_shared_title_tokens() {
+        assert!(
+            (jaccard("Fast incremental parsing", "fast INCREMENTAL parsing!") - 1.0).abs() < 1e-9
+        );
+        // {a b c} vs {a b d}: 2 of 4.
+        assert!((jaccard("a b c", "a b d") - 0.5).abs() < 1e-9);
+        // {a b c d} vs {a b c e}: 3 of 5.
+        assert!((jaccard("a b c d", "a-b-c-e") - 0.6).abs() < 1e-9);
+        assert!(jaccard("", "") < f64::EPSILON);
+        assert!(jaccard("one", "two") < f64::EPSILON);
+    }
+
+    #[test]
+    fn repos_are_star_or_owner_slash_name() {
+        for good in ["*", "jgeschwendt/sandman", "jgeschwendt/jlg.io", "a_b/c-d"] {
+            assert!(valid_repo(good), "{good}");
+        }
+        for bad in [
+            "", "sandman", "a/b/c", "/x", "x/", "../x", "a/..", "a b/c", "**",
+        ] {
+            assert!(!valid_repo(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_seed_is_valid_sorted_and_renders_back_to_itself() {
+        let sources = Sources::parse(SEED).expect("seed");
+        assert!(sources.sources.len() >= 10);
+        let names: Vec<&str> = sources
+            .sources
+            .iter()
+            .map(|source| source.name.as_str())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
+        assert_eq!(Sources::parse(&sources.render()).expect("reparse"), sources);
+    }
+
+    #[test]
+    fn breaths_render_and_parse_back() {
+        let breath = Breath {
+            bearing: Some(0.8),
+            file: "2026-10-09-a-thing.md".to_owned(),
+            filed: "2026-10-09T12:00:00Z".to_owned(),
+            novelty: None,
+            problem: "recall over budget".to_owned(),
+            reason: None,
+            repo: "jgeschwendt/sandman".to_owned(),
+            seen_again: 2,
+            source: Some("releases-oxc".to_owned()),
+            state: "new".to_owned(),
+            summary: "one\ntwo\nthree\nfour".to_owned(),
+            title: "A thing: with a colon".to_owned(),
+            updated: "2026-10-09T13:00:00Z".to_owned(),
+            url: "https://example.com/a?b=c".to_owned(),
+        };
+        assert_eq!(Breath::parse(&breath.file, &breath.render()), Some(breath));
+    }
+
+    #[test]
+    fn names_and_ids() {
+        assert!(is_breath_name("2026-10-09-x.md"));
+        assert!(!is_breath_name("problems.md"));
+        assert!(!is_breath_name("2026-10-09.md"));
+        assert!(!is_breath_name("2026-1009-xx.md"));
+        assert_eq!(
+            pass_id(Timestamp::from_unix_seconds(1_791_589_262), PassKind::Skim),
+            "b-20261009T234102Z-skim"
+        );
+    }
+}
