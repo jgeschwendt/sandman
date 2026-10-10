@@ -39,7 +39,8 @@ static SCRATCH: AtomicU32 = AtomicU32::new(0);
 /// What reconcile did in one repository.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RepoReport {
-    /// Hits the branch already reverts — a rerun skips them.
+    /// Hits the branch already reverts, or whose revert changes nothing — a
+    /// rerun skips them.
     pub already: Vec<String>,
     /// The trunk ref the branch starts from.
     pub base: String,
@@ -260,7 +261,8 @@ fn reconcile_repo(
     };
     for sha in report.planned.clone() {
         match revert_one(&scratch.path, &sha, event_id) {
-            Ok(()) => report.reverted.push(sha),
+            Ok(true) => report.reverted.push(sha),
+            Ok(false) => report.already.push(sha),
             Err(Undone::Conflict) => {
                 report.conflicts.push(sha);
                 break;
@@ -271,7 +273,14 @@ fn reconcile_repo(
             }
         }
     }
-    if let Err(error) = scratch.remove() {
+    // a branch this run cut and reverted nothing onto is not left behind
+    let removed = scratch.remove().and_then(|()| {
+        if reused || !report.reverted.is_empty() {
+            return Ok(());
+        }
+        hookless(dir, &["branch", "-D", "--quiet", branch]).map(drop)
+    });
+    if let Err(error) = removed {
         report.failed.get_or_insert_with(|| error.to_string());
     }
     report
@@ -400,12 +409,18 @@ enum Undone {
     Failed(Error),
 }
 
-/// Revert `sha` in the scratch worktree as one commit carrying the trailers.
-fn revert_one(scratch: &Path, sha: &str, event_id: &str) -> std::result::Result<(), Undone> {
+/// Revert `sha` in the scratch worktree as one commit carrying the trailers;
+/// `false`, with nothing committed, when the revert changes nothing — a hand
+/// revert without git's `This reverts commit` line already undid it.
+fn revert_one(scratch: &Path, sha: &str, event_id: &str) -> std::result::Result<bool, Undone> {
     let subject = git(scratch, &["log", "-1", "--format=%s", sha]).map_err(Undone::Failed)?;
     if hookless(scratch, &["revert", "--no-commit", sha]).is_err() {
         hookless(scratch, &["revert", "--abort"]).map_err(Undone::Failed)?;
         return Err(Undone::Conflict);
+    }
+    if git_ok(scratch, &["diff", "--cached", "--quiet"]) {
+        hookless(scratch, &["revert", "--abort"]).map_err(Undone::Failed)?;
+        return Ok(false);
     }
     let message = format!(
         "Revert \"{}\"\n\nThis reverts commit {sha}.\n\n{}",
@@ -417,7 +432,7 @@ fn revert_one(scratch: &Path, sha: &str, event_id: &str) -> std::result::Result<
         &["commit", "--no-verify", "--quiet", "-m", &message],
     )
     .map_err(Undone::Failed)?;
-    Ok(())
+    Ok(true)
 }
 
 /// Every live memory under `<root>/memories` whose `source:` names one of

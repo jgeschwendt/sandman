@@ -483,10 +483,10 @@ fn a_conflicting_revert_is_aborted_and_reported() {
         "{report}"
     );
     assert!(stderr(&output).contains("o/fixture"), "{}", stderr(&output));
-    let branch = format!("reconcile/{first}");
+    // Nothing was reverted, so the branch the pass cut is gone again.
     assert_eq!(
-        git(&checkout, &["rev-parse", &branch]),
-        git(&checkout, &["rev-parse", "HEAD"])
+        git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
+        ""
     );
     assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
     assert_eq!(git(&checkout, &["status", "--porcelain"]), "");
@@ -835,6 +835,28 @@ fn a_manifest_trunk_that_does_not_resolve_fails_the_repo() {
         git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
         ""
     );
+}
+
+#[test]
+fn a_hand_revert_without_gits_line_is_already_reverted() {
+    let machine = Machine::new("hand-revert");
+    let first = machine.append(&["--kind", "change"]);
+    let (checkout, shas) = fixture(&machine, &[("one", &first)]);
+    fs::write(checkout.join("file.txt"), "base\n").expect("undo");
+    commit(&checkout, "Revert \"change 0\"", None);
+
+    let report = machine.ok(&["reconcile", &first]);
+    assert!(
+        report.contains(&format!("already reverted: {}", shas[0])),
+        "{report}"
+    );
+    assert!(!report.contains("  reverted:"), "{report}");
+    assert_eq!(
+        git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
+        ""
+    );
+    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+    assert_eq!(git(&checkout, &["status", "--porcelain"]), "");
 }
 
 #[test]

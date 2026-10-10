@@ -244,14 +244,16 @@ to a message or for `git commit --trailer`.
   `reconcile/<id>` — cut from trunk, or reused if it exists and still contains trunk (a
   reconcile branch trunk has moved past fails that repo: merge trunk in or delete the
   branch, then rerun); a hit the branch's history already reverts — its `This reverts
-  commit <sha>.` line — is reported `already reverted` and skipped, so a rerun after a
+  commit <sha>.` line — is reported `already reverted` and skipped, as is a hit whose
+  revert stages nothing (a hand revert without that line), so a rerun after a
   complete reconcile changes nothing and exits 0. The reverts happen in a scratch
   worktree, so no checkout is switched, and it is removed with `--force` however the
   pass ends. The repo's commit hooks are switched off (`core.hooksPath=/dev/null`,
   `--no-verify`): a revert is the owner's reconcile, not a shift's work, so a repo's hook
   suite neither blocks nor slows it. Each revert commit carries `Shift: reconcile` and
   `Event: <the reconcile event's id>`. A conflicting revert is aborted and ends that
-  repo's pass. History is never reset or forced.
+  repo's pass; a `reconcile/<id>` branch the pass cut and reverted nothing onto — a
+  first revert that conflicts — is deleted again. History is never reset or forced.
 - Reconcile then appends one `reconcile` event — `parent: <id>`, `shift: reconcile`,
   `refs` every reverted commit as `repo@sha`, `rationale` the count and every conflict —
   and lists the memories under `memories/` whose `source:` names a revoked event, for
