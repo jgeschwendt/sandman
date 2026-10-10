@@ -1159,3 +1159,69 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
         0
     );
 }
+
+#[test]
+fn an_abandoned_handoff_says_why_when_the_runner_does() {
+    let machine = Machine::new("abandon-reason");
+    machine.repo("jgeschwendt/alpha");
+    machine.repo("jgeschwendt/beta");
+    let rationale = |machine: &Machine| {
+        machine
+            .trail()
+            .into_iter()
+            .rfind(|line| line.contains(r#""kind":"shift.handoff""#))
+            .expect("a handoff event")
+    };
+
+    // Without a reason: the fixed text, which is also the rationale.
+    let first = "s-20261016T1600Z";
+    machine.ok(FRIDAY, &["shift", "brief"]);
+    machine.ok(
+        FRIDAY,
+        &["shift", "handoff", "--shift", first, "--abandoned"],
+    );
+    assert!(
+        rationale(&machine)
+            .contains(r#""rationale":"Abandoned: the shift runner found the session gone"#),
+        "{}",
+        rationale(&machine)
+    );
+
+    // With one, over a handoff the session had begun.
+    let second = "s-20261016T1700Z";
+    let now = "2026-10-16T17:00:00Z";
+    machine.ok(now, &["shift", "brief"]);
+    machine.write(
+        &format!(".sandman/shifts/{second}/handoff.md"),
+        "# Half done\n\nThe parser fix is on shift/x.\n",
+    );
+    let reason = "stopped at 2026-10-16T21:57:00Z: still working 12 min past handoff_by";
+    let output = machine.run(
+        now,
+        &["shift", "handoff", "--shift", second, "--reason", reason],
+        &[],
+    );
+    assert_eq!(code(&output), 2, "--reason needs --abandoned");
+    machine.ok(
+        now,
+        &[
+            "shift",
+            "handoff",
+            "--shift",
+            second,
+            "--abandoned",
+            "--reason",
+            reason,
+        ],
+    );
+    assert_eq!(
+        machine.read(&format!(".sandman/shifts/{second}/handoff.md")),
+        format!("Abandoned: {reason}\n\n# Half done\n\nThe parser fix is on shift/x.\n")
+    );
+    let event = rationale(&machine);
+    assert!(
+        event.contains(&format!(r#""rationale":"Abandoned: {reason}""#)),
+        "{event}"
+    );
+    assert!(event.contains(r#""abandoned""#), "{event}");
+}

@@ -191,8 +191,8 @@ usage: sandman <verb> [args]
   shift attach --shift ID [--bg-id X] [--session-id S]
   shift brief [--mind M] [--dry-run]
   shift clock [--check]
-  shift handoff --shift ID (--from-session | --abandoned | --file PATH)
-                [--truncate]
+  shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] |
+                --file PATH) [--truncate]
   shift pick [--path] [--shift ID]
   shift status
       The perpetual machine's unit of work, bounded by the five-hour window.
@@ -218,7 +218,9 @@ usage: sandman <verb> [args]
       there but cannot be read, is not a five_hour object with numeric
       resets_at and used_percentage, or resets more than 6 h ahead. handoff finalizes a shift —
       copies --file in, accepts the handoff.md the session wrote, or records
-      --abandoned — appends shift.handoff and releases current.json; a shift
+      --abandoned (--reason TEXT heads the handoff and is the event's
+      rationale as `Abandoned: <reason>`) — appends shift.handoff and
+      releases current.json; a shift
       already handed off exits 1, and so does a handoff over 2,000 characters
       unless --truncate keeps its head and notes the cut (--abandoned always
       truncates). attach records the session the runner
@@ -2148,23 +2150,30 @@ fn shift_clock(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `shift handoff --shift ID (--from-session | --abandoned | --file PATH)`.
+/// `shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] | --file PATH)`.
 fn shift_handoff(args: &[String]) -> Result<(), Failure> {
     let (values, set) = shift_flags(
         args,
         "shift handoff",
-        &["--file", "--shift"],
+        &["--file", "--reason", "--shift"],
         &["--abandoned", "--from-session", "--truncate"],
     )?;
+    let reason = flag(&values, "--reason").filter(|reason| !reason.trim().is_empty());
     let id = flag(&values, "--shift")
         .ok_or_else(|| Failure::Usage("shift handoff needs --shift".to_owned()))?;
     let file = flag(&values, "--file");
+    let abandoned = set.iter().any(|switch| switch == "--abandoned");
+    if reason.is_some() && !abandoned {
+        return Err(Failure::Usage(
+            "shift handoff takes --reason only with --abandoned".to_owned(),
+        ));
+    }
     let source = match (
-        set.iter().any(|switch| switch == "--abandoned"),
+        abandoned,
         set.iter().any(|switch| switch == "--from-session"),
         file,
     ) {
-        (true, false, None) => shift::Source::Abandoned,
+        (true, false, None) => shift::Source::Abandoned(reason),
         (false, true, None) => shift::Source::Session,
         (false, false, Some(file)) => shift::Source::File(PathBuf::from(file)),
         _ => {

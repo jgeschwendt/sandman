@@ -390,6 +390,13 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   open — unless `--truncate`, which keeps the head and appends a note of how many
   characters went, the whole within the cap. `--abandoned` always truncates: the runner
   recording a dead session has nobody to send back to shorten the file.
+- **An abandoned handoff says why when the runner does.** `--abandoned` alone keeps a
+  `handoff.md` the session wrote, else writes `Abandoned: the shift runner found the
+  session gone at <instant> with no handoff written.` With `--reason TEXT` (only beside
+  `--abandoned`; the runner's overrun path passes `stopped at <time>: still working <n>
+  min past handoff_by`) the handoff opens with the line `Abandoned: <reason>` — above
+  whatever the session wrote — and so the `shift.handoff` event's `rationale` reads the
+  same.
 - **`shift clock --check`** exits 0 when a shift may start, 1 when it must not — under
   `$SANDMAN_SHIFT_MIN_WINDOW_MIN` (default 60) minutes left, or 90 % of the window used —
   and 3 on a fault. `handoff_by` stays fifteen minutes before the reset, so with the

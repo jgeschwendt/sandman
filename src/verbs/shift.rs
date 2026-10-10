@@ -1389,8 +1389,9 @@ fn upsert_problems(data_root: &Path, (heading, section): &(String, String)) -> R
 /// Where a handoff comes from.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Source {
-    /// The runner found the session gone without one.
-    Abandoned,
+    /// The runner found the session gone, or stopped it — with why, when it
+    /// says.
+    Abandoned(Option<String>),
     /// A markdown file to copy in.
     File(PathBuf),
     /// `shifts/<id>/handoff.md`, written by the shift itself.
@@ -1434,7 +1435,7 @@ pub fn handoff(
             })?,
             false,
         ),
-        Source::Abandoned => match existing {
+        Source::Abandoned(None) => match existing {
             Some(text) => (text, false),
             None => (
                 format!(
@@ -1444,14 +1445,25 @@ pub fn handoff(
                 true,
             ),
         },
+        Source::Abandoned(Some(reason)) => {
+            let head = format!(
+                "Abandoned: {}",
+                reason.split_whitespace().collect::<Vec<_>>().join(" ")
+            );
+            match existing {
+                Some(text) => (format!("{head}\n\n{text}"), true),
+                None => (format!("{head}\n"), true),
+            }
+        }
     };
+    let abandoned = matches!(source, Source::Abandoned(_));
     if text.trim().is_empty() {
         return Err(Error::refused(format!("the handoff for {shift} is empty")));
     }
     let length = text.chars().count();
     let (text, write) = if length <= HANDOFF_CHARS {
         (text, write)
-    } else if truncate || *source == Source::Abandoned {
+    } else if truncate || abandoned {
         (cut_handoff(&text), true)
     } else {
         return Err(Error::refused(format!(
@@ -1465,7 +1477,7 @@ pub fn handoff(
         .unwrap_or_default();
     entries.retain(|(key, _)| key != "ended" && key != "abandoned");
     entries.push(("ended".to_owned(), Value::string(ctx.now.iso8601())));
-    if *source == Source::Abandoned {
+    if abandoned {
         entries.push(("abandoned".to_owned(), Value::Bool(true)));
     }
     entries.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1491,7 +1503,7 @@ pub fn handoff(
         .find(|line| !line.is_empty())
         .unwrap_or("handoff");
     let mut refs = vec![format!("handoff:{}", path.display())];
-    if *source == Source::Abandoned {
+    if abandoned {
         refs.push("abandoned".to_owned());
     }
     trail::append(
