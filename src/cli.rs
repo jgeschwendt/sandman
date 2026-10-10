@@ -135,12 +135,16 @@ usage: sandman <verb> [args]
       takes new|spiked; drop needs --reason; adopt and drop append a breath
       event ($SANDMAN_SHIFT adds adopted-by:<shift>). pass fills every
       {{slot}} of prompts/breathe.md, writes passes/<id>/pass.json and
-      passes/<id>/prompt.md, and prints the id; it exits 1 with `nothing due`
-      when no source is due or `budget spent` when today's closed passes have
-      spent $SANDMAN_BREATH_BUDGET_USD (default 10; open passes count 0 and
-      are listed in flight), and 3 when the template or sources.toml cannot
-      be read; --dry-run prints the prompt and writes nothing. attach records
-      the pass's session; close requires --cost, records its counters,
+      passes/<id>/prompt.md, and prints the id; an open pass past its timeout
+      (skim 15 min, deep 60 min from started) is marked dead and charged
+      $SANDMAN_BREATH_DEAD_COST_USD (default 2). It exits 1 with `nothing
+      due` when no source is due, `pass in flight` while a pass of the same
+      kind is open within its timeout, or `budget spent` when today's closed
+      and dead passes have spent $SANDMAN_BREATH_BUDGET_USD (default 10; a
+      pass in flight counts 0 and is listed), and 3 when the template or
+      sources.toml cannot be read; --dry-run prints the prompt and writes
+      nothing. attach records the pass's session; close requires --cost (0
+      journals a cost zero note), records its counters,
       advances last_read (and each --cursor) on the sources it listed, and
       appends a breath event.
       reweight moves each weight +0.1 per breath whose adopted: stamp is
@@ -1888,32 +1892,26 @@ fn breathe_transition(args: &[String], to: breathe::Transition) -> Result<(), Fa
 fn breathe_pass(args: &[String]) -> Result<(), Failure> {
     let parsed = BreatheArgs::parse(args, "breathe pass", &["--kind"], &["--dry-run"], 0)?;
     let kind = breathe::PassKind::parse(&parsed.required("--kind", "breathe pass")?)?;
-    let budget = env::var("SANDMAN_BREATH_BUDGET_USD")
-        .ok()
-        .filter(|budget| !budget.is_empty());
-    let budget_usd = match budget {
-        None => breathe::DEFAULT_BUDGET_USD,
-        Some(text) => text
-            .parse::<f64>()
-            .ok()
-            .filter(|budget| budget.is_finite() && *budget >= 0.0)
-            .ok_or_else(|| {
-                Failure::Usage(format!(
-                    "$SANDMAN_BREATH_BUDGET_USD wants USD, got `{text}`"
-                ))
-            })?,
-    };
+    let budget_usd = usd_env("SANDMAN_BREATH_BUDGET_USD", breathe::DEFAULT_BUDGET_USD)?;
+    let dead_usd = usd_env(
+        "SANDMAN_BREATH_DEAD_COST_USD",
+        breathe::DEFAULT_DEAD_COST_USD,
+    )?;
     let dry_run = parsed.set("--dry-run");
     let ctx = breathe_context()?;
-    // nothing due and budget spent are waits (1); anything else is a fault (3)
-    let composed = breathe_journal(&ctx, "pass", breathe::pass(&ctx, kind, budget_usd, dry_run))
-        .map_err(|failure| match failure {
-            Failure::Error(error @ (Error::Refused { .. } | Error::LockHeld { .. })) => {
-                Failure::Error(error)
-            }
-            Failure::Error(error) => Failure::Fault(error),
-            other => other,
-        })?;
+    // nothing due, in flight and budget spent are waits (1); anything else is a fault (3)
+    let composed = breathe_journal(
+        &ctx,
+        "pass",
+        breathe::pass(&ctx, kind, budget_usd, dead_usd, dry_run),
+    )
+    .map_err(|failure| match failure {
+        Failure::Error(error @ (Error::Refused { .. } | Error::LockHeld { .. })) => {
+            Failure::Error(error)
+        }
+        Failure::Error(error) => Failure::Fault(error),
+        other => other,
+    })?;
     if dry_run {
         println!("{}", composed.text);
         return Ok(());
@@ -1930,6 +1928,19 @@ fn breathe_pass(args: &[String]) -> Result<(), Failure> {
     );
     println!("{}", composed.id);
     Ok(())
+}
+
+/// A USD amount from `$name`, else `default`; anything but a non-negative
+/// number is a usage failure.
+fn usd_env(name: &str, default: f64) -> Result<f64, Failure> {
+    match env::var(name).ok().filter(|text| !text.is_empty()) {
+        None => Ok(default),
+        Some(text) => text
+            .parse::<f64>()
+            .ok()
+            .filter(|usd| usd.is_finite() && *usd >= 0.0)
+            .ok_or_else(|| Failure::Usage(format!("${name} wants USD, got `{text}`"))),
+    }
 }
 
 /// `breathe attach --id ID [--bg-id X] [--session-id S]`.
@@ -2006,6 +2017,13 @@ fn breathe_close(args: &[String]) -> Result<(), Failure> {
     };
     let ctx = breathe_context()?;
     let event = breathe_journal(&ctx, "close", breathe::close(&ctx, &id, &closing))?;
+    if closing.cost_usd <= 0.0 {
+        note(
+            Some(&ctx.data_root),
+            "breathe",
+            &format!("cost zero pass={id}: the session could not read its cost"),
+        );
+    }
     note(
         Some(&ctx.data_root),
         "breathe",

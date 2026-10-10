@@ -34,6 +34,8 @@ use crate::verbs::trail;
 pub const SEED: &str = include_str!("../../breath/sources.toml");
 /// `$SANDMAN_BREATH_BUDGET_USD`'s default.
 pub const DEFAULT_BUDGET_USD: f64 = 10.0;
+/// `$SANDMAN_BREATH_DEAD_COST_USD`'s default: what a dead pass is charged.
+pub const DEFAULT_DEAD_COST_USD: f64 = 2.0;
 /// Title-token Jaccard at or above this is the same breath.
 pub const JACCARD_SAME: f64 = 0.6;
 /// The problems slot's ceiling.
@@ -1075,6 +1077,15 @@ impl PassKind {
         }
     }
 
+    /// How long an open pass is in flight before it is dead.
+    #[must_use]
+    pub fn timeout_seconds(self) -> i64 {
+        match self {
+            Self::Deep => 3_600,
+            Self::Skim => 900,
+        }
+    }
+
     /// The `pass.cadence` slot.
     #[must_use]
     pub fn cadence(self) -> &'static str {
@@ -1138,49 +1149,79 @@ fn write_pass(path: &Path, mut entries: Vec<(String, Value)>) -> Result<()> {
     atomic::write(path, &format!("{}\n", Value::Object(entries).render()))
 }
 
-/// The passes started on `now`'s UTC day: `cost_usd` summed over the closed
-/// ones, and the ids of those still open — in flight, counted as 0 until
-/// `close` records what they cost.
-fn spent_today(data_root: &Path, now: Timestamp) -> (f64, Vec<String>) {
+/// The passes' ledger: `cost_usd` summed over those started on `now`'s UTC
+/// day, and the ids of the passes still in flight. An open pass younger than
+/// its kind's timeout is in flight, and refuses a second pass of `kind`
+/// (`pass in flight`); an older one is dead — it costs `dead_cost_usd` and,
+/// when `write`, is closed as `dead: true`. The caller holds the lock to write.
+fn ledger(
+    data_root: &Path,
+    now: Timestamp,
+    kind: PassKind,
+    dead_cost_usd: f64,
+    write: bool,
+) -> Result<(f64, Vec<String>)> {
     let (year, month, day, ..) = now.parts();
     let today = format!("{year:04}-{month:02}-{day:02}");
-    let Ok(entries) = fs::read_dir(paths::breath_passes(data_root)) else {
-        return (0.0, Vec::new());
-    };
-    let mut spent = 0.0;
-    let mut in_flight = Vec::new();
-    for pass in entries
+    let mut ids: Vec<String> = fs::read_dir(paths::breath_passes(data_root))
+        .into_iter()
         .flatten()
-        .map(|entry| entry.path().join("pass.json"))
-        .filter_map(|path| json::parse(&fs::read_to_string(path).ok()?).ok())
-        .filter(|pass| {
-            pass.get("started")
-                .and_then(Value::as_str)
-                .is_some_and(|started| started.starts_with(&today))
-        })
-    {
-        if pass.get("ended").and_then(Value::as_str).is_none() {
-            in_flight.extend(
-                pass.get("id")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned),
-            );
-        } else if let Some(cost) = pass.get("cost_usd").and_then(Value::as_number) {
-            spent += cost;
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    ids.sort();
+    let (mut spent, mut in_flight) = (0.0, Vec::new());
+    for id in ids {
+        let Ok((path, mut entries)) = read_pass(data_root, &id) else {
+            continue;
+        };
+        let pass = Value::Object(entries.clone());
+        let text = |key: &str| pass.get(key).and_then(Value::as_str);
+        let started = text("started").unwrap_or_default();
+        let mut cost = pass.get("cost_usd").and_then(Value::as_number);
+        if text("ended").is_none() {
+            let of = PassKind::parse(text("kind").unwrap_or_default()).unwrap_or(PassKind::Skim);
+            let age = Timestamp::parse_iso8601(started)
+                .map(|started| now.unix_seconds() - started.unix_seconds());
+            if age.is_some_and(|age| age < of.timeout_seconds()) {
+                if of == kind {
+                    return Err(Error::refused(format!(
+                        "pass in flight: {id} started {started}"
+                    )));
+                }
+                in_flight.push(id);
+                continue;
+            }
+            cost = Some(dead_cost_usd);
+            if write {
+                set(&mut entries, "cost_usd", Value::Number(dead_cost_usd));
+                set(&mut entries, "dead", Value::Bool(true));
+                set(&mut entries, "ended", Value::string(now.iso8601()));
+                write_pass(&path, entries)?;
+            }
+        }
+        if started.starts_with(&today) {
+            spent += cost.unwrap_or_default();
         }
     }
-    in_flight.sort();
-    (spent, in_flight)
+    Ok((spent, in_flight))
 }
 
 /// Compose the pass prompt from `prompts/breathe.md`; unless `dry_run`, write
 /// `passes/<id>/pass.json` and `passes/<id>/prompt.md`.
 ///
-/// Refuses ([`Error::Refused`]) when no source is due — `nothing due` — or
-/// the day's budget is spent — `budget spent` — and the runner then starts
+/// Refuses ([`Error::Refused`]) when no source is due — `nothing due` —, a
+/// pass of `kind` is in flight — `pass in flight` — or the day's budget is
+/// spent — `budget spent` — and the runner then starts
 /// no session; any other error (a missing template, an invalid
 /// `sources.toml`) is a fault for the runner to report.
-pub fn pass(ctx: &Context, kind: PassKind, budget_usd: f64, dry_run: bool) -> Result<Composed> {
+pub fn pass(
+    ctx: &Context,
+    kind: PassKind,
+    budget_usd: f64,
+    dead_cost_usd: f64,
+    dry_run: bool,
+) -> Result<Composed> {
     let template_path = ctx.prompts.join("breathe.md");
     let template = fs::read_to_string(&template_path).map_err(|source| {
         if source.kind() == ErrorKind::NotFound {
@@ -1197,7 +1238,10 @@ pub fn pass(ctx: &Context, kind: PassKind, budget_usd: f64, dry_run: bool) -> Re
             kind.name()
         )));
     }
-    let (spent, in_flight) = spent_today(&ctx.data_root, ctx.now);
+    let lock = (!dry_run)
+        .then(|| trail::acquire(&ctx.data_root))
+        .transpose()?;
+    let (spent, in_flight) = ledger(&ctx.data_root, ctx.now, kind, dead_cost_usd, lock.is_some())?;
     if spent >= budget_usd {
         return Err(Error::refused(format!(
             "budget spent: {spent:.2} of {budget_usd} USD today"
@@ -1262,7 +1306,6 @@ pub fn pass(ctx: &Context, kind: PassKind, budget_usd: f64, dry_run: bool) -> Re
             text,
         });
     }
-    let _lock = trail::acquire(&ctx.data_root)?;
     let dir = paths::breath_pass(&ctx.data_root, &id);
     let path = dir.join("pass.json");
     if dir.exists() {

@@ -924,7 +924,7 @@ fn pass_tells_a_wait_from_a_fault_and_close_needs_a_cost() {
     let open = machine.ok(NOW, &skim);
     let open = open.trim();
     let deep = machine.ok(
-        "2026-10-16T16:30:00Z",
+        "2026-10-16T16:10:00Z",
         &["breathe", "pass", "--kind", "deep", "--dry-run"],
     );
     assert!(deep.contains("spent 0.00."), "{deep}");
@@ -996,6 +996,73 @@ fn pass_tells_a_wait_from_a_fault_and_close_needs_a_cost() {
         "{}",
         stderr(&output)
     );
+}
+
+#[test]
+fn a_pass_in_flight_refuses_its_kind_and_a_dead_one_is_charged() {
+    let machine = Machine::new("pass-dead");
+    machine.ok(NOW, &["breathe", "init"]);
+    let skim = ["breathe", "pass", "--kind", "skim"];
+    let open = machine.ok(NOW, &skim);
+    let open = open.trim();
+
+    let output = machine.run("2026-10-16T16:14:59Z", &skim, &[]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains(&format!("pass in flight: {open}")),
+        "{}",
+        stderr(&output)
+    );
+
+    // Fifteen minutes on, the open skim is dead: closed, charged, counted.
+    let output = machine.run(
+        "2026-10-16T16:15:00Z",
+        &skim,
+        &[
+            ("SANDMAN_BREATH_BUDGET_USD", "2.5"),
+            ("SANDMAN_BREATH_DEAD_COST_USD", "2.5"),
+        ],
+    );
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("budget spent: 2.50"),
+        "{}",
+        stderr(&output)
+    );
+    let pass = machine.read(&format!(".sandman/breath/passes/{open}/pass.json"));
+    for expected in [
+        r#""cost_usd":2.5"#,
+        r#""dead":true"#,
+        r#""ended":"2026-10-16T16:15:00Z""#,
+    ] {
+        assert!(pass.contains(expected), "missing {expected} in {pass}");
+    }
+    let deep = machine.ok(NOW, &["breathe", "pass", "--kind", "deep"]);
+    let output = machine.run(
+        NOW,
+        &[
+            "breathe",
+            "close",
+            "--id",
+            deep.trim(),
+            "--read",
+            "0",
+            "--filed",
+            "0",
+            "--dropped",
+            "0",
+            "--cost",
+            "0",
+        ],
+        &[],
+    );
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let trace = fs::read_dir(machine.root().join(".trace"))
+        .expect("trace")
+        .flatten()
+        .map(|entry| fs::read_to_string(entry.path()).unwrap_or_default())
+        .collect::<String>();
+    assert!(trace.contains("cost zero"), "{trace}");
 }
 
 #[test]
