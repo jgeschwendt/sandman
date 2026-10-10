@@ -25,6 +25,8 @@ pub const ROOT_ENV: &str = "SANDMAN_ROOT";
 pub const ROOT_DIR_NAME: &str = ".sandman";
 /// Claude Code's state directory, under `$HOME`.
 pub const CLAUDE_DIR_NAME: &str = ".claude";
+/// The environment variable that moves Claude Code's `~/.claude.json`.
+pub const CLAUDE_JSON_ENV: &str = "SANDMAN_CLAUDE_JSON";
 /// Claude Code's background-job records, one directory per job.
 pub const JOBS_DIR_NAME: &str = "jobs";
 /// Where Claude Code keeps one directory of transcripts per project.
@@ -82,6 +84,15 @@ pub fn data_root() -> Result<PathBuf> {
 /// Claude Code's state directory — where transcripts are found.
 pub fn claude_root() -> Result<PathBuf> {
     Ok(home()?.join(CLAUDE_DIR_NAME))
+}
+
+/// Claude Code's global config, where the trust dialog's answers live:
+/// `$SANDMAN_CLAUDE_JSON`, else `~/.claude.json`.
+pub fn claude_json() -> Result<PathBuf> {
+    if let Some(file) = env::var_os(CLAUDE_JSON_ENV).filter(|file| !file.is_empty()) {
+        return Ok(PathBuf::from(file));
+    }
+    Ok(home()?.join(".claude.json"))
 }
 
 /// `<claude root>/jobs` — one directory per background job, for as long as the

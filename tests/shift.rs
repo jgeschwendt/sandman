@@ -53,11 +53,29 @@ impl Machine {
         self.home.join("window.json")
     }
 
-    /// A grove checkout at `<code>/<slug>/main`.
-    fn repo(&self, slug: &str) -> PathBuf {
+    /// A grove checkout at `<code>/<slug>/main`, never trusted.
+    fn checkout(&self, slug: &str) -> PathBuf {
         let checkout = self.grove_code().join(slug).join("main");
         fs::create_dir_all(checkout.join(".git")).expect("checkout");
         checkout
+    }
+
+    /// A grove checkout at `<code>/<slug>/main` that Claude Code trusts.
+    fn repo(&self, slug: &str) -> PathBuf {
+        let checkout = self.checkout(slug);
+        self.trust(&checkout, true);
+        checkout
+    }
+
+    /// Record the trust dialog's answer for `dir` in the fixture claude.json.
+    fn trust(&self, dir: &Path, accepted: bool) {
+        let prior = self.read("claude.json");
+        let prior = prior.strip_suffix("}}").unwrap_or(r#"{"projects":{"/":{}"#);
+        let entry = format!(
+            r#""{}":{{"hasTrustDialogAccepted":{accepted}}}"#,
+            dir.display()
+        );
+        self.write("claude.json", &format!("{prior},{entry}}}}}"));
     }
 
     fn run(&self, now: &str, args: &[&str], extra: &[(&str, &str)]) -> Output {
@@ -67,6 +85,7 @@ impl Machine {
             .env("CLAUDE_WINDOW_FILE", self.window())
             .env("HOME", &self.home)
             .env("PATH", env::var("PATH").unwrap_or_default())
+            .env("SANDMAN_CLAUDE_JSON", self.home.join("claude.json"))
             .env("SANDMAN_GROVE_CODE", self.grove_code())
             .env("SANDMAN_NOW", now)
             .env("SANDMAN_PROMPTS", self.home.join("prompts"))
@@ -1298,4 +1317,90 @@ fn an_abandoned_handoff_says_why_when_the_runner_does() {
         "{event}"
     );
     assert!(event.contains(r#""abandoned""#), "{event}");
+}
+
+#[test]
+fn pick_passes_over_untrusted_trunks_and_brief_faults_when_none_is_trusted() {
+    let machine = Machine::new("trust");
+    let alpha = machine.repo("jgeschwendt/alpha");
+    let beta = machine.checkout("jgeschwendt/beta");
+    let gamma = machine.checkout("jgeschwendt/gamma");
+    // Trust is per directory: the grove above them lends beta and gamma none,
+    // and gamma's dialog was declined.
+    machine.trust(&machine.grove_code(), true);
+    machine.trust(&gamma, false);
+    // Beta and gamma never shifted; alpha yesterday.
+    machine.meta(
+        "s-20261015T1200Z",
+        "jgeschwendt/alpha",
+        "2026-10-15T12:00:00Z",
+    );
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick", "--path"]).trim(),
+        alpha.display().to_string()
+    );
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick", "--untrusted"]),
+        "jgeschwendt/beta\njgeschwendt/gamma\n"
+    );
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "pick", "--untrusted", "--path"]),
+        format!("{}\n{}\n", beta.display(), gamma.display())
+    );
+
+    let skip = [("SANDMAN_SHIFT_SKIP", "jgeschwendt/alpha")];
+    let output = machine.run(FRIDAY, &["shift", "pick"], &skip);
+    assert_eq!(code(&output), 1, "{}", stdout(&output));
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "sandman: no trusted target: run claude once in each trunk and accept the trust prompt\n{}\n{}\n",
+            beta.display(),
+            gamma.display()
+        )
+    );
+    for args in [&["shift", "brief", "--dry-run"][..], &["shift", "brief"]] {
+        let output = machine.run(FRIDAY, args, &skip);
+        assert_eq!(code(&output), 3, "{args:?}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains("no trusted target"),
+            "{}",
+            stderr(&output)
+        );
+    }
+    assert!(!machine.root().join("shifts/current.json").exists());
+}
+
+#[test]
+fn a_missing_or_unparsable_claude_json_trusts_nothing() {
+    let machine = Machine::new("no-trust");
+    machine.repo("jgeschwendt/alpha");
+    let missing = machine.home.join("absent.json");
+    let missing = [("SANDMAN_CLAUDE_JSON", missing.to_str().expect("utf-8"))];
+    let output = machine.run(FRIDAY, &["shift", "pick"], &missing);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("no trusted target"),
+        "{}",
+        stderr(&output)
+    );
+
+    machine.write("claude.json", "{\"projects\":");
+    let output = machine.run(FRIDAY, &["shift", "pick"], &[]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("no trusted target"),
+        "{}",
+        stderr(&output)
+    );
+    let journal: String = fs::read_dir(machine.root().join(".trace"))
+        .expect("the journal")
+        .flatten()
+        .map(|entry| fs::read_to_string(entry.path()).unwrap_or_default())
+        .collect();
+    assert_eq!(
+        journal.matches("unparsable, nothing trusted").count(),
+        1,
+        "{journal}"
+    );
 }

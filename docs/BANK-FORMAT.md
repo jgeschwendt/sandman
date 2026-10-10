@@ -320,6 +320,17 @@ missing binary skipped), then the most open threads naming the slug, then the mo
 untried breaths (`state: new` or `spiked`) filed against it, then the name. The open shift's repo and
 `$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over.
 
+**Trust.** Claude Code asks once per directory whether to trust a workspace and records
+the answer in `~/.claude.json` (`$SANDMAN_CLAUDE_JSON` overrides) as
+`projects["<absolute path>"].hasTrustDialogAccepted`; a parent's answer does not carry
+to its children. `claude --bg` refuses an untrusted cwd ("Workspace not trusted"),
+while `claude -p` skips the dialog, so a shift can only open where the owner has run
+`claude` once and accepted. `shift pick` passes over untrusted trunks; when only they
+remain it exits 1 with `no trusted target: run claude once in each trunk and accept
+the trust prompt` and their paths, one per line, and `shift brief` exits 3 on the same.
+`shift pick --untrusted` lists them (`--path` for paths). A missing or unparsable
+`~/.claude.json` trusts nothing; an unparsable one is journaled. Sandman only reads it.
+
 ### The brief and its slots
 
 `shift brief` fills `prompts/shift.md` — `$SANDMAN_PROMPTS`, else the `prompts/` of

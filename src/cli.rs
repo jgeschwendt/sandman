@@ -5,7 +5,7 @@
 //! operator has to fix in the command line itself, unbuilt verbs included, and
 //! 3 for a fault a runner must tell apart from a refusal — `shift clock`
 //! finding its window file there but unreadable, `breathe pass` without a
-//! template or a valid `sources.toml`.
+//! template or a valid `sources.toml`, `shift brief` with no trusted trunk.
 //!
 //! This is the only place that resolves the real roots (`crate::paths`); every
 //! verb below it takes them as arguments.
@@ -199,7 +199,7 @@ usage: sandman <verb> [args]
   shift clock [--check]
   shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] |
                 --file PATH) [--truncate]
-  shift pick [--path] [--shift ID]
+  shift pick [--path] [--shift ID | --untrusted]
   shift profile [--kind shift|breath]
   shift status
       The perpetual machine's unit of work, bounded by the five-hour window.
@@ -216,8 +216,11 @@ usage: sandman <verb> [args]
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
       (default jgeschwendt) — never ~, ~/.routines or the data root — ties
       broken by a failing stele check, open threads and breaths; it skips the
-      open shift's repo and $SANDMAN_SHIFT_SKIP (colon-separated slugs);
-      --shift prints the target a shift was briefed on. clock reads the window
+      open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs) and
+      every trunk Claude Code has not trusted ($SANDMAN_CLAUDE_JSON, else
+      ~/.claude.json) — exit 1 listing them when no other is left, and brief
+      exits 3; --untrusted lists those trunks; --shift prints the target a
+      shift was briefed on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
       ~/.local/state/claude/window.json); --check exits 1 under
       $SANDMAN_SHIFT_MIN_WINDOW_MIN (default 60) minutes left or at 90% used,
@@ -1529,6 +1532,7 @@ fn shift_context() -> Result<shift::Context, Failure> {
     };
     let home = paths::home()?;
     Ok(shift::Context {
+        claude_json: paths::claude_json()?,
         data_root: paths::data_root()?,
         now,
         min_window_seconds: min_window_minutes()? * 60,
@@ -2136,7 +2140,10 @@ fn shift_brief(args: &[String]) -> Result<(), Failure> {
                 "shift",
                 &format!("brief error: {error}"),
             );
-            return Err(error.into());
+            return Err(match error {
+                Error::Untrusted(_) => Failure::Fault(error),
+                error => error.into(),
+            });
         }
     };
     if options.dry_run {
@@ -2237,20 +2244,28 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
     }
 }
 
-/// `shift pick [--path] [--shift ID]`.
+/// `shift pick [--path] [--shift ID | --untrusted]`.
 fn shift_pick(args: &[String]) -> Result<(), Failure> {
-    let (values, set) = shift_flags(args, "shift pick", &["--shift"], &["--path"])?;
+    let (values, set) = shift_flags(args, "shift pick", &["--shift"], &["--path", "--untrusted"])?;
     let ctx = shift_context()?;
-    let target = match flag(&values, "--shift") {
-        Some(id) => shift::picked(&ctx, &id)?,
+    let targets = match flag(&values, "--shift") {
+        _ if set.iter().any(|switch| switch == "--untrusted") => shift::untrusted(&ctx),
+        Some(id) => {
+            let target = shift::picked(&ctx, &id)?;
+            vec![(target.label, target.path)]
+        }
         None => {
-            shift::pick(&ctx)?.ok_or_else(|| Error::not_found("repo to shift", "the rotation"))?
+            let target = shift::pick(&ctx)?
+                .ok_or_else(|| Error::not_found("repo to shift", "the rotation"))?;
+            vec![(target.label, target.path)]
         }
     };
-    if set.iter().any(|switch| switch == "--path") {
-        println!("{}", target.path.display());
-    } else {
-        println!("{}", target.label);
+    for (label, path) in targets {
+        if set.iter().any(|switch| switch == "--path") {
+            println!("{}", path.display());
+        } else {
+            println!("{label}");
+        }
     }
     Ok(())
 }

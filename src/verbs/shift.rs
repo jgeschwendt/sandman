@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use crate::atomic;
 use crate::error::{Error, Result};
 use crate::grove;
+use crate::journal;
 use crate::json::{self, Value};
 use crate::paths;
 use crate::slug::truncate_chars;
@@ -179,6 +180,8 @@ pub const WEEK: [Day; 7] = [
 /// Everything the shift verbs read, resolved by the caller.
 #[derive(Clone, Debug)]
 pub struct Context {
+    /// Claude Code's `~/.claude.json`, which holds the trust dialog's answers.
+    pub claude_json: PathBuf,
     /// The data root.
     pub data_root: PathBuf,
     /// `$HOME`.
@@ -619,6 +622,50 @@ fn trunks(ctx: &Context) -> Vec<(String, PathBuf)> {
     found
 }
 
+/// The directories Claude Code's trust dialog was accepted in:
+/// `projects["<path>"].hasTrustDialogAccepted`. Trust is per directory, never
+/// inherited from a parent, and `claude --bg` refuses a cwd without it. A
+/// missing file trusts nothing; so does an unparsable one, journaled.
+fn trusted(ctx: &Context) -> Vec<PathBuf> {
+    let Ok(text) = fs::read_to_string(&ctx.claude_json) else {
+        return Vec::new();
+    };
+    match json::parse(&text) {
+        Ok(config) => config
+            .get("projects")
+            .and_then(Value::as_object)
+            .unwrap_or_default()
+            .iter()
+            .filter(|(_, project)| {
+                project
+                    .get("hasTrustDialogAccepted")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            })
+            .map(|(path, _)| PathBuf::from(path))
+            .collect(),
+        Err(error) => {
+            let file = ctx.claude_json.display();
+            journal::note(
+                &ctx.data_root,
+                "shift",
+                &format!("{file} unparsable, nothing trusted: {error}"),
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// The rotation's trunks Claude Code does not trust — the owner's list.
+#[must_use]
+pub fn untrusted(ctx: &Context) -> Vec<(String, PathBuf)> {
+    let trust = trusted(ctx);
+    trunks(ctx)
+        .into_iter()
+        .filter(|(_, path)| !trust.contains(path))
+        .collect()
+}
+
 /// The live signals that break a tie between equally rested repos.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 struct Signals {
@@ -788,7 +835,8 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
 
 /// The rotation's choice: the least recently shifted trunk, ties broken by the
 /// live signals (a failing `stele check`, then open threads, then breaths) and
-/// then by name. Repos the open shift names and `skip` are passed over.
+/// then by name. Repos the open shift names, `skip` and untrusted trunks are
+/// passed over; when only untrusted ones remain, that is the error.
 pub fn pick(ctx: &Context) -> Result<Option<Target>> {
     let busy: Vec<String> = read_current(&ctx.data_root)?
         .and_then(|current| {
@@ -800,11 +848,17 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
         .into_iter()
         .collect();
     let last = last_shifted(&ctx.data_root);
-    let mut candidates: Vec<(Option<Timestamp>, String, PathBuf)> = trunks(ctx)
+    let trust = trusted(ctx);
+    let (mut candidates, untrusted): (Vec<_>, Vec<_>) = trunks(ctx)
         .into_iter()
         .filter(|(label, _)| !busy.contains(label) && !ctx.skip.contains(label))
         .map(|(label, path)| (last.get(&label).copied(), label, path))
-        .collect();
+        .partition(|(.., path)| trust.contains(path));
+    if candidates.is_empty() && !untrusted.is_empty() {
+        return Err(Error::Untrusted(
+            untrusted.into_iter().map(|(.., path)| path).collect(),
+        ));
+    }
     candidates.sort();
     let Some(front) = candidates.first().map(|(last, ..)| *last) else {
         return Ok(None);

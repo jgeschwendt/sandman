@@ -499,6 +499,7 @@ fn error_kind(error: &Error) -> &'static str {
         Error::Refused { .. } => "Refused",
         Error::ReplacesMissing { .. } => "ReplacesMissing",
         Error::TooManyCollisions { .. } => "TooManyCollisions",
+        Error::Untrusted(_) => "Untrusted",
     }
 }
 

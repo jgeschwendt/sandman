@@ -57,7 +57,7 @@ Sources ──▶ Read ──▶ Judge ──▶ File ──▶ Spike ──▶ 
 
 ## Repo rotation
 
-Scope is every root under `~/.grove/code/jgeschwendt/`. The three home repos (`~`, `~/.routines`, `~/.sandman`) are out of the rotation: home-sync commits them without trailers every fifteen minutes, and a shift there could edit the trail or the live runner; reconcile still scans them. `sandman shift pick` orders repos by least-recently-shifted, then weights by live signals: CI red, stale `graph.lock`, open findings, open threads, breaths filed against it. Invariant: every repo is shifted at least once a week; Wednesday's score reports coverage and a miss is a finding.
+Scope is every root under `~/.grove/code/jgeschwendt/`. The three home repos (`~`, `~/.routines`, `~/.sandman`) are out of the rotation: home-sync commits them without trailers every fifteen minutes, and a shift there could edit the trail or the live runner; reconcile still scans them. `sandman shift pick` orders repos by least-recently-shifted, then weights by live signals: CI red, stale `graph.lock`, open findings, open threads, breaths filed against it. Only trunks Claude Code trusts are picked — `claude --bg` refuses any other cwd — and `sandman shift pick --untrusted` lists the rest for the owner (BANK-FORMAT § shifts, Trust). Invariant: every repo is shifted at least once a week; Wednesday's score reports coverage and a miss is a finding.
 
 ## Standing rails
 

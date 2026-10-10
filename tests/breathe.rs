@@ -858,8 +858,15 @@ fn reweight_raises_to_the_cap_and_lowers_to_the_floor() {
 #[test]
 fn a_filed_breath_reaches_the_shift_brief_for_its_repo() {
     let machine = Machine::new("reaches");
-    fs::create_dir_all(machine.home.join(".grove/code/jgeschwendt/alpha/main/.git"))
-        .expect("checkout");
+    let alpha = machine.home.join(".grove/code/jgeschwendt/alpha/main");
+    fs::create_dir_all(alpha.join(".git")).expect("checkout");
+    machine.write(
+        ".claude.json",
+        &format!(
+            r#"{{"projects":{{"{}":{{"hasTrustDialogAccepted":true}}}}}}"#,
+            alpha.display()
+        ),
+    );
     filed_name(&machine.file(NOW, "https://example.com/lexing", "Incremental lexing", &[]));
     let brief = machine.ok(NOW, &["shift", "brief", "--dry-run"]);
     assert!(

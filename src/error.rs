@@ -96,6 +96,9 @@ pub enum Error {
         /// The base filename that could not be placed.
         filename: String,
     },
+    /// Every trunk the rotation could pick lacks Claude Code's trust, which
+    /// `claude --bg` will not start without.
+    Untrusted(Vec<PathBuf>),
 }
 
 impl Error {
@@ -162,6 +165,15 @@ impl fmt::Display for Error {
             }
             Self::TooManyCollisions { filename } => {
                 write!(f, "too many colliding filenames for {filename}")
+            }
+            Self::Untrusted(paths) => {
+                write!(
+                    f,
+                    "no trusted target: run claude once in each trunk and accept the trust prompt"
+                )?;
+                paths
+                    .iter()
+                    .try_for_each(|path| write!(f, "\n{}", path.display()))
             }
         }
     }
