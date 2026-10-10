@@ -1402,6 +1402,18 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
             "shift {open} is open — hand it off before briefing another"
         )));
     }
+    if rest && !options.dry_run {
+        let today = Local::at(ctx.now).ymd();
+        if let Some((kept, ended)) = metas(&ctx.data_root).into_iter().find_map(|meta| {
+            let rested = meta.value.get("theme").and_then(Value::as_str) == Some("Rest")
+                && meta.started.is_some_and(|at| Local::at(at).ymd() == today);
+            Some((meta.shift, meta.ended.filter(|_| rested)?))
+        }) {
+            return Err(Error::refused(format!(
+                "sabbath kept: {kept} handed off at {ended}"
+            )));
+        }
+    }
     let shift = shift_id(ctx.now);
     let dir = paths::shift_dir(&ctx.data_root, &shift);
     if !options.dry_run && dir.exists() {

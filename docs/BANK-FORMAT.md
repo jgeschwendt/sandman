@@ -327,6 +327,12 @@ trunk — the machine's own repo, where the self-pass branch `sabbath/<yyyy-Www>
 rotation, the open shift and the skip list aside; it must be a rotation trunk (exit 1
 otherwise) and trusted (the untrusted exit below).
 
+**One Sabbath a day.** Once a shift with `theme: Rest` started today (New York) has
+handed off — its `meta.json` has `ended` — `shift brief` exits 1 with `sabbath kept:
+<id> handed off at <ended>`, and the runner waits; `--dry-run` still composes. The
+runner fires every tick, so without this a Sabbath that ends early is followed by
+another.
+
 **Trust.** Claude Code asks once per directory whether to trust a workspace and records
 the answer in `~/.claude.json` (`$SANDMAN_CLAUDE_JSON` overrides) as
 `projects["<absolute path>"].hasTrustDialogAccepted`; a parent's answer does not carry

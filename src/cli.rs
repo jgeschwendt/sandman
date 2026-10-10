@@ -224,7 +224,8 @@ usage: sandman <verb> [args]
       --dry-run prints the brief and writes nothing. The theme is the
       America/New_York weekday's: Sun Hunt, Mon Redesign, Tue Refactor, Wed
       Measure, Thu Harden, Fri Ship, Sat Rest — the Sabbath, which fills
-      prompts/sabbath.md instead and works jgeschwendt/sandman's trunk; a
+      prompts/sabbath.md instead and works jgeschwendt/sandman's trunk, once
+      (exit 1, `sabbath kept: <id> handed off at <time>`, after today's); a
       repo whose docs/plan.md names nothing next takes its line from the
       Sabbath's score/<week>-targets.md. pick is the rotation — the least
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos

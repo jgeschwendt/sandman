@@ -1516,6 +1516,32 @@ fn the_sabbath_brief_fills_its_own_template_and_works_sandman() {
 }
 
 #[test]
+fn one_sabbath_a_day() {
+    let machine = Machine::new("one-sabbath");
+    machine.repo("jgeschwendt/sandman");
+    let kept = "s-20261010T1600Z";
+    assert_eq!(machine.ok(SATURDAY, &["shift", "brief"]).trim(), kept);
+    machine.write(&format!(".sandman/shifts/{kept}/handoff.md"), "Rested.\n");
+    machine.ok(
+        "2026-10-10T17:00:00Z",
+        &["shift", "handoff", "--shift", kept, "--from-session"],
+    );
+    // 23:00 Saturday in New York: the day's Sabbath is kept.
+    let late = "2026-10-11T03:00:00Z";
+    let output = machine.run(late, &["shift", "brief"], &[]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains(&format!(
+            "sabbath kept: {kept} handed off at 2026-10-10T17:00:00Z"
+        )),
+        "{}",
+        stderr(&output)
+    );
+    machine.ok(late, &["shift", "brief", "--dry-run"]);
+    machine.ok("2026-10-17T16:00:00Z", &["shift", "brief"]);
+}
+
+#[test]
 fn a_weekday_brief_falls_back_to_the_sabbaths_targets() {
     let machine = Machine::new("targets");
     machine.repo("jgeschwendt/alpha");
