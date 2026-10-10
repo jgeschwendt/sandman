@@ -230,8 +230,9 @@ to a message or for `git commit --trailer`.
   rather than falling through; so does a repo where none of the three resolves, and that
   message asks the operator to name the trunk in `~/.grove/manifest.toml` as
   `trunk = "…"` under the repo's `[roots."owner/repo"]` table. Nothing is reverted and
-  no branch is cut. A hit trunk does not reach is reported `off trunk` and left alone:
-  its branch is simply never merged.
+  no branch is cut. A trunk behind `refs/remotes/origin/<trunk>` (an ancestor of it,
+  not equal) fails the repo too — fast-forward it (`grove sync`) and rerun — so a hit
+  trunk does not reach, reported `off trunk` and left alone, is one that never landed.
 - **The machine lands by fast-forward only.** A shift never makes a merge commit: when
   trunk has moved it rebases its own unpushed `shift/<id>` branch onto trunk, then
   `git merge --ff-only` — so every commit it lands sits on trunk's first-parent line and

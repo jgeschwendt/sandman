@@ -184,11 +184,11 @@ usage: sandman <verb> [args]
       ($SANDMAN_RECONCILE_EXTRA, colon-separated) — that the repo's trunk
       reaches is reverted newest-first on a reconcile/<event-id> branch cut
       from trunk (the manifest's trunk — one that does not resolve fails —
-      else main, else origin/HEAD; a repo with none fails), in a scratch
-      worktree, with the repo's hooks off; hits trunk does not reach are
-      reported off trunk. A conflict ends that repo, and so does a trailered
-      merge: the machine lands by fast-forward only, so merges are never
-      reverted but left to the operator. Appends one
+      else main, else origin/HEAD; a repo with none, or a trunk behind
+      origin, fails), in a scratch worktree, with the repo's hooks off; hits
+      trunk does not reach are reported off trunk. A conflict ends that repo,
+      and so does a trailered merge: the machine lands by fast-forward only,
+      so merges are never reverted but left to the operator. Appends one
       reconcile event and lists the memories whose source: names a revoked
       event, for reflect to retire; exits 1 when any repo ended in a conflict
       or a failure. --dry-run prints the plan and changes nothing.

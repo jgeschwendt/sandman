@@ -56,8 +56,8 @@ pub struct RepoReport {
     pub label: String,
     /// What the operator should know, such as a repo with no trunk ref.
     pub notes: Vec<String>,
-    /// Hits trunk does not reach: nothing to revert, the branch carrying
-    /// them is simply left unmerged.
+    /// Hits trunk does not reach — trunk is never behind `origin`, so these
+    /// never landed: nothing to revert.
     pub off_trunk: Vec<String>,
     /// Hits to revert, newest first — what `--dry-run` reports.
     pub planned: Vec<String>,
@@ -168,8 +168,8 @@ fn rationale(repos: &[RepoReport]) -> String {
 ///
 /// The branch starts from the repo's trunk, never from whichever checkout's
 /// `HEAD` reaches the hits: a `shift/…` HEAD would carry the shift's other
-/// commits onto the reconcile branch. Hits trunk does not reach are left
-/// alone — their branch is simply never merged.
+/// commits onto the reconcile branch. A trunk behind `origin` fails the repo:
+/// shipped hits it does not reach would pass for unlanded ones.
 fn reconcile_repo(
     repo: &Repo,
     trunks: &BTreeMap<String, String>,
@@ -196,6 +196,16 @@ fn reconcile_repo(
         }
     };
     report.base.clone_from(&trunk);
+    let upstream = trunk.replacen("refs/heads/", "refs/remotes/origin/", 1);
+    if git_ok(dir, &["merge-base", "--is-ancestor", &trunk, &upstream])
+        && !git_ok(dir, &["merge-base", "--is-ancestor", &upstream, &trunk])
+    {
+        report.failed = Some(format!(
+            "trunk is behind {}: fast-forward it (grove sync) and rerun",
+            upstream.trim_start_matches("refs/remotes/")
+        ));
+        return report;
+    }
     let branch_ref = format!("refs/heads/{branch}");
     let reused = git_ok(dir, &["rev-parse", "--verify", "--quiet", &branch_ref]);
     if reused && !git_ok(dir, &["merge-base", "--is-ancestor", &trunk, &branch_ref]) {

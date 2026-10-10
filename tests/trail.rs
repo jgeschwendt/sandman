@@ -836,3 +836,43 @@ fn a_manifest_trunk_that_does_not_resolve_fails_the_repo() {
         ""
     );
 }
+
+#[test]
+fn a_trunk_behind_origin_fails_until_it_is_fast_forwarded() {
+    let machine = Machine::new("stale-trunk");
+    let event = machine.append(&["--kind", "change"]);
+    let (checkout, _) = fixture(&machine, &[]);
+    let origin = machine.home.join("origin.git");
+    let other = machine.home.join("other");
+    let (origin_arg, other_arg) = (origin.display().to_string(), other.display().to_string());
+    git(&checkout, &["clone", "--quiet", "--bare", ".", &origin_arg]);
+    git(&checkout, &["remote", "add", "origin", &origin_arg]);
+    git(
+        &machine.home,
+        &["clone", "--quiet", &origin_arg, &other_arg],
+    );
+    fs::write(other.join("file.txt"), "shipped\n").expect("work");
+    let hit = commit(&other, "shipped", Some(&event));
+    git(&other, &["push", "--quiet", "origin", "main"]);
+    git(&checkout, &["fetch", "--quiet", "origin"]);
+
+    let output = machine.run(&["reconcile", &event]);
+    let report = stdout(&output);
+    assert_eq!(code(&output), 1, "{report}");
+    assert!(
+        report.contains(
+            "failed: trunk is behind origin/main: fast-forward it (grove sync) and rerun"
+        ),
+        "{report}"
+    );
+    assert!(!report.contains("reverted:"), "{report}");
+    assert!(!report.contains("off trunk"), "{report}");
+    assert_eq!(
+        git(&checkout, &["for-each-ref", "refs/heads/reconcile"]),
+        ""
+    );
+
+    git(&checkout, &["merge", "--quiet", "--ff-only", "origin/main"]);
+    let report = machine.ok(&["reconcile", &event]);
+    assert!(report.contains(&format!("reverted: {hit}")), "{report}");
+}
