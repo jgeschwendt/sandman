@@ -48,6 +48,7 @@
         "127.0.0.1:1701",
         "127.0.0.1:1703",
         "127.0.0.1:7777",
+        "api.anthropic.com",
         "api.github.com",
         "builds.hex.pm",
         "export.arxiv.org",

@@ -222,6 +222,8 @@ fn profile_prints_the_session_settings_for_either_kind() {
     let text = shift.trim();
     assert!(text.starts_with("{\n  \"permissions\": {") && text.ends_with('}'));
     assert!(text.contains("\n  \"sandbox\": {"), "{text}");
+    // `reflect` and `dream` run `claude -p` from Bash
+    assert!(text.contains("\"api.anthropic.com\","), "{text}");
     assert_eq!(
         machine.ok(now, &["shift", "profile", "--kind", "shift"]),
         shift

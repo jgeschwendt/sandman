@@ -472,7 +472,9 @@ today (`--kind` is there so they can diverge). Strict means
 `allowUnsandboxedCommands: false`: a command the sandbox refuses fails rather than
 retrying outside it. Writes reach only `~/.grove` (the checkouts, and the bare repositories and manifest lock under `~/.grove/roots` and `~/.grove` that every commit and `grove tree add` write — observed 2026-10-10, the first Sabbath could not cut its branch with `~/.grove/code` alone), `~/.local/state/claude`,
 `~/.routines` and `~/.sandman`; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
-cannot be read; the network reaches only the profile's `allowedDomains`.
+cannot be read; the network reaches only the profile's `allowedDomains` — among them
+`api.anthropic.com`, because `sandman reflect` and `sandman dream` run `claude -p` from
+Bash, inside the sandbox (observed 2026-10-10: the first Sabbath's reflect was denied).
 
 `dontAsk` runs what `permissions.allow` names — the profile lists the tools a shift
 uses, bare, and the `sandman` and `threads` MCP tools — and denies everything else
