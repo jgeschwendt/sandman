@@ -41,7 +41,7 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 
 ## The sandbox
 
-A shift runs in `bypassPermissions` — no prompts, no classifier — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove/code`, `~/.sandman`, `~/.routines` and `~/.local/state/claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. `git fetch`, `git pull`, `git push` and `grove sync` run outside the sandbox with the host's own git auth, because git over SSH fails inside the macOS sandbox and a `--bg` session inherits no environment. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
+A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove/code`, `~/.sandman`, `~/.routines` and `~/.local/state/claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. `git fetch`, `git pull`, `git push` and `grove sync` run outside the sandbox with the host's own git auth, because git over SSH fails inside the macOS sandbox and a `--bg` session inherits no environment. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
 
 ## Spawn's answers
 
@@ -161,7 +161,7 @@ print(json.dumps({
     "prompt": open(brief).read(),
     "cwd": cwd,
     "model": mind,
-    "permission_mode": "bypassPermissions",
+    "permission_mode": "dontAsk",
     "settings": json.loads(profile),
     "name": "shift " + shift,
 }))

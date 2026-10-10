@@ -17,7 +17,7 @@ The ruach's hourly pass. Research is its own perpetual engine, outside the creat
 
 ## The sandbox
 
-A pass runs in `bypassPermissions` inside Claude Code's strict Bash sandbox with the profile `sandman shift profile --kind breath` prints — the same boundary as `shift.md` § The sandbox: writes under the machine's own trees only, network to the allowlisted feeds and GitHub, credentials unreadable.
+A pass runs in `dontAsk` inside Claude Code's strict Bash sandbox with the profile `sandman shift profile --kind breath` prints — the same boundary as `shift.md` § The sandbox: writes under the machine's own trees only, network to the allowlisted feeds and GitHub, credentials unreadable.
 
 ## Knobs
 
@@ -49,7 +49,7 @@ print(json.dumps({
     "prompt": open(prompt).read(),
     "cwd": cwd,
     "model": mind,
-    "permission_mode": "bypassPermissions",
+    "permission_mode": "dontAsk",
     "settings": json.loads(profile),
     "name": "breath skim " + pid,
 }))
