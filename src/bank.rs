@@ -126,8 +126,17 @@ impl Bank {
 
     /// The index as it should be on disk.
     pub fn render_index(&self) -> Result<String> {
+        self.render_index_without(None)
+    }
+
+    /// The index as it would be without `except` — a file about to be
+    /// superseded need not be readable to be replaced.
+    pub fn render_index_without(&self, except: Option<&str>) -> Result<String> {
         let mut out = String::from(INDEX_HEADER);
         for name in self.memory_filenames()? {
+            if except == Some(name.as_str()) {
+                continue;
+            }
             let path = self.dir.join(&name);
             let memory = MemoryFile::read(&path)?;
             let entry_name = memory.name().ok_or_else(|| Error::MissingField {

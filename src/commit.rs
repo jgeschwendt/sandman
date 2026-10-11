@@ -78,7 +78,7 @@ pub fn commit_memory(
     fs::create_dir_all(bank.dir()).map_err(|source| Error::io(bank.dir(), source))?;
     // A sibling the index cannot read fails the commit before anything lands,
     // not after: a write that then reports failure invites a duplicating retry.
-    bank.render_index()?;
+    bank.render_index_without(request.replaces.as_deref())?;
 
     let now = Timestamp::now()?;
     let mut created = now.iso8601();
@@ -325,6 +325,16 @@ mod tests {
         fs::write(bank.dir().join("README.md"), "# readme\n").expect("readme");
         assert!(commit_memory(temp.path(), BANK, request("kept")).is_err());
         assert_eq!(bank.memory_filenames().expect("list"), ["README.md"]);
+        // …but replacing that very file repairs the bank.
+        fs::write(
+            bank.dir().join("README.md"),
+            "---\nname: readme\n---\n\nbody\n",
+        )
+        .expect("readme");
+        let mut repair = request("kept");
+        repair.replaces = Some("README.md".to_owned());
+        commit_memory(temp.path(), BANK, repair).expect("repair");
+        assert!(bank.index_path().is_file());
     }
 
     #[test]
