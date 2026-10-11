@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use crate::atomic;
 use crate::error::{Error, Result};
 use crate::json::{self, Value};
+use crate::lock::CommitLock;
 use crate::paths;
 use crate::slug::{slug, truncate_chars};
 use crate::time::Timestamp;
@@ -417,7 +418,7 @@ pub fn sources_json(sources: &[Source]) -> String {
 /// Create the store's directories and seed `sources.toml` if absent; the
 /// paths it created.
 pub fn init(data_root: &Path) -> Result<Vec<PathBuf>> {
-    let _lock = trail::acquire(data_root)?;
+    let _lock = CommitLock::acquire(data_root)?;
     let mut made = Vec::new();
     for dir in [
         paths::breath_dir(data_root),
@@ -816,7 +817,7 @@ pub fn file(ctx: &Context, filing: &Filing) -> Result<Filed> {
     let dir = paths::breath_dir(&ctx.data_root);
     let now = ctx.now.iso8601();
     let (path, name) = {
-        let _lock = trail::acquire(&ctx.data_root)?;
+        let _lock = CommitLock::acquire(&ctx.data_root)?;
         let existing = breaths(&ctx.data_root)?;
         if let Some(matched) = repeat_of(&existing, &filing.repo, &url, &title) {
             let mut breath = matched.clone();
@@ -973,7 +974,7 @@ pub fn transition(
         return Err(Error::refused("drop needs --reason"));
     }
     let breath = {
-        let _lock = trail::acquire(&ctx.data_root)?;
+        let _lock = CommitLock::acquire(&ctx.data_root)?;
         let path = paths::breath_dir(&ctx.data_root).join(&name);
         let raw = match fs::read_to_string(&path) {
             Ok(raw) => raw,
@@ -1239,7 +1240,7 @@ pub fn pass(
         )));
     }
     let lock = (!dry_run)
-        .then(|| trail::acquire(&ctx.data_root))
+        .then(|| CommitLock::acquire(&ctx.data_root))
         .transpose()?;
     let (spent, in_flight) = ledger(&ctx.data_root, ctx.now, kind, dead_cost_usd, lock.is_some())?;
     if spent >= budget_usd {
@@ -1344,7 +1345,7 @@ pub fn attach(
     bg_id: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<()> {
-    let _lock = trail::acquire(&ctx.data_root)?;
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
     let (path, mut entries) = read_pass(&ctx.data_root, id)?;
     for (key, value) in [("bg_id", bg_id), ("session_id", session_id)] {
         if let Some(value) = value {
@@ -1376,7 +1377,7 @@ pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event>
         return Err(Error::invalid("cost", closing.cost_usd.to_string()));
     }
     let kind = {
-        let _lock = trail::acquire(&ctx.data_root)?;
+        let _lock = CommitLock::acquire(&ctx.data_root)?;
         let (path, mut entries) = read_pass(&ctx.data_root, id)?;
         let field = |key: &str| {
             entries
@@ -1501,7 +1502,7 @@ fn cents(value: f64) -> f64 {
 /// `reweighted` stamped and append one `breath` event.
 pub fn reweight(ctx: &Context, dry_run: bool) -> Result<(Vec<Change>, Option<trail::Event>)> {
     let changes = {
-        let _lock = trail::acquire(&ctx.data_root)?;
+        let _lock = CommitLock::acquire(&ctx.data_root)?;
         let mut sources = Sources::read(&ctx.data_root)?;
         let since = sources.reweighted;
         let adopted = breaths(&ctx.data_root)?;

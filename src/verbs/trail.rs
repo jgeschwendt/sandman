@@ -14,8 +14,6 @@ use std::hash::{BuildHasher as _, RandomState};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
-use std::time::Duration;
 
 use crate::atomic;
 use crate::error::{Error, Result};
@@ -44,11 +42,6 @@ pub const KINDS: [&str; 10] = [
 /// would have a second reconcile revert the first one's reverts.
 const META_KINDS: [&str; 2] = ["reconcile", "revoke"];
 
-/// How long an append waits for a held `.commit.lock` — every holder is a
-/// single short write — before reporting it.
-const LOCK_ATTEMPTS: u32 = 50;
-/// The pause between lock attempts.
-const LOCK_PAUSE: Duration = Duration::from_millis(100);
 /// How many fresh ids an append tries before giving up on a collision.
 const MINT_ATTEMPTS: u32 = 16;
 /// How much of a rationale one `log` line keeps.
@@ -529,7 +522,7 @@ pub fn append_event(data_root: &Path, event: Event, remint: bool) -> Result<Even
             draft.cost_usd.unwrap_or_default().to_string(),
         ));
     }
-    let _lock = acquire(data_root)?;
+    let _lock = CommitLock::acquire(data_root)?;
     append_locked(data_root, event, remint)
 }
 
@@ -567,20 +560,6 @@ fn append_locked(data_root: &Path, mut event: Event, remint: bool) -> Result<Eve
     Ok(event)
 }
 
-/// Take `.commit.lock`, waiting out a short-lived holder.
-pub(crate) fn acquire(data_root: &Path) -> Result<CommitLock> {
-    let mut attempt = 1;
-    loop {
-        match CommitLock::acquire(data_root) {
-            Err(Error::LockHeld { .. }) if attempt < LOCK_ATTEMPTS => {
-                attempt += 1;
-                thread::sleep(LOCK_PAUSE);
-            }
-            other => return other,
-        }
-    }
-}
-
 /// What a revoke did.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Revoked {
@@ -594,7 +573,7 @@ pub enum Revoked {
 /// `shift:<id>` ref — unless one already does. The check and the append
 /// share one hold of `.commit.lock`, so two revokes racing write one event.
 pub fn revoke(data_root: &Path, id: &str, reason: &str) -> Result<Revoked> {
-    let _lock = acquire(data_root)?;
+    let _lock = CommitLock::acquire(data_root)?;
     let entries = read(data_root, None)?;
     revoked_set(&entries, id)?;
     if let Some(earlier) = revocations(&entries, id).first() {

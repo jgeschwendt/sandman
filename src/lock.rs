@@ -1,18 +1,26 @@
 //! `.commit.lock` — the data root's single writer gate.
 //!
-//! Create-exclusive, so acquisition is the OS's atomic `O_EXCL` and a second
-//! writer gets [`Error::LockHeld`] rather than a corrupted bank. The lockfile
-//! carries the holder's pid for post-mortems and is removed on drop.
+//! Create-exclusive, so acquisition is the OS's atomic `O_EXCL`; a second
+//! writer waits out the holder — every one is a short write — and gets
+//! [`Error::LockHeld`] rather than a corrupted bank only when it outlasts the
+//! wait. The lockfile carries the holder's pid for post-mortems and is removed
+//! on drop.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::thread;
+use std::time::Duration;
 
 use crate::error::{Error, Result};
 
 /// The lockfile's name at the data root.
 pub const LOCK_FILE_NAME: &str = ".commit.lock";
+/// How many times an acquire tries a held lock before reporting it.
+const LOCK_ATTEMPTS: u32 = 50;
+/// The pause between lock attempts.
+const LOCK_PAUSE: Duration = Duration::from_millis(100);
 
 /// A held commit lock. Dropping it releases the lock.
 #[derive(Debug)]
@@ -21,11 +29,28 @@ pub struct CommitLock {
 }
 
 impl CommitLock {
-    /// Take the lock at `data_root`, creating the root if it is not there yet.
+    /// Take the lock at `data_root`, creating the root if it is not there yet,
+    /// waiting out a short-lived holder. Every writer waits alike: one that
+    /// failed fast would lose each race to a trail append and leave a
+    /// multi-step caller (reflect's merge) half-applied.
     ///
     /// A stale lockfile — one left by a killed process — is never stolen: it
     /// is reported, and clearing it is the operator's call.
     pub fn acquire(data_root: &Path) -> Result<Self> {
+        let mut attempt = 1;
+        loop {
+            match Self::try_acquire(data_root) {
+                Err(Error::LockHeld { .. }) if attempt < LOCK_ATTEMPTS => {
+                    attempt += 1;
+                    thread::sleep(LOCK_PAUSE);
+                }
+                other => return other,
+            }
+        }
+    }
+
+    /// One attempt at the lock.
+    fn try_acquire(data_root: &Path) -> Result<Self> {
         fs::create_dir_all(data_root).map_err(|source| Error::io(data_root, source))?;
         let path = data_root.join(LOCK_FILE_NAME);
         match OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -71,7 +96,7 @@ mod tests {
         let first = CommitLock::acquire(temp.path()).expect("first acquire");
         assert!(first.path().is_file());
 
-        match CommitLock::acquire(temp.path()) {
+        match CommitLock::try_acquire(temp.path()) {
             Err(Error::LockHeld { path }) => assert_eq!(path, temp.path().join(LOCK_FILE_NAME)),
             other => panic!("expected LockHeld, got {other:?}"),
         }

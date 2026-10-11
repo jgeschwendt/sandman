@@ -715,5 +715,6 @@ worst three inside the first 20 lines, the ones a weekday brief's `score.week` c
 
 ## Concurrency
 
-All bank, trail, shift, breath and score writes happen under `.commit.lock` at the data root; every file write is
-atomic (tmp → rename in the same directory).
+All bank, trail, shift, breath and score writes happen under `.commit.lock` at the data root, and every writer waits
+alike — up to five seconds for a holder to finish — before it reports the lock held; every file write is atomic (tmp →
+rename in the same directory).

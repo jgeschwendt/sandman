@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::atomic;
 use crate::error::{Error, Result};
 use crate::json::{self, Value};
+use crate::lock::CommitLock;
 use crate::paths;
 use crate::time::{Timestamp, civil_from_days, days_from_civil};
 use crate::verbs::breathe;
@@ -755,7 +756,7 @@ pub fn write(ctx: &shift::Context, score: &Score) -> Result<PathBuf> {
     let week = score.week;
     let dir = paths::score_dir(&ctx.data_root);
     let path = dir.join(format!("{}.md", week.name()));
-    let _lock = trail::acquire(&ctx.data_root)?;
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
     fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
     atomic::write(&path, &score.page(ctx.now))?;
     Ok(path)

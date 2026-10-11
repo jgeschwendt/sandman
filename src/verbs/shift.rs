@@ -29,6 +29,7 @@ use crate::error::{Error, Result};
 use crate::grove;
 use crate::journal;
 use crate::json::{self, Value};
+use crate::lock::CommitLock;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::{Timestamp, civil_from_days, days_from_civil};
@@ -1607,7 +1608,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         &guard_lines(&entries, &target.label),
     );
     {
-        let _lock = trail::acquire(&ctx.data_root)?;
+        let _lock = CommitLock::acquire(&ctx.data_root)?;
         fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
         atomic::write(&brief_path, &text)?;
         atomic::write(&dir.join("meta.json"), &format!("{}\n", meta.render()))?;
@@ -1804,7 +1805,7 @@ pub fn handoff(
     }
     entries.sort_by(|left, right| left.0.cmp(&right.0));
     {
-        let _lock = trail::acquire(&ctx.data_root)?;
+        let _lock = CommitLock::acquire(&ctx.data_root)?;
         if write {
             atomic::write(&path, &text)?;
         }
@@ -1864,7 +1865,7 @@ pub fn attach(
     bg_id: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<()> {
-    let _lock = trail::acquire(&ctx.data_root)?;
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
     let current = read_current(&ctx.data_root)?
         .filter(|value| value.get("shift").and_then(Value::as_str) == Some(shift))
         .ok_or_else(|| Error::not_found("open shift", shift.to_owned()))?;

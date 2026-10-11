@@ -303,15 +303,15 @@ mod tests {
     }
 
     #[test]
-    fn a_held_lock_blocks_the_commit() {
+    fn a_commit_waits_out_a_short_holder() {
         let temp = TempDir::new("commit-blocked");
         let held = CommitLock::acquire(temp.path()).expect("acquire");
-        assert!(matches!(
-            commit_memory(temp.path(), BANK, request("blocked")),
-            Err(Error::LockHeld { .. })
-        ));
-        drop(held);
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            drop(held);
+        });
         commit_memory(temp.path(), BANK, request("blocked")).expect("commit after release");
+        release.join().expect("release");
     }
 
     #[test]
