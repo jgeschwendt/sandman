@@ -28,7 +28,8 @@ use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 use crate::verbs::{
-    breathe, dream, forget, mcp, recall, reconcile, reflect, remember, score, shift, take, trail,
+    breathe, dream, forget, mcp, recall, reconcile, reflect, remember, report, score, shift, take,
+    trail,
 };
 use crate::version::VERSION;
 
@@ -194,6 +195,18 @@ usage: sandman <verb> [args]
       exits 1 when any repo ended in a conflict or a failure. --dry-run
       prints the plan and changes nothing.
 
+  report [--since T | --week yyyy-Www | --all] [--mark-read]
+  report --hook          (SessionStart payload on stdin)
+      The owner's digest: the shifts' report.md files started after the read
+      cursor (<root>/.reports-read), newest first under a --- rule, headed by
+      every one's Worth-your-eye bullets and the proposal: threads awaiting
+      him; `nothing new.` when there are none. --since, --week and --all
+      select by the shift's start and ignore the cursor; --mark-read moves it
+      to the newest report printed. --hook answers with the hook envelope,
+      capped at 6,000 characters (whole reports cut oldest first), and moves
+      the cursor; silent when nothing is unread and for the machine's own
+      sessions — the open shift's session_id, or a cwd under the data root.
+
   score [--week yyyy-Www] [--json]
       The week's numbers from the trail, shifts/*/meta.json, the breath
       store, ~/.threads ($SANDMAN_THREADS) and the shift and breathe-*
@@ -250,7 +263,9 @@ usage: sandman <verb> [args]
       journals a cost zero note) and releases current.json; a shift already handed off
       exits 1, and so does a handoff over 2,000 characters
       unless --truncate keeps its head and notes the cut (--abandoned always
-      truncates). attach records the session the runner
+      truncates); every handoff but --abandoned refuses (exit 1) without a
+      shifts/<id>/report.md carrying the report's five headings in order, under
+      6,000 characters. attach records the session the runner
       started in current.json. status prints current.json and the clock.
       profile prints the Claude Code settings a shift or breath session runs
       under (profiles/session.json, compiled in; one profile for both kinds).
@@ -345,6 +360,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "reconcile" => reconcile_verb(rest),
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
+        "report" => report_verb(rest),
         "score" => score_verb(rest),
         "shift" => shift_verb(rest),
         "take" => take_verb(rest),
@@ -1504,6 +1520,75 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
             troubled.join(", ")
         ))
         .into());
+    }
+    Ok(())
+}
+
+/// `report [--since T | --week W | --all] [--mark-read] | --hook`.
+fn report_verb(args: &[String]) -> Result<(), Failure> {
+    let (values, set) = shift_flags(
+        args,
+        "report",
+        &["--since", "--week"],
+        &["--all", "--hook", "--mark-read"],
+    )?;
+    let switch = |name: &str| set.iter().any(|switch| switch == name);
+    let since = flag(&values, "--since")
+        .map(|text| {
+            Timestamp::parse_iso8601(&text)
+                .ok_or_else(|| Failure::Usage(format!("--since wants RFC 3339, got `{text}`")))
+        })
+        .transpose()?;
+    let week = flag(&values, "--week")
+        .map(|text| {
+            score::Week::parse(&text)
+                .ok_or_else(|| Failure::Usage(format!("--week wants yyyy-Www, got `{text}`")))
+        })
+        .transpose()?;
+    let select = match (since, week, switch("--all")) {
+        (None, None, false) => report::Select::Unread,
+        (Some(at), None, false) => report::Select::Since(at),
+        (None, Some(week), false) => report::Select::Week(week),
+        (None, None, true) => report::Select::All,
+        _ => {
+            return Err(Failure::Usage(
+                "report takes one of --since, --week, --all".to_owned(),
+            ));
+        }
+    };
+    let hook = switch("--hook");
+    if hook && (select != report::Select::Unread || switch("--mark-read")) {
+        return Err(Failure::Usage(
+            "report --hook takes no other flag".to_owned(),
+        ));
+    }
+    let data_root = paths::data_root()?;
+    let threads = paths::threads_dir(&paths::home()?);
+    let digest = if hook {
+        let start = hook::session_start(&stdin()?)?;
+        if report::own(&data_root, &start) {
+            note(
+                Some(&data_root),
+                "report",
+                "hook declined the machine's own session",
+            );
+            return Ok(());
+        }
+        let digest = report::digest(&data_root, &threads, select, report::REPORT_CHARS);
+        if digest.newest.is_none() {
+            return Ok(());
+        }
+        println!("{}", hook::session_start_reply(&digest.text));
+        digest
+    } else {
+        let digest = report::digest(&data_root, &threads, select, usize::MAX);
+        print!("{}", digest.text);
+        digest
+    };
+    if (hook || switch("--mark-read"))
+        && let Some(newest) = digest.newest
+    {
+        report::mark_read(&data_root, newest)?;
     }
     Ok(())
 }

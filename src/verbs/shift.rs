@@ -35,6 +35,7 @@ use crate::slug::truncate_chars;
 use crate::time::{Timestamp, civil_from_days, days_from_civil};
 use crate::verbs::breathe;
 use crate::verbs::recall;
+use crate::verbs::report;
 use crate::verbs::score::{self, Week};
 use crate::verbs::trail;
 
@@ -53,11 +54,13 @@ const MAX_SKEW_SECONDS: i64 = 300;
 const CHECK_USED_PERCENT: f64 = 90.0;
 /// The brief's Context slots, each fenced as data under a label naming
 /// where it came from.
-const CONTEXT_SOURCES: [(&str, &str); 12] = [
+const CONTEXT_SOURCES: [(&str, &str); 14] = [
     ("breath.pending", "the breath store"),
     ("breath.week", "the breath store"),
     ("handoff.previous", "the previous shift's handoff.md"),
     ("memories.bearing", "the target's bank chain"),
+    ("proposals.approved", "~/.threads"),
+    ("proposals.open", "~/.threads"),
     ("sabbath.previous", "last Sabbath's targets file"),
     ("score.week", "this week's score page"),
     ("shifts.week", "shifts/*/meta.json"),
@@ -95,8 +98,10 @@ pub fn profile(kind: &str) -> Option<&'static str> {
 /// What the cap leaves of the previous handoff, at the least.
 const HANDOFF_FLOOR: usize = 1_500;
 /// The order the cap cuts slots in, and how each gives.
-const TRIM_ORDER: [(&str, Cut); 12] = [
+const TRIM_ORDER: [(&str, Cut); 14] = [
     ("trail.week", Cut::OldestLines),
+    ("proposals.open", Cut::TailLines),
+    ("proposals.approved", Cut::TailLines),
     ("trail.recent", Cut::OldestLines),
     ("memories.bearing", Cut::TailLines),
     ("threads.open", Cut::TailLines),
@@ -160,7 +165,7 @@ pub const WEEK: [Day; 7] = [
     },
     Day {
         creation: "Day 2 · Firmament; waters divided",
-        does: "Rebuild the structure Sunday's findings and standing proposals indict, through an always-green staged migration.",
+        does: "Execute the approved proposals first (§ Context), then rebuild the structure Sunday's findings and standing proposals indict, through an always-green staged migration.",
         instrument: "/gigaredesign → /execute-plan",
         name: "Monday",
         theme: "Redesign",
@@ -624,6 +629,12 @@ fn read_current(data_root: &Path) -> Result<Option<Value>> {
     }
 }
 
+/// The open shift's session id, once the runner has attached it.
+pub(crate) fn session(data_root: &Path) -> Option<String> {
+    let current = read_current(data_root).ok()??;
+    current.get("session_id")?.as_str().map(ToOwned::to_owned)
+}
+
 /// Every trunk the rotation covers: each grove repo of an allowed owner at its
 /// trunk checkout (the manifest's `trunk`, else `main`). Only checkouts under
 /// `<grove code>/<owner>/` qualify — the home repos (`~`, `~/.routines`, the
@@ -781,7 +792,7 @@ pub(crate) fn front_files(dir: &Path) -> Vec<(String, BTreeMap<String, String>, 
 }
 
 /// The first `# ` heading of a body, cut to a line.
-fn title(body: &str) -> Option<String> {
+pub(crate) fn title(body: &str) -> Option<String> {
     body.lines()
         .find_map(|line| line.strip_prefix("# "))
         .map(|title| truncate_chars(title.trim(), TITLE_CHARS).to_owned())
@@ -1197,6 +1208,17 @@ fn newest_within(lines: &[String], cap: usize) -> String {
     listed(&kept)
 }
 
+/// The proposals still waiting on the owner, one line each, else `none.`.
+fn open_proposals(proposals: &[report::Proposal]) -> String {
+    report::listed(
+        &proposals
+            .iter()
+            .filter(|p| p.awaiting)
+            .map(|p| format!("- {} · opened {} · {}", p.key, p.opened, p.title))
+            .collect::<Vec<_>>(),
+    )
+}
+
 /// One line per shift started in `week`: id, repo, theme, outcome.
 fn shifts_week(data_root: &Path, week: Week) -> Vec<String> {
     metas(data_root)
@@ -1275,6 +1297,10 @@ fn sabbath_slots(
         String::new()
     };
     slots.insert("breath.week", breath_lines.join("\n"));
+    slots.insert(
+        "proposals.open",
+        open_proposals(&report::proposals(&ctx.threads, None)),
+    );
     slots.insert(
         "sabbath.previous",
         fs::read_to_string(targets)
@@ -1489,6 +1515,24 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
             memories
         },
     );
+    let proposals = report::proposals(&ctx.threads, Some(&target.label));
+    slots.insert(
+        "proposals.approved",
+        report::listed(
+            &proposals
+                .iter()
+                .filter_map(|p| {
+                    Some(format!(
+                        "- {} · decided {} · {}",
+                        p.key,
+                        p.approved.as_ref()?,
+                        p.title
+                    ))
+                })
+                .collect::<Vec<_>>(),
+        ),
+    );
+    slots.insert("proposals.open", open_proposals(&proposals));
     slots.insert("score.week", score.unwrap_or_else(|| "none yet".to_owned()));
     slots.insert("shift.creation", day.creation.to_owned());
     slots.insert("shift.id", shift.clone());
@@ -1748,6 +1792,20 @@ pub fn handoff(
         )));
     }
     let dir = paths::shift_dir(&ctx.data_root, shift);
+    let abandoned = matches!(source, Source::Abandoned(_));
+    let report = dir.join("report.md");
+    if let Some(why) = fs::read_to_string(&report)
+        .map_or_else(
+            |_| Some("missing".to_owned()),
+            |text| report::refusal(&text),
+        )
+        .filter(|_| !abandoned)
+    {
+        return Err(Error::refused(format!(
+            "shift {shift}'s report {}: {why}",
+            report.display()
+        )));
+    }
     let path = dir.join("handoff.md");
     let existing = fs::read_to_string(&path)
         .ok()
@@ -1787,7 +1845,6 @@ pub fn handoff(
             }
         }
     };
-    let abandoned = matches!(source, Source::Abandoned(_));
     if text.trim().is_empty() {
         return Err(Error::refused(format!("the handoff for {shift} is empty")));
     }

@@ -293,6 +293,13 @@ pub fn shift_current(data_root: &Path) -> PathBuf {
     shifts_dir(data_root).join("current.json")
 }
 
+/// `<root>/.reports-read` — `report`'s read cursor, runtime state in the
+/// dotted tier: one ISO-8601 line, the start of the newest report shown.
+#[must_use]
+pub fn reports_read(data_root: &Path) -> PathBuf {
+    data_root.join(".reports-read")
+}
+
 /// The five-hour window file: `$CLAUDE_WINDOW_FILE`, else
 /// `$XDG_STATE_HOME/claude/window.json`, else `~/.local/state/claude/window.json`.
 pub fn claude_window_file() -> Result<PathBuf> {

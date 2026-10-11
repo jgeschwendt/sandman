@@ -12,6 +12,7 @@ pub mod recall;
 pub mod reconcile;
 pub mod reflect;
 pub mod remember;
+pub mod report;
 pub mod score;
 pub mod shift;
 pub mod take;
