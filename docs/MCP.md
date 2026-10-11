@@ -89,7 +89,7 @@ Every request journals one line to `<root>/.trace/mcp-<date>.log` through `src/j
 
 ### Concurrency
 
-Stdio is one client, one request at a time; the server handles requests sequentially and does not spawn. The commit lock (`src/lock.rs`) already serializes against reflect, dream, and a concurrent CLI `remember`; a lock failure surfaces as an `isError` tool result naming the holder, and the caller retries. Nothing here reads `.recent/` or the queue for itself (see the `lm:queue-definition` invariant).
+Stdio is one client, one request at a time; the server handles requests sequentially and does not spawn. The commit lock (`src/lock.rs`) already serializes against reflect, dream, and a concurrent CLI `remember`; a lock still held after the five-second wait every writer gives it surfaces as an `isError` tool result naming the lockfile, and the caller retries. Nothing here reads `.recent/` or the queue for itself (see the `lm:queue-definition` invariant).
 
 ### Registration
 
