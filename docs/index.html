@@ -64,27 +64,31 @@
 <section class="plan-section" id="verbs" data-component="verbs">
   <header>
     <h2 class="h2">Verbs</h2>
-    <p class="plan-note">Six memory verbs — the whole surface. Sandman never sees a hook
-      event; it reads transcripts.</p>
+    <p class="plan-note">Thirteen verbs, one dispatcher. The memory verbs read transcripts —
+      sandman never sees a hook event; the machine verbs read the trail.</p>
   </header>
   <figure class="plate">
-    <object class="plate-light" type="image/svg+xml" data="plates/verbs.svg" aria-label="the CLI surface — six memory verbs"><img src="plates/verbs.png"
-      alt="Six boxes in alphabetical order — dream, forget, recall, reflect, remember, take — each carrying the one-line duty the table below spells out." /></object>
-    <object class="plate-dark" type="image/svg+xml" data="plates/verbs.dark.svg" aria-label="the CLI surface — six memory verbs"><img src="plates/verbs.dark.png"
-      alt="Six boxes in alphabetical order — dream, forget, recall, reflect, remember, take — each carrying the one-line duty the table below spells out." /></object>
-    <figcaption>The CLI surface — one box per verb, in the order the table reads. Source: <a href="arch.tldr">arch.tldr</a>, frame
-      <code class="code">verbs</code>.</figcaption>
+    <img class="plate-img" src="plates/verbs.png" alt="Fourteen boxes in two rows of seven: the thirteen verbs in alphabetical order — breathe, dream, forget, mcp, recall, reconcile, reflect, remember, report, score, shift, take, trail — each with its family (memory, machine, ruach, owner) and one-line duty, and a dashed fourteenth box naming how they fire: hooks, routines, shifts, by hand." />
+    <figcaption>The CLI surface — one box per verb, in the order the table reads. Source: <code class="code">docs/plates/sandman/</code>, artboard
+      <code class="code">verbs</code> (Claude Design).</figcaption>
   </figure>
   <div class="table-wrap">
     <table data-table>
       <thead><tr><th>verb</th><th>duty</th></tr></thead>
       <tbody>
+        <tr data-verb="breathe"><td class="table-mono">breathe init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight</td><td>the ruach's store — feeds, breaths, the pass prompt, reweight; no model, no network</td></tr>
         <tr data-verb="dream"><td class="table-mono">dream [--now]</td><td>route short-term → banks: 3 parallel dreams → 2-of-3 consensus → commit</td></tr>
         <tr data-verb="forget"><td class="table-mono">forget &lt;session&gt;</td><td>the privacy ending — destroy every copy; no archive, no pointer, no routing</td></tr>
-        <tr data-verb="recall"><td class="table-mono">recall</td><td>the recall surface: ancestor-directional banks + <code class="code">.recent</code> pointers</td></tr>
+        <tr data-verb="mcp"><td class="table-mono">mcp</td><td>the stdio tool server: recall, remember and banks over the same code paths</td></tr>
+        <tr data-verb="recall"><td class="table-mono">recall</td><td>the recall surface: ancestor-directional banks + <code class="code">.recent</code> pointers + the voyage log tail + the tool index</td></tr>
+        <tr data-verb="reconcile"><td class="table-mono">reconcile &lt;event|shift&gt;</td><td>revert a revoked event's commits — or a whole shift's — on <code class="code">reconcile/&lt;id&gt;</code>, cut from trunk</td></tr>
         <tr data-verb="reflect"><td class="table-mono">reflect</td><td>the 24 h pass: the voyage entry, the log index, bank upkeep</td></tr>
         <tr data-verb="remember"><td class="table-mono">remember "&lt;body&gt;"</td><td>commit one memory now — the in-session path</td></tr>
+        <tr data-verb="report"><td class="table-mono">report [--hook | serve]</td><td>the owner's digest of the shifts' reports; <code class="code">serve</code> is the page on 127.0.0.1:1705</td></tr>
+        <tr data-verb="score"><td class="table-mono">score [--week yyyy-Www]</td><td>the week's numbers from the trail, shifts, breaths and threads — worst three first</td></tr>
+        <tr data-verb="shift"><td class="table-mono">shift attach|brief|clock|handoff|pick|profile|status</td><td>one five-hour shift by night: the rotation's target, the brief, the clock, the handoff</td></tr>
         <tr data-verb="take"><td class="table-mono">take &lt;session&gt;</td><td>archive the session by move + drop a pointer; queue ≥ 10 fires dream</td></tr>
+        <tr data-verb="trail"><td class="table-mono">trail append|log|show|revoke|today|trailers</td><td>the append-only event log; every machine commit names its event</td></tr>
       </tbody>
     </table>
   </div>
@@ -102,12 +106,9 @@
       change.</p>
   </header>
   <figure class="plate">
-    <object class="plate-light" type="image/svg+xml" data="plates/data-root.svg" aria-label="data root — ~/.sandman"><img src="plates/data-root.png"
-      alt="The ~/.sandman tree as nested boxes: .dream, archive/claude, log, pending-takes, and memories wrapping .recent and one bank, each with its one-line meaning." /></object>
-    <object class="plate-dark" type="image/svg+xml" data="plates/data-root.dark.svg" aria-label="data root — ~/.sandman"><img src="plates/data-root.dark.png"
-      alt="The ~/.sandman tree as nested boxes: .dream, archive/claude, log, pending-takes, and memories wrapping .recent and one bank, each with its one-line meaning." /></object>
-    <figcaption>The data root as nested boxes — the same tree below, with its ownership shown. Source: <a href="arch.tldr">arch.tldr</a>, frame
-      <code class="code">data-root</code>.</figcaption>
+    <img class="plate-img" src="plates/data-root.png" alt="The ~/.sandman tree as nested boxes split by a dashed line: on the left the raw, dotted, gitignored tier — .archive/claude, .dream, .trace, and the runtime state .commit.lock, .reports-read and shifts/current.json; on the right the visible, versioned tier — memories (filled, pipeline-owned) wrapping .recent pointers and one bank, then log, trail, shifts, breath, score and pending-takes. Beneath: what is append-only, what is pipeline-owned, and the one lock." />
+    <figcaption>The data root as nested boxes — the tree below, split at the leading dot, with its ownership shown. Source: <code class="code">docs/plates/sandman/</code>, artboard
+      <code class="code">data root</code> (Claude Design).</figcaption>
   </figure>
   <pre class="tree" data-live>
 ~/.sandman/
@@ -115,10 +116,14 @@
 │   └── claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;relpath&gt;    bytes at rest — take's target
 ├── .dream/&lt;claude project&gt;/&lt;session-id&gt;.jsonl        dream mind transcripts — kept to evaluate
 ├── .trace/&lt;verb&gt;-&lt;date&gt;.log                          the journal — one line per decision
+├── breath/                                           the ruach — sources.toml, breaths, passes/, ledger/, problems.md
 ├── log/
 │   ├── &lt;yyyy-mm-dd&gt;.md                               the voyage log — one entry a day, derived from the banks
 │   └── INDEX.md                                      regenerated — ascending, began fixed once
 ├── pending-takes/&lt;sid&gt;.json                          takes a live job deferred — {declined, job, session}
+├── score/&lt;yyyy&gt;-W&lt;ww&gt;.md                             the week's numbers
+├── shifts/&lt;id&gt;/                                      one shift's brief, handoff, meta.json and report; current.json while one is open
+├── trail/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl                      the event log — one line per autonomous decision
 └── memories/
     ├── .recent/&lt;sid&gt;.json                            pointers — the short-term surface (3 days)
     └── &lt;bank&gt;/
@@ -132,27 +137,28 @@
   <header>
     <h2 class="h2">Cadence</h2>
     <p class="plan-note">One dispatcher: a calling hook's stdin hands over intact
-      (recall, take). The dream trigger lives in take — the only writer that grows the
+      (recall, take, report). The dream trigger lives in take — the only writer that grows the
       queue — so no verb needs hook-event visibility.</p>
   </header>
   <figure class="plate">
-    <object class="plate-light" type="image/svg+xml" data="plates/cadence.svg" aria-label="cadence — what fires each verb"><img src="plates/cadence.png"
-      alt="Seven lanes, each a trigger box arrowed into the verb it fires, with the verb's effect named beside it: SessionStart to recall, SessionEnd to take, the queue to dream, the nightly routine to reflect, the golden rule to remember, /delete to forget, and the shell to any verb by hand." /></object>
-    <object class="plate-dark" type="image/svg+xml" data="plates/cadence.dark.svg" aria-label="cadence — what fires each verb"><img src="plates/cadence.dark.png"
-      alt="Seven lanes, each a trigger box arrowed into the verb it fires, with the verb's effect named beside it: SessionStart to recall, SessionEnd to take, the queue to dream, the nightly routine to reflect, the golden rule to remember, /delete to forget, and the shell to any verb by hand." /></object>
-    <figcaption>What fires each verb — one lane per trigger, the same seven rows as the table. Source: <a href="arch.tldr">arch.tldr</a>, frame
-      <code class="code">cadence</code>.</figcaption>
+    <img class="plate-img" src="plates/cadence.png" alt="One lane per trigger, each a trigger box arrowed into the verbs it runs: SessionStart into recall --hook, thread --hook and report --hook; SessionEnd into take --hook; take's own queue of ten into dream; the four routines — shift, breathe-skim, breathe-deep, sandman-reflect — into shift, breathe pass and reflect; a shift session into trail append, score, shift handoff and the Sabbath's reflect, remember and breathe reweight; a breath pass into breathe file and close; the owner into remember, forget, take, dream --now, report and trail revoke → reconcile; launchd into report serve; an MCP client into mcp." />
+    <figcaption>What fires each verb — one lane per trigger; every arrow is one exec and no verb polls. Source: <code class="code">docs/plates/sandman/</code>, artboard
+      <code class="code">cadence</code> (Claude Design).</figcaption>
   </figure>
   <div class="table-wrap">
     <table data-table>
       <thead><tr><th>trigger</th><th>verb</th></tr></thead>
       <tbody>
-        <tr data-trigger="sessionstart"><td><code class="code">SessionStart</code> hook</td><td class="table-mono">recall</td></tr>
+        <tr data-trigger="sessionstart"><td><code class="code">SessionStart</code> hook</td><td class="table-mono">recall --hook · report --hook</td></tr>
         <tr data-trigger="sessionend"><td><code class="code">SessionEnd</code> hook · <code class="code">/dissolve</code></td><td class="table-mono">take $SESSION</td></tr>
         <tr data-trigger="queue"><td>take itself, after dropping a pointer — queue ≥ 10 · by hand</td><td class="table-mono">dream [--now]</td></tr>
         <tr data-trigger="nightly"><td>routine <code class="code">sandman-reflect</code> · 03:30 UTC (≈ 23:30 local)</td><td class="table-mono">reflect</td></tr>
         <tr data-trigger="golden"><td>claude, in-session — the golden rule</td><td class="table-mono">remember "&lt;body&gt;"</td></tr>
         <tr data-trigger="delete"><td><code class="code">/delete</code></td><td class="table-mono">forget $SESSION</td></tr>
+        <tr data-trigger="routines"><td>routines <code class="code">shift</code> · */5 · <code class="code">breathe-skim</code> · hourly · <code class="code">breathe-deep</code> · daily</td><td class="table-mono">shift · breathe pass</td></tr>
+        <tr data-trigger="shifts"><td>a shift session, as its prompt says</td><td class="table-mono">trail append · score · shift handoff</td></tr>
+        <tr data-trigger="launchd"><td>launchd — <code class="code">io.jlg.sandman-report</code></td><td class="table-mono">report serve</td></tr>
+        <tr data-trigger="mcp"><td>MCP client — the desktop app, Claude Code</td><td class="table-mono">mcp</td></tr>
         <tr data-trigger="shell"><td>shell — the owner</td><td class="table-mono">any verb by hand</td></tr>
       </tbody>
     </table>
@@ -164,12 +170,9 @@
     <h2 class="h2">Flow — a conversation's afterlife</h2>
   </header>
   <figure class="plate">
-    <object class="plate-light" type="image/svg+xml" data="plates/flow.svg" aria-label="flow — take → dream"><img src="plates/flow.png"
-      alt="Five stations left to right: take, archive, pointer, dream, reflect — a conversation's whole afterlife from the SessionEnd hook to the nightly bank upkeep." /></object>
-    <object class="plate-dark" type="image/svg+xml" data="plates/flow.dark.svg" aria-label="flow — take → dream"><img src="plates/flow.dark.png"
-      alt="Five stations left to right: take, archive, pointer, dream, reflect — a conversation's whole afterlife from the SessionEnd hook to the nightly bank upkeep." /></object>
-    <figcaption>Take → dream. The five stations below, in the order a conversation passes them. Source: <a href="arch.tldr">arch.tldr</a>, frame
-      <code class="code">flow</code>.</figcaption>
+    <img class="plate-img" src="plates/flow.png" alt="Five stations left to right — take, archive, pointer, dream (filled), reflect — each with what it does; below, the three places the conversation comes back: the .recent pointers, the bank, and the voyage log, all feeding recall --hook in the next session." />
+    <figcaption>A conversation's afterlife — the five stations below, in the order a conversation passes them, and where what it left surfaces again. Source: <code class="code">docs/plates/sandman/</code>, artboard
+      <code class="code">flow</code> (Claude Design).</figcaption>
   </figure>
   <div class="stations stations-detail">
     <div class="panel" data-station="take">
@@ -180,6 +183,7 @@
           <li>refuse live — a transcript touched in the last 120 s is refused; <code class="code">--force</code> overrides; <code class="code">--hook</code> implies force, because SessionEnd itself is the proof the session is over</li>
           <li>decline a resume — SessionEnd carries <code class="code">reason</code> ∈ {<code class="code">clear</code>, <code class="code">logout</code>, <code class="code">other</code>, <code class="code">prompt_input_exit</code>, <code class="code">resume</code>}, and <code class="code">resume</code> is not an ending: Claude Code fires it on the session it is <em>adopting</em>. Forcing there moves the transcript out from under the turn about to append to it; the file is recreated, the next ending takes that live fragment too, and the pointer names a stub while the whole conversation sits orphaned in the archive</li>
           <li>decline on request — <code class="code">$SANDMAN_NO_TAKE</code> makes <code class="code">--hook</code> exit quietly before it reads anything, so a caller driving <code class="code">claude -p --resume</code> turns keeps its transcript live; a session named by hand is taken regardless</li>
+          <li>decline for a live job — a job under <code class="code">~/.claude/jobs</code> still naming the session says it will be resumed: the ending belongs to the retiring worker, not the conversation. <code class="code">reason: clear</code> reaches past it. The decline writes <code class="code">pending-takes/&lt;sid&gt;.json</code>, and every later take that reaches an ending — and every reflect — drains it: job live → keep, job gone → take unforced, transcript gone → drop</li>
           <li>resolve the transcript; <code class="code">mv</code> it to the archive path — same-volume rename, atomic, no copy ever exists; a cross-device destination is an error, never a fallback copy</li>
           <li>drop the pointer to <code class="code">memories/.recent/&lt;sid&gt;.json</code></li>
           <li>check queue depth — <em>unrouted</em> pointers only, asked of dream rather than counted off disk, so the trigger and the run cannot disagree about what is queued; ≥ 10 → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, logged to <code class="code">.trace/dream-&lt;date&gt;.log</code>; take never waits on it</li>
@@ -232,19 +236,16 @@
           <li>pending-take drain first, before anything is written: a take reclaimed by the pass belongs to the day being written, not tomorrow's</li>
           <li><strong>the voyage entry</strong> <code class="code">log/&lt;yyyy-mm-dd&gt;.md</code> — the UTC day that <em>ended</em>, never the day the 03:30 pass runs in; the day's sources are the memories whose <code class="code">created:</code> or <code class="code">updated:</code> fall in it, their names and bodies hash to the entry's <code class="code">fingerprint</code>, and an entry already carrying it is left alone — same sources, same entry, no model call. Otherwise ONE mind (<code class="code">$SANDMAN_MIND_LOG</code>, default <code class="code">claude-opus-5</code> — the log's own variable) writes it, seeing the last five entries whole; an abstention leaves whatever is on disk and the next pass asks again. A day with no sources gets no entry and no file. <code class="code">INDEX.md</code> is regenerated behind every write — ascending, <code class="code">began:</code> fixed once. <code class="code">reflect --day &lt;date&gt;</code> renders that one day and nothing else</li>
           <li>pointer sweep: delete <code class="code">.recent</code> pointers that are dreamed and ended &gt; 72 h ago</li>
-          <li>bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last: ONE opus call (<code class="code">$SANDMAN_MIND_UPKEEP</code>) proposing at most 6 net-non-increasing ops (prune, merge, retitle), validated whole — an invalid reply is rejected entire, never partially applied; upkeep never grows a bank</li>
+          <li>bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last, OR the previous pass spent every operation it was allowed: ONE opus call (<code class="code">$SANDMAN_MIND_UPKEEP</code>) proposing at most 6 net-non-increasing ops (prune, merge, retitle), validated whole — an invalid reply is rejected entire, never partially applied; upkeep never grows a bank</li>
           <li><code class="code">_reflect.json</code> <code class="code">{at, count, last_ops}</code> — the due-baseline, seeded on first sight of a bank</li>
         </ul>
       </div>
     </div>
   </div>
   <figure class="plate">
-    <object class="plate-light" type="image/svg+xml" data="plates/ending.svg" aria-label="the ending — three paths"><img src="plates/ending.png"
-      alt="Three lanes leaving one origin, ClaudeCode(SessionEnd) to sandman take --hook: lane A archives the session outright, lane B declines the ending, writes the debt and schedules the alarm that drains it, lane C is the backstops. Lane B's drain hands the reclaimed session back to lane A's pointer." /></object>
-    <object class="plate-dark" type="image/svg+xml" data="plates/ending.dark.svg" aria-label="the ending — three paths"><img src="plates/ending.dark.png"
-      alt="Three lanes leaving one origin, ClaudeCode(SessionEnd) to sandman take --hook: lane A archives the session outright, lane B declines the ending, writes the debt and schedules the alarm that drains it, lane C is the backstops. Lane B's drain hands the reclaimed session back to lane A's pointer." /></object>
-    <figcaption>Station ① alone, zoomed: one <code class="code">SessionEnd</code>, and the lane it takes depending on whether a job under <code class="code">~/.claude/jobs</code> names the session — the guards the take panel above lists, drawn as the decision they are. Source: <a href="arch.tldr">arch.tldr</a>, frame
-      <code class="code">ending</code>.</figcaption>
+    <img class="plate-img" src="plates/ending.png" alt="One SessionEnd fanning into three lanes. A, no job names the session: take now (filled), archive and pointer, dream at ten, drain. B, a job under ~/.claude/jobs names it: decline, write the debt to pending-takes, and the drain — job live keep, job gone take unforced, transcript gone drop — hands a reclaimed take back to A. C, reason resume: declined as a beginning, beside the resume-is-not-an-ending hazard. A dashed box names the two quiet declines checked first." />
+    <figcaption>Station ① alone, zoomed: one <code class="code">SessionEnd</code> and its three paths — a resume declined as a beginning, a session a live job under <code class="code">~/.claude/jobs</code> would resume declined into the debt ledger, and every other ending taken now. Source: <code class="code">docs/plates/sandman/</code>, artboard
+      <code class="code">ending</code> (Claude Design).</figcaption>
   </figure>
 </section>
 
@@ -257,13 +258,9 @@
       <code class="code">docs/BANK-FORMAT.md</code> § <code class="code">log/</code>.</p>
   </header>
   <figure class="plate">
-    <object class="plate-light" type="image/svg+xml" data="plates/voyage.svg" aria-label="voyage — the log · one day, one entry, derived from the banks"><img src="plates/voyage.png"
-      alt="Left to right: take and dream feed the banks, then reflect at 03:30 UTC takes the day that ended — sources, fingerprint, one mind — and writes log/&lt;yyyy-mm-dd&gt;.md and INDEX.md, which recall and bridge read; a matching fingerprint keeps the entry with no call, a quiet day gets no entry, and every outcome is journaled." /></object>
-    <object class="plate-dark" type="image/svg+xml" data="plates/voyage.dark.svg" aria-label="voyage — the log · one day, one entry, derived from the banks"><img src="plates/voyage.dark.png"
-      alt="Left to right: take and dream feed the banks, then reflect at 03:30 UTC takes the day that ended — sources, fingerprint, one mind — and writes log/&lt;yyyy-mm-dd&gt;.md and INDEX.md, which recall and bridge read; a matching fingerprint keeps the entry with no call, a quiet day gets no entry, and every outcome is journaled." /></object>
-    <figcaption>One day, one entry, derived from the banks — the whole path from the memories that landed to the
-      entry every new session opens on. Source: <a href="arch.tldr">arch.tldr</a>, frame
-      <code class="code">voyage</code>.</figcaption>
+    <img class="plate-img" src="plates/voyage.png" alt="Left to right: the banks, reflect at 03:30 UTC taking the day that ended, the day's sources, their fingerprint, one mind (filled), the entry log/&lt;yyyy-mm-dd&gt;.md with INDEX.md, and recall in every new session. Below, the dashed outcomes where nothing is written — a quiet day, a kept entry, an abstention — all journaled to .trace; beside them, one entry's keys and kinds and the one-day backfill." />
+    <figcaption>One day, one entry, derived from the banks — the whole path from the memories that landed to the entry every new session opens on. Source: <code class="code">docs/plates/sandman/</code>, artboard
+      <code class="code">voyage</code> (Claude Design).</figcaption>
   </figure>
 </section>
 
@@ -287,15 +284,10 @@
   <ul class="stack" role="list">
     <li data-non-goal="hook-visibility">Hook-event visibility — sandman reads transcripts, never hook events.</li>
     <li data-non-goal="session-registry">A live-session registry — session discovery is another tool's job; sandman owns history.</li>
-    <li data-non-goal="ui">UI of any kind — sandman is a CLI; any UI is a separate client consuming it.</li>
+    <li data-non-goal="ui">UI beyond one page — sandman is a CLI; its only UI is <code class="code">report serve</code>, one loopback page, and any other is a separate client consuming it.</li>
   </ul>
 </section>
 
-<p class="plan-note" id="colophon">Every drawing on this page is a frame of one document,
-  <a href="arch.tldr">docs/arch.tldr</a>: <code class="code">tldraft export docs/arch.tldr --out docs/plates --png --both</code>
-  cuts each frame twice — a light plate and a dark one, drawn in tldraw's own themes and carrying the same stamp, of which
-  this page shows whichever matches yours — and <code class="code">tldraft check docs/plates</code> runs in the pre-push
-  gate, so a plate cannot fall behind the drawing it was cut from.</p>
 
 </main>
 

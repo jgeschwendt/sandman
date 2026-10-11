@@ -8,8 +8,8 @@
 //! Two tiers under the root, and the leading dot is the boundary. The hidden
 //! directories — `.archive/`, `.dream/`, `.trace/` — hold raw bytes the
 //! operator's `~/.sandman` repo gitignores; the visible ones — `breath/`,
-//! `log/`, `memories/`, `score/`, `shifts/`, `trail/` — hold the content it
-//! versions. The tiers were mixed until
+//! `log/`, `memories/`, `pending-takes/`, `score/`, `shifts/`, `trail/` — hold
+//! the content it versions. The tiers were mixed until
 //! 2026-09-05, when 60 run journals went in with a commit because they shared
 //! `log/` with reflect's day pages; one gitignorable prefix is what stops the
 //! next one, and it only works if nothing raw is ever filed outside it.

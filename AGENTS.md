@@ -18,7 +18,7 @@ invariants:
 | where | what |
 | --- | --- |
 | breath/ | `sources.toml`, the seed feed list `sandman breathe init` copies into the data root — compiled into the binary; the schema is `docs/BANK-FORMAT.md` § breath |
-| docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875); `plates/` holds the page plates and `plates/perpetual-shift/` the plan plate's Claude Design source |
+| docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (`ui.css` vendored from jgeschwendt/ui @ 4f1d9db — one comment edited, so not byte-identical); `docs/serve.py` (:7875); `plates/` holds the page plates' PNG exports, `plates/sandman/` their Claude Design source and `plates/perpetual-shift/` the plan plate's |
 | launchd/ | `io.jlg.sandman-report.plist`, the launchd agent that keeps `sandman report serve` up on 127.0.0.1:1705; installed by hand (`docs/BANK-FORMAT.md` § report) |
 | profiles/ | `session.json`, the Claude Code settings shift and breath sessions run under — the strict Bash sandbox and deny rules `sandman shift profile` prints, compiled into the binary; the contract is `docs/BANK-FORMAT.md` § shifts, The sandbox |
 | prompts/ | the machine's prompt templates — `shift.md` is the dynamic shift prompt `sandman shift brief` fills, `sabbath.md` the one it fills on Saturday, `breathe.md` the ruach's pass prompt `sandman breathe pass` fills; their slot names are the contract in `docs/BANK-FORMAT.md` § shifts and § breath |

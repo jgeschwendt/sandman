@@ -7,7 +7,7 @@ knew. The on-disk format is `BANK-FORMAT.md`.
 
 ## Verbs
 
-Six memory verbs. Sandman never sees a hook event; it reads transcripts.
+Thirteen verbs, one dispatcher. Six are memory verbs: sandman never sees a hook event; it reads transcripts.
 
 | verb | duty |
 | --- | --- |
@@ -18,16 +18,18 @@ Six memory verbs. Sandman never sees a hook event; it reads transcripts.
 | `remember "<body>"` | commit one memory now — the in-session path |
 | `take <session>` | archive the session by move + drop a pointer |
 
-Four machine verbs sit beside them, for the machine that commits on the operator's behalf:
+Six machine verbs sit beside them, for the machine that commits on the operator's behalf and the owner who reads what it did:
 
 | verb | duty |
 | --- | --- |
 | `breathe init\|sources\|file\|list\|spike\|adopt\|drop\|pass\|attach\|close\|reweight` | the ruach — the research engine's store of feeds and breaths, the pass prompt it composes for a reading session, and the weights adoption and silence move |
 | `reconcile <event\|shift>` | revert every commit carrying a revoked event or its descendants — or every event of a revoked shift — that the repo's trunk reaches, on `reconcile/<id>` per repo cut from trunk |
-| `shift attach\|brief\|clock\|handoff\|pick\|status` | one five-hour shift: the rotation's target, the dynamic prompt composed from the trail, banks and calendar, the window clock, the handoff |
+| `report [--hook \| serve]` | the owner's digest of the shifts' reports, once per session start; `serve` is the page on 127.0.0.1:1705 |
+| `score [--week yyyy-Www]` | the week's numbers from the trail, shifts, breaths and threads — worst three first |
+| `shift attach\|brief\|clock\|handoff\|pick\|profile\|status` | one five-hour shift: the rotation's target, the dynamic prompt composed from the trail, banks and calendar, the window clock, the handoff |
 | `trail append\|log\|show\|revoke\|today\|trailers` | the append-only event log; every machine commit names its event by `Event:` trailer |
 
-Their contract is `BANK-FORMAT.md` § trail, § shifts and § breath.
+Their contract is `BANK-FORMAT.md` § trail, § shifts, § breath, § score and § report.
 
 `recall` composes four surfaces into one 9,000-character budget — the cwd's bank and its
 ancestors', `.recent` pointers, the voyage log tail, the tool index. The voyage log has a
@@ -42,7 +44,7 @@ take the one surface the floor exists to protect. The log leaves the payload for
 reasons only: the log is empty, or the tail alone is wider than the whole budget, and both
 are reported as a trim.
 
-`mcp` is a seventh verb and not a memory verb: it serves recall, remember and a bank
+`mcp` is the thirteenth verb and not a memory verb: it serves recall, remember and a bank
 listing to MCP clients over stdio — the desktop app, Cowork through the bridge, Claude
 Code — through the same code paths, so no consumer re-implements the format. The
 contract is `MCP.md`.
@@ -60,7 +62,8 @@ contract is `MCP.md`.
 │   ├── <yyyy-mm-dd>.md                               the voyage log — one entry a day, derived from the banks
 │   └── INDEX.md                                      regenerated — ascending, began fixed once
 ├── pending-takes/<sid>.json                          takes a live job deferred — {declined, job, session}
-├── shifts/<id>/                                      one shift's brief, handoff and meta.json; current.json while one is open
+├── score/<yyyy>-W<ww>.md                             the week's numbers
+├── shifts/<id>/                                      one shift's brief, handoff, meta.json and report; current.json while one is open
 ├── trail/<yyyy>/<mm>/<dd>.jsonl                      the event log — one line per autonomous decision
 └── memories/
     ├── .recent/<sid>.json                            pointers — the short-term surface (3 days)
@@ -84,16 +87,19 @@ a commit of 60 run journals that shared `log/` with the log's own entries (2026-
 
 | trigger | verb |
 | --- | --- |
-| `SessionStart` hook | `recall` |
+| `SessionStart` hook | `recall --hook` · `report --hook` |
 | `SessionEnd` hook · `/dissolve` | `take $SESSION` |
 | take itself, after dropping a pointer — queue ≥ 10 · by hand | `dream [--now]` |
 | routine `sandman-reflect` · 03:30 UTC (≈ 23:30 local) | `reflect` |
 | claude, in-session — the golden rule | `remember "<body>"` |
 | `/delete` | `forget $SESSION` |
 | MCP client — the desktop app, Cowork via the bridge, `claude mcp` | `mcp` (a served process, not a hook) |
+| routines `shift` · */5 · `breathe-skim` · hourly · `breathe-deep` · daily | `shift` · `breathe pass` |
+| a shift session, as its prompt says | `trail append` · `score` · `shift handoff` |
+| launchd — `io.jlg.sandman-report` | `report serve` |
 | shell — the owner | any verb by hand |
 
-One dispatcher: a calling hook's stdin hands over intact (recall, take). The dream
+One dispatcher: a calling hook's stdin hands over intact (recall, take, report). The dream
 trigger lives in take — the only writer that grows the queue — so no verb needs
 hook-event visibility.
 
@@ -325,4 +331,4 @@ reconstructed afterwards, by anyone, including its operator.
 - Hook-event visibility — sandman reads transcripts, never hook events.
 - A live-session registry — session discovery is another tool's job; sandman owns
   history.
-- UI of any kind — sandman is a CLI; any UI is a separate client consuming it.
+- UI beyond one page — sandman is a CLI; its only UI is `report serve`, one loopback page, and any other is a separate client consuming it.
