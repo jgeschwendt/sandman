@@ -17,8 +17,19 @@ use crate::transcript;
 ///
 /// Nothing found at all is an error: a silent success would read as "it is
 /// gone" when it may mean the id was wrong.
+///
+/// The id must be a whole uuid: matching is by substring and destruction is
+/// whole-tree, so a fragment like `2026` or `claude` would name an archive
+/// year or lane and destroy it.
 pub fn forget(data_root: &Path, claude_root: &Path, session_id: &str) -> Result<Vec<PathBuf>> {
-    transcript::check_session_id(session_id)?;
+    let uuid = session_id.len() == 36
+        && session_id.bytes().enumerate().all(|(at, byte)| match at {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        });
+    if !uuid {
+        return Err(Error::invalid("session id", session_id));
+    }
     let found = transcript::find(claude_root, session_id)?;
 
     let mut targets: Vec<PathBuf> = Vec::new();
@@ -168,12 +179,38 @@ mod tests {
         let claude = temp.path().join(".claude");
         let root = temp.path().join(".sandman");
         assert!(matches!(
-            forget(&root, &claude, "no-such-session"),
+            forget(&root, &claude, SID),
             Err(Error::NotFound { what: "trace", .. })
         ));
-        assert!(matches!(
-            forget(&root, &claude, "../escape"),
-            Err(Error::InvalidInput { .. })
-        ));
+    }
+
+    #[test]
+    fn forget_refuses_anything_but_a_whole_uuid() {
+        let temp = TempDir::new("forget-fragment");
+        let claude = temp.path().join(".claude");
+        let root = temp.path().join(".sandman");
+        let memory = claude.join("projects").join(PROJECT).join("memory");
+        let archive = crate::paths::archive_day_dir(&root, 2026, 8, 6);
+        for dir in [&memory, &archive] {
+            fs::create_dir_all(dir).expect("dir");
+        }
+        let short = &SID[..35];
+        for fragment in [
+            "2026",
+            "claude",
+            "memory",
+            "../escape",
+            short,
+            &SID.replace('a', "g"),
+        ] {
+            assert!(
+                matches!(
+                    forget(&root, &claude, fragment),
+                    Err(Error::InvalidInput { .. })
+                ),
+                "{fragment} was not refused"
+            );
+        }
+        assert!(memory.is_dir() && archive.is_dir());
     }
 }

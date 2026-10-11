@@ -110,7 +110,7 @@ usage: sandman <verb> [args]
 
   forget <session-id>
       The privacy ending: destroy every copy — transcript, subagent directory,
-      archives, pointer. Never touches a bank.
+      archives, pointer. Never touches a bank. The id must be a whole uuid.
 
   breathe init
   breathe sources [--due] [--kind skim|deep] [--json]
