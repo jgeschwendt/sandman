@@ -62,6 +62,8 @@ impl Machine {
             .env("SANDMAN_GROVE_CODE", self.grove_code())
             .env("SANDMAN_RECONCILE_EXTRA", "")
             .env("SANDMAN_ROOT", self.root())
+            // reconcile's scratch worktree lives under temp_dir(); scrubbed, that is /tmp, which a sandbox denies
+            .env("TMPDIR", env::temp_dir())
             .envs(GIT_ENV)
             .output()
             .expect("run sandman")
