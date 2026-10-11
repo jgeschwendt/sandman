@@ -25,6 +25,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -426,10 +427,14 @@ fn run(request: &Ask, child: &mut std::process::Child) -> Result<String, Abstain
     // Both pipes are drained on their own threads: a child that fills one
     // while the runner polls `try_wait` would otherwise deadlock instead of
     // timing out.
+    // Both send over one channel, so collecting them can be bounded by the
+    // deadline too.
+    let (sender, pipes) = mpsc::channel();
     let out = child.stdout.take();
     let err = child.stderr.take();
-    let out_reader = thread::spawn(move || drain(out));
-    let err_reader = thread::spawn(move || drain(err));
+    let out_sender = sender.clone();
+    thread::spawn(move || out_sender.send((0, drain(out))));
+    thread::spawn(move || sender.send((1, drain(err))));
 
     let deadline = Instant::now() + request.timeout;
     let mut status = None;
@@ -455,14 +460,18 @@ fn run(request: &Ask, child: &mut std::process::Child) -> Result<String, Abstain
     }
 
     let Some(status) = status else {
-        // The readers are deliberately not joined here: killing the process
-        // sandman started does not kill a grandchild it left holding the
-        // pipe, so a join would wait out exactly the run the timeout just
-        // refused to wait out. The threads end when the pipe finally closes.
         return Err(Abstained::Timeout);
     };
-    let stdout = out_reader.join().unwrap_or_default();
-    let stderr = err_reader.join().unwrap_or_default();
+    // The readers are never joined: a grandchild the mind left holding a pipe
+    // keeps it open past the mind's own exit, so only the deadline bounds the
+    // wait. The threads end when the pipe finally closes.
+    let mut texts = [String::new(), String::new()];
+    for _ in 0..2 {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let (pipe, text) = pipes.recv_timeout(left).map_err(|_| Abstained::Timeout)?;
+        texts[pipe] = text;
+    }
+    let [stdout, stderr] = texts;
     if !status.success() {
         return Err(Abstained::Failed(format!(
             "exit {}: {}",
@@ -617,17 +626,26 @@ mod tests {
     #[test]
     fn a_mind_that_runs_past_the_timeout_is_killed_and_abstains() {
         let temp = TempDir::new("mind-timeout");
-        let stub = crate::testutil::stub_script(temp.path(), "slow", "sleep 30\n");
-        let request = Ask {
-            binary: stub.into(),
-            keep: None,
-            model: "claude-sonnet-5".to_owned(),
-            prompt: "hello".to_owned(),
-            timeout: Duration::from_millis(150),
-        };
-        let started = std::time::Instant::now();
-        assert_eq!(ask(&request), Err(Abstained::Timeout));
-        assert!(started.elapsed() < Duration::from_secs(10), "it waited");
+        // The second exits at once but leaves a grandchild holding its pipes.
+        for (name, script) in [
+            ("slow", "sleep 30\n"),
+            (
+                "orphaning",
+                "sleep 30 &\nprintf '{\"is_error\":false,\"result\":\"OK\",\"type\":\"result\"}'\n",
+            ),
+        ] {
+            let stub = crate::testutil::stub_script(temp.path(), name, script);
+            let request = Ask {
+                binary: stub.into(),
+                keep: None,
+                model: "claude-sonnet-5".to_owned(),
+                prompt: "hello".to_owned(),
+                timeout: Duration::from_millis(500),
+            };
+            let started = std::time::Instant::now();
+            assert_eq!(ask(&request), Err(Abstained::Timeout), "{name}");
+            assert!(started.elapsed() < Duration::from_secs(10), "{name} waited");
+        }
     }
 
     #[cfg(unix)]
