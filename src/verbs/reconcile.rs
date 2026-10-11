@@ -240,7 +240,7 @@ fn reconcile_repo(
         let Some(sha) = shas.next().filter(|sha| hits.contains(sha)) else {
             continue;
         };
-        if already.contains(sha) {
+        if undone(&already, &hits, sha) {
             report.already.push(sha.to_owned());
         } else if shas.nth(1).is_some() {
             report.planned.clear();
@@ -390,20 +390,44 @@ impl Drop for Scratch {
     }
 }
 
-/// The shas `base`'s history already reverts, read off the
-/// `This reverts commit <sha>.` line `git revert` writes and reconcile keeps.
-fn reverted_by(dir: &Path, base: &str) -> BTreeSet<String> {
-    let Ok(log) = git(dir, &["log", base, "--format=%B"]) else {
-        return BTreeSet::new();
+/// Each sha `base`'s history reverts, mapped to the commits that revert it —
+/// read off the `This reverts commit <sha>.` line `git revert` writes and
+/// reconcile keeps.
+fn reverted_by(dir: &Path, base: &str) -> BTreeMap<String, Vec<String>> {
+    let mut reverts: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let Ok(log) = git(dir, &["log", base, "--format=%x00%H%n%B"]) else {
+        return reverts;
     };
-    log.lines()
-        .filter_map(|line| {
+    for commit in log.split('\0') {
+        let mut lines = commit.lines();
+        let Some(reverter) = lines.next() else {
+            continue;
+        };
+        for reverted in lines.filter_map(|line| {
             line.trim()
                 .strip_prefix("This reverts commit ")?
                 .strip_suffix('.')
-                .map(ToOwned::to_owned)
-        })
-        .collect()
+        }) {
+            reverts
+                .entry(reverted.to_owned())
+                .or_default()
+                .push(reverter.to_owned());
+        }
+    }
+    reverts
+}
+
+/// Whether `sha`'s change is already undone: some commit reverts it and that
+/// revert stands — it is not itself being revoked (a shift that `git revert`ed
+/// its own commit) and not itself undone (an operator's revert of the revert).
+/// Counting a bare message line would skip the original while reverting its
+/// revert, putting the revoked change back.
+fn undone(reverts: &BTreeMap<String, Vec<String>>, hits: &BTreeSet<&str>, sha: &str) -> bool {
+    reverts.get(sha).is_some_and(|reverters| {
+        reverters
+            .iter()
+            .any(|reverter| !hits.contains(reverter.as_str()) && !undone(reverts, hits, reverter))
+    })
 }
 
 /// Why a revert did not land.

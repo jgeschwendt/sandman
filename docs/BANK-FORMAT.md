@@ -246,7 +246,8 @@ to a message or for `git commit --trailer`.
   `reconcile/<id>` — cut from trunk, or reused if it exists and still contains trunk (a
   reconcile branch trunk has moved past fails that repo: merge trunk in or delete the
   branch, then rerun); a hit the branch's history already reverts — its `This reverts
-  commit <sha>.` line — is reported `already reverted` and skipped, as is a hit whose
+  commit <sha>.` line, written by a commit that is neither itself a hit nor itself
+  reverted — is reported `already reverted` and skipped, as is a hit whose
   revert stages nothing (a hand revert without that line), so a rerun after a
   complete reconcile changes nothing and exits 0. The reverts happen in a scratch
   worktree, so no checkout is switched, and it is removed with `--force` however the

@@ -873,6 +873,25 @@ fn a_hand_revert_without_gits_line_is_already_reverted() {
 }
 
 #[test]
+fn a_revoked_revert_does_not_count_its_target_as_reverted() {
+    let machine = Machine::new("self-revert");
+    let first = machine.append(&["--kind", "change"]);
+    let (checkout, shas) = fixture(&machine, &[("bad", &first)]);
+    fs::write(checkout.join("file.txt"), "base\n").expect("undo");
+    let subject = format!("Revert \"change 0\"\n\nThis reverts commit {}.", shas[0]);
+    commit(&checkout, &subject, Some(&first));
+    fs::write(checkout.join("other.txt"), "y\n").expect("other");
+    commit(&checkout, "y", Some(&first));
+
+    let report = machine.ok(&["reconcile", &first]);
+    assert!(!report.contains("already reverted"), "{report}");
+    assert_eq!(
+        git(&checkout, &["show", &format!("reconcile/{first}:file.txt")]),
+        "base\n"
+    );
+}
+
+#[test]
 fn a_trunk_behind_origin_fails_until_it_is_fast_forwarded() {
     let machine = Machine::new("stale-trunk");
     let event = machine.append(&["--kind", "change"]);
