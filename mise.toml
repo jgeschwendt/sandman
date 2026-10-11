@@ -5,3 +5,7 @@
 # lefthook runs the pre-push gate (lefthook.toml); `lefthook install` wires it.
 lefthook = "2.1.10"
 rust = "1.94.0"
+
+[tasks.plates]
+description = "render every Claude Design artboard under docs/plates/*/project/ to its PNG (agent-browser, 2×)"
+run = "sh docs/plates/export.sh"

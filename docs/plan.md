@@ -2,7 +2,7 @@
 
 Status: **live since 2026-10-10 14:19Z.** Phases 0–5 and a minimal 7 built (trail, reconcile, shift, breathe, score, the Sabbath brief), trunk c1aecb3 installed, the runner and both breath runners installed, sessions in `dontAsk` inside the strict sandbox. First live tick (02:25Z) failed on workspace trust; first Sabbath s-20261010T1345Z (13:45–14:08Z) handed off cleanly — dream-pass 263→245 memories, W42 targets for 20 repos — and its four findings (sandbox must cover `~/.grove`, api.anthropic.com egress, tools through mise, one Sabbath a day) landed the same day. Deferred to the machine: phase 6 (dowse ranking, titer promote/decay), the mod's tool-call guards, the ruach's own Sabbath, the ablation prompt. Sunday opens the first Hunt. Every shift now ends with a `report.md` for the owner (`sandman report`, and a SessionStart hook that shows each once) and turns work larger than itself into a `proposal:` thread Monday executes once approved.
 
-The plate is `docs/plates/perpetual-shift/` (Claude Design source; export to `perpetual-shift.png` beside it).
+The plate is `docs/plates/perpetual-shift/` (Claude Design source); `mise run plates` renders it to `perpetual-shift.png` beside it, with the docs page's six.
 
 ## Premise, pressure-tested
 
