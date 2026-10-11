@@ -1345,6 +1345,34 @@ fn an_abandoned_handoff_says_why_when_the_runner_does() {
 }
 
 #[test]
+fn concurrent_briefs_open_one_shift() {
+    let machine = Machine::new("brief-race");
+    machine.repo("jgeschwendt/alpha");
+    let opened = std::thread::scope(|scope| {
+        let runs: Vec<_> = (0..8)
+            .map(|minute| {
+                let machine = &machine;
+                scope.spawn(move || {
+                    let now = format!("2026-10-16T16:0{minute}:00Z");
+                    code(&machine.run(&now, &["shift", "brief"], &[]))
+                })
+            })
+            .collect();
+        runs.into_iter()
+            .map(|run| run.join().expect("brief"))
+            .filter(|code| *code == 0)
+            .count()
+    });
+    assert_eq!(opened, 1);
+    let starts = machine
+        .trail()
+        .iter()
+        .filter(|line| line.contains("shift.start"))
+        .count();
+    assert_eq!(starts, 1);
+}
+
+#[test]
 fn pick_passes_over_untrusted_trunks_and_brief_faults_when_none_is_trusted() {
     let machine = Machine::new("trust");
     let alpha = machine.repo("jgeschwendt/alpha");

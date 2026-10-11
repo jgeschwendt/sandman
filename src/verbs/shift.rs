@@ -1395,13 +1395,10 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
             Error::io(&template_path, source)
         }
     })?;
-    if !options.dry_run
-        && let Some(current) = read_current(&ctx.data_root)?
-    {
-        let open = current.get("shift").and_then(Value::as_str).unwrap_or("?");
-        return Err(Error::refused(format!(
-            "shift {open} is open — hand it off before briefing another"
-        )));
+    let shift = shift_id(ctx.now);
+    let dir = paths::shift_dir(&ctx.data_root, &shift);
+    if !options.dry_run {
+        unopened(&ctx.data_root, &dir)?;
     }
     if rest && !options.dry_run {
         let today = Local::at(ctx.now).ymd();
@@ -1414,11 +1411,6 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
                 "sabbath kept: {kept} handed off at {ended}"
             )));
         }
-    }
-    let shift = shift_id(ctx.now);
-    let dir = paths::shift_dir(&ctx.data_root, &shift);
-    if !options.dry_run && dir.exists() {
-        return Err(Error::refused(format!("shift {shift} already exists")));
     }
     let target = pick(ctx)?.ok_or_else(|| Error::not_found("repo to shift", "the rotation"))?;
     let local = Local::at(ctx.now);
@@ -1609,6 +1601,8 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
     );
     {
         let _lock = CommitLock::acquire(&ctx.data_root)?;
+        // again under the lock: a concurrent brief may have opened one since
+        unopened(&ctx.data_root, &dir)?;
         fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
         atomic::write(&brief_path, &text)?;
         atomic::write(&dir.join("meta.json"), &format!("{}\n", meta.render()))?;
@@ -1639,6 +1633,20 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         text,
         trimmed,
     })
+}
+
+/// Refuse a brief while a shift is open or this minute's shift already exists.
+fn unopened(data_root: &Path, dir: &Path) -> Result<()> {
+    if let Some(current) = read_current(data_root)? {
+        let open = current.get("shift").and_then(Value::as_str).unwrap_or("?");
+        return Err(Error::refused(format!(
+            "shift {open} is open — hand it off before briefing another"
+        )));
+    }
+    if dir.exists() {
+        return Err(Error::refused(format!("{} already exists", dir.display())));
+    }
+    Ok(())
 }
 
 /// One repo's day in the problems file: `(heading, section)`.
