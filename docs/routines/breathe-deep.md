@@ -6,7 +6,7 @@ on_error: claude
 
 # Breathe · deep
 
-The ruach's daily pass. Research is its own perpetual engine, outside the creation week: once a day at 10:00 UTC (06:00 New York in summer, 05:00 in winter — the cron is UTC and does not follow DST) it reads every feed in depth with `/gigaresearch`, against every repo's open problems. This routine never reads a feed itself; it composes the pass prompt with `sandman breathe pass --kind deep` and starts a Claude Code `--bg` session through `spawn run`, exactly as `shift.md` does, with cwd at the breath store. The session reads the sources, files breaths with provenance, marks at most one for the next shift to spike, and ends with `sandman breathe close`. The contract is sandman's `docs/BANK-FORMAT.md` § breath; the plan is sandman's `docs/plan.md` § The ruach.
+The ruach's daily pass. Research is its own perpetual engine, outside the creation week: once a day at 10:00 UTC (06:00 New York in summer, 05:00 in winter — the cron is UTC and does not follow DST) it reads every feed in depth with `/gigaresearch`, against every repo's open problems. This routine never reads a feed itself; it composes the pass prompt with `sandman breathe pass --kind deep` and starts a Claude Code `--bg` session through `spawn run`, exactly as `shift.md` does, with cwd at the breath store. The session reads the sources, files breaths with provenance, marks at most one for the next shift to spike, and ends with `sandman breathe close`. Each tick first removes the sessions of closed passes from Claude Code's listing, where a finished session otherwise stays forever — so a deep pass's session leaves it at the next day's tick. The contract is sandman's `docs/BANK-FORMAT.md` § breath; the plan is sandman's `docs/plan.md` § The ruach.
 
 ## State
 
@@ -29,6 +29,46 @@ A pass runs in `dontAsk` inside Claude Code's strict Bash sandbox with the profi
 - `unknown verb` (exit 2): the installed `~/.local/bin/sandman` predates `breathe`; install a trunk build as `sandman-reflect.md` describes.
 - `spawn` answering `{"error": …}`: the pass record stays without session ids and without `ended`; nothing else to undo. Tomorrow's tick starts a fresh pass. A hand retry today (`routine run breathe-deep`) is refused as `pass in flight` until the failed pass outlives its hour, is marked dead and charged; then it runs.
 - A second pass of the same kind while one is in flight is refused by `breathe pass` (exit 1, `pass in flight`) until the first closes or outlives its timeout, at which point it is marked dead and charged `SANDMAN_BREATH_DEAD_COST_USD` (default 2) against the day; a skim and a deep pass may run together.
+
+```sh
+# close: remove every "breath deep" session whose pass has ended — closed, or marked dead — stopping it first if it still runs
+root="${SANDMAN_ROOT:-$HOME/.sandman}"
+sp="$HOME/.local/bin/spawn"
+ask() {   # one spawn request; prints the answer; returns 1 when spawn fails, says nothing, or answers an error
+  answer=$(printf '%s\n' "$1" | "$sp" run) || return 1
+  [ -n "$answer" ] || return 1
+  printf '%s\n' "$answer"
+  printf '%s' "$answer" | python3 -I -c '
+import json, sys
+a = json.loads(sys.stdin.readline())
+sys.exit(1 if "error" in a or not ("sessions" in a or a.get("ok")) else 0)
+'
+}
+request() {   # one claude request for one bg id
+  python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":sys.argv[1],"id":sys.argv[2]}))' "$1" "$2"
+}
+req=$(python3 -I -c 'import json; print(json.dumps({"verb": "claude", "action": "list"}))')
+answer=$(ask "$req") || { echo "spawn list failed: $answer" >&2; exit 0; }
+ended=$(printf '%s' "$answer" | python3 -I -c '
+import json, os, sys
+for row in json.loads(sys.stdin.readline() or "{}").get("sessions", []):
+    name = (row.get("name") or "").split(" ")
+    if name[:2] != ["breath", sys.argv[2]] or len(name) != 3:
+        continue
+    try:
+        record = json.load(open(os.path.join(sys.argv[1], name[2], "pass.json")))
+    except (OSError, ValueError):
+        continue
+    if record.get("ended"):
+        print(row["id"], "stop" if row.get("state") in ("working", "blocked") else "rm")
+' "$root/breath/passes" deep)
+stopped=$(printf '%s\n' "$ended" | awk '$2 == "stop" { print $1 }')
+for bg in $stopped; do ask "$(request stop "$bg")" >/dev/null || echo "spawn could not stop $bg" >&2; done
+[ -z "$stopped" ] || sleep 3   # a stopped session's SessionEnd hook races the removal of its job dir
+for bg in $(printf '%s\n' "$ended" | awk '{ print $1 }'); do
+  ask "$(request rm "$bg")" >/dev/null || echo "spawn could not rm $bg; left in the listing" >&2
+done
+```
 
 ```sh
 # open: unless paused, compose a deep pass and start its session
