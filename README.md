@@ -21,11 +21,11 @@ The contract is `docs/BANK-FORMAT.md` § trail.
 
 ## Shift
 
-`sandman shift` runs the perpetual machine's unit of work, one five-hour session at a
-time; `~/.routines/shift.md` drives it every five minutes.
+`sandman shift` runs the perpetual machine's unit of work by night (21:00–07:00 New
+York, the theme the day the night began on's), one five-hour session at a time; `~/.routines/shift.md` drives it every five minutes.
 
 ```sh
-sandman shift clock --check     # remaining=3h56m used=6% … — exit 1 under 15 min or at 90 % used, 3 on an unreadable window file
+sandman shift clock --check     # remaining=3h56m used=6% … — exit 1 by day, under 60 min of night or window, or at 90 % used; 3 on an unreadable window file
 sandman shift pick              # the rotation's next repo; --path for its trunk checkout
 sandman shift brief             # compose prompts/shift.md into shifts/<id>/brief.md; prints the id
 sandman shift brief --dry-run   # print the brief, write nothing
@@ -41,6 +41,7 @@ without one — and opens a `proposal:` thread for any work larger than itself.
 sandman report                  # the reports since you last read, Worth-your-eye and open proposals first
 sandman report --week 2026-W42  # or --since <instant>, --all; --mark-read moves the cursor
 sandman report --hook           # SessionStart: each report once, never in the machine's own sessions
+sandman report serve            # http://127.0.0.1:1705 — each night's reports; approve/revise/decline proposals by form
 ```
 
 The contract is `docs/BANK-FORMAT.md` § shifts and § report.

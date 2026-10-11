@@ -181,8 +181,10 @@ alphabetical, newest last:
 `at`, `id`, `kind`, `parent` and `refs` are always present (`refs` may be `[]`); every
 other key is omitted when it has no value, never `null`.
 
-Kinds: `breath` · `change` · `correction` · `decay` · `guard` · `promote` · `reconcile`
-· `revoke` · `shift.handoff` · `shift.start`. Any other kind is refused. `promote` and
+Kinds: `breath` · `change` · `correction` · `decay` · `decision` · `guard` · `promote`
+· `reconcile` · `revoke` · `shift.handoff` · `shift.start`. Any other kind is refused.
+`decision` is the owner's word on a proposal, appended by `report serve`'s `POST /answer`
+(§ report). `promote` and
 `decay` are proposals: the Sabbath appends them through `trail append`, the owner acts
 on them, and no verb emits or reads them yet.
 
@@ -294,19 +296,34 @@ shifts/
 | key | what |
 | --- | --- |
 | `bg_id` | the background session's short id, once the runner has attached it |
-| `handoff_by` | when the shift must hand off — fifteen minutes before the window resets, or before five hours pass when the window is unknown |
+| `handoff_by` | when the shift must hand off — fifteen minutes before the window resets, or before five hours pass when the window is unknown, and never past the night's end |
 | `path` | the checkout the shift works |
 | `repo` | `owner/repo` |
 | `session_id` | the session's full id, once attached |
 | `shift` | the shift id |
 | `started` | when the brief was composed, ISO-8601 Z |
-| `theme` | the day's theme |
+| `theme` | the night's theme |
 
 `meta.json` — keys alphabetical: `shift`, `theme`, `instrument`, `repo`, `path`,
 `started`, `mind` (the orchestrator model), `window` (`remaining` as prose, `resets_at`,
-`stale`, `used` — the clock at the start); `shift handoff` adds `ended`, and `abandoned:
-true` when the runner found the session gone. The rotation reads `repo` and `started`
+`stale`, `used` — the clock at the start); `shift handoff` adds `ended`, `cost_usd` when
+given `--cost`, and `abandoned: true` when the runner found the session gone. The rotation reads `repo` and `started`
 from every `meta.json` to know which repo has rested longest.
+
+### The night
+
+The owner works by day; the machine works nights. A night is `$SANDMAN_SHIFT_NIGHT`
+(`HH-HH`, New York hours 0–23, two different ones; default `21-07`): from the first
+hour until the second, across midnight when the first is the later. Both shifts of a
+night carry the theme of the day it began on — its **anchor**, the New York date
+`end` hours before the instant when the night wraps midnight (Monday 02:00 and Sunday
+22:00 are both Sunday's night), the plain New York date when it does not. Everything
+the creation week decides reads the anchor: the theme, the Sabbath (Saturday's night,
+into Sunday morning), one Sabbath a night, the Sabbath's pick, the rotation's and the
+score's Saturday-aside. `shift clock --check` refuses by day and close to dawn (§ The
+handoff and the clock), and `handoff_by` never runs past the night's end, so by day
+the runner's tick only closes a shift that overran. `report serve` keys its pages by
+the same anchor.
 
 ### The rotation
 
@@ -322,16 +339,16 @@ that supervises it. Least recently shifted first, never-shifted before any; a ti
 to a failing `stele check` (run only where `.stele/graph.lock` exists, 20 s timeout, a
 missing binary skipped), then the most open threads naming the slug, then the most
 untried breaths (`state: new` or `spiked`) filed against it, then the name. The open shift's repo and
-`$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over. A shift started on a New York
-Saturday never counts as a repo's last: the Sabbath works sandman whatever the rotation
+`$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over. A shift started in Saturday's
+night never counts as a repo's last: the Sabbath works sandman whatever the rotation
 says, and must not stand in for its turn.
 
-**The Sabbath's pick.** On a New York Saturday `shift pick` returns `jgeschwendt/sandman`'s
+**The Sabbath's pick.** In Saturday's night `shift pick` returns `jgeschwendt/sandman`'s
 trunk — the machine's own repo, where the self-pass branch `sabbath/<yyyy-Www>` lives —
 rotation, the open shift and the skip list aside; it must be a rotation trunk (exit 1
 otherwise) and trusted (the untrusted exit below).
 
-**One Sabbath a day.** Once a shift with `theme: Rest` started today (New York) has
+**One Sabbath a night.** Once a shift with `theme: Rest` started in this night has
 handed off — its `meta.json` has `ended` — `shift brief` exits 1 with `sabbath kept:
 <id> handed off at <ended>`, and the runner waits; `--dry-run` still composes. The
 runner fires every tick, so without this a Sabbath that ends early is followed by
@@ -350,7 +367,7 @@ the trust prompt` and their paths, one per line, and `shift brief` exits 3 on th
 
 ### The brief and its slots
 
-`shift brief` fills `prompts/shift.md` — on a New York Saturday `prompts/sabbath.md`
+`shift brief` fills `prompts/shift.md` — in Saturday's night `prompts/sabbath.md`
 instead — from `$SANDMAN_PROMPTS`, else the `prompts/` of sandman's trunk checkout in
 the grove, and refuses (exit 1) while `current.json` names
 an open shift, when the template is missing, when it names a slot outside this table,
@@ -468,12 +485,18 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   min past handoff_by`) the handoff opens with the line `Abandoned: <reason>` — above
   whatever the session wrote — and so the `shift.handoff` event's `rationale` reads the
   same.
-- **`shift clock --check`** exits 0 when a shift may start, 1 when it must not — under
-  `$SANDMAN_SHIFT_MIN_WINDOW_MIN` (default 60) minutes left, or 90 % of the window used —
-  and 3 on a fault. `handoff_by` stays fifteen minutes before the reset, so with the
-  default floor **a shift always has at least 45 minutes of work**: one the reset would
-  cut shorter is never opened.
-- **The window file's faults.** Only a missing file is unknown, never a refusal. A file
+- **`shift clock --check`** exits 0 when a shift may start, 1 when it must not — by day
+  (`day: the night opens at <instant>`), under `$SANDMAN_SHIFT_MIN_WINDOW_MIN` (default
+  60) minutes of night left (`night ends in <m>m`) or of window left, or 90 % of the
+  window used — and 3 on a fault. `handoff_by` stays fifteen minutes before the reset and
+  never past dawn, so with the default floor **a shift always has at least 45 minutes of
+  work**: one the reset or the morning would cut shorter is never opened.
+- **A stale window file is unknown.** The statusline that writes it runs only beside an
+  interactive session, so overnight it goes stale: a file whose `at` is more than 30
+  minutes old, or that has no `at`, reads exactly as a missing one — never a refusal, the
+  runner's timeout the bound — and `shift clock` and `shift status` print `window=unknown
+  (stale since <at>)`.
+- **The window file's faults.** A missing or stale file is unknown, never a refusal. A file
   that is there is a fault — exit 3 from plain `shift clock` and from `--check`, for the
   runner to report rather than wait on — when it cannot be read or parsed, is not a JSON
   object, has no `five_hour` object, carries a `five_hour.resets_at` or
@@ -781,6 +804,37 @@ or Proposals sections — then moves the cursor, so each report reaches a sessio
 once and `--week`/`--all` read it again. It prints nothing when nothing is unread, and
 nothing for the machine's own sessions: a payload `session_id` equal to
 `shifts/current.json`'s, or a `cwd` under the data root (breath passes, dream minds).
+
+**The UI — `sandman report serve [--bind 127.0.0.1:1705]`** — makes the report a page,
+std-only HTTP/1.1 one request at a time (`Connection: close`), loopback only (any other
+`--bind` exits 2); it prints `listening on http://<address>` and serves until killed
+(`--requests N` answers N, then exits — the tests' seam). `GET /` is a night (§ shifts,
+The night) — the newest with a shift, or `?night=yyyy-mm-dd` by its anchor date, `404`
+when no shift began in it: a header `<Day>→<Day> night · <n> shifts · $<cost> · <landed>
+landed · <proposals> proposals` (cost summed over the shifts' `meta.json` `cost_usd`,
+landed the rows of their Landed tables), then **Proposals awaiting you** — every repo's,
+each with its title, repo, opened time, body (a matrix renders as a table) and a form
+of `approve` · `revise` · `decline` with an optional `note` — then Worth your eye (each
+bullet linking its shift), Landed (one table, a `shift` column first), every shift as a
+`<details>` holding its whole report, and the last 14 nights. The markdown rendered is
+exactly what reports use — `#`/`##` headings, `-` bullets, pipe tables, paragraphs,
+`` `code` ``, `**bold**` — everything else and every datum HTML-escaped; no script, no
+external fetch, the style inline in `ui`'s green-and-gold palette. `POST /answer` (`key`,
+`answer`, `note`) finds the open `proposal:` thread with that key, runs `thread reply
+<id> --as user --answer <answer>` plus `--body <note>` when the note is non-empty
+(`$SANDMAN_THREAD_BIN`, else `~/.local/bin/thread`), appends a `decision` event (rationale
+`owner <answer>d proposal <key>`, ref `thread:<id>`, the key's repo) and answers `303` to
+`/`: `400` for another answer, `404` for an unknown key, `502` with thread's stderr when
+it fails, `500` when the trail refuses. A request whose `Host` is not the bound address,
+or whose `Origin` is not `http://<bound address>`, is `403` — no rebinding DNS name or
+foreign form reaches it; other paths `404`, other methods `405`. Open it at
+`http://127.0.0.1:1705`, never `localhost`, which the Host check refuses. The launchd
+agent `launchd/io.jlg.sandman-report.plist` keeps it up (log
+`~/Library/Logs/sandman-report.log`):
+
+```sh
+cp launchd/io.jlg.sandman-report.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.jlg.sandman-report.plist
+```
 
 ## Concurrency
 

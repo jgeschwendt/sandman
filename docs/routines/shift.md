@@ -6,11 +6,11 @@ on_error: claude
 
 # Shift
 
-The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it only opens and closes shifts. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
+The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it only opens and closes shifts. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
 
 ## The creation week
 
-Local time, America/New_York; Sunday is Day 1, Saturday the Sabbath. `sandman shift brief` reads the weekday and fills the theme into the brief; this table is the human copy.
+Local time, America/New_York; Sunday is Day 1, Saturday the Sabbath. The owner works by day; the machine works nights: a night of weekday D runs D 21:00 → D+1 07:00 New York and carries D's theme, so Monday 02:00 is still Sunday's Hunt and the Sabbath is Saturday's night. `sandman shift clock --check` refuses by day and within `SANDMAN_SHIFT_MIN_WINDOW_MIN` of dawn, and `handoff_by` never runs past 07:00, so by day the tick only closes a shift that overran. `sandman shift brief` reads the night's day and fills the theme into the brief; this table is the human copy.
 
 | day | creation | theme | instrument | what a shift does |
 | --- | --- | --- | --- | --- |
@@ -27,7 +27,7 @@ Local time, America/New_York; Sunday is Day 1, Saturday the Sabbath. `sandman sh
 - `~/.sandman/shifts/current.json` — the lock: `{bg_id, handoff_by, path, repo, session_id, shift, started, theme}` while a shift is open, absent otherwise. `sandman shift brief` writes it, `sandman shift attach` adds the session ids, `sandman shift handoff` removes it. Never delete it by hand: `handoff --abandoned` is the release, and it records the abandonment on the trail.
 - `~/.sandman/shifts/<id>/` — `brief.md` (the prompt the session got), `handoff.md` (the session writes it, then runs `sandman shift handoff --shift <id> --from-session` itself), `meta.json`.
 - `~/.sandman/shifts/PAUSE` — the owner's off switch. While it exists no shift opens; an open one still closes. Only the owner removes it.
-- `~/.local/state/claude/window.json` — the five-hour window as the harness statusline last saw it; `sandman shift clock --check` exits 1 with under `SANDMAN_SHIFT_MIN_WINDOW_MIN` minutes left or at 90 % used, 3 when the file is unreadable or of the wrong shape, and 0 when the file is missing (the session then runs until the window cuts it off).
+- `~/.local/state/claude/window.json` — the five-hour window as the harness statusline last saw it; `sandman shift clock --check` exits 1 by day, with under `SANDMAN_SHIFT_MIN_WINDOW_MIN` minutes of night or window left, or at 90 % used, 3 when the file is unreadable or of the wrong shape, and 0 when the file is missing or stale — over 30 minutes old, as it is overnight with no interactive session to refresh it (the session then runs until the window or the runner's timeout cuts it off).
 
 ## Knobs
 
@@ -37,7 +37,8 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 - `SANDMAN_SHIFT_BUDGET_USD` — per-shift cost cap the brief states, default `15`.
 - `SANDMAN_SHIFT_SKIP` — colon-separated repo slugs the rotation passes over.
 - `SANDMAN_SHIFT_GRACE_MIN` — minutes past `handoff_by` before a still-working shift is stopped, default `20`.
-- `SANDMAN_SHIFT_MIN_WINDOW_MIN` — the least window a shift may open with, default `60`; `handoff_by` is the reset minus fifteen, so a shift always has at least 45 minutes.
+- `SANDMAN_SHIFT_MIN_WINDOW_MIN` — the least window, and the least night, a shift may open with, default `60`; `handoff_by` is the reset minus fifteen, never past dawn, so a shift always has at least 45 minutes.
+- `SANDMAN_SHIFT_NIGHT` — the night, New York hours `HH-HH`, default `21-07`; set it on `io.jlg.sandman-report` too, whose pages are keyed by the same nights.
 
 ## The sandbox
 
@@ -148,7 +149,7 @@ sm="$HOME/.local/bin/sandman"
 sp="$HOME/.local/bin/spawn"
 rc=0
 "$sm" shift clock --check >/dev/null || rc=$?
-[ "$rc" -ne 1 ] || exit 0   # the window is nearly spent: wait for the reset
+[ "$rc" -ne 1 ] || exit 0   # day, dawn near, or the window nearly spent: wait
 [ "$rc" -eq 0 ] || exit "$rc"   # 3: the clock file is unreadable — a fault, not a wait
 rc=0
 id=$("$sm" shift brief) || rc=$?

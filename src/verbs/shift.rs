@@ -221,6 +221,8 @@ pub struct Context {
     /// `$SANDMAN_SHIFT_MIN_WINDOW_MIN` in seconds: the least window
     /// `clock --check` lets a shift open into.
     pub min_window_seconds: i64,
+    /// `$SANDMAN_SHIFT_NIGHT`: the hours the machine works.
+    pub night: Night,
     /// The grove owners whose repos rotate; the extras never do.
     pub owners: Vec<String>,
     /// The directory holding `shift.md`.
@@ -262,6 +264,11 @@ fn weekday(days: i64) -> i64 {
     (days + 4).rem_euclid(7)
 }
 
+/// `at` on New York's wall clock, in seconds since the epoch.
+fn local_seconds(at: Timestamp) -> i64 {
+    at.unix_seconds() + new_york_offset_hours(at) * 3600
+}
+
 /// The local calendar facts a brief needs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Local {
@@ -277,8 +284,11 @@ impl Local {
     /// `at` in New York.
     #[must_use]
     pub fn at(at: Timestamp) -> Self {
-        let local = at.unix_seconds() + new_york_offset_hours(at) * 3600;
-        let days = local.div_euclid(86_400);
+        Self::of_days(local_seconds(at).div_euclid(86_400))
+    }
+
+    /// The local day `days` after the epoch.
+    fn of_days(days: i64) -> Self {
         let iso_weekday = (days + 3).rem_euclid(7) + 1;
         let thursday = days - iso_weekday + 4;
         let (iso_year, ..) = civil_from_days(thursday);
@@ -304,10 +314,76 @@ impl Local {
     }
 }
 
-/// Whether `at` falls on the Sabbath, Saturday in New York.
-#[must_use]
-pub fn sabbath(at: Timestamp) -> bool {
-    Local::at(at).weekday == 6
+/// The hours the machine works, New York's: from `start` until `end`, across
+/// midnight when `start > end`. The owner works by day.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Night {
+    /// The hour it ends, 0–23.
+    pub end: i64,
+    /// The hour it opens, 0–23.
+    pub start: i64,
+}
+
+/// `$SANDMAN_SHIFT_NIGHT`'s default: 21:00 until 07:00.
+pub const DEFAULT_NIGHT: Night = Night { end: 7, start: 21 };
+
+impl Night {
+    /// `HH-HH`, each hour 0–23, the two apart.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let (start, end) = text.split_once('-')?;
+        let hour = |text: &str| text.parse().ok().filter(|hour| (0..24).contains(hour));
+        Some(Self {
+            end: hour(end)?,
+            start: hour(start)?,
+        })
+        .filter(|night| night.start != night.end)
+    }
+
+    /// The day whose night `at` is in, whose theme it carries: the local date
+    /// `end` hours earlier when the night wraps midnight — Monday 02:00 is
+    /// Sunday's — the plain local date otherwise.
+    #[must_use]
+    pub fn anchor(self, at: Timestamp) -> Local {
+        let back = if self.start > self.end { self.end } else { 0 };
+        Local::of_days((local_seconds(at) - back * 3600).div_euclid(86_400))
+    }
+
+    /// When the night `at` is in ends — the next one's end, by day.
+    #[must_use]
+    pub fn ends(self, at: Timestamp) -> Timestamp {
+        next(at, self.end)
+    }
+
+    /// Whether `at` is inside the night: it ends before it next opens.
+    #[must_use]
+    pub fn inside(self, at: Timestamp) -> bool {
+        self.ends(at) < self.opens(at)
+    }
+
+    /// When the night next opens after `at`.
+    #[must_use]
+    pub fn opens(self, at: Timestamp) -> Timestamp {
+        next(at, self.start)
+    }
+
+    /// Whether `at` is in the Sabbath's night, Saturday's.
+    #[must_use]
+    pub fn sabbath(self, at: Timestamp) -> bool {
+        self.anchor(at).weekday == 6
+    }
+}
+
+/// The first instant after `at` that New York's clock strikes `hour`.
+fn next(at: Timestamp, hour: i64) -> Timestamp {
+    let local = local_seconds(at);
+    let mut wall = local.div_euclid(86_400) * 86_400 + hour * 3600;
+    if wall <= local {
+        wall += 86_400;
+    }
+    // read as standard time first; the offset there says which it is
+    let offset = new_york_offset_hours(Timestamp::from_unix_seconds(wall + 5 * 3600));
+    Timestamp::from_unix_seconds(wall - offset * 3600)
 }
 
 /// `s-<yyyymmddThhmm>Z` — the instant to the minute, UTC.
@@ -406,6 +482,8 @@ impl Window {
 /// What the clock answers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Clock {
+    /// The hours shifts may run in.
+    pub night: Night,
     /// When it was asked.
     pub now: Timestamp,
     /// The window, when the file was readable.
@@ -413,11 +491,18 @@ pub struct Clock {
 }
 
 impl Clock {
+    /// The window, unless stale — then as unknown as a missing one: the
+    /// statusline that writes it runs only beside an interactive session,
+    /// none overnight.
+    fn known(&self) -> Option<Window> {
+        self.window.filter(|_| !self.stale())
+    }
+
     /// Seconds left in the window: `None` when unknown, `Some(None)` when the
     /// recorded window has already reset (a fresh one opens on first use).
     #[must_use]
     pub fn remaining(&self) -> Option<Option<i64>> {
-        let resets_at = self.window?.resets_at?;
+        let resets_at = self.known()?.resets_at?;
         let left = resets_at.unix_seconds() - self.now.unix_seconds();
         Some((left > 0).then_some(left))
     }
@@ -446,27 +531,42 @@ impl Clock {
         let Some(window) = self.window else {
             return "remaining=unknown".to_owned();
         };
+        if self.stale() {
+            return format!(
+                "window=unknown (stale since {})",
+                window.at.map_or_else(|| "-".to_owned(), Timestamp::iso8601)
+            );
+        }
         let used = match (self.remaining(), window.used) {
             (Some(None), _) => "0%".to_owned(),
             (_, Some(used)) => format!("{used}%"),
             (_, None) => "unknown".to_owned(),
         };
         format!(
-            "remaining={} used={used} resets_at={} stale={}",
+            "remaining={} used={used} resets_at={}",
             self.remaining_text(),
             window
                 .resets_at
-                .map_or_else(|| "unknown".to_owned(), Timestamp::iso8601),
-            self.stale()
+                .map_or_else(|| "unknown".to_owned(), Timestamp::iso8601)
         )
     }
 
-    /// Why a shift must not start now, if it must not: under `floor_seconds`
-    /// left — the reset would cut it short — or ninety percent used. An
-    /// unknown window never refuses: the runner's five-hour timeout is the
-    /// bound then.
+    /// Why a shift must not start now, if it must not: by day, under
+    /// `floor_seconds` of night or of window left — the morning or the reset
+    /// would cut it short — or ninety percent used. An unknown window never
+    /// refuses: the runner's five-hour timeout is the bound then.
     #[must_use]
     pub fn refusal(&self, floor_seconds: i64) -> Option<String> {
+        if !self.night.inside(self.now) {
+            return Some(format!(
+                "day: the night opens at {}",
+                self.night.opens(self.now).iso8601()
+            ));
+        }
+        let night = self.night.ends(self.now).unix_seconds() - self.now.unix_seconds();
+        if night < floor_seconds {
+            return Some(format!("night ends in {}m", night / 60));
+        }
         if let Some(Some(left)) = self.remaining()
             && left < floor_seconds
         {
@@ -477,7 +577,7 @@ impl Clock {
             ));
         }
         if self.remaining() != Some(None)
-            && let Some(used) = self.window.and_then(|window| window.used)
+            && let Some(used) = self.known().and_then(|window| window.used)
             && used >= CHECK_USED_PERCENT
         {
             return Some(format!("window: {used}% used"));
@@ -486,14 +586,17 @@ impl Clock {
     }
 
     /// When a shift started now must hand off: fifteen minutes before the
-    /// window resets, or before five hours pass when the window is unknown.
+    /// window resets, or before five hours pass when the window is unknown —
+    /// and by the night's end, whichever comes first.
     #[must_use]
     pub fn handoff_by(&self) -> Timestamp {
         let end = match self.remaining() {
             Some(Some(left)) => self.now.unix_seconds() + left,
             _ => self.now.unix_seconds() + WINDOW_SECONDS,
         };
-        Timestamp::from_unix_seconds(end - HANDOFF_MARGIN_SECONDS)
+        Timestamp::from_unix_seconds(
+            (end - HANDOFF_MARGIN_SECONDS).min(self.night.ends(self.now).unix_seconds()),
+        )
     }
 }
 
@@ -501,6 +604,7 @@ impl Clock {
 #[must_use]
 pub fn clock(ctx: &Context) -> Clock {
     Clock {
+        night: ctx.night,
         now: ctx.now,
         window: Window::load(&ctx.window, ctx.now).ok().flatten(),
     }
@@ -511,6 +615,7 @@ pub fn clock(ctx: &Context) -> Clock {
 /// fault from a wait.
 pub fn read_clock(ctx: &Context) -> Result<Clock> {
     Ok(Clock {
+        night: ctx.night,
         now: ctx.now,
         window: Window::load(&ctx.window, ctx.now)?,
     })
@@ -603,11 +708,11 @@ pub(crate) fn metas(data_root: &Path) -> Vec<Meta> {
 
 /// The newest `started` per repo, Sabbath shifts aside: the Sabbath works
 /// sandman whatever the rotation says, and must not stand in for its turn.
-fn last_shifted(data_root: &Path) -> BTreeMap<String, Timestamp> {
+fn last_shifted(ctx: &Context) -> BTreeMap<String, Timestamp> {
     let mut last: BTreeMap<String, Timestamp> = BTreeMap::new();
-    for meta in metas(data_root) {
+    for meta in metas(&ctx.data_root) {
         if let (Some(repo), Some(started)) = (meta.repo, meta.started)
-            && !sabbath(started)
+            && !ctx.night.sabbath(started)
         {
             let entry = last.entry(repo).or_insert(started);
             *entry = (*entry).max(started);
@@ -876,7 +981,7 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
 /// passed over; when only untrusted ones remain, that is the error. On the
 /// Sabbath the choice is [`SABBATH_REPO`]'s trunk, rotation aside.
 pub fn pick(ctx: &Context) -> Result<Option<Target>> {
-    if sabbath(ctx.now) {
+    if ctx.night.sabbath(ctx.now) {
         let (label, path) = trunks(ctx)
             .into_iter()
             .find(|(label, _)| label == SABBATH_REPO)
@@ -885,7 +990,7 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
             return Err(Error::Untrusted(vec![path]));
         }
         return Ok(Some(Target {
-            last: last_shifted(&ctx.data_root).get(&label).copied(),
+            last: last_shifted(ctx).get(&label).copied(),
             label,
             path,
             reason: "the Sabbath works the machine's own repo".to_owned(),
@@ -900,7 +1005,7 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
         })
         .into_iter()
         .collect();
-    let last = last_shifted(&ctx.data_root);
+    let last = last_shifted(ctx);
     let trust = trusted(ctx);
     let (mut candidates, untrusted): (Vec<_>, Vec<_>) = trunks(ctx)
         .into_iter()
@@ -1410,7 +1515,8 @@ fn trim_slot(
 /// the Sabbath, `shift.md` otherwise; unless `dry_run`, write the shift's
 /// files, take `current.json` and append `shift.start`.
 pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
-    let rest = sabbath(ctx.now);
+    let local = ctx.night.anchor(ctx.now);
+    let rest = local.weekday == 6;
     let template_path = ctx
         .prompts
         .join(if rest { "sabbath.md" } else { "shift.md" });
@@ -1427,10 +1533,12 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         unopened(&ctx.data_root, &dir)?;
     }
     if rest && !options.dry_run {
-        let today = Local::at(ctx.now).ymd();
+        let today = local.ymd();
         if let Some((kept, ended)) = metas(&ctx.data_root).into_iter().find_map(|meta| {
             let rested = meta.value.get("theme").and_then(Value::as_str) == Some("Rest")
-                && meta.started.is_some_and(|at| Local::at(at).ymd() == today);
+                && meta
+                    .started
+                    .is_some_and(|at| ctx.night.anchor(at).ymd() == today);
             Some((meta.shift, meta.ended.filter(|_| rested)?))
         }) {
             return Err(Error::refused(format!(
@@ -1439,7 +1547,6 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         }
     }
     let target = pick(ctx)?.ok_or_else(|| Error::not_found("repo to shift", "the rotation"))?;
-    let local = Local::at(ctx.now);
     let day = local.day();
     let clock = clock(ctx);
     let handoff_by = clock.handoff_by();
@@ -1865,6 +1972,7 @@ pub fn handoff(
         .unwrap_or_default();
     entries.retain(|(key, _)| key != "ended" && key != "abandoned");
     entries.push(("ended".to_owned(), Value::string(ctx.now.iso8601())));
+    entries.extend(cost_usd.map(|cost| ("cost_usd".to_owned(), Value::Number(cost))));
     if abandoned {
         entries.push(("abandoned".to_owned(), Value::Bool(true)));
     }
@@ -1970,8 +2078,8 @@ pub fn status(ctx: &Context) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Clock, Local, PROFILE, Week, Window, fenced, fill, fnv1a, names, new_york_offset_hours,
-        profile, shift_id, slot_names,
+        Clock, DEFAULT_NIGHT, Local, Night, PROFILE, Week, Window, fenced, fill, fnv1a, names,
+        new_york_offset_hours, profile, shift_id, slot_names,
     };
     use crate::json::{self, Value};
     use crate::time::Timestamp;
@@ -2052,8 +2160,10 @@ mod tests {
 
     #[test]
     fn the_clock_reads_remaining_used_and_staleness() {
-        let now = at("2026-10-09T23:00:00Z");
+        // Friday 23:00 in New York, four hours into the night.
+        let now = at("2026-10-10T03:00:00Z");
         let window = |left: i64, used: f64| Clock {
+            night: DEFAULT_NIGHT,
             now,
             window: Some(Window {
                 at: Some(now),
@@ -2064,18 +2174,83 @@ mod tests {
         let clock = window(4 * 3600 + 7 * 60, 5.0);
         assert_eq!(
             clock.line(),
-            "remaining=4h7m used=5% resets_at=2026-10-10T03:07:00Z stale=false"
+            "remaining=4h7m used=5% resets_at=2026-10-10T07:07:00Z"
         );
         assert_eq!(clock.refusal(3600), None);
+        assert_eq!(clock.handoff_by(), at("2026-10-10T06:52:00Z"));
         assert!(window(59 * 60, 5.0).refusal(3600).is_some());
         assert_eq!(window(3600, 5.0).refusal(3600), None);
         assert!(window(3600, 90.0).refusal(3600).is_some());
-        assert_eq!(window(-60, 99.0).remaining_text(), "fresh");
+        assert_eq!(
+            window(-60, 99.0).line(),
+            "remaining=fresh used=0% resets_at=2026-10-10T02:59:00Z"
+        );
         assert_eq!(window(-60, 99.0).refusal(3600), None);
-        let blind = Clock { now, window: None };
+        let vague = Clock {
+            window: Some(Window {
+                at: Some(now),
+                ..Window::default()
+            }),
+            ..clock
+        };
+        assert_eq!(
+            vague.line(),
+            "remaining=unknown used=unknown resets_at=unknown"
+        );
+        let blind = Clock {
+            window: None,
+            ..clock
+        };
         assert_eq!(blind.line(), "remaining=unknown");
         assert_eq!(blind.refusal(3600), None);
-        assert_eq!(blind.handoff_by(), at("2026-10-10T03:45:00Z"));
+        assert_eq!(blind.handoff_by(), at("2026-10-10T07:45:00Z"));
+        // Five hours before dawn, the morning comes first.
+        let late = Clock {
+            now: at("2026-10-10T08:00:00Z"),
+            ..blind
+        };
+        assert_eq!(late.handoff_by(), at("2026-10-10T11:00:00Z"));
+    }
+
+    #[test]
+    fn the_night_wraps_midnight_on_new_york_clocks_across_dst() {
+        let night = DEFAULT_NIGHT;
+        assert_eq!(Night::parse("21-07"), Some(night));
+        for bad in ["21", "21-21", "24-07", "x-07", "21-7x", "-1-07"] {
+            assert_eq!(Night::parse(bad), None, "{bad}");
+        }
+        // Monday 02:00 EDT is Sunday's night, until 07:00.
+        let monday = at("2026-10-12T06:00:00Z");
+        assert_eq!(night.anchor(monday).day().name, "Sunday");
+        assert_eq!(night.ends(monday), at("2026-10-12T11:00:00Z"));
+        assert!(night.inside(at("2026-10-12T10:59:59Z")));
+        assert!(!night.inside(at("2026-10-12T11:00:00Z")));
+        assert_eq!(
+            night.opens(at("2026-10-12T11:00:00Z")),
+            at("2026-10-13T01:00:00Z")
+        );
+        assert!(night.inside(at("2026-10-13T01:00:00Z")));
+        // Saturday's nights, falling back to EST and springing to EDT.
+        assert_eq!(
+            night.opens(at("2026-10-31T12:00:00Z")),
+            at("2026-11-01T01:00:00Z")
+        );
+        for (dawn, ends) in [
+            ("2026-11-01T11:30:00Z", "2026-11-01T12:00:00Z"),
+            ("2026-03-08T10:30:00Z", "2026-03-08T11:00:00Z"),
+        ] {
+            assert!(night.sabbath(at(dawn)), "{dawn}");
+            assert_eq!(night.ends(at(dawn)), at(ends));
+        }
+        // A window that does not wrap keeps the plain local date.
+        let day = Night::parse("09-17").expect("a day window");
+        assert!(day.inside(at("2026-10-12T14:00:00Z")));
+        assert_eq!(day.anchor(at("2026-10-12T14:00:00Z")).day().name, "Monday");
+        assert_eq!(
+            day.opens(at("2026-10-12T21:00:00Z")),
+            at("2026-10-13T13:00:00Z")
+        );
+        assert!(!day.inside(at("2026-10-12T21:00:00Z")));
     }
 
     #[test]

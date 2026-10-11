@@ -1,9 +1,13 @@
 //! `report` — what the machine did, told to the owner: every shift's
 //! `report.md` beside its handoff, and the open `proposal:` threads that wait
 //! on his word. Pure over the data root and `~/.threads`: no model, no
-//! network, no git.
+//! network, no git. `serve` makes it a loopback page whose forms answer the
+//! proposals through the `thread` binary.
 //!
 //! The contract is `docs/BANK-FORMAT.md` § report.
+
+mod html;
+pub mod serve;
 
 use std::fmt::Write as _;
 use std::fs;
@@ -52,6 +56,10 @@ pub(crate) struct Proposal {
     pub(crate) approved: Option<String>,
     /// Whether it still waits on him: `waiting: user` and undecided.
     pub(crate) awaiting: bool,
+    /// Everything below its frontmatter.
+    pub(crate) body: String,
+    /// The thread's id, its file stem.
+    pub(crate) id: String,
     /// `proposal:<owner/repo>:<slug>`.
     pub(crate) key: String,
     /// When it was opened.
@@ -68,7 +76,7 @@ pub(crate) fn proposals(threads: &Path, repo: Option<&str>) -> Vec<Proposal> {
     );
     shift::front_files(threads)
         .into_iter()
-        .filter_map(|(_, fields, body)| {
+        .filter_map(|(id, fields, body)| {
             let field = |key: &str| fields.get(key).map(String::as_str);
             let key = field("key").filter(|key| key.starts_with(&prefix))?;
             (field("state") == Some("open")).then(|| Proposal {
@@ -82,9 +90,20 @@ pub(crate) fn proposals(threads: &Path, repo: Option<&str>) -> Vec<Proposal> {
                 key: key.to_owned(),
                 opened: field("opened").unwrap_or("-").to_owned(),
                 title: shift::title(&body).unwrap_or_else(|| "untitled".to_owned()),
+                body,
+                id,
             })
         })
         .collect()
+}
+
+/// The lines of `text` under `heading`, up to the next `## `.
+pub(crate) fn section<'a>(text: &'a str, heading: &'a str) -> impl Iterator<Item = &'a str> {
+    text.lines()
+        .map(str::trim_end)
+        .skip_while(move |line| *line != heading)
+        .skip(1)
+        .take_while(|line| !line.starts_with("## "))
 }
 
 /// `lines` as a section body, `none.` when empty.
@@ -183,12 +202,9 @@ pub fn digest(data_root: &Path, threads: &Path, select: Select, cap: usize) -> D
     let eye: Vec<String> = reports
         .iter()
         .flat_map(|(_, shift, text)| {
-            text.lines()
-                .skip_while(|line| line.trim_end() != HEADINGS[0])
-                .skip(1)
-                .take_while(|line| !line.starts_with("## "))
+            section(text, HEADINGS[0])
                 .filter(|line| line.starts_with("- "))
-                .map(move |line| format!("{} — {shift}", line.trim_end()))
+                .map(move |line| format!("{line} — {shift}"))
         })
         .collect();
     let render = |kept: usize| {

@@ -313,7 +313,7 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
     for meta in shift::metas(&ctx.data_root) {
         if let (Some(repo), Some(started)) = (&meta.repo, meta.started)
             && week.contains(started)
-            && !shift::sabbath(started)
+            && !ctx.night.sabbath(started)
         {
             tally(&mut shifted, repo);
         }

@@ -21,7 +21,7 @@ Sandman grows into the machine. It already owned the loop's skeleton — take, d
 
 ## The spine — the creation week
 
-Hebrew reckoning: Sunday is Day 1, Saturday the Sabbath. Local time, America/New_York; four to five shifts a day. The day's theme is the shift's instrument, the repo rotation its target. The order is the point: find, restructure, polish, measure, multiply, finish, rest.
+Hebrew reckoning: Sunday is Day 1, Saturday the Sabbath. Local time, America/New_York. The owner works by day and the machine by night: a night of weekday D runs D 21:00 → D+1 07:00 (`$SANDMAN_SHIFT_NIGHT`), and carries D's theme in every shift it holds. The day's theme is the shift's instrument, the repo rotation its target. The order is the point: find, restructure, polish, measure, multiply, finish, rest.
 
 | day | creation | theme | instrument | what a shift does |
 | --- | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ Scope is every root under `~/.grove/code/jgeschwendt/`. The three home repos (`~
 - Cost: every headless call logs its cost to the trail; a shift stops at `SANDMAN_SHIFT_BUDGET_USD` and hands off early; the ruach stops at `SANDMAN_BREATH_BUDGET_USD` per day. `claude-breaker` keeps its cap of twenty.
 - The Sabbath commits no code. Three consecutive failed blocks end a shift and open a problem thread. Threads are for what the trail cannot undo: publishing, deleting data, spending money, touching other people.
 - Work larger than one shift — an architecture change, a redesign, a refactor spanning modules — is a `proposal:<owner/repo>:<slug>` decision thread with a comparison matrix, never started unapproved; Monday's Redesign executes the approved ones first (BANK-FORMAT § report).
-- Every shift, the Sabbath too, writes `report.md` for the owner before its handoff — Worth your eye, Landed, Proposals, Decisions (every choice with two live options and the one rejected), Numbers — and `shift handoff` refuses without it; `sandman report` and its SessionStart hook are how he reads them.
+- Every shift, the Sabbath too, writes `report.md` for the owner before its handoff — Worth your eye, Landed, Proposals, Decisions (every choice with two live options and the one rejected), Numbers — and `shift handoff` refuses without it; `sandman report`, its SessionStart hook and `sandman report serve` — a loopback page of each night, its proposals answered by form into their threads — are how he reads them.
 
 ## Phases
 

@@ -287,7 +287,7 @@ fn score_writes_the_weeks_page_worst_three_first() {
     for row in [
         "| jgeschwendt/alpha | 1 |\n| jgeschwendt/beta | 0 |\n| jgeschwendt/gamma | 0 |\n| covered | 1/3 |",
         "| opened | handed off | abandoned | mean minutes | cost per shift |\n| --- | --- | --- | --- | --- |\n| 2 | 1 | 1 | 150 | 1.50 |",
-        "| breath | 2 |\n| change | 3 |\n| correction | 2 |\n| decay | 0 |\n| guard | 1 |",
+        "| breath | 2 |\n| change | 3 |\n| correction | 2 |\n| decay | 0 |\n| decision | 0 |\n| guard | 1 |",
         "| 12 | 1 | 5.00 | 2 |",
         "| - | 7 |\n| jgeschwendt/alpha | 4 |\n| jgeschwendt/beta | 1 |",
         "| - | 10 |\n| opus | 2 |",

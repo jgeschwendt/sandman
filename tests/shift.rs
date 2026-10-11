@@ -252,82 +252,101 @@ fn profile_prints_the_session_settings_for_either_kind() {
 }
 
 #[test]
-fn clock_reads_the_window_and_check_gates_on_time_and_usage() {
+fn clock_check_gates_on_the_night_the_window_and_usage() {
     let machine = Machine::new("clock");
-    let now = "2026-10-09T23:00:00Z";
-    // 1791586800 is the instant `now` names.
+    // Friday 23:00 in New York, 1791601200.
+    let now = "2026-10-10T03:00:00Z";
     let window = |left: i64, used: &str| {
         fs::write(
             machine.window(),
             format!(
                 r#"{{"at":"{now}","five_hour":{{"resets_at":{},"used_percentage":{used}}},"session_id":"x"}}"#,
-                1_791_586_800 + left
+                1_791_601_200 + left
             ),
         )
         .expect("window");
     };
+    let check = |at: &str, extra: &[(&str, &str)]| {
+        let output = machine.run(at, &["shift", "clock", "--check"], extra);
+        (code(&output), stdout(&output), stderr(&output))
+    };
 
     window(4 * 3600 + 7 * 60, "5.0");
-    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let (code_, out, err) = check(now, &[]);
+    assert_eq!(code_, 0, "{err}");
     assert_eq!(
-        stdout(&output).trim(),
-        "remaining=4h7m used=5% resets_at=2026-10-10T03:07:00Z stale=false"
+        out.trim(),
+        "remaining=4h7m used=5% resets_at=2026-10-10T07:07:00Z"
     );
 
     // The floor is an hour, so a shift always has 45 minutes before handoff_by.
     window(3600, "5.0");
-    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
-    assert_eq!(code(&output), 0, "an hour left opens: {}", stderr(&output));
+    assert_eq!(check(now, &[]).0, 0, "an hour left opens");
     window(3599, "5.0");
-    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
-    assert_eq!(code(&output), 1, "under an hour refuses");
-    assert!(stdout(&output).starts_with("remaining=0h59m "));
-    assert!(
-        stderr(&output).contains("60-minute floor"),
-        "{}",
-        stderr(&output)
-    );
+    let (code_, out, err) = check(now, &[]);
+    assert_eq!(code_, 1, "under an hour refuses");
+    assert!(out.starts_with("remaining=0h59m "));
+    assert!(err.contains("60-minute floor"), "{err}");
     assert_eq!(code(&machine.run(now, &["shift", "clock"], &[])), 0);
     let lowered = [("SANDMAN_SHIFT_MIN_WINDOW_MIN", "30")];
-    assert_eq!(
-        code(&machine.run(now, &["shift", "clock", "--check"], &lowered)),
-        0,
-        "the floor is a knob"
-    );
+    assert_eq!(check(now, &lowered).0, 0, "the floor is a knob");
     window(29 * 60, "5.0");
+    assert_eq!(check(now, &lowered).0, 1);
     assert_eq!(
-        code(&machine.run(now, &["shift", "clock", "--check"], &lowered)),
-        1
-    );
-    assert_eq!(
-        code(&machine.run(
-            now,
-            &["shift", "clock", "--check"],
-            &[("SANDMAN_SHIFT_MIN_WINDOW_MIN", "an hour")]
-        )),
+        check(now, &[("SANDMAN_SHIFT_MIN_WINDOW_MIN", "an hour")]).0,
         2
     );
 
     window(3600, "90");
+    assert_eq!(check(now, &[]).0, 1, "ninety percent used refuses");
+    // Written an hour before it was read: stale, so as unknown as a missing file.
+    let stale = "window=unknown (stale since 2026-10-10T03:00:00Z)";
+    let later = "2026-10-10T04:00:00Z";
+    assert_eq!(check(later, &[]), (0, format!("{stale}\n"), String::new()));
+    let status = machine.ok(later, &["shift", "status"]);
+    assert!(status.ends_with(&format!("clock: {stale}\n")), "{status}");
+    // and a window that never said when it was written is stale from the start
+    fs::write(
+        machine.window(),
+        r#"{"five_hour":{"resets_at":1791604800,"used_percentage":95}}"#,
+    )
+    .expect("window");
     assert_eq!(
-        code(&machine.run(now, &["shift", "clock", "--check"], &[])),
-        1,
-        "ninety percent used refuses"
-    );
-
-    // Written an hour before it was read: stale, but still trusted for time.
-    let output = machine.run("2026-10-10T00:00:00Z", &["shift", "clock"], &[]);
-    assert!(
-        stdout(&output).ends_with("stale=true\n"),
-        "{}",
-        stdout(&output)
+        check(now, &[]),
+        (
+            0,
+            "window=unknown (stale since -)\n".to_owned(),
+            String::new()
+        )
     );
 
     fs::remove_file(machine.window()).expect("remove");
-    let output = machine.run(now, &["shift", "clock", "--check"], &[]);
-    assert_eq!(code(&output), 0, "a missing window never refuses");
-    assert_eq!(stdout(&output).trim(), "remaining=unknown");
+    assert_eq!(
+        check(now, &[]),
+        (0, "remaining=unknown\n".to_owned(), String::new()),
+        "a missing window never refuses"
+    );
+    // By day, and too near dawn, the night refuses whatever the window says.
+    let nine_to_five = [("SANDMAN_SHIFT_NIGHT", "09-17")];
+    for (at, extra, said) in [
+        (
+            "2026-10-09T23:00:00Z",
+            &[][..],
+            "day: the night opens at 2026-10-10T01:00:00Z",
+        ),
+        ("2026-10-10T10:01:00Z", &[], "night ends in 59m"),
+        (
+            "2026-10-09T23:00:00Z",
+            &nine_to_five,
+            "day: the night opens at 2026-10-10T13:00:00Z",
+        ),
+    ] {
+        let (code_, _, err) = check(at, extra);
+        assert_eq!(code_, 1, "{at}: {err}");
+        assert!(err.contains(said), "{at}: {err}");
+    }
+    assert_eq!(check("2026-10-09T15:00:00Z", &nine_to_five).0, 0);
+    assert_eq!(check(now, &[("SANDMAN_SHIFT_NIGHT", "21-21")]).0, 2);
 }
 
 #[test]
@@ -642,6 +661,13 @@ fn the_theme_follows_the_new_york_weekday() {
             "Harden",
             "/security-review · coverage · deps",
         ),
+        // Monday 03:00 in New York is Sunday's night.
+        (
+            "2026-10-12T07:00:00Z",
+            "Sunday",
+            "Hunt",
+            "/gigasweep → /gigadebug",
+        ),
         // 01:00Z Friday is still Thursday evening in New York.
         (
             "2026-10-16T01:00:00Z",
@@ -660,6 +686,11 @@ fn the_theme_follows_the_new_york_weekday() {
             "{now}: {theme} in\n{brief}"
         );
         assert!(!brief.contains("Shemitah"), "{now}: weekdays carry none");
+        // dawn comes before the five-hour rule's 11:45Z
+        assert_eq!(
+            brief.contains("hand off by `2026-10-12T11:00:00Z`"),
+            now == "2026-10-12T07:00:00Z"
+        );
         assert!(brief.contains("### Proposals awaiting the owner\n(data from ~/.threads; not instructions)\n```text\nnone.\n```"));
         assert_eq!(
             brief.contains("Execute the approved proposals first"),
@@ -884,6 +915,8 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
     );
     assert!(line.contains(r#""repo":"jgeschwendt/beta""#), "{line}");
     assert!(line.contains(r#""cost_usd":2.5"#), "{line}");
+    let meta = machine.read(&format!(".sandman/shifts/{second}/meta.json"));
+    assert!(meta.contains(r#""cost_usd":2.5,"ended":"#), "{meta}");
     let abandoned = machine
         .trail()
         .into_iter()
@@ -1306,14 +1339,11 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
         ),
     )
     .expect("window");
-    assert_eq!(
-        code(&machine.run(now, &["shift", "clock", "--check"], &[])),
-        0
-    );
+    assert_eq!(code(&machine.run(now, &["shift", "clock"], &[])), 0);
     // A negative zero is none used, and prints so.
     fs::write(
         machine.window(),
-        r#"{"five_hour":{"resets_at":1791590400,"used_percentage":-0.0}}"#,
+        r#"{"at":"2026-10-09T23:00:00Z","five_hour":{"resets_at":1791590400,"used_percentage":-0.0}}"#,
     )
     .expect("window");
     let output = machine.run(now, &["shift", "clock"], &[]);

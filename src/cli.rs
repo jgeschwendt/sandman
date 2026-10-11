@@ -14,6 +14,7 @@ use std::env;
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
+use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::str::FromStr;
@@ -207,6 +208,19 @@ usage: sandman <verb> [args]
       the cursor; silent when nothing is unread and for the machine's own
       sessions — the open shift's session_id, or a cwd under the data root.
 
+  report serve [--bind 127.0.0.1:1705] [--requests N]
+      The report as a loopback page (a non-loopback --bind exits 2), printing
+      `listening on http://<address>`: GET / shows a night — the newest with
+      a shift, or ?night=yyyy-mm-dd, a night keyed by the day it began on —
+      its header, the proposal: threads awaiting the owner each with an
+      approve/revise/decline form, Worth your eye, Landed, every shift's
+      report, and the last 14 nights. POST /answer (key, answer, note) runs
+      `thread reply <id> --as user --answer <answer> [--body <note>]`
+      ($SANDMAN_THREAD_BIN, else ~/.local/bin/thread), appends a decision
+      event and redirects to /; 404 for an unknown key, 502 when thread
+      fails. A Host other than the bound address, or a foreign Origin, is
+      403. --requests answers N requests, then exits.
+
   score [--week yyyy-Www] [--json]
       The week's numbers from the trail, shifts/*/meta.json, the breath
       store, ~/.threads ($SANDMAN_THREADS) and the shift and breathe-*
@@ -234,11 +248,12 @@ usage: sandman <verb> [args]
       fit), writes <root>/shifts/<id>/{brief.md,meta.json},
       takes shifts/current.json, refreshes breath/problems.md, appends a
       shift.start event whose refs fingerprint every slot, and prints the id;
-      --dry-run prints the brief and writes nothing. The theme is the
-      America/New_York weekday's: Sun Hunt, Mon Redesign, Tue Refactor, Wed
-      Measure, Thu Harden, Fri Ship, Sat Rest — the Sabbath, which fills
+      --dry-run prints the brief and writes nothing. The theme is that of
+      the America/New_York weekday the night began on: Sun Hunt, Mon
+      Redesign, Tue Refactor, Wed Measure, Thu Harden, Fri Ship, Sat Rest —
+      the Sabbath, which fills
       prompts/sabbath.md instead and works jgeschwendt/sandman's trunk, once
-      (exit 1, `sabbath kept: <id> handed off at <time>`, after today's); a
+      (exit 1, `sabbath kept: <id> handed off at <time>`, after the night's); a
       repo whose docs/plan.md names nothing next takes its line from the
       Sabbath's score/<week>-targets.md. pick is the rotation — the least
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
@@ -248,11 +263,15 @@ usage: sandman <verb> [args]
       every trunk Claude Code has not trusted ($SANDMAN_CLAUDE_JSON, else
       ~/.claude.json) — exit 1 listing them when no other is left, and brief
       exits 3; --untrusted lists those trunks; --shift prints the target a
-      shift was briefed on. clock reads the window
+      shift was briefed on. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
+      York hours HH-HH (default 21-07) — and a night carries the theme of the
+      day it began on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
-      ~/.local/state/claude/window.json); --check exits 1 under
-      $SANDMAN_SHIFT_MIN_WINDOW_MIN (default 60) minutes left or at 90% used,
-      0 when the file is missing; clock and --check exit 3 when the file is
+      ~/.local/state/claude/window.json); --check exits 1 by day (`day: the
+      night opens at <instant>`), under $SANDMAN_SHIFT_MIN_WINDOW_MIN (default
+      60) minutes of night left (`night ends in <m>m`) or of window left, or
+      at 90% used; 0 when the file is missing or stale (written over 30 min
+      ago); clock and --check exit 3 when the file is
       there but cannot be read, is not a five_hour object with numeric
       resets_at and non-negative used_percentage, is stamped at more than
       5 min ahead, or resets more than 6 h ahead. handoff finalizes a shift —
@@ -267,6 +286,8 @@ usage: sandman <verb> [args]
       shifts/<id>/report.md carrying the report's five headings in order, under
       6,000 characters. attach records the session the runner
       started in current.json. status prints current.json and the clock.
+      handoff_by is the window's reset less 15 min (now + 5 h less 15 min
+      when unknown), never past the night's end.
       profile prints the Claude Code settings a shift or breath session runs
       under (profiles/session.json, compiled in; one profile for both kinds).
       $SANDMAN_NOW (ISO-8601) fixes the instant; $SANDMAN_SHIFT_MIND (default
@@ -286,8 +307,8 @@ usage: sandman <verb> [args]
       carrying it; revoke appends a revoke event (once — a second is a note),
       parent the event, or ref shift:<id> for a whole shift;
       today prints today's file; trailers prints the Shift:/Event: lines every
-      machine commit carries. Kinds: breath change correction decay guard
-      promote reconcile revoke shift.handoff shift.start.
+      machine commit carries. Kinds: breath change correction decay decision
+      guard promote reconcile revoke shift.handoff shift.start.
 
   version
       The crate version and the commit it was built from — the same stamp
@@ -1524,8 +1545,11 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `report [--since T | --week W | --all] [--mark-read] | --hook`.
+/// `report [--since T | --week W | --all] [--mark-read] | --hook | serve …`.
 fn report_verb(args: &[String]) -> Result<(), Failure> {
+    if args.first().is_some_and(|arg| arg == "serve") {
+        return report_serve(&args[1..]);
+    }
     let (values, set) = shift_flags(
         args,
         "report",
@@ -1590,6 +1614,36 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
     {
         report::mark_read(&data_root, newest)?;
     }
+    Ok(())
+}
+
+/// `report serve [--bind ADDR] [--requests N]`.
+fn report_serve(args: &[String]) -> Result<(), Failure> {
+    let (values, _) = shift_flags(args, "report serve", &["--bind", "--requests"], &[])?;
+    let bind = flag(&values, "--bind").unwrap_or_else(|| report::serve::BIND.to_owned());
+    let address = bind
+        .parse::<SocketAddr>()
+        .ok()
+        .filter(|address| address.ip().is_loopback())
+        .ok_or_else(|| Failure::Usage(format!("--bind wants a loopback address, got `{bind}`")))?;
+    let requests = flag(&values, "--requests")
+        .map(|text| {
+            text.parse()
+                .map_err(|_| Failure::Usage(format!("--requests wants a count, got `{text}`")))
+        })
+        .transpose()?;
+    let home = paths::home()?;
+    let server = report::serve::Server {
+        data_root: paths::data_root()?,
+        night: night()?,
+        requests,
+        thread: env::var_os("SANDMAN_THREAD_BIN")
+            .filter(|bin| !bin.is_empty())
+            .map_or(home.join(".local/bin/thread"), PathBuf::from),
+        threads: paths::threads_dir(&home),
+    };
+    let listener = TcpListener::bind(address).map_err(|source| Error::io(&bind, source))?;
+    report::serve::serve(&listener, &server);
     Ok(())
 }
 
@@ -1661,7 +1715,17 @@ fn shift_context() -> Result<shift::Context, Failure> {
         claude_json: paths::claude_json()?,
         data_root: paths::data_root()?,
         now,
-        min_window_seconds: min_window_minutes()? * 60,
+        min_window_seconds: knob(
+            "SANDMAN_SHIFT_MIN_WINDOW_MIN",
+            "minutes 0–300",
+            shift::DEFAULT_MIN_WINDOW_MINUTES,
+            |text| {
+                text.parse::<i64>()
+                    .ok()
+                    .filter(|minutes| (0..=300).contains(minutes))
+            },
+        )? * 60,
+        night: night()?,
         owners: list("SANDMAN_SHIFT_OWNERS", &["jgeschwendt"]),
         prompts: paths::prompts_dir()?,
         roots: grove_roots()?,
@@ -1672,19 +1736,28 @@ fn shift_context() -> Result<shift::Context, Failure> {
     })
 }
 
-/// `$SANDMAN_SHIFT_MIN_WINDOW_MIN`, else the default: whole minutes, ≥ 0.
-fn min_window_minutes() -> Result<i64, Failure> {
-    match env::var("SANDMAN_SHIFT_MIN_WINDOW_MIN") {
-        Ok(text) if !text.is_empty() => text
-            .parse::<i64>()
-            .ok()
-            .filter(|minutes| (0..=300).contains(minutes))
-            .ok_or_else(|| {
-                Failure::Usage(format!(
-                    "$SANDMAN_SHIFT_MIN_WINDOW_MIN wants minutes 0–300, got `{text}`"
-                ))
-            }),
-        _ => Ok(shift::DEFAULT_MIN_WINDOW_MINUTES),
+/// `$SANDMAN_SHIFT_NIGHT`, else 21–07.
+fn night() -> Result<shift::Night, Failure> {
+    knob(
+        "SANDMAN_SHIFT_NIGHT",
+        "HH-HH, two different New York hours 0–23",
+        shift::DEFAULT_NIGHT,
+        shift::Night::parse,
+    )
+}
+
+/// `$name` read through `parse`, else `default`; a value `parse` refuses is the
+/// operator's to fix, `want` saying what it takes.
+fn knob<T>(
+    name: &str,
+    want: &str,
+    default: T,
+    parse: impl Fn(&str) -> Option<T>,
+) -> Result<T, Failure> {
+    match env::var(name) {
+        Ok(text) if !text.is_empty() => parse(&text)
+            .ok_or_else(|| Failure::Usage(format!("${name} wants {want}, got `{text}`"))),
+        _ => Ok(default),
     }
 }
 

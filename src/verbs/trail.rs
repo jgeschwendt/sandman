@@ -24,11 +24,12 @@ use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 
 /// Every kind an event may carry.
-pub const KINDS: [&str; 10] = [
+pub const KINDS: [&str; 11] = [
     "breath",
     "change",
     "correction",
     "decay",
+    "decision",
     "guard",
     "promote",
     "reconcile",

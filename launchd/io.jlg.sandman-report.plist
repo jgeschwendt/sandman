@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.jlg.sandman-report</string>
+  <!-- `sandman report serve` on 127.0.0.1:1705: the nights' reports and the
+       proposals awaiting an answer (docs/BANK-FORMAT.md § report). launchd
+       expands no `~`, so the paths are the owner's home, spelled out. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jlg/.local/bin/sandman</string>
+    <string>report</string><string>serve</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/Users/jlg/Library/Logs/sandman-report.log</string>
+  <key>StandardErrorPath</key><string>/Users/jlg/Library/Logs/sandman-report.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/jlg</string>
+    <key>PATH</key><string>/Users/jlg/.local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

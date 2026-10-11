@@ -4,9 +4,11 @@
 
 use std::env;
 use std::fs;
-use std::io::Write as _;
+use std::io::{BufRead, BufReader, Read, Write as _};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Disambiguates directories created within the same process.
@@ -86,20 +88,25 @@ impl Home {
         fs::read_to_string(self.0.join(".sandman/.reports-read")).unwrap_or_default()
     }
 
-    fn run(&self, args: &[&str], stdin: &str) -> Output {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .arg("report")
+    /// `sandman <args>` under this home, every stream piped.
+    fn spawn(&self, args: &[&str]) -> Child {
+        Command::new(env!("CARGO_BIN_EXE_sandman"))
             .args(args)
             .env_clear()
             .env("HOME", &self.0)
             .env("SANDMAN_ROOT", self.0.join(".sandman"))
+            .env("SANDMAN_THREAD_BIN", self.0.join("thread"))
             // keeps the binary's coverage when `cargo llvm-cov` drives the suite
             .envs(env::var_os("LLVM_PROFILE_FILE").map(|file| ("LLVM_PROFILE_FILE", file)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("run sandman");
+            .expect("run sandman")
+    }
+
+    fn run(&self, args: &[&str], stdin: &str) -> Output {
+        let mut child = self.spawn(&[&["report"], args].concat());
         child
             .stdin
             .take()
@@ -126,6 +133,43 @@ impl Drop for Home {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+/// `report serve` on a free port, answering `requests` before it exits — and
+/// a client for it: `ask(request line, extra headers, body)` sends one
+/// request with this server's `Host`, and hands back the whole response.
+fn serve(home: &Home, requests: usize) -> (Child, impl Fn(&str, &str, &str) -> String) {
+    let mut child = home.spawn(&[
+        "report",
+        "serve",
+        "--bind",
+        "127.0.0.1:0",
+        "--requests",
+        &requests.to_string(),
+    ]);
+    let mut line = String::new();
+    BufReader::new(child.stdout.as_mut().expect("stdout"))
+        .read_line(&mut line)
+        .expect("the address");
+    let address = line
+        .trim()
+        .strip_prefix("listening on http://")
+        .expect(&line)
+        .to_owned();
+    let ask = move |request: &str, headers: &str, body: &str| {
+        let mut stream = TcpStream::connect(&address).expect("connect");
+        write!(
+            stream,
+            "{request} HTTP/1.1\r\n{headers}Host: {address}\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .expect("send");
+        stream.shutdown(Shutdown::Write).expect("half-close");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("response");
+        response
+    };
+    (child, ask)
 }
 
 const AWAITING: &str = "## Proposals awaiting you\n- proposal:jgeschwendt/alpha:cache · untitled · opened 2026-10-12T10:00:00Z\n";
@@ -215,4 +259,158 @@ fn the_hook_shows_the_owner_each_report_once_within_the_cap() {
     assert_eq!(shown.matches("## Landed").count(), 1, "{shown}");
     assert_eq!(home.cursor(), "2026-10-14T14:00:00Z\n");
     assert_eq!(home.out(&["--hook"], owner, 0), "", "each report once");
+}
+
+#[test]
+fn serve_shows_a_night_and_answers_proposals_through_thread() {
+    let home = Home::new(0);
+    // Friday's night: 22:00 and, past midnight, 03:00 in New York.
+    for (shift, cost, eye, landed) in [
+        (
+            "s-20261017T0200Z",
+            "1.25",
+            "- watch <script>alert(1)</script> and `<b>`",
+            "| abc1234 | **parser** |",
+        ),
+        ("s-20261017T0700Z", "2.25", "- b1", "| def5678 | lexer |"),
+    ] {
+        let started = format!("2026-10-17T{}:00:00Z", &shift[11..13]);
+        home.write(
+            &format!(".sandman/shifts/{shift}/meta.json"),
+            &format!(
+                r#"{{"cost_usd":{cost},"repo":"jgeschwendt/alpha","shift":"{shift}","started":"{started}","theme":"Ship"}}"#
+            ),
+        );
+        home.write(
+            &format!(".sandman/shifts/{shift}/report.md"),
+            &format!("# {shift} · Ship\n## Worth your eye\n{eye}\n## Landed\n| sha | what |\n| --- | --- |\n{landed}\n## Numbers\nnone.\n"),
+        );
+    }
+    home.write(
+        ".threads/p1.md",
+        "---\nstate: open\nwaiting: user\nkey: proposal:jgeschwendt/alpha:cache\nopened: 2026-10-12T10:00:00Z\n---\n\n# Cache the parser\n\n## agent · 2026-10-12T10:00:00Z\n\n| option | shifts |\n| --- | --- |\n| **cache** | 2 |\n",
+    );
+    let thread = home.0.join("thread");
+    home.write(
+        "thread",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/argv\"\n[ \"$6\" != revise ] || { echo 'thread: <refused>' >&2; exit 1; }\n",
+    );
+    fs::set_permissions(&thread, fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    // a shift that never started belongs to no night
+    home.write(".sandman/shifts/s-20261016T0000Z/meta.json", "{}");
+    let (mut server, ask) = serve(&home, 17);
+    let page = ask("GET /", "", "");
+    for expected in [
+        "HTTP/1.1 200 OK\r\n",
+        "<p>Friday→Saturday night · 2 shifts · $3.50 · 2 landed · 1 proposals</p>",
+        "<h3>Cache the parser</h3><p class=\"meta\">jgeschwendt/alpha · opened 2026-10-12T10:00:00Z</p><h2>agent · 2026-10-12T10:00:00Z</h2><table><thead><tr><th>option</th><th>shifts</th></tr></thead><tbody><tr><td><strong>cache</strong></td><td>2</td></tr></tbody></table>",
+        "<input type=\"hidden\" name=\"key\" value=\"proposal:jgeschwendt/alpha:cache\">",
+        "<button name=\"answer\" value=\"approve\">approve</button><button name=\"answer\" value=\"revise\">revise</button><button name=\"answer\" value=\"decline\">decline</button>",
+        "<ul><li>b1 — <a href=\"#s-20261017T0700Z\">s-20261017T0700Z</a></li><li>watch &lt;script&gt;alert(1)&lt;/script&gt; and <code>&lt;b&gt;</code> — <a href=\"#s-20261017T0200Z\">",
+        "<tr><th>shift</th><th>sha</th><th>what</th></tr></thead><tbody><tr><td><a href=\"#s-20261017T0700Z\">s-20261017T0700Z</a></td><td>def5678</td><td>lexer</td></tr><tr><td><a href=\"#s-20261017T0200Z\">s-20261017T0200Z</a></td><td>abc1234</td><td><strong>parser</strong></td></tr>",
+        "<details id=\"s-20261017T0200Z\"><summary>s-20261017T0200Z · Ship · jgeschwendt/alpha · $1.25</summary><h1>s-20261017T0200Z · Ship</h1>",
+        "<nav><a href=\"/?night=2026-10-16\">2026-10-16</a><a href=\"/?night=2026-10-15\">",
+    ] {
+        assert!(page.contains(expected), "{expected} missing: {page}");
+    }
+    assert!(!page.contains("<script"), "{page}");
+    let tuesday = ask("GET /?night=2026-10-13", "", "");
+    assert!(
+        tuesday
+            .contains("<p>Tuesday→Wednesday night · 1 shifts · $0.00 · 0 landed · 1 proposals</p>")
+            && tuesday.contains(
+                "<h2>Worth your eye</h2><p>none.</p></section><section><h2>Landed</h2><p>none.</p>"
+            ),
+        "{tuesday}"
+    );
+
+    let answer = |fields: &str| {
+        let response = ask(
+            "POST /answer",
+            "Content-Type: application/x-www-form-urlencoded\r\n",
+            fields,
+        );
+        response[9..12].to_owned() + &response[response.find("\r\n\r\n").expect("a body")..]
+    };
+    let key = "key=proposal%3Ajgeschwendt%2Falpha%3Acache";
+    assert_eq!(
+        answer(&format!("{key}&answer=approve&note=ship+it%21%zz")),
+        "303\r\n\r\n"
+    );
+    assert_eq!(
+        answer(&format!("{key}&answer=decline&note=+")),
+        "303\r\n\r\n"
+    );
+    assert!(
+        answer(&format!("{key}&answer=revise")).ends_with("<pre>thread: &lt;refused&gt;\n</pre>\n")
+    );
+    assert!(answer("key=proposal%3Anone&answer=approve").starts_with("404"));
+    assert!(answer(&format!("{key}&answer=maybe")).starts_with("400"));
+    assert_eq!(
+        fs::read_to_string(home.0.join("argv")).expect("argv"),
+        "reply p1 --as user --answer approve --body ship it!%zz\nreply p1 --as user --answer decline\nreply p1 --as user --answer revise\n"
+    );
+    let decisions = home
+        .spawn(&["trail", "log", "--kind", "decision", "--json"])
+        .wait_with_output()
+        .expect("trail");
+    let decisions = String::from_utf8_lossy(&decisions.stdout);
+    assert_eq!(decisions.lines().count(), 2, "{decisions}");
+    for said in ["approved", "declined"] {
+        assert!(
+            decisions.contains(&format!(r#""kind":"decision","parent":null,"rationale":"owner {said} proposal proposal:jgeschwendt/alpha:cache","refs":["thread:p1"],"repo":"jgeschwendt/alpha""#)),
+            "{decisions}"
+        );
+    }
+    // A trail that cannot be appended to, then a thread binary that is gone.
+    let trail = home.0.join(".sandman/trail");
+    fs::remove_dir_all(&trail).expect("trail");
+    fs::write(&trail, "").expect("a file in its place");
+    assert!(answer(&format!("{key}&answer=approve")).starts_with("500"));
+    fs::remove_file(&thread).expect("thread");
+    assert!(answer(&format!("{key}&answer=approve")).starts_with("502"));
+
+    for (request, headers, status) in [
+        ("GET /", "Host: evil.example:1705\r\n", "403"),
+        ("POST /answer", "Origin: http://evil.example\r\n", "403"),
+        ("DELETE /", "", "405"),
+        ("GET /nope", "", "404"),
+        ("GET /?night=2026-01-01", "", "404"),
+        ("GET /", "Content-Length: 99999999\r\n", "400"),
+        ("", "", "400"),
+        ("POST /answer", "Content-Length: 5\r\n", "400"),
+    ] {
+        let response = ask(request, headers, "");
+        assert!(
+            response.starts_with(&format!("HTTP/1.1 {status} ")),
+            "{request}: {response}"
+        );
+    }
+    assert!(server.wait().expect("exit").success());
+}
+
+#[test]
+fn serve_binds_only_loopback_and_shows_an_empty_machine() {
+    let empty = Home(env::temp_dir().join(format!("sandman-report-serve-{}", std::process::id())));
+    let (mut server, ask) = serve(&empty, 1);
+    let page = ask("GET /", "", "");
+    assert!(
+        page.contains(
+            "<p>no nights yet</p></header><section><h2>Proposals awaiting you</h2><p>none.</p>"
+        ),
+        "{page}"
+    );
+    assert!(server.wait().expect("exit").success());
+    let taken = TcpListener::bind("127.0.0.1:0").expect("a port");
+    let taken = taken.local_addr().expect("address").to_string();
+    for (args, code) in [
+        (&["serve", "--bind", "0.0.0.0:1705"][..], 2),
+        (&["serve", "--bind", "localhost"], 2),
+        (&["serve", "--requests", "some"], 2),
+        (&["serve", "--bogus"], 2),
+        (&["serve", "--bind", &taken], 1),
+    ] {
+        empty.out(args, "", code);
+    }
 }
