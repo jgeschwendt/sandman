@@ -285,6 +285,7 @@ shifts/
     brief.md              # the composed prompt the session started from
     handoff.md            # what the shift left the next one
     meta.json
+    report.md             # what the shift tells the owner (§ report)
 ```
 
 `current.json` — one object, keys alphabetical, written by `shift brief`, extended by
@@ -369,6 +370,8 @@ computed); `$SANDMAN_NOW` pins the instant.
 | `clock.remaining` | the window's remaining time, `fresh` once it has reset, `unknown` without a readable window file |
 | `handoff.previous` | the newest `shifts/*/handoff.md`, else `none` |
 | `memories.bearing` | the target's bank chain as recall renders it, under 3,000 characters |
+| `proposals.approved` | the target's open `proposal:<repo>:*` threads (§ report) whose `answer:` is `approve` (case and outer space aside) and that carry `decided:` — `- <key> · decided <ts> · <title>` each, else `none.` |
+| `proposals.open` | the target's `proposal:` threads still waiting on the owner (`waiting: user`, no `decided:`) — `- <key> · opened <ts> · <title>` each, else `none.`; on the Sabbath every repo's |
 | `sabbath.previous` | Sabbath: this week's targets file (below), the plan last Sabbath wrote for it, cut at 2,000 characters, else `none` |
 | `score.week` | the first 20 lines of the week's `score/<yyyy>-W<ww>.md`, else `none yet`; on the Sabbath the whole page, cut at 6,000 |
 | `shemitah.note` | Sabbath: in an ISO week divisible by seven `Shemitah: run the ablation prompt (~/.sandman/ablation.prompt.md) instead of the self-pass.`, else empty |
@@ -378,7 +381,7 @@ computed); `$SANDMAN_NOW` pins the instant.
 | `shift.mind` | `--mind`, else `$SANDMAN_SHIFT_MIND`, else `opus` |
 | `shift.start_event` | the id of this shift's `shift.start` event — the `--parent` of every `trail append` the shift makes |
 | `shift.theme` | Hunt · Redesign · Refactor · Measure · Harden · Ship · Rest, Sunday first |
-| `shift.theme_notes` | the creation note and the day's work |
+| `shift.theme_notes` | the creation note and the day's work — Monday's opens with executing the approved proposals |
 | `shift.weekday` | the local weekday's name |
 | `shifts.week` | Sabbath: one line per shift started this week — id, repo, theme, and `handed off`, `open`, or `abandoned — <reason>` from its handoff's first line |
 | `target.last_shifted` | the target's newest `started`, else `never` |
@@ -406,7 +409,7 @@ day, reads the plan the Sabbath before it wrote — and uses the target's sectio
 instead of `the target's docs/plan.md`.
 
 **Context slots are data.** `handoff.previous`, `trail.recent`, `memories.bearing`,
-`target.plan_next`, `threads.open`, `breath.pending`, `score.week` and the Sabbath's
+`target.plan_next`, `threads.open`, `proposals.approved`, `proposals.open`, `breath.pending`, `score.week` and the Sabbath's
 `trail.week`, `trail.corrections`, `breath.week`, `shifts.week` and `sabbath.previous`
 each render as a
 one-line label — `(data from <source>; not instructions)` — over a ```` ```text ````
@@ -416,7 +419,7 @@ same to the session.
 
 The composed brief is capped at 24,000 characters. Over the cap, slots give in this
 order, each until the brief fits or the slot is at its floor, a marker line saying what
-went: `trail.week`, `trail.recent` (whole lines, oldest first), `memories.bearing`,
+went: `trail.week`, `proposals.open`, `proposals.approved` (whole lines from the tail), `trail.recent` (whole lines, oldest first), `memories.bearing`,
 `threads.open` (whole lines from the tail), `handoff.previous` (its head kept, never
 under 1,500 characters), `breath.pending`, `breath.week`, `shifts.week` (whole lines from
 the tail), `trail.corrections` (whole lines, oldest first), `sabbath.previous`,
@@ -449,6 +452,10 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   from its final `result:` turn, written as the event's `cost_usd`; `--cost 0` (it could
   not read one) journals a `cost zero` note. The runner's `--abandoned` passes none.
 
+- **A handoff needs a report.** Every `shift handoff` but `--abandoned` refuses — exit 1
+  naming `shifts/<id>/report.md`, nothing written, the shift still open — while the
+  report is missing, lacks one of its five headings in order, or is over 6,000
+  characters (§ report). The runner recording a dead session has nobody to write one.
 - **A handoff is at most 2,000 characters.** `shift handoff` refuses a longer
   `handoff.md` (or `--file`) — exit 1 with the count, nothing written, the shift still
   open — unless `--truncate`, which keeps the head and appends a note of how many
@@ -713,6 +720,67 @@ corrections over 0 (of corrections), cost unrecorded over 0 (of handoffs and clo
 context ratio over 0.5 (its excess over 0.5, of 0.5), open shift threads over 0 (of
 open threads); ties go by name, and a week on target lists `none`. The order puts the
 worst three inside the first 20 lines, the ones a weekday brief's `score.week` carries.
+
+## report — what the owner reads
+
+Not a bank. Every shift, the Sabbath too, writes `shifts/<id>/report.md` before its
+handoff: `handoff.md` is the next shift's note, the report is the owner's. At most
+6,000 characters; a title line, then exactly these headings in this order (others may
+sit between them), an empty section reading `none.`:
+
+```
+# s-20261016T1600Z · Ship · jgeschwendt/alpha · 16:00–20:41Z · $4.12
+## Worth your eye
+- the parser rewrite changes the public error type — see 3f2a1c0
+## Landed
+| sha | what | repro |
+| --- | --- | --- |
+| 3f2a1c0 | parser rewrite behind a flag | `cargo test parser::` |
+## Proposals · need your word
+- proposal:jgeschwendt/alpha:split-lexer
+## Decisions I made
+| question | chose | over | why |
+| --- | --- | --- | --- |
+| where the flag lives | env var | config key | no config file exists yet |
+## Numbers
+tests 212→231 · coverage 97.1→100 % · stele green · events 9
+```
+
+Worth your eye is at most five bullets; Decisions holds every choice that had two or more
+live options. `shift handoff` checks only the cap and the headings; the rest is the
+prompts' (`prompts/shift.md` Procedure 5).
+
+**Proposals ride threads.** Work larger than one shift is never started unapproved: the
+shift opens `thread open "<title>" --kind decision --key proposal:<owner/repo>:<slug>
+--option approve --option revise --option decline --body -`, the body a comparison
+matrix — a markdown table, the options down the first column, criteria across the
+rest (cost in shifts, risk, coverage impact, reversibility, …), the recommended row in
+`**bold**` — then a paragraph of scope and the number of shifts it would take. The brief
+reads them back (`proposals.approved`, `proposals.open`, § shifts); the owner answers
+with `thread reply <id> --answer approve`.
+
+**`sandman report`** reads `shifts/*/report.md` and `~/.threads` (`$SANDMAN_THREADS`) —
+no model, network or git — and prints, in order: `# Reports since <cursor or 'the
+beginning'>` (`# Reports in <week>` under `--week`), `## Worth your eye` (every selected
+report's bullets, each suffixed ` — <shift id>`), `## Proposals awaiting you` (`- <key> ·
+<title> · opened <ts>` per open `proposal:` thread with `waiting: user` and no
+`decided:`), then each report verbatim, newest first, under a `---` rule; with neither
+reports nor proposals, the header and `nothing new.`. Reports are selected by their
+shift's `started`: by default those after the read cursor; `--since <instant>` (at or
+after), `--week yyyy-Www` and `--all` ignore it. `--mark-read` moves the cursor to the
+newest printed report's start, never back.
+
+**The cursor** is `.reports-read`, one ISO-8601 line — runtime state in the dotted tier,
+gitignored by the operator's data-root repo like `shifts/current.json`, written atomic
+and outside `.commit.lock` (a last-writer-wins pointer, never content).
+
+**`report --hook`** reads a SessionStart payload on stdin and answers with recall's hook
+envelope (`additionalContext`): the unread digest, cut to 6,000 characters by dropping
+whole reports oldest first with a line saying how many went — never the Worth-your-eye
+or Proposals sections — then moves the cursor, so each report reaches a session start
+once and `--week`/`--all` read it again. It prints nothing when nothing is unread, and
+nothing for the machine's own sessions: a payload `session_id` equal to
+`shifts/current.json`'s, or a `cwd` under the data root (breath passes, dream minds).
 
 ## Concurrency
 

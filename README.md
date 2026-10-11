@@ -34,7 +34,16 @@ sandman shift profile           # the Claude Code settings (sandbox, deny rules)
 sandman shift status            # the open shift and the clock
 ```
 
-The contract is `docs/BANK-FORMAT.md` § shifts.
+Every shift ends with a `report.md` for the owner beside its handoff — `handoff` refuses
+without one — and opens a `proposal:` thread for any work larger than itself.
+
+```sh
+sandman report                  # the reports since you last read, Worth-your-eye and open proposals first
+sandman report --week 2026-W42  # or --since <instant>, --all; --mark-read moves the cursor
+sandman report --hook           # SessionStart: each report once, never in the machine's own sessions
+```
+
+The contract is `docs/BANK-FORMAT.md` § shifts and § report.
 
 ## Breathe
 

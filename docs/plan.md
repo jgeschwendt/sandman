@@ -1,6 +1,6 @@
 # The perpetual shift — plan
 
-Status: **live since 2026-10-10 14:19Z.** Phases 0–5 and a minimal 7 built (trail, reconcile, shift, breathe, score, the Sabbath brief), trunk c1aecb3 installed, the runner and both breath runners installed, sessions in `dontAsk` inside the strict sandbox. First live tick (02:25Z) failed on workspace trust; first Sabbath s-20261010T1345Z (13:45–14:08Z) handed off cleanly — dream-pass 263→245 memories, W42 targets for 20 repos — and its four findings (sandbox must cover `~/.grove`, api.anthropic.com egress, tools through mise, one Sabbath a day) landed the same day. Deferred to the machine: phase 6 (dowse ranking, titer promote/decay), the mod's tool-call guards, the ruach's own Sabbath, the ablation prompt. Sunday opens the first Hunt.
+Status: **live since 2026-10-10 14:19Z.** Phases 0–5 and a minimal 7 built (trail, reconcile, shift, breathe, score, the Sabbath brief), trunk c1aecb3 installed, the runner and both breath runners installed, sessions in `dontAsk` inside the strict sandbox. First live tick (02:25Z) failed on workspace trust; first Sabbath s-20261010T1345Z (13:45–14:08Z) handed off cleanly — dream-pass 263→245 memories, W42 targets for 20 repos — and its four findings (sandbox must cover `~/.grove`, api.anthropic.com egress, tools through mise, one Sabbath a day) landed the same day. Deferred to the machine: phase 6 (dowse ranking, titer promote/decay), the mod's tool-call guards, the ruach's own Sabbath, the ablation prompt. Sunday opens the first Hunt. Every shift now ends with a `report.md` for the owner (`sandman report`, and a SessionStart hook that shows each once) and turns work larger than itself into a `proposal:` thread Monday executes once approved.
 
 The plate is `docs/plates/perpetual-shift/` (Claude Design source; export to `perpetual-shift.png` beside it).
 
@@ -26,7 +26,7 @@ Hebrew reckoning: Sunday is Day 1, Saturday the Sabbath. Local time, America/New
 | day | creation | theme | instrument | what a shift does |
 | --- | --- | --- | --- | --- |
 | Sun | Day 1 · Light divided from darkness | **Hunt** | `/gigasweep` → `/gigadebug` | sweep a repo for real defects, root-cause the confirmed ones, ship the repro as a regression test |
-| Mon | Day 2 · Firmament; waters divided | **Redesign** | `/gigaredesign` → `/execute-plan` | rebuild the structure Sunday's findings and standing proposals indict, always-green staged migration |
+| Mon | Day 2 · Firmament; waters divided | **Redesign** | `/gigaredesign` → `/execute-plan` | execute the approved proposals first, then rebuild the structure Sunday's findings and standing proposals indict, always-green staged migration |
 | Tue | Day 3 · Land and seed | **Refactor** | `/gigarefine` | drive a repo's worst-scored module — tests as much as source — to its best form, behaviour preserved: the fewest statements, functions, branches and lines that still fulfil the feature set |
 | Wed | Day 4 · Lights to mark seasons | **Measure** | `sandman score`, benchmarks | compute the score, run the perf and coverage passes, count statements, functions, branches and lines in source and tests, write the numbers where the Sabbath will read them |
 | Thu | Day 5 · Swarms; be fruitful and multiply | **Harden** | `/security-review`, coverage, dependencies | bring the repo to 100 % coverage first (table stakes, end-to-end style), then close security findings and land dependency updates with their tests |
@@ -69,6 +69,8 @@ Scope is every root under `~/.grove/code/jgeschwendt/`. The three home repos (`~
 - The orchestrator model is a knob, `SANDMAN_SHIFT_MIND`, default `opus`. Fable takes the Sabbath self-pass and Friday's verdicts while quota allows; when the weekly limit is exhausted every spawned agent pins opus or below. Workers are always opus or below.
 - Cost: every headless call logs its cost to the trail; a shift stops at `SANDMAN_SHIFT_BUDGET_USD` and hands off early; the ruach stops at `SANDMAN_BREATH_BUDGET_USD` per day. `claude-breaker` keeps its cap of twenty.
 - The Sabbath commits no code. Three consecutive failed blocks end a shift and open a problem thread. Threads are for what the trail cannot undo: publishing, deleting data, spending money, touching other people.
+- Work larger than one shift — an architecture change, a redesign, a refactor spanning modules — is a `proposal:<owner/repo>:<slug>` decision thread with a comparison matrix, never started unapproved; Monday's Redesign executes the approved ones first (BANK-FORMAT § report).
+- Every shift, the Sabbath too, writes `report.md` for the owner before its handoff — Worth your eye, Landed, Proposals, Decisions (every choice with two live options and the one rejected), Numbers — and `shift handoff` refuses without it; `sandman report` and its SessionStart hook are how he reads them.
 
 ## Phases
 
