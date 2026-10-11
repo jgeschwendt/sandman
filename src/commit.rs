@@ -76,6 +76,9 @@ pub fn commit_memory(
     let _lock = CommitLock::acquire(data_root)?;
     let bank = Bank::in_data_root(data_root, bank_key);
     fs::create_dir_all(bank.dir()).map_err(|source| Error::io(bank.dir(), source))?;
+    // A sibling the index cannot read fails the commit before anything lands,
+    // not after: a write that then reports failure invites a duplicating retry.
+    bank.render_index()?;
 
     let now = Timestamp::now()?;
     let mut created = now.iso8601();
@@ -312,6 +315,16 @@ mod tests {
         });
         commit_memory(temp.path(), BANK, request("blocked")).expect("commit after release");
         release.join().expect("release");
+    }
+
+    #[test]
+    fn an_unreadable_sibling_fails_the_commit_before_it_lands() {
+        let temp = TempDir::new("commit-unreadable");
+        let bank = Bank::in_data_root(temp.path(), BANK);
+        fs::create_dir_all(bank.dir()).expect("bank");
+        fs::write(bank.dir().join("README.md"), "# readme\n").expect("readme");
+        assert!(commit_memory(temp.path(), BANK, request("kept")).is_err());
+        assert_eq!(bank.memory_filenames().expect("list"), ["README.md"]);
     }
 
     #[test]
