@@ -1,5 +1,5 @@
 [exhaustiveness]
-# `.github` is CI wiring, `launchd` the report page's agent, `docs` the plan
-# and design (markdown, plates, a ui-styled page) — none is code reachable from
-# the router.
-exclude = [".github", "_build", "deps", "docs", "launchd", "node_modules", "target"]
+# `.github` is CI wiring, `launchd` the report page's agent, `cloud` the cloud
+# routine's setup script and configuration, `docs` the plan and design
+# (markdown, plates, a ui-styled page) — none is code reachable from the router.
+exclude = [".github", "_build", "cloud", "deps", "docs", "launchd", "node_modules", "target"]
