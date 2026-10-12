@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs one test command under shift-test.sb, the sandbox a shift's tests get in place of
+# Claude Code's, which the session profile excludes this wrapper from
+# (docs/BANK-FORMAT.md § shifts, The sandbox). The proxy and agent variables go: the
+# profile has no network, and nothing should go looking for one. The home comes from the
+# user database, never $HOME, which a caller could point anywhere.
+# Install: install -m755 profiles/shift-test ~/.local/bin/ &&
+#   install -m644 profiles/shift-test.sb ~/.local/share/sandman/
+[ $# -gt 0 ] || { echo "shift-test: usage: shift-test <test command> [args…]" >&2; exit 2; }
+eval "home=~$(id -un)"
+cwd=$(pwd -P)
+case "$cwd/" in "$home/.grove/code/"?*) ;; *) echo "shift-test: $cwd is not under ~/.grove/code" >&2; exit 2 ;; esac
+profile="$(dirname "$0")/shift-test.sb"
+[ -f "$profile" ] || profile="$home/.local/share/sandman/shift-test.sb"
+exec sandbox-exec -D HOME="$home" -D CWD="$cwd" -f "$profile" \
+  env -u ALL_PROXY -u HTTPS_PROXY -u HTTP_PROXY -u SSH_AUTH_SOCK -u all_proxy -u https_proxy -u http_proxy \
+  CARGO_NET_OFFLINE=true HEX_OFFLINE=1 HOME="$home" MIX_ENV=test "$@"

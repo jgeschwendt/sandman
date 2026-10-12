@@ -560,7 +560,7 @@ any cwd.
   holds in a mode that never says yes on its own.
 
 - **Git's network commands run outside the sandbox.** `git fetch`, `git pull`, `git push`
-  and `grove sync` are `excludedCommands` (beside `git merge --ff-only`, below), run with the host's own git auth: git over SSH
+  and `grove sync` are `excludedCommands` (beside `git merge --ff-only` and `shift-test`, below), run with the host's own git auth: git over SSH
   fails inside the macOS sandbox, and a `--bg` session inherits no environment to carry
   a token in.
 - **Some paths no `allowWrite` reaches.** The sandbox protects `.claude/skills`,
@@ -572,6 +572,31 @@ any cwd.
   and a fast-forward only moves trunk to a commit that already exists. A skill whose
   workspace is `~/.claude/plans/<slug>/` works in `~/.sandman/shifts/<id>/<slug>/`
   instead (`prompts/shift.md` rule 7).
+- **Tests run in a second sandbox.** Inside Claude Code's, a test suite cannot bind
+  loopback, open a pty, run `ps` or read `/dev/fd` (process substitution). An
+  `excludedCommands` entry would run with no sandbox at all — no proxy, no `denyRead` —
+  so exactly one command leaves: `~/.local/bin/shift-test <test command>`, which re-enters
+  its own Seatbelt profile, `profiles/shift-test.sb` (both installed by hand:
+  `install -m755 profiles/shift-test ~/.local/bin/ && install -m644 profiles/shift-test.sb ~/.local/share/sandman/`).
+  It runs only from under `~/.grove/code`, and from `(allow default)` it subtracts: reads of
+  `~/.aws`, `~/.claude`, `~/.claude.json`, `~/.config/gh`, `~/.docker/config.json`,
+  `~/.gnupg`, `~/.netrc`, `~/.npmrc`, `~/.ssh`, `~/Codes` and `~/Library/Keychains`;
+  writes outside `~/.grove`, the toolchain caches (`~/.bun`, `~/.cache`, `~/.cargo`,
+  `~/.hex`, `~/.mix`, `~/Library/Caches`, mise's state), temp, the ptys and the working
+  tree — and inside them, toolchain binaries and config and the files Claude Code's
+  sandbox write-protects in a checkout (git hooks and config, `.claude/` agent config,
+  `.mcp.json`, editor tasks); every network peer but loopback, less the machine's
+  services (1701, 1703, 1705, 7777) and the unix sockets of launchd's listeners
+  (ssh-agent), `/var/run` (docker, DNS), docker and gpg; and the exec of `ssh`, `scp`,
+  `sftp`, `security`, `osascript`, `open` and `launchctl`. `ps` is setuid, which no
+  sandboxed process may exec, so it alone runs unconfined. The wrapper drops the proxy and
+  agent variables, takes the home from the user database rather than `$HOME`, and sets
+  `CARGO_NET_OFFLINE`, `HEX_OFFLINE` and `MIX_ENV=test`. The matcher is literal and keys
+  on the spelling: probed 2026-10-12 on 2.1.296, the `/Users/jlg/…` entry let out only
+  the `~/…` spelling and the `~/…` entry only the absolute one, so the profile lists both,
+  and denies a bare `shift-test`. A call holding `cd`, a redirect, `$(…)` or another
+  command stays sandboxed, so a shift `cd`s into its worktree in a call of its own
+  (`prompts/shift.md` rule 7).
 - **Pushing is the runner's.** `git push` from a session fails at the sandbox proxy
   despite `excludedCommands` — "This proxy requires authentication", exit 128 (observed
   2026-10-11) — so a shift lands on trunk by fast-forward and never pushes; the runner,

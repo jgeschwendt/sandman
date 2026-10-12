@@ -1,0 +1,90 @@
+;; The sandbox `shift-test` runs a shift's tests under, in place of Claude Code's (the
+;; session profile excludes the wrapper): everything allowed, then subtracted —
+;; credentials unreadable, writes confined to checkouts, caches and temp, the network to
+;; loopback. Later rules win. HOME and CWD arrive as `-D` parameters.
+(version 1)
+(allow default)
+
+(define (home path) (string-append (param "HOME") path))
+
+(deny file-read*
+  (literal (home "/.claude.json"))
+  (literal (home "/.docker/config.json"))
+  (literal (home "/.netrc"))
+  (literal (home "/.npmrc"))
+  (subpath (home "/.aws"))
+  (subpath (home "/.claude"))
+  (subpath (home "/.config/gh"))
+  (subpath (home "/.gnupg"))
+  (subpath (home "/.ssh"))
+  (subpath (home "/Codes"))
+  (subpath (home "/Library/Keychains")))
+(allow file-read* (subpath "/dev/fd"))
+
+(deny file-write*)
+(allow file-write*
+  (literal "/dev/null")
+  (literal "/dev/ptmx")
+  (literal "/dev/tty")
+  (regex #"^/dev/ttys[0-9]+$")
+  (subpath "/dev/fd")
+  (subpath "/private/tmp")
+  (subpath "/private/var/folders")
+  (subpath (home "/.bun"))
+  (subpath (home "/.cache"))
+  (subpath (home "/.cargo"))
+  (subpath (home "/.grove"))
+  (subpath (home "/.hex"))
+  (subpath (home "/.local/state/mise"))
+  (subpath (home "/.mix"))
+  (subpath (home "/Library/Caches"))
+  (subpath (param "CWD")))
+;; What the host runs later is no cache: toolchain binaries and config, and in a
+;; checkout the files Claude Code's own sandbox write-protects — git hooks and config
+;; (worktree and bare), agent config, editor tasks.
+(deny file-write*
+  (literal (home "/.cargo/config"))
+  (literal (home "/.cargo/config.toml"))
+  (subpath (home "/.bun/bin"))
+  (subpath (home "/.cargo/bin"))
+  (subpath (home "/.mix/archives"))
+  (subpath (home "/.mix/escripts"))
+  (require-all
+    (subpath (home "/.grove"))
+    (regex #"/(\.git|bare)/(config$|config\.worktree$|hooks(/|$)|worktrees/[^/]+/config\.worktree$)"
+           #"/(\.claude/(agents|commands|hooks|skills)(/|$)|\.claude/settings[^/]*\.json$|\.mcp\.json$|\.vscode/|\.idea/)")))
+
+(deny network*)
+(allow network-bind network-inbound (local ip "localhost:*"))
+(allow network-outbound (remote ip "localhost:*"))
+;; Socket paths match as the caller spelled them (relative, /tmp, /private/tmp), so
+;; unix sockets are allowed whole and the dangerous ones subtracted: launchd's
+;; listeners (ssh-agent), /var/run (docker, mDNSResponder — DNS), docker's and gpg's.
+(allow network-bind (local unix-socket (path-regex #"^/")))
+(allow network-outbound (remote unix-socket (path-regex #"^/")))
+(deny network-outbound
+  (remote unix-socket (path-regex #"^(/private)?/(tmp/com\.apple\.launchd\.|var/run/)"))
+  (remote unix-socket (subpath (home "/.docker")))
+  (remote unix-socket (subpath (home "/.gnupg"))))
+;; The machine's own loopback services: bridge, Kev, sandman report, grove.
+(deny network-outbound
+  (remote ip "localhost:1701")
+  (remote ip "localhost:1703")
+  (remote ip "localhost:1705")
+  (remote ip "localhost:7777"))
+
+(allow pseudo-tty)
+
+;; A sandboxed process cannot exec a setuid binary at all, and ps is setuid root; it
+;; only reads the process table, so it alone runs outside.
+(allow process-exec (literal "/bin/ps") (with no-sandbox))
+;; Nothing that reaches past the sandbox: SSH, the keychain, AppleScript, launchd jobs,
+;; LaunchServices.
+(deny process-exec
+  (literal "/bin/launchctl")
+  (literal "/usr/bin/open")
+  (literal "/usr/bin/osascript")
+  (literal "/usr/bin/scp")
+  (literal "/usr/bin/security")
+  (literal "/usr/bin/sftp")
+  (literal "/usr/bin/ssh"))

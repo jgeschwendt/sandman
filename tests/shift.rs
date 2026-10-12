@@ -236,9 +236,12 @@ fn profile_prints_the_session_settings_for_either_kind() {
     assert!(text.contains("\n  \"sandbox\": {"), "{text}");
     // `reflect` and `dream` run `claude -p` from Bash; a landing that touches
     // `.claude/` aborts inside the sandbox; mise records trust and caches
+    // nothing leaves the sandbox but git's network, the fast-forward and
+    // shift-test, which brings its own
     for needed in [
         "\"api.anthropic.com\",",
-        "\"git merge --ff-only *\",",
+        "\"Bash(shift-test *)\"\n",
+        "\"excludedCommands\": [\n      \"/Users/jlg/.local/bin/shift-test *\",\n      \"git fetch *\",\n      \"git merge --ff-only *\",\n      \"git pull *\",\n      \"git push *\",\n      \"grove sync *\",\n      \"~/.local/bin/shift-test *\"\n    ],",
         "\"~/.local/state/mise\",",
         "\"~/Library/Caches/mise\"\n",
     ] {

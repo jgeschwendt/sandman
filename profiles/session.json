@@ -32,18 +32,21 @@
       "Bash(git push -f*)",
       "Bash(git reset*)",
       "Bash(git stash*)",
-      "Bash(pkill -f*)"
+      "Bash(pkill -f*)",
+      "Bash(shift-test *)"
     ]
   },
   "sandbox": {
     "allowUnsandboxedCommands": false,
     "enabled": true,
     "excludedCommands": [
+      "/Users/jlg/.local/bin/shift-test *",
       "git fetch *",
       "git merge --ff-only *",
       "git pull *",
       "git push *",
-      "grove sync *"
+      "grove sync *",
+      "~/.local/bin/shift-test *"
     ],
     "filesystem": {
       "allowWrite": [
