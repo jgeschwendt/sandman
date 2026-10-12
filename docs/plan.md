@@ -127,9 +127,15 @@ Built: on a New York Saturday `shift brief` fills `prompts/sabbath.md` instead o
 
 Deferred: `promote` and `decay` are trail kinds nothing emits yet — the Sabbath prompt proposes them by hand; the prompts are not yet stele nodes with claims the Sabbath scores; the ablation prompt itself; the ruach's own Sabbath (rewriting `sources.toml` and `breathe.md` from its score); a runner that lands `sabbath/<week>` on green without a session's judgement.
 
+### 8 · Cloud — built, awaiting the owner's routine
+
+Nightly shifts move from `claude --bg` on the Mac to the Claude Code routine `perpetual-shift` (`cloud/README.md`): an hourly fire, 21:07–06:07 New York, on a fresh VM holding the twenty rotation repos, the state repo and the threads repo as clones. `sandman shift open --cloud` pulls the state clone, takes its committed `current.json` as the lock (busy under seventy minutes, abandoned after), picks among the clones — approved proposals first — composes the brief with `handoff_by` fifty minutes out, commits and pushes; `shift handoff --cloud` commits and pushes the record. The session lands on each default branch and pushes itself (`prompts/cloud-shift.md`); `cloud/setup.sh` installs mise, sandman, thread and stele. The contract is BANK-FORMAT § shifts, The cloud. Saturday's night runs the Sabbath on the same routine.
+
+Open: the owner creates the environment and routine; home-sync pulls before it pushes; the Mac runner stays paused; `thread` comes from the attached clone while `threads` is private.
+
 ## Not in this change
 
-Cloud routines (ingress stays as it is); bridge pages for the trail, the breaths and the score (bridge gets them in its own shift); replacing the voyage log (the log stays the human-facing narrative, the trail the machine-facing ledger); the Jubilee.
+Cloud routines beyond the shift (ingress stays as it is); bridge pages for the trail, the breaths and the score (bridge gets them in its own shift); replacing the voyage log (the log stays the human-facing narrative, the trail the machine-facing ledger); the Jubilee.
 
 ## Acceptance
 

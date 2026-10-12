@@ -32,7 +32,12 @@ sandman shift brief --dry-run   # print the brief, write nothing
 sandman shift handoff --shift <id> --from-session   # or --file PATH, or --abandoned; over 2,000 chars needs --truncate
 sandman shift profile           # the Claude Code settings (sandbox, deny rules) a session runs under
 sandman shift status            # the open shift and the clock
+sandman shift open --cloud      # in the cloud routine: pull the state clone, take its committed lock, brief, commit, push; prints the brief
+sandman shift handoff --shift <id> --from-session --cloud   # hand off, then commit and push the state clone
 ```
+
+In the cloud the routine `perpetual-shift` runs it instead, hourly by night on a fresh VM
+(`cloud/README.md`).
 
 Every shift ends with a `report.md` for the owner beside its handoff — `handoff` refuses
 without one — and opens a `proposal:` thread for any work larger than itself.

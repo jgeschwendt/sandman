@@ -11,7 +11,9 @@
 //! Nothing here calls a model. `brief` composes the dynamic prompt from
 //! `prompts/shift.md` — `prompts/sabbath.md` on Saturday — by filling its
 //! `{{slot}}`s from the trail, the banks, the target repo and the calendar; the runner (`~/.routines/shift.md`) hands the
-//! result to a session.
+//! result to a session. In the cloud, `open` is the brief and the runner both:
+//! the state clone's committed `current.json` is the lock, and `sync` commits
+//! and pushes what the open and the handoff wrote.
 //!
 //! The contract is `docs/BANK-FORMAT.md` § shift.
 

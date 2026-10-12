@@ -2,7 +2,7 @@
 
 ```stele
 kind: container
-purpose: the machine's prompt templates — `shift.md`, Saturday's `sabbath.md` (`shift brief`) and `breathe.md` (`breathe pass`); their slot names are the contract (BANK-FORMAT § shifts, § breath)
+purpose: the machine's prompts — `shift.md`, `sabbath.md`, `breathe.md`, whose slot names are the contract (BANK-FORMAT § shifts, § breath), and the cloud routine's `cloud-shift.md`
 ```
 
 ## Working here
@@ -14,6 +14,9 @@ purpose: the machine's prompt templates — `shift.md`, Saturday's `sabbath.md` 
 - The installed binary reads the trunk checkout's `prompts/` (`$SANDMAN_PROMPTS`
   overrides) — an edit here goes live for the next shift once it reaches trunk, with no
   rebuild; a new slot needs the binary that fills it installed first.
+- `cloud-shift.md` is no template: it is pasted into the routine `perpetual-shift` as its
+  prompt (`cloud/README.md`), so an edit reaches the cloud only when the owner re-pastes
+  it; the brief it runs comes from `shift.md`/`sabbath.md` through `shift open --cloud`.
 - `tests/shift.rs` composes the real `shift.md` and `sabbath.md`, `tests/breathe.rs` the
   real `breathe.md`, so a template edit runs through the suite.
 

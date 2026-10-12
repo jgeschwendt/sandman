@@ -342,7 +342,9 @@ there could not be told from the sync's or revoked cleanly, and a shift working
 that supervises it. Least recently shifted first, never-shifted before any; a tie goes
 to a failing `stele check` (run only where `.stele/graph.lock` exists, 20 s timeout, a
 missing binary skipped), then the most open threads naming the slug, then the most
-untried breaths (`state: new` or `spiked`) filed against it, then the name. The open shift's repo and
+untried breaths (`state: new` or `spiked`) filed against it, then the name. On a Redesign
+night, and every night in the cloud (§ The cloud), repos with an approved `proposal:`
+thread come before all the rest, least recently shifted first among them. The open shift's repo and
 `$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over. A shift started in Saturday's
 night never counts as a repo's last: the Sabbath works sandman whatever the rotation
 says, and must not stand in for its turn.
@@ -586,6 +588,44 @@ The ruach's reading list, kept by `shift brief`: one `## <repo> · <yyyy-mm-dd>`
 per repo per local day — the target's plan-next, its open threads, and the newest five
 `guard`/`correction` events touching it — replaced in place when the same heading is
 briefed again.
+
+### The cloud
+
+The same shift, run by a Claude Code cloud routine instead of the Mac's runner
+(`cloud/README.md` holds its configuration, `prompts/cloud-shift.md` its prompt).
+Each fire is a fresh VM: `$SANDMAN_ROOT` names the clone of the state repo
+(`jgeschwendt/.sandman`), `$SANDMAN_GROVE` the directory holding every attached repo as
+`<dir>/<repo>` on its default branch, `$SANDMAN_THREADS` the threads clone; templates
+default to `$SANDMAN_GROVE/sandman/prompts`.
+
+`shift open --cloud` is the cloud's `brief`:
+
+1. `git pull --rebase` the state clone.
+2. **The committed lock.** `current.json`, gitignored on the Mac, is committed here, so
+   every VM sees the open shift. Under seventy minutes old by its `started`, exit 1
+   `busy: <id> open since <started>`; older, the shift is handed off `--abandoned` with
+   the reason `cloud: stale lock` and the open goes on.
+3. **The rotation over the clones.** The candidates are `$SANDMAN_GROVE`'s clones,
+   labelled `<first $SANDMAN_SHIFT_OWNERS owner>/<dir name>`, the state and threads
+   clones aside; trust is moot and every clone counts. Repos with an approved
+   `proposal:<repo>:*` thread (open, `answer: approve`, `decided:`) come first on every
+   cloud night — on the Mac, on a Redesign night — among them the least recently
+   shifted; the rest of § The rotation stands.
+4. **The brief** is composed as `brief` composes it, with no night gate (the routine's
+   cron is the clock) and `handoff_by` the open plus fifty minutes; `current.json` and
+   `meta.json` gain `cloud: true` and, when `$CLAUDE_CODE_REMOTE_SESSION_ID` is set,
+   `session_url: https://claude.ai/code/<id>` — the handoff keeps both in `meta.json`.
+5. **Commit and push.** Everything the state clone carries is committed (`git add -A`,
+   `current.json` forced), subject `shift(<id>): open <repo>`, and pushed to
+   `origin HEAD`. A rejected push pulls `--rebase` once and pushes again; a second
+   rejection, or a rebase that conflicts (aborted, the clone left as it was), exits 1
+   `state push rejected`. Machine state carries no trailers: reconcile scans the data
+   root, and a revoked shift must not revert its own record.
+6. stdout is the brief; nothing is spawned or attached.
+
+`shift handoff … --cloud` hands off as ever (the report gate included), then commits
+and pushes the state the same way, subject `shift(<id>): handoff`, the released
+`current.json` staged as a deletion.
 
 ## breath/ — the ruach
 
