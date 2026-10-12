@@ -485,14 +485,20 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   min past handoff_by`) the handoff opens with the line `Abandoned: <reason>` — above
   whatever the session wrote — and so the `shift.handoff` event's `rationale` reads the
   same.
-- **The runner pushes, then forgets the session.** Once a handoff is recorded —
-  `--from-session` or `--abandoned` — the shift routine pushes the trunk at `path` with
-  `git push origin HEAD` when it is ahead of its upstream (never forced); a rejected push
-  is a `correction` event naming the repo and branch, never a fault that keeps the lock.
-  It then `spawn`s `claude rm` on the shift's session — three seconds after a `stop`, at
-  once when the session ended on its own — so finished sessions leave the owner's
-  `claude agents` view; the breath routines remove a pass's session once its pass has
-  `ended`.
+- **The runner's push sweep.** Every tick, before it looks for an open shift — a session
+  that hands itself off with `--from-session` has removed `current.json` by then — the
+  shift routine runs `git push origin HEAD` (never forced, no other flag) in each trunk
+  checkout `~/.grove/code/jgeschwendt/*/main` whose `git status -sb` shows `[ahead ` and
+  whose HEAD carries a `Shift:` trailer; a trunk whose HEAD is the owner's own commit is
+  never pushed by the machine. A rejected push is a `correction` event naming the repo,
+  the branch and the trailer's shift, rationale `push rejected: <the first error:,
+  fatal: or ! line>`, never a fault: the sweep moves on, and retries next tick.
+- **The runner forgets the session it closes.** Once it records a handoff it `spawn`s
+  `claude rm` on the shift's session — three seconds after a `stop`, at once when the
+  session ended on its own — so finished sessions leave the owner's `claude agents` view;
+  the breath routines remove a pass's session once its pass has `ended`. A shift that
+  handed itself off is never closed by the runner, so its session stays listed (`done`)
+  until removed by hand — open.
 - **`shift clock --check`** exits 0 when a shift may start, 1 when it must not — by day
   (`day: the night opens at <instant>`), under `$SANDMAN_SHIFT_MIN_WINDOW_MIN` (default
   60) minutes of night left (`night ends in <m>m`) or of window left, or 90 % of the
@@ -546,7 +552,7 @@ any cwd.
 - **Pushing is the runner's.** `git push` from a session fails at the sandbox proxy
   despite `excludedCommands` — "This proxy requires authentication", exit 128 (observed
   2026-10-11) — so a shift lands on trunk by fast-forward and never pushes; the runner,
-  on the host with working SSH, pushes it at close (§ The handoff and the clock).
+  on the host with working SSH, pushes it in its sweep (§ The handoff and the clock).
 - **Installing a binary stays the owner's act.** `~/.local/bin` is not writable, so a
   shift builds and tests its binary but never replaces the installed one.
 - **Deny rules and the mod's guards hold in every mode.** No mode skips

@@ -6,7 +6,7 @@ on_error: claude
 
 # Shift
 
-The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it only opens and closes shifts. Closing records the handoff, then pushes the trunk the shift landed on — the session cannot reach the remote, this host can — and removes the finished session from Claude Code's listing. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
+The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it only opens and closes shifts, and pushes what they landed. Every tick opens with the push sweep: each trunk checkout `~/.grove/code/jgeschwendt/*/main` ahead of its upstream whose HEAD carries a `Shift:` trailer is pushed — the session cannot reach the remote, this host can — and a trunk whose HEAD is the owner's own commit is never the machine's to push. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. Closing records the handoff and removes the finished session from Claude Code's listing. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
 
 ## The creation week
 
@@ -42,7 +42,7 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 
 ## The sandbox
 
-A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove/code`, `~/.sandman`, `~/.routines` and `~/.local/state/claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. `git fetch`, `git pull`, `git push` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift lands on trunk by fast-forward and the close block pushes it. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
+A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove/code`, `~/.sandman`, `~/.routines` and `~/.local/state/claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. `git fetch`, `git pull`, `git push` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift lands on trunk by fast-forward and the push sweep pushes it. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
 
 ## Spawn's answers
 
@@ -57,15 +57,27 @@ A shift runs in `dontAsk` — no prompts, no classifier, anything that would hav
 - `brief` refusing with `shift … is open`: `current.json` exists, so the open block should not have reached it; a concurrent hand run is the cause. Wait for the next tick.
 - `brief` refusing on a template slot: `prompts/shift.md` in sandman's trunk names a slot the binary does not fill — a template ahead of the installed binary. Install the newer binary; do not edit the template here.
 - `spawn start` answering `Workspace not trusted`: the picked trunk has never had Claude Code's trust prompt accepted, and `--bg` will not start there (`-p` would; `--bg` will not). Accepting trust is the owner's call, so never set `hasTrustDialogAccepted` yourself. `sandman shift pick` skips untrusted trunks and `shift pick --untrusted` lists them; abandon the shift with the cause as its `--reason`, then open a thread keyed `shift:trust:<repo>` asking the owner to run `claude` once in that path or add the repo to `SANDMAN_SHIFT_SKIP`. (observed 2026-10-10 · s-20261010T0225Z, jlg.io/main)
-- A push rejected at close (trunk diverged from `origin`) is a `correction` event on the trail naming the repo and branch, never a fault: the lock is released all the same, and the commits wait on trunk for the owner or the next shift on that repo.
+- A push the sweep finds rejected (trunk diverged from `origin`) is a `correction` event on the trail naming the repo, the branch and the trailer's shift, never a fault: the tick goes on to close and open, and the commits wait on trunk for the owner or the next shift on that repo. The sweep retries every tick, so a rejection repeats on the trail until the trunk is reconciled.
 - Exit 124 is the routine watchdog and fires no catch. A start that timed out may still have started a session: the close block finds `current.json` without `bg_id`, stops any session named `shift <id>`, and abandons it.
 
 ```sh
+# sweep: push every trunk ahead of origin whose HEAD a shift landed (a Shift: trailer); the owner's own HEAD is never pushed
+sm="$HOME/.local/bin/sandman"
+for trunk in "$HOME"/.grove/code/jgeschwendt/*/main; do
+  case $(git -C "$trunk" status -sb 2>/dev/null | head -n 1) in *"[ahead "*) ;; *) continue ;; esac
+  landed=$(git -C "$trunk" log -1 --format='%(trailers:key=Shift,valueonly)' | head -n 1)
+  [ -n "$landed" ] || continue
+  err=$(git -C "$trunk" push origin HEAD 2>&1 >/dev/null) && continue
+  why=$(printf '%s\n' "$err" | awk 'NR == 1 { first = $0 } /^(error|fatal):|^ ?! / { first = $0; exit } END { gsub(/ +/, " ", first); sub(/^ /, "", first); print first }')
+  repo=${trunk#"$HOME/.grove/code/"}
+  branch=$(git -C "$trunk" symbolic-ref --short HEAD 2>/dev/null) || branch=HEAD
+  echo "push of $branch in $trunk rejected: $err" >&2
+  "$sm" trail append --kind correction --shift "$landed" --repo "${repo%/main}" --branch "$branch" --rationale "push rejected: $why" >/dev/null
+done
 # close: when the open shift's session has ended or overrun, record its handoff and release the lock
 root="${SANDMAN_ROOT:-$HOME/.sandman}"
 cur="$root/shifts/current.json"
 [ -f "$cur" ] || exit 0
-sm="$HOME/.local/bin/sandman"
 sp="$HOME/.local/bin/spawn"
 field() {   # one field of current.json; "-" when absent, null or empty
   python3 -I -c '
@@ -74,7 +86,7 @@ v = json.load(open(sys.argv[1])).get(sys.argv[2])
 print(v if isinstance(v, str) and v else "-")
 ' "$cur" "$1"
 }
-id=$(field shift); bg=$(field bg_id); due=$(field handoff_by); path=$(field path); repo=$(field repo)   # read before handoff removes current.json
+id=$(field shift); bg=$(field bg_id); due=$(field handoff_by)   # read before handoff removes current.json
 [ "$id" != "-" ] || { echo "current.json names no shift: $(cat "$cur")" >&2; exit 1; }
 ask() {   # one spawn request; prints the answer; returns 1 when spawn fails, says nothing, or answers an error
   answer=$(printf '%s\n' "$1" | "$sp" run) || return 1
@@ -94,15 +106,6 @@ rm_session() {   # forget one finished bg session so it leaves the owner's `clau
   req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"rm","id":sys.argv[1]}))' "$1")
   ask "$req" >/dev/null || echo "spawn could not rm $1; left in the listing" >&2
 }
-push_trunk() {   # push the trunk the shift landed on when it is ahead of its upstream; a rejection goes on the trail, never keeps the lock
-  [ "$1" != "-" ] && [ -d "$1" ] || return 0
-  case $(git -C "$1" status -sb 2>/dev/null | head -n 1) in *...*"[ahead "*) ;; *) return 0 ;; esac
-  branch=$(git -C "$1" symbolic-ref --short HEAD) || return 0
-  err=$(git -C "$1" push origin HEAD 2>&1 >/dev/null) && return 0
-  why=$(printf '%s\n' "$err" | awk 'NR == 1 { first = $0 } /^(error|fatal):|^ ?! / { first = $0; exit } END { gsub(/ +/, " ", first); sub(/^ /, "", first); print first }')
-  echo "push of $branch in $1 rejected: $err" >&2
-  "$sm" trail append --kind correction --shift "$id" --repo "$repo" --branch "$branch" --rationale "push rejected at close: $why" >/dev/null
-}
 stop_named() {   # stop every working or blocked session spawn lists under the name "shift <id>"; leaves their ids in $strays
   req=$(python3 -I -c 'import json; print(json.dumps({"verb": "claude", "action": "list"}))')
   answer=$(ask "$req") || { echo "spawn list failed: $answer" >&2; exit 1; }
@@ -119,7 +122,6 @@ if [ "$bg" = "-" ]; then
   # briefed but never attached: the open block failed between brief and spawn; a session may still have started
   stop_named "$id"
   "$sm" shift handoff --shift "$id" --abandoned --reason "the open block failed between brief and attach; any session named shift $id was stopped" || exit 1
-  push_trunk "$path"
   [ -z "$strays" ] || sleep 3   # a stopped session's SessionEnd hook races the removal of its job dir
   for stray in $strays; do rm_session "$stray"; done
   exit 0
@@ -134,7 +136,6 @@ print(rows[0].get("state", "") if rows else "gone")
 case "$state" in
   done|failed|gone)
     "$sm" shift handoff --shift "$id" --from-session || "$sm" shift handoff --shift "$id" --abandoned || exit 1
-    push_trunk "$path"
     [ "$state" = gone ] || rm_session "$bg"
     ;;
   working|blocked)
@@ -150,7 +151,6 @@ print(int((datetime.datetime.now(datetime.timezone.utc) - d).total_seconds() // 
       stop_session "$bg"
       # always abandoned-with-reason: a handoff.md the session wrote is kept beneath the Abandoned line
       "$sm" shift handoff --shift "$id" --abandoned --reason "stopped at $(date -u +%FT%TZ): still $state $late min past handoff_by" || exit 1
-      push_trunk "$path"
       sleep 3   # a stopped session's SessionEnd hook races the removal of its job dir
       rm_session "$bg"
     fi
