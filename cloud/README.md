@@ -28,7 +28,7 @@ repositories  jgeschwendt/bifrost        jgeschwendt/routines
               jgeschwendt/-              (the threads)
 environment   perpetual
   network     Custom: the defaults (package registries, GitHub) + api.typesafe.ai
-  setup       the contents of cloud/setup.sh
+  setup       curl -fsSL https://raw.githubusercontent.com/jgeschwendt/sandman/main/cloud/setup.sh | bash
 schedule      7 21-23,0-6 * * *   America/New_York (the UI converts local time;
               in UTC that is 7 1-10 * * * under EDT, 7 2-11 * * * under EST)
 prompt        the contents of prompts/cloud-shift.md
