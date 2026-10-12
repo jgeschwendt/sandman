@@ -1977,9 +1977,18 @@ pub fn handoff(
     if abandoned {
         entries.push(("abandoned".to_owned(), Value::Bool(true)));
     }
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
     {
         let _lock = CommitLock::acquire(&ctx.data_root)?;
+        let current = read_current(&ctx.data_root)?
+            .filter(|value| value.get("shift").and_then(Value::as_str) == Some(shift));
+        // the session's ids outlive the lock, so the runner can reap it later
+        for key in ["bg_id", "session_id"] {
+            if let Some(id) = current.as_ref().and_then(|value| value.get(key)?.as_str()) {
+                entries.retain(|(name, _)| name != key);
+                entries.push((key.to_owned(), Value::string(id)));
+            }
+        }
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
         if write {
             atomic::write(&path, &text)?;
         }
@@ -1987,10 +1996,8 @@ pub fn handoff(
             &dir.join("meta.json"),
             &format!("{}\n", Value::Object(entries).render()),
         )?;
-        let current = paths::shift_current(&ctx.data_root);
-        if read_current(&ctx.data_root)?
-            .is_some_and(|value| value.get("shift").and_then(Value::as_str) == Some(shift))
-        {
+        if current.is_some() {
+            let current = paths::shift_current(&ctx.data_root);
             fs::remove_file(&current).map_err(|source| Error::io(&current, source))?;
         }
     }
@@ -2029,6 +2036,27 @@ fn cut_handoff(text: &str) -> String {
     let keep = HANDOFF_CHARS - note(length).chars().count();
     let head = truncate_chars(text, keep);
     format!("{head}{}", note(length - keep))
+}
+
+/// Stamp `reaped` into `shift`'s `meta.json`: the runner has removed its
+/// session from Claude Code's listing and taken its transcript.
+pub fn reaped(ctx: &Context, shift: &str) -> Result<()> {
+    if shift.contains(['/', '\\']) || shift.starts_with('.') {
+        return Err(Error::invalid("shift id", shift.to_owned()));
+    }
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
+    let mut entries = read_meta(&ctx.data_root, shift)?
+        .value
+        .as_object()
+        .map(<[(String, Value)]>::to_vec)
+        .unwrap_or_default();
+    entries.retain(|(key, _)| key != "reaped");
+    entries.push(("reaped".to_owned(), Value::string(ctx.now.iso8601())));
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    atomic::write(
+        &paths::shift_dir(&ctx.data_root, shift).join("meta.json"),
+        &format!("{}\n", Value::Object(entries).render()),
+    )
 }
 
 /// Record the session the runner started for the open shift in

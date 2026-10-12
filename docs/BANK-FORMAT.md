@@ -184,7 +184,7 @@ other key is omitted when it has no value, never `null`.
 Kinds: `breath` · `change` · `correction` · `decay` · `decision` · `guard` · `promote`
 · `reconcile` · `revoke` · `shift.handoff` · `shift.start`. Any other kind is refused.
 `decision` is the owner's answer to a proposal, written by `report serve` only (its
-`POST /answer`, § report) — a shift's own choice is a row of its report's Decisions table,
+`POST /answer`, § report; `trail append` refuses it, exit 2) — a shift's own choice is a row of its report's Decisions table,
 and a `change` event if it changed code. `promote` and
 `decay` are proposals: the Sabbath appends them through `trail append`, the owner acts
 on them, and no verb emits or reads them yet.
@@ -308,7 +308,10 @@ shifts/
 `meta.json` — keys alphabetical: `shift`, `theme`, `instrument`, `repo`, `path`,
 `started`, `mind` (the orchestrator model), `window` (`remaining` as prose, `resets_at`,
 `stale`, `used` — the clock at the start); `shift handoff` adds `ended`, `cost_usd` when
-given `--cost`, and `abandoned: true` when the runner found the session gone. The rotation reads `repo` and `started`
+given `--cost`, `abandoned: true` when the runner found the session gone, and
+`current.json`'s `bg_id` and `session_id` when the runner attached them — the lock goes,
+the ids stay for the reap; `shift reaped --shift <id>` stamps `reaped` once the runner
+has reaped the session. The rotation reads `repo` and `started`
 from every `meta.json` to know which repo has rested longest.
 
 ### The night
@@ -494,12 +497,18 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   never pushed by the machine. A rejected push is a `correction` event naming the repo,
   the branch and the trailer's shift, rationale `push rejected: <the first error:,
   fatal: or ! line>`, never a fault: the sweep moves on, and retries next tick.
-- **The runner forgets the session it closes.** Once it records a handoff it `spawn`s
-  `claude rm` on the shift's session — three seconds after a `stop`, at once when the
-  session ended on its own — so finished sessions leave the owner's `claude agents` view;
-  the breath routines remove a pass's session once its pass has `ended`. A shift that
-  handed itself off is never closed by the runner, so its session stays listed (`done`)
-  until removed by hand — open.
+- **The sweep reaps.** The owner keeps no machine session in his history — not in
+  `claude agents`, not in the desktop app's list. In the same sweep, for every
+  `shifts/s-*/meta.json` and `breath/passes/*/pass.json` with `ended` and no `reaped`:
+  when it names a `bg_id` and `spawn`'s `claude list` shows that session `done`,
+  `failed` or `stopped`, `claude rm` it (a failure ignored); absent from the listing, go
+  on; `working`, `blocked` or no answer, leave it for the next tick — a live transcript
+  is never taken. Then `sandman take <session_id> --force` moves the transcript out of
+  `~/.claude/projects` into the archive (spawn's state, not the file's mtime, is the
+  proof it is over; "no transcript" means already taken), and `shift reaped` /
+  `breathe reaped` stamps `reaped`, so each is reaped once. A shift ended before its
+  `meta.json` carried the ids is stamped with nothing removed. The close block itself
+  `rm`s only the strays it stopped under a shift's name, three seconds after the stop.
 - **`shift clock --check`** exits 0 when a shift may start, 1 when it must not — by day
   (`day: the night opens at <instant>`), under `$SANDMAN_SHIFT_MIN_WINDOW_MIN` (default
   60) minutes of night left (`night ends in <m>m`) or of window left, or 90 % of the
@@ -679,6 +688,7 @@ stamps `adopted`.
 | `ended` | when `close` ran, or when it was marked dead — `null` until then |
 | `id` | `b-<yyyymmddThhmmss>Z-<kind>`, the UTC instant `pass` ran |
 | `kind` | `skim` or `deep` |
+| `reaped` | when the shift runner removed its session and took its transcript (`breathe reaped --id <id>`); absent until then |
 | `session_id` | the session's full id, once attached |
 | `sources` | the due sources the prompt listed, by name |
 | `started` | when the prompt was composed |

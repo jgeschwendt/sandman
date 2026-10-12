@@ -60,6 +60,8 @@ impl Machine {
             .env("HOME", &self.home)
             .env("PATH", env::var("PATH").unwrap_or_default())
             .env("SANDMAN_GROVE_CODE", self.grove_code())
+            // keeps the binary's coverage when `cargo llvm-cov` drives the suite
+            .envs(env::var_os("LLVM_PROFILE_FILE").map(|file| ("LLVM_PROFILE_FILE", file)))
             .env("SANDMAN_RECONCILE_EXTRA", "")
             .env("SANDMAN_ROOT", self.root())
             // reconcile's scratch worktree lives under temp_dir(); scrubbed, that is /tmp, which a sandbox denies
@@ -289,10 +291,18 @@ fn an_unknown_kind_is_a_usage_failure_that_writes_nothing() {
         &["trail", "append"],
         &["trail", "append", "--kind", "change", "--cost", "-1"],
         &["trail", "frobnicate"],
+        &["trail", "append", "--kind", "decision"],
     ] {
         let output = machine.run(args);
         assert_eq!(code(&output), 2, "{args:?}: {}", stderr(&output));
     }
+    // `decision` is the owner's answer, written by the page alone.
+    let decision = machine.run(&["trail", "append", "--json", r#"{"kind":"decision"}"#]);
+    assert!(
+        stderr(&decision).contains("written by `report serve` only"),
+        "{}",
+        stderr(&decision)
+    );
     // A parent the trail does not hold is a failure, not a usage error.
     let orphan = machine.run(&["trail", "append", "--kind", "change", "--parent", "e-nope"]);
     assert_eq!(code(&orphan), 1, "{}", stderr(&orphan));

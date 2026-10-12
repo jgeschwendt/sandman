@@ -1355,6 +1355,15 @@ pub fn attach(
     write_pass(&path, entries)
 }
 
+/// Stamp `reaped` into pass `id`: the runner has removed its session from
+/// Claude Code's listing and taken its transcript.
+pub fn reaped(ctx: &Context, id: &str) -> Result<()> {
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
+    let (path, mut entries) = read_pass(&ctx.data_root, id)?;
+    set(&mut entries, "reaped", Value::string(ctx.now.iso8601()));
+    write_pass(&path, entries)
+}
+
 /// What `close` records.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Closing {

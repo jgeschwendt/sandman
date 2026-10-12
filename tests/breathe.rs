@@ -64,6 +64,8 @@ impl Machine {
             .env("HOME", &self.home)
             .env("PATH", env::var("PATH").unwrap_or_default())
             .env("SANDMAN_GROVE_CODE", self.home.join(".grove").join("code"))
+            // keeps the binary's coverage when `cargo llvm-cov` drives the suite
+            .envs(env::var_os("LLVM_PROFILE_FILE").map(|file| ("LLVM_PROFILE_FILE", file)))
             .env("SANDMAN_NOW", now)
             .env("SANDMAN_PROMPTS", self.home.join("prompts"))
             .env("SANDMAN_RECONCILE_EXTRA", "")
@@ -657,6 +659,12 @@ fn pass_fills_every_slot_and_close_advances_last_read() {
     ] {
         assert!(pass.contains(expected), "missing {expected} in {pass}");
     }
+    machine.ok(close_at, &["breathe", "reaped", "--id", id]);
+    let pass = machine.read(&format!(".sandman/breath/passes/{id}/pass.json"));
+    assert!(
+        pass.contains(r#""reaped":"2026-10-16T16:40:00Z","#),
+        "{pass}"
+    );
     let sources = machine.sources();
     for source in &sources.sources {
         assert_eq!(

@@ -122,6 +122,7 @@ usage: sandman <verb> [args]
   breathe spike|adopt|drop <file> [--reason TEXT]
   breathe pass --kind skim|deep [--dry-run]
   breathe attach --id ID [--bg-id X] [--session-id S]
+  breathe reaped --id ID
   breathe close --id ID --read N --filed M --dropped K --cost USD
                 [--cursor NAME=VALUE]...
   breathe reweight [--dry-run]
@@ -145,7 +146,8 @@ usage: sandman <verb> [args]
       and dead passes have spent $SANDMAN_BREATH_BUDGET_USD (default 10; a
       pass in flight counts 0 and is listed), and 3 when the template or
       sources.toml cannot be read; --dry-run prints the prompt and writes
-      nothing. attach records the pass's session; close requires --cost (0
+      nothing. attach records the pass's session; reaped stamps reaped: <now>
+      once the runner has removed it and taken its transcript; close requires --cost (0
       journals a cost zero note), records its counters,
       advances last_read (and each --cursor) on the sources it listed, and
       appends a breath event.
@@ -241,6 +243,7 @@ usage: sandman <verb> [args]
                 --file PATH) [--cost USD] [--truncate]
   shift pick [--path] [--shift ID | --untrusted]
   shift profile [--kind shift|breath]
+  shift reaped --shift ID
   shift status
       The perpetual machine's unit of work, bounded by the five-hour window.
       brief picks the target, fills every {{slot}} of prompts/shift.md
@@ -281,13 +284,16 @@ usage: sandman <verb> [args]
       --abandoned (--reason TEXT, only beside --abandoned, heads the handoff
       and is the event's rationale as `Abandoned: <reason>`) — appends
       shift.handoff (--cost, the session's own total, as its cost_usd; 0
-      journals a cost zero note) and releases current.json; a shift already handed off
+      journals a cost zero note), copies current.json's bg_id and session_id
+      into meta.json and releases current.json; a shift already handed off
       exits 1, and so does a handoff over 2,000 characters
       unless --truncate keeps its head and notes the cut (--abandoned always
       truncates); every handoff but --abandoned refuses (exit 1) without a
       shifts/<id>/report.md carrying the report's five headings in order, under
       6,000 characters. attach records the session the runner
-      started in current.json. status prints current.json and the clock.
+      started in current.json; reaped stamps reaped: <now> into meta.json once
+      the runner has removed the session and taken its transcript. status
+      prints current.json and the clock.
       handoff_by is the window's reset less 15 min (now + 5 h less 15 min
       when unknown), never past the night's end.
       profile prints the Claude Code settings a shift or breath session runs
@@ -310,7 +316,8 @@ usage: sandman <verb> [args]
       parent the event, or ref shift:<id> for a whole shift;
       today prints today's file; trailers prints the Shift:/Event: lines every
       machine commit carries. Kinds: breath change correction decay decision
-      guard promote reconcile revoke shift.handoff shift.start.
+      guard promote reconcile revoke shift.handoff shift.start — append
+      refuses decision (exit 2), the owner's answer, which report serve writes.
 
   version
       The crate version and the commit it was built from — the same stamp
@@ -1248,6 +1255,12 @@ fn trail_append(args: &[String]) -> Result<(), Failure> {
     if !trail::is_kind(&draft.kind) {
         return Err(Failure::Usage(format!("unknown kind `{}`", draft.kind)));
     }
+    if draft.kind == "decision" {
+        return Err(Failure::Usage(
+            "kind `decision` is the owner's answer to a proposal, written by `report serve` only"
+                .to_owned(),
+        ));
+    }
     let data_root = paths::data_root()?;
     let event = trail::append(&data_root, draft)?;
     note(
@@ -1689,6 +1702,7 @@ fn shift_verb(args: &[String]) -> Result<(), Failure> {
         "handoff" => shift_handoff(rest),
         "pick" => shift_pick(rest),
         "profile" => shift_profile(rest),
+        "reaped" => shift_reaped(rest),
         "status" => shift_status(rest),
         other => Err(Failure::Usage(format!(
             "unknown shift subcommand `{other}`"
@@ -1820,6 +1834,7 @@ fn breathe_verb(args: &[String]) -> Result<(), Failure> {
         "init" => breathe_init(rest),
         "list" => breathe_list(rest),
         "pass" => breathe_pass(rest),
+        "reaped" => breathe_reaped(rest),
         "reweight" => breathe_reweight(rest),
         "sources" => breathe_sources(rest),
         "spike" => breathe_transition(rest, breathe::Transition::Spike),
@@ -2159,6 +2174,14 @@ fn usd_env(name: &str, default: f64) -> Result<f64, Failure> {
     }
 }
 
+/// `breathe reaped --id ID`.
+fn breathe_reaped(args: &[String]) -> Result<(), Failure> {
+    let parsed = BreatheArgs::parse(args, "breathe reaped", &["--id"], &[], 0)?;
+    let id = parsed.required("--id", "breathe reaped")?;
+    let ctx = breathe_context()?;
+    breathe_journal(&ctx, "reaped", breathe::reaped(&ctx, &id))
+}
+
 /// `breathe attach --id ID [--bg-id X] [--session-id S]`.
 fn breathe_attach(args: &[String]) -> Result<(), Failure> {
     let parsed = BreatheArgs::parse(
@@ -2275,6 +2298,14 @@ fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
         );
     }
     Ok(())
+}
+
+/// `shift reaped --shift ID`.
+fn shift_reaped(args: &[String]) -> Result<(), Failure> {
+    let (values, _) = shift_flags(args, "shift reaped", &["--shift"], &[])?;
+    let id = flag(&values, "--shift")
+        .ok_or_else(|| Failure::Usage("shift reaped needs --shift".to_owned()))?;
+    Ok(shift::reaped(&shift_context()?, &id)?)
 }
 
 /// `shift attach --shift ID [--bg-id X] [--session-id S]`.

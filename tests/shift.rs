@@ -924,7 +924,29 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
     assert!(line.contains(r#""repo":"jgeschwendt/beta""#), "{line}");
     assert!(line.contains(r#""cost_usd":2.5"#), "{line}");
     let meta = machine.read(&format!(".sandman/shifts/{second}/meta.json"));
+    assert!(meta.contains(r#""bg_id":"bb2d9a0e","#), "{meta}");
     assert!(meta.contains(r#""cost_usd":2.5,"ended":"#), "{meta}");
+    assert!(meta.contains(r#""session_id":"bb2d9a0e-1","#), "{meta}");
+    // The runner reaps the finished session, then stamps it; twice is once.
+    for _ in 0..2 {
+        machine.ok(
+            "2026-10-16T18:00:00Z",
+            &["shift", "reaped", "--shift", second],
+        );
+    }
+    let meta = machine.read(&format!(".sandman/shifts/{second}/meta.json"));
+    assert_eq!(
+        meta.matches(r#""reaped":"2026-10-16T18:00:00Z""#).count(),
+        1,
+        "{meta}"
+    );
+    for (args, want) in [
+        (&["shift", "reaped", "--shift", "../x"][..], 1),
+        (&["shift", "reaped", "--shift", "s-none"], 1),
+        (&["shift", "reaped"], 2),
+    ] {
+        assert_eq!(code(&machine.run(now, args, &[])), want, "{args:?}");
+    }
     let abandoned = machine
         .trail()
         .into_iter()
