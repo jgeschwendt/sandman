@@ -266,9 +266,7 @@ pub(crate) fn page(
     let (mut eye, mut details, mut head, mut rows, mut newest) =
         (String::new(), String::new(), None, Vec::new(), None);
     for shift in chosen.iter().flat_map(|(_, shifts)| shifts.iter().rev()) {
-        if !shift.report.is_empty() {
-            newest = newest.max(shift.meta.started);
-        }
+        newest = newest.max(shift.meta.started.filter(|_| !shift.report.is_empty()));
         let id = escape(&shift.meta.shift);
         let link = format!("<a href=\"#{id}\">{id}</a>");
         for line in section(&shift.report, HEADINGS[0]).filter(|line| line.starts_with("- ")) {

@@ -269,6 +269,8 @@ fn the_hook_shows_the_owner_unread_reports_within_the_cap_and_never_marks_them()
     assert_eq!(shown.matches("## Landed").count(), 1, "{shown}");
     assert_eq!(home.cursor(), "", "only the page marks reports read");
     assert_eq!(home.out(&["--hook"], owner, 0), shown);
+    home.out(&["--mark-read"], "", 0);
+    assert_eq!(home.out(&["--hook"], owner, 0), "", "silent once read");
 }
 
 #[test]
