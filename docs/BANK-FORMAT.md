@@ -183,8 +183,9 @@ other key is omitted when it has no value, never `null`.
 
 Kinds: `breath` · `change` · `correction` · `decay` · `decision` · `guard` · `promote`
 · `reconcile` · `revoke` · `shift.handoff` · `shift.start`. Any other kind is refused.
-`decision` is the owner's word on a proposal, appended by `report serve`'s `POST /answer`
-(§ report). `promote` and
+`decision` is the owner's answer to a proposal, written by `report serve` only (its
+`POST /answer`, § report) — a shift's own choice is a row of its report's Decisions table,
+and a `change` event if it changed code. `promote` and
 `decay` are proposals: the Sabbath appends them through `trail append`, the owner acts
 on them, and no verb emits or reads them yet.
 

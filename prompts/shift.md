@@ -19,7 +19,7 @@ You are one shift of the perpetual machine: the grove at `~/.grove/code/jgeschwe
 6. **The owner's standing rules bind you** (`~/.claude/CLAUDE.md`, the repo's AGENTS.md). Where this brief and those disagree, those win, and you log the disagreement as a `correction` event so the Sabbath can fix the brief.
 7. **Run tools through mise.** A `--bg` session carries no mise shims, so `bun`, `cargo` and `uv` are off PATH and a bare run false-reds: every repo command (tests, lint, builds, `stele check`) runs as `mise x -C <repo path> -- <command>`, and `stele`, `sandman`, `spawn`, `thread` and `grove` are invoked as `~/.local/bin/<name>`.
 8. **Loopback goes through the proxy.** Kev (127.0.0.1:1703), grove (7777) and bridge (1701) are reached with `curl --noproxy '' …`: the sandbox blocks direct loopback and only the allowlisted proxy route connects (observed 2026-10-10, the first skim found Kev "down").
-9. **Decisions are recorded.** A choice with two or more live options is a row of the report's Decisions table: the option you took, the one you rejected, the one-line reason.
+9. **Decisions are recorded.** A choice with two or more live options is a row of the report's Decisions table: the option you took, the one you rejected, the one-line reason. Never `trail append --kind decision` — that kind is the owner's answer; your choice is that row, and a `change` event if it changed code.
 
 ## Proposals
 
