@@ -11,6 +11,9 @@ export PATH="$bin:$PATH"
 
 # mise, by its official installer, which drops it in ~/.local/bin; every repo's
 # mise.toml is trusted and every prompt answered, since nobody is there to
+# commits the session makes carry the owner's identity (the proxy authenticates the push)
+git config --global user.name jgeschwendt
+git config --global user.email joshua@geschwendt.com
 command -v mise >/dev/null || curl -fsSL https://mise.run | sh
 mise settings add trusted_config_paths /
 mise settings set yes true
