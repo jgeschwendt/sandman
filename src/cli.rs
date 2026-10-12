@@ -240,7 +240,8 @@ usage: sandman <verb> [args]
   shift brief [--mind M] [--dry-run]
   shift clock [--check]
   shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] |
-                --file PATH) [--cost USD] [--truncate]
+                --file PATH) [--cost USD] [--truncate] [--cloud]
+  shift open --cloud [--mind M]
   shift pick [--path] [--shift ID | --untrusted]
   shift profile [--kind shift|breath]
   shift reaped --shift ID
@@ -300,6 +301,18 @@ usage: sandman <verb> [args]
       under (profiles/session.json, compiled in; one profile for both kinds).
       $SANDMAN_NOW (ISO-8601) fixes the instant; $SANDMAN_SHIFT_MIND (default
       opus) and $SANDMAN_SHIFT_BUDGET_USD (default 15) fill the brief.
+      open --cloud is the cloud routine's brief: in the state clone
+      ($SANDMAN_ROOT) it pulls --rebase, takes the committed current.json as
+      the lock (exit 1 `busy: <id> open since <ts>` under 70 min old, else
+      abandoned `cloud: stale lock`), picks among the clones in $SANDMAN_GROVE
+      (<dir>/<repo>, the state and $SANDMAN_THREADS clones aside, every clone
+      trusted, approved proposals first), composes as brief does with
+      handoff_by now + 50 min and no night gate, adds cloud: true and
+      session_url ($CLAUDE_CODE_REMOTE_SESSION_ID) to current.json and
+      meta.json, commits, pushes (one pull --rebase on a rejection, then exit
+      1 `state push rejected`) and prints the brief; templates default to
+      $SANDMAN_GROVE/sandman/prompts. handoff --cloud commits and pushes the
+      same way. On a Redesign night pick puts approved proposals first too.
 
   trail append --kind K [--shift S] [--repo R] [--branch B] [--sha SHA]
                [--rationale TEXT] [--cost USD] [--model M] [--parent ID]
@@ -1700,6 +1713,7 @@ fn shift_verb(args: &[String]) -> Result<(), Failure> {
         "brief" => shift_brief(rest),
         "clock" => shift_clock(rest),
         "handoff" => shift_handoff(rest),
+        "open" => shift_open(rest),
         "pick" => shift_pick(rest),
         "profile" => shift_profile(rest),
         "reaped" => shift_reaped(rest),
@@ -1728,6 +1742,7 @@ fn shift_context() -> Result<shift::Context, Failure> {
     let home = paths::home()?;
     Ok(shift::Context {
         claude_json: paths::claude_json()?,
+        cloud: None,
         data_root: paths::data_root()?,
         now,
         min_window_seconds: knob(
@@ -2333,10 +2348,12 @@ fn shift_attach(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `shift brief [--mind M] [--dry-run]`.
-fn shift_brief(args: &[String]) -> Result<(), Failure> {
-    let (values, set) = shift_flags(args, "shift brief", &["--mind"], &["--dry-run"])?;
-    let ctx = shift_context()?;
+/// What a brief is composed for: `--mind`, else `$SANDMAN_SHIFT_MIND`, else
+/// opus, and `$SANDMAN_SHIFT_BUDGET_USD`, else 15.
+fn brief_options(
+    values: &[(String, String)],
+    dry_run: bool,
+) -> Result<shift::BriefOptions, Failure> {
     let budget = env::var("SANDMAN_SHIFT_BUDGET_USD")
         .ok()
         .filter(|budget| !budget.is_empty());
@@ -2350,18 +2367,25 @@ fn shift_brief(args: &[String]) -> Result<(), Failure> {
                 Failure::Usage(format!("$SANDMAN_SHIFT_BUDGET_USD wants USD, got `{text}`"))
             })?,
     };
-    let mind = flag(&values, "--mind")
+    let mind = flag(values, "--mind")
         .or_else(|| {
             env::var("SANDMAN_SHIFT_MIND")
                 .ok()
                 .filter(|mind| !mind.is_empty())
         })
         .unwrap_or_else(|| "opus".to_owned());
-    let options = shift::BriefOptions {
+    Ok(shift::BriefOptions {
         budget_usd,
-        dry_run: set.iter().any(|switch| switch == "--dry-run"),
+        dry_run,
         mind,
-    };
+    })
+}
+
+/// `shift brief [--mind M] [--dry-run]`.
+fn shift_brief(args: &[String]) -> Result<(), Failure> {
+    let (values, set) = shift_flags(args, "shift brief", &["--mind"], &["--dry-run"])?;
+    let ctx = shift_context()?;
+    let options = brief_options(&values, set.iter().any(|switch| switch == "--dry-run"))?;
     let briefed = shift::brief(&ctx, &options);
     let briefed = match briefed {
         Ok(briefed) => briefed,
@@ -2404,6 +2428,45 @@ fn shift_brief(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
+/// `shift open --cloud [--mind M]`.
+fn shift_open(args: &[String]) -> Result<(), Failure> {
+    let (values, set) = shift_flags(args, "shift open", &["--mind"], &["--cloud"])?;
+    let clones = paths::cloud_clones().filter(|_| set.iter().any(|switch| switch == "--cloud"));
+    let Some(clones) = clones else {
+        return Err(Failure::Usage(
+            "shift open runs in the cloud: --cloud, with $SANDMAN_GROVE naming the clones"
+                .to_owned(),
+        ));
+    };
+    let ctx = shift::Context {
+        cloud: Some(shift::Cloud {
+            clones,
+            session_url: env::var("CLAUDE_CODE_REMOTE_SESSION_ID")
+                .ok()
+                .filter(|id| !id.is_empty())
+                .map(|id| format!("https://claude.ai/code/{id}")),
+        }),
+        ..shift_context()?
+    };
+    let briefed = shift::open(&ctx, &brief_options(&values, false)?).inspect_err(|error| {
+        note(
+            Some(&ctx.data_root),
+            "shift",
+            &format!("open error: {error}"),
+        );
+    })?;
+    note(
+        Some(&ctx.data_root),
+        "shift",
+        &format!(
+            "opened shift={} repo={} cloud",
+            briefed.shift, briefed.target.label
+        ),
+    );
+    println!("{}", briefed.text);
+    Ok(())
+}
+
 /// `shift clock [--check]`.
 fn shift_clock(args: &[String]) -> Result<(), Failure> {
     let (_, set) = shift_flags(args, "shift clock", &[], &["--check"])?;
@@ -2425,7 +2488,7 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
         args,
         "shift handoff",
         &["--cost", "--file", "--reason", "--shift"],
-        &["--abandoned", "--from-session", "--truncate"],
+        &["--abandoned", "--cloud", "--from-session", "--truncate"],
     )?;
     let cost = flag(&values, "--cost")
         .map(|value| {
@@ -2478,6 +2541,9 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
                 "shift",
                 &format!("handed off shift={id} event={}", event.id),
             );
+            if set.iter().any(|switch| switch == "--cloud") {
+                shift::sync(&ctx.data_root, &format!("shift({id}): handoff"))?;
+            }
             println!("{}", event.id);
             Ok(())
         }

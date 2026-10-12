@@ -147,7 +147,7 @@ pub fn manifest_trunks(manifest: &Path) -> BTreeMap<String, String> {
 }
 
 /// A directory's subdirectories, sorted; none when it is missing.
-fn subdirs(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn subdirs(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };

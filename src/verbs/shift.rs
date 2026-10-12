@@ -15,6 +15,7 @@
 //!
 //! The contract is `docs/BANK-FORMAT.md` § shift.
 
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
@@ -114,6 +115,11 @@ const TRIM_ORDER: [(&str, Cut); 14] = [
     ("score.week", Cut::TailLines),
     ("target.plan_next", Cut::TailLines),
 ];
+/// How long a cloud shift runs before it must hand off: the routine fires
+/// hourly, so the next fire finds the lock released.
+const CLOUD_HANDOFF_SECONDS: i64 = 50 * 60;
+/// How old a committed lock is before `open --cloud` takes it for abandoned.
+const CLOUD_STALE_SECONDS: i64 = 70 * 60;
 /// How many breath, thread and guard lines the problems file keeps per repo.
 const PROBLEM_EVENTS: usize = 5;
 /// The memories slot's ceiling.
@@ -207,11 +213,23 @@ pub const WEEK: [Day; 7] = [
     },
 ];
 
+/// Cloud mode: the routine's VM, where every attached repo is a clone.
+#[derive(Clone, Debug)]
+pub struct Cloud {
+    /// `$SANDMAN_GROVE`, the directory holding the clones, each `<dir>/<repo>`.
+    pub clones: PathBuf,
+    /// The session's page, from `$CLAUDE_CODE_REMOTE_SESSION_ID`.
+    pub session_url: Option<String>,
+}
+
 /// Everything the shift verbs read, resolved by the caller.
 #[derive(Clone, Debug)]
 pub struct Context {
     /// Claude Code's `~/.claude.json`, which holds the trust dialog's answers.
     pub claude_json: PathBuf,
+    /// Set by `shift open --cloud`: the rotation covers the clones, trust is
+    /// moot and the routine's cron is the clock.
+    pub cloud: Option<Cloud>,
     /// The data root.
     pub data_root: PathBuf,
     /// `$HOME`.
@@ -747,7 +765,27 @@ pub(crate) fn current(data_root: &Path, key: &str) -> Option<String> {
 /// data root) are reconcile's to scan but never a shift's to work: home-sync
 /// commits them without trailers, and a shift there could edit the trail or
 /// the runner it answers to.
+///
+/// In the cloud the trunks are the clones in [`Cloud::clones`], each labelled
+/// with the first owner, the data root and `~/.threads` clones aside.
 pub(crate) fn trunks(ctx: &Context) -> Vec<(String, PathBuf)> {
+    if let Some(cloud) = &ctx.cloud {
+        let state = [&ctx.data_root, &ctx.threads].map(|dir| fs::canonicalize(dir).ok());
+        return ctx
+            .owners
+            .iter()
+            .take(1)
+            .flat_map(|owner| {
+                grove::subdirs(&cloud.clones)
+                    .into_iter()
+                    .filter(|dir| dir.join(".git").exists())
+                    .filter(|dir| !state.contains(&fs::canonicalize(dir).ok()))
+                    .filter_map(move |dir| {
+                        Some((format!("{owner}/{}", dir.file_name()?.to_str()?), dir))
+                    })
+            })
+            .collect();
+    }
     let named = grove::manifest_trunks(&ctx.roots.manifest);
     let mut found = Vec::new();
     for checkout in grove::checkouts(&ctx.roots) {
@@ -978,8 +1016,10 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
 
 /// The rotation's choice: the least recently shifted trunk, ties broken by the
 /// live signals (a failing `stele check`, then open threads, then breaths) and
-/// then by name. Repos the open shift names, `skip` and untrusted trunks are
-/// passed over; when only untrusted ones remain, that is the error. On the
+/// then by name. On a Redesign night, and on every night in the cloud, repos
+/// with an approved `proposal:` thread come before the rest. Repos the open
+/// shift names, `skip` and untrusted trunks are passed over (the cloud trusts
+/// every clone); when only untrusted ones remain, that is the error. On the
 /// Sabbath the choice is [`SABBATH_REPO`]'s trunk, rotation aside.
 pub fn pick(ctx: &Context) -> Result<Option<Target>> {
     if ctx.night.sabbath(ctx.now) {
@@ -987,7 +1027,7 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
             .into_iter()
             .find(|(label, _)| label == SABBATH_REPO)
             .ok_or_else(|| Error::not_found("Sabbath trunk", SABBATH_REPO))?;
-        if !trusted(ctx).contains(&path) {
+        if ctx.cloud.is_none() && !trusted(ctx).contains(&path) {
             return Err(Error::Untrusted(vec![path]));
         }
         return Ok(Some(Target {
@@ -1008,24 +1048,31 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
         .collect();
     let last = last_shifted(ctx);
     let trust = trusted(ctx);
+    let weighted = ctx.cloud.is_some() || ctx.night.anchor(ctx.now).weekday == 1;
     let (mut candidates, untrusted): (Vec<_>, Vec<_>) = trunks(ctx)
         .into_iter()
         .filter(|(label, _)| !busy.contains(label) && !ctx.skip.contains(label))
-        .map(|(label, path)| (last.get(&label).copied(), label, path))
-        .partition(|(.., path)| trust.contains(path));
+        .map(|(label, path)| {
+            let approved = weighted
+                && report::proposals(&ctx.threads, Some(&label))
+                    .iter()
+                    .any(|proposal| proposal.approved.is_some());
+            ((Reverse(approved), last.get(&label).copied()), label, path)
+        })
+        .partition(|(.., path)| ctx.cloud.is_some() || trust.contains(path));
     if candidates.is_empty() && !untrusted.is_empty() {
         return Err(Error::Untrusted(
             untrusted.into_iter().map(|(.., path)| path).collect(),
         ));
     }
     candidates.sort();
-    let Some(front) = candidates.first().map(|(last, ..)| *last) else {
+    let Some((Reverse(approved), front)) = candidates.first().map(|(rank, ..)| *rank) else {
         return Ok(None);
     };
     // Signals cost a process per repo, so only the front's tie pays for them.
     let mut tied: Vec<(Signals, String, PathBuf)> = candidates
         .into_iter()
-        .take_while(|(last, ..)| *last == front)
+        .take_while(|(rank, ..)| *rank == (Reverse(approved), front))
         .map(|(_, label, path)| {
             let signals = Signals {
                 breaths: breaths(ctx, &label).len(),
@@ -1038,10 +1085,14 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
     let rivals = tied.len() - 1;
     tied.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
     let (signals, label, path) = tied.swap_remove(0);
-    let mut reasons = vec![match front {
+    let mut reasons: Vec<String> = approved
+        .then(|| "an approved proposal waits".to_owned())
+        .into_iter()
+        .collect();
+    reasons.push(match front {
         None => "never shifted".to_owned(),
         Some(at) => format!("least recently shifted ({})", at.iso8601()),
-    }];
+    });
     reasons.extend(signals.reasons());
     if rivals > 0 {
         reasons.push(format!("ahead of {rivals} equally rested repo(s)"));
@@ -1550,7 +1601,10 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
     let target = pick(ctx)?.ok_or_else(|| Error::not_found("repo to shift", "the rotation"))?;
     let day = local.day();
     let clock = clock(ctx);
-    let handoff_by = clock.handoff_by();
+    let handoff_by = match ctx.cloud {
+        Some(_) => Timestamp::from_unix_seconds(ctx.now.unix_seconds() + CLOUD_HANDOFF_SECONDS),
+        None => clock.handoff_by(),
+    };
     let entries = trail::read(&ctx.data_root, None)?;
     let threads = open_threads(ctx, &target.label);
     let scores = paths::score_dir(&ctx.data_root);
@@ -1726,7 +1780,17 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         ),
     ]);
     let path_text = target.path.display().to_string();
-    let meta = Value::object([
+    // the cloud's keys go in both files, and `handoff` keeps meta's as they are
+    let keyed = |mut entries: Vec<(&'static str, Value)>| {
+        if let Some(cloud) = &ctx.cloud {
+            entries.push(("cloud", Value::Bool(true)));
+            entries
+                .extend((cloud.session_url.clone()).map(|url| ("session_url", Value::string(url))));
+        }
+        entries.sort_by_key(|(key, _)| *key);
+        Value::object(entries)
+    };
+    let meta = keyed(vec![
         ("instrument", Value::string(day.instrument)),
         ("mind", Value::string(options.mind.clone())),
         ("path", Value::string(path_text.clone())),
@@ -1736,7 +1800,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         ("theme", Value::string(day.theme)),
         ("window", window),
     ]);
-    let current = Value::object([
+    let current = keyed(vec![
         ("handoff_by", Value::string(handoff_by.iso8601())),
         ("path", Value::string(path_text)),
         ("repo", Value::string(target.label.clone())),
@@ -2086,6 +2150,52 @@ pub fn attach(
         &paths::shift_current(&ctx.data_root),
         &format!("{}\n", Value::Object(entries).render()),
     )
+}
+
+// ─── the cloud ───────────────────────────────────────────────────────────
+
+/// Open a cloud shift: bring the state clone up to date, take its committed
+/// `current.json` as the lock — refused while younger than seventy minutes,
+/// abandoned when older — compose the brief as [`brief`] does, then commit
+/// and push the state clone.
+pub fn open(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
+    grove::git(&ctx.data_root, &["pull", "--rebase", "--quiet"])?;
+    if let Some(current) = read_current(&ctx.data_root)? {
+        let text = |key| current.get(key).and_then(Value::as_str).unwrap_or("?");
+        let started = Timestamp::parse_iso8601(text("started")).map_or(0, Timestamp::unix_seconds);
+        if ctx.now.unix_seconds() - started < CLOUD_STALE_SECONDS {
+            return Err(Error::refused(format!(
+                "busy: {} open since {}",
+                text("shift"),
+                text("started")
+            )));
+        }
+        let reason = Source::Abandoned(Some("cloud: stale lock".to_owned()));
+        handoff(ctx, text("shift"), &reason, true, None)?;
+    }
+    let briefed = brief(ctx, options)?;
+    let message = format!("shift({}): open {}", briefed.shift, briefed.target.label);
+    sync(&ctx.data_root, &message).map(|()| briefed)
+}
+
+/// Commit everything the state clone carries — `current.json` too, which is
+/// gitignored on the Mac and committed here, the lock every VM sees — then
+/// push, pulling `--rebase` once on a rejection.
+pub fn sync(data_root: &Path, message: &str) -> Result<()> {
+    let current = paths::shift_current(data_root);
+    grove::git(data_root, &["add", "-A", "."])?;
+    if current.exists() {
+        let relative = paths::shift_current(Path::new("."));
+        grove::git(data_root, &["add", "-f", "--", &relative.to_string_lossy()])?;
+    }
+    grove::git(data_root, &["commit", "--quiet", "-m", message])?;
+    let push = || grove::git_ok(data_root, &["push", "--quiet", "origin", "HEAD"]);
+    if push() || (grove::git_ok(data_root, &["pull", "--rebase", "--quiet"]) && push()) {
+        return Ok(());
+    }
+    // a conflicted rebase is left as it was found
+    let _ = grove::git_ok(data_root, &["rebase", "--abort"]);
+    Err(Error::refused("state push rejected"))
 }
 
 /// `current.json`, one `key: value` per line; `None` between shifts.

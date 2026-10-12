@@ -3,12 +3,14 @@
 //! and the repo's own `prompts/shift.md` under `$SANDMAN_PROMPTS`.
 //!
 //! `$SANDMAN_NOW` pins the instant, so the weekday, the shift id and the clock
-//! are the test's to choose. Nothing here runs a model, git or `stele`: the
+//! are the test's to choose. Nothing here runs a model or `stele`, and only the
+//! cloud test runs git, against a bare remote for the state clone: the other
 //! fixture checkouts carry a `.git` directory and no `.stele/`.
 
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1000,14 +1002,11 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
 fn a_missing_template_fails_with_its_path() {
     let machine = Machine::new("template");
     machine.repo("jgeschwendt/alpha");
-    let output = machine.run(
-        FRIDAY,
-        &["shift", "brief"],
-        &[("SANDMAN_PROMPTS", "/nonexistent/prompts")],
-    );
+    let output = machine.run(FRIDAY, &["shift", "brief"], &[("SANDMAN_PROMPTS", "")]);
     assert_eq!(code(&output), 1);
+    // unset, the templates are sandman's trunk's in the grove
     assert!(
-        stderr(&output).contains("/nonexistent/prompts/shift.md"),
+        stderr(&output).contains("/.grove/code/jgeschwendt/sandman/main/prompts/shift.md"),
         "{}",
         stderr(&output)
     );
@@ -1786,5 +1785,165 @@ fn sabbath_shifts_do_not_count_toward_last_shifted() {
     assert!(
         brief.contains("last shifted never; picked because never shifted"),
         "{brief}"
+    );
+}
+
+/// Identity and isolation for every git the cloud test runs, sandman's too.
+const GIT_ENV: [(&str, &str); 6] = [
+    ("GIT_AUTHOR_EMAIL", "machine@example.com"),
+    ("GIT_AUTHOR_NAME", "machine"),
+    ("GIT_COMMITTER_EMAIL", "machine@example.com"),
+    ("GIT_COMMITTER_NAME", "machine"),
+    ("GIT_CONFIG_GLOBAL", "/dev/null"),
+    ("GIT_CONFIG_NOSYSTEM", "1"),
+];
+
+/// Run git in `dir`, scrubbed; its stdout, or `None` when it fails.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env_clear()
+        .env("PATH", env::var("PATH").unwrap_or_default())
+        .envs(GIT_ENV)
+        .output()
+        .expect("run git");
+    output.status.success().then(|| stdout(&output))
+}
+
+#[test]
+fn cloud_shifts_lock_through_the_state_remote() {
+    let machine = Machine::new("cloud");
+    let home = &machine.home;
+    let remote = home.join("state.git");
+    git(
+        home,
+        &["init", "-q", "--bare", "--initial-branch=main", "state.git"],
+    )
+    .expect("bare");
+    git(home, &["clone", "-q", "state.git", "seed"]).expect("clone");
+    machine.write(
+        "seed/.gitignore",
+        "shifts/current.json\nshifts/PAUSE\n.trace/\n",
+    );
+    git(&home.join("seed"), &["add", "."]).expect("add");
+    git(&home.join("seed"), &["commit", "-qm", "seed"]).expect("seed");
+    git(&home.join("seed"), &["push", "-q", "origin", "HEAD"]).expect("push");
+    // two VMs, each holding the state clone, the threads clone and the repos
+    let [vm, other] = ["vm", "other"].map(|name| {
+        git(home, &["clone", "-q", "state.git", &format!("{name}/.sandman")]).expect("clone");
+        for repo in ["-", "alpha", "beta", "sandman"] {
+            fs::create_dir_all(home.join(name).join(repo).join(".git")).expect("clone");
+        }
+        machine.write(&format!("{name}/sandman/prompts/shift.md"), TEMPLATE);
+        machine.write(
+            &format!("{name}/-/p1.md"),
+            "---\nstate: open\nkey: proposal:jgeschwendt/beta:split\nanswer: approve\ndecided: 2026-10-15T09:00:00Z\n---\n\n# Split beta\n",
+        );
+        home.join(name)
+    });
+    let run = |vm: &Path, now: &str, args: &[&str], extra: &[(&str, &str)]| {
+        let [clones, root, threads] = [vm.to_path_buf(), vm.join(".sandman"), vm.join("-")]
+            .map(|dir| dir.to_string_lossy().into_owned());
+        let mut env = vec![
+            ("SANDMAN_GROVE", clones.as_str()),
+            ("SANDMAN_PROMPTS", ""),
+            ("SANDMAN_ROOT", root.as_str()),
+            ("SANDMAN_THREADS", threads.as_str()),
+        ];
+        env.extend(GIT_ENV.iter().chain(extra));
+        let output = machine.run(now, args, &env);
+        (code(&output), stdout(&output) + &stderr(&output))
+    };
+    let open = |vm: &Path, now: &str, extra: &[(&str, &str)]| {
+        run(vm, now, &["shift", "open", "--cloud"], extra)
+    };
+    let show = |path: &str| git(&remote, &["show", &format!("HEAD:{path}")]).unwrap_or_default();
+
+    let (code_, brief) = open(&vm, FRIDAY, &[("CLAUDE_CODE_REMOTE_SESSION_ID", "abc")]);
+    assert_eq!(code_, 0, "{brief}");
+    assert!(brief.contains("Target `jgeschwendt/beta` at `"), "{brief}");
+    assert!(
+        brief.contains("picked because an approved proposal waits; never shifted"),
+        "{brief}"
+    );
+    assert_eq!(
+        git(&remote, &["log", "-1", "--format=%s"]).as_deref(),
+        Some("shift(s-20261016T1600Z): open jgeschwendt/beta\n")
+    );
+    for (file, key) in [
+        ("current.json", r#""handoff_by":"2026-10-16T16:50:00Z""#),
+        ("current.json", r#""cloud":true"#),
+        (
+            "s-20261016T1600Z/meta.json",
+            r#""session_url":"https://claude.ai/code/abc""#,
+        ),
+        ("s-20261016T1600Z/brief.md", "# Shift brief"),
+    ] {
+        assert!(
+            show(&format!("shifts/{file}")).contains(key),
+            "{file}: {key}"
+        );
+    }
+    assert_eq!(code(&machine.run(FRIDAY, &["shift", "open"], &[])), 2);
+
+    // another VM sees the committed lock: busy within seventy minutes, stale after
+    let (code_, said) = open(&other, "2026-10-16T16:30:00Z", &[]);
+    assert_eq!(
+        (code_, said.trim()),
+        (
+            1,
+            "sandman: busy: s-20261016T1600Z open since 2026-10-16T16:00:00Z"
+        )
+    );
+    let skip = [("SANDMAN_SHIFT_SKIP", "jgeschwendt/beta")];
+    let (code_, brief) = open(&other, "2026-10-16T17:15:00Z", &skip);
+    assert_eq!(code_, 0, "{brief}");
+    assert!(
+        brief.contains("Target `jgeschwendt/alpha`"),
+        "the state clones are never targets: {brief}"
+    );
+    assert!(show("shifts/s-20261016T1600Z/handoff.md").starts_with("Abandoned: cloud: stale lock"));
+    assert!(show("shifts/current.json").contains("s-20261016T1715Z"));
+
+    // the first VM's late handoff loses the race and leaves its rebase undone
+    let handoff = |vm: &Path, shift: &str| {
+        let dir = vm.join(".sandman").join("shifts").join(shift);
+        fs::write(dir.join("report.md"), REPORT).expect("report");
+        fs::write(dir.join("handoff.md"), "# Done\n").expect("handoff");
+        let args = [
+            "shift",
+            "handoff",
+            "--shift",
+            shift,
+            "--from-session",
+            "--cloud",
+        ];
+        run(vm, "2026-10-16T17:40:00Z", &args, &[])
+    };
+    assert_eq!(
+        handoff(&vm, "s-20261016T1600Z"),
+        (1, "sandman: state push rejected\n".to_owned())
+    );
+    assert!(!vm.join(".sandman/.git/rebase-merge").exists());
+    // a push the remote turns away once goes through after one pull --rebase
+    machine.write(
+        "state.git/hooks/pre-receive",
+        "#!/bin/sh\n[ -e once ] || { touch once; exit 1; }\n",
+    );
+    let hook = remote.join("hooks").join("pre-receive");
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod");
+    assert_eq!(handoff(&other, "s-20261016T1715Z").0, 0);
+    assert!(remote.join("once").exists());
+    assert_eq!(
+        show("shifts/current.json"),
+        "",
+        "the lock is released on the remote"
+    );
+    let meta = show("shifts/s-20261016T1715Z/meta.json");
+    assert!(
+        meta.contains(r#""cloud":true"#) && meta.contains(r#""ended":"2026-10-16T17:40:00Z""#),
+        "{meta}"
     );
 }
