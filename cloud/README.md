@@ -26,7 +26,7 @@ repositories  jgeschwendt/bifrost        jgeschwendt/routines
               jgeschwendt/voice          jgeschwendt/voice-corpus
               jgeschwendt/.sandman       (the state)
               jgeschwendt/-              (the threads)
-environment   perpetual
+environment   Motion
   network     Custom: the defaults (package registries, GitHub) + api.typesafe.ai
   setup       curl -fsSL https://raw.githubusercontent.com/jgeschwendt/sandman/main/cloud/setup.sh | bash
 schedule      7 21-23,0-6 * * *   America/New_York (the UI converts local time;
