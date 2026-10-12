@@ -42,7 +42,7 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 
 ## The sandbox
 
-A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove/code`, `~/.sandman`, `~/.routines` and `~/.local/state/claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. `git fetch`, `git pull`, `git push` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift lands on trunk by fast-forward and the push sweep pushes it. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
+A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove`, `~/.sandman`, `~/.routines`, `~/.local/state/claude` and mise's state and cache, never `.claude/` config or `~/.claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. `git fetch`, `git pull`, `git push`, `git merge --ff-only` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift lands on trunk by fast-forward and the push sweep pushes it. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
 
 ## Spawn's answers
 

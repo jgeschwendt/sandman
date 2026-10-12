@@ -38,9 +38,22 @@
   "sandbox": {
     "allowUnsandboxedCommands": false,
     "enabled": true,
-    "excludedCommands": ["git fetch *", "git pull *", "git push *", "grove sync *"],
+    "excludedCommands": [
+      "git fetch *",
+      "git merge --ff-only *",
+      "git pull *",
+      "git push *",
+      "grove sync *"
+    ],
     "filesystem": {
-      "allowWrite": ["~/.grove", "~/.local/state/claude", "~/.routines", "~/.sandman"],
+      "allowWrite": [
+        "~/.grove",
+        "~/.local/state/claude",
+        "~/.local/state/mise",
+        "~/.routines",
+        "~/.sandman",
+        "~/Library/Caches/mise"
+      ],
       "denyRead": ["~/.aws", "~/.netrc", "~/.npmrc", "~/.ssh", "~/Codes"]
     },
     "network": {

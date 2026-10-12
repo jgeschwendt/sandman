@@ -529,7 +529,9 @@ prints — `profiles/session.json`, compiled into the binary, one profile for bo
 today (`--kind` is there so they can diverge). Strict means
 `allowUnsandboxedCommands: false`: a command the sandbox refuses fails rather than
 retrying outside it. Writes reach only `~/.grove` (the checkouts, and the bare repositories and manifest lock under `~/.grove/roots` and `~/.grove` that every commit and `grove tree add` write — observed 2026-10-10, the first Sabbath could not cut its branch with `~/.grove/code` alone), `~/.local/state/claude`,
-`~/.routines` and `~/.sandman`; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
+`~/.local/state/mise` and `~/Library/Caches/mise` (mise records a config's trust and
+caches there; without them every `mise x -C <worktree>` failed EPERM, observed
+2026-10-12), `~/.routines` and `~/.sandman`; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
 cannot be read; the network reaches only the profile's `allowedDomains` — among them
 `api.anthropic.com`, because `sandman reflect` and `sandman dream` run `claude -p` from
 Bash, inside the sandbox (observed 2026-10-10: the first Sabbath's reflect was denied).
@@ -547,9 +549,18 @@ any cwd.
   holds in a mode that never says yes on its own.
 
 - **Git's network commands run outside the sandbox.** `git fetch`, `git pull`, `git push`
-  and `grove sync` are `excludedCommands`, run with the host's own git auth: git over SSH
+  and `grove sync` are `excludedCommands` (beside `git merge --ff-only`, below), run with the host's own git auth: git over SSH
   fails inside the macOS sandbox, and a `--bg` session inherits no environment to carry
   a token in.
+- **Some paths no `allowWrite` reaches.** The sandbox protects `.claude/skills`,
+  `.claude/agents`, `.claude/commands`, `.claude/hooks`, the `.claude` settings files and
+  `.mcp.json` "in your working directory and the directories above it", and `~/.claude`
+  almost entirely, whatever `allowWrite` says (<https://code.claude.com/docs/en/sandboxing>, fetched
+  2026-10-12). So `git merge --ff-only *` is an `excludedCommands` entry too: a landing
+  that touches `.claude/skills/…` aborted halfway inside the sandbox (stave, 2026-10-12),
+  and a fast-forward only moves trunk to a commit that already exists. A skill whose
+  workspace is `~/.claude/plans/<slug>/` works in `~/.sandman/shifts/<id>/<slug>/`
+  instead (`prompts/shift.md` rule 7).
 - **Pushing is the runner's.** `git push` from a session fails at the sandbox proxy
   despite `excludedCommands` — "This proxy requires authentication", exit 128 (observed
   2026-10-11) — so a shift lands on trunk by fast-forward and never pushes; the runner,
