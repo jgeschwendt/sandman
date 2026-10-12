@@ -813,22 +813,29 @@ newest printed report's start, never back.
 
 **The cursor** is `.reports-read`, one ISO-8601 line — runtime state in the dotted tier,
 gitignored by the operator's data-root repo like `shifts/current.json`, written atomic
-and outside `.commit.lock` (a last-writer-wins pointer, never content).
+and outside `.commit.lock` (a last-writer-wins pointer, never content). Only the owner's
+eyes move it: `report serve`'s `GET /` of the newest night (no `?night=`) moves it to the
+newest report on that page, and `--mark-read` to the newest printed; `--hook` never does,
+since a hook that guessed wrong about whose session it primed would spend the owner's
+digest on a machine session (observed 2026-10-12 · s-20261012T0515Z read it before
+`attach` named its session).
 
 **`report --hook`** reads a SessionStart payload on stdin and answers with recall's hook
 envelope (`additionalContext`): the unread digest, cut to 6,000 characters by dropping
 whole reports oldest first with a line saying how many went — never the Worth-your-eye
-or Proposals sections — then moves the cursor, so each report reaches a session start
-once and `--week`/`--all` read it again. It prints nothing when nothing is unread, and
-nothing for the machine's own sessions: a payload `session_id` equal to
-`shifts/current.json`'s, or a `cwd` under the data root (breath passes, dream minds).
+or Proposals sections — and leaves the cursor, so every session start shows the unread
+reports until the owner opens the page. It prints nothing when nothing is unread, and
+nothing for the machine's own sessions — the hook skip rule: a payload `session_id` equal
+to `shifts/current.json`'s; a `cwd` equal to its `path`, both canonicalized (SessionStart
+fires before `shift attach` writes the session id); or a `cwd` under the data root
+(breath passes, dream minds).
 
 **The UI — `sandman report serve [--bind 127.0.0.1:1705]`** — makes the report a page,
 std-only HTTP/1.1 one request at a time (`Connection: close`), loopback only (any other
 `--bind` exits 2); it prints `listening on http://<address>` and serves until killed
 (`--requests N` answers N, then exits — the tests' seam). `GET /` is a night (§ shifts,
-The night) — the newest with a shift, or `?night=yyyy-mm-dd` by its anchor date, `404`
-when no shift began in it: a header `<Day>→<Day> night · <n> shifts · $<cost> · <landed>
+The night) — the newest with a shift, which moves the cursor (above), or
+`?night=yyyy-mm-dd` by its anchor date, which does not, `404` when no shift began in it: a header `<Day>→<Day> night · <n> shifts · $<cost> · <landed>
 landed · <proposals> proposals` (cost summed over the shifts' `meta.json` `cost_usd`,
 landed the rows of their Landed tables), then **Proposals awaiting you** — every repo's,
 each with its title, repo, opened time, body (a matrix renders as a table) and a form

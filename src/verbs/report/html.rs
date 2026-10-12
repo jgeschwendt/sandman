@@ -12,6 +12,7 @@ use std::path::Path;
 use super::{HEADINGS, proposals, section};
 use crate::json::Value;
 use crate::paths;
+use crate::time::Timestamp;
 use crate::verbs::shift::{self, Local, Meta, Night, WEEK};
 
 /// The answers a proposal's form offers, in the order its buttons show.
@@ -245,13 +246,14 @@ fn list(tag: &str, items: &str) -> String {
 }
 
 /// The page for the night anchored on `wanted` (`yyyy-mm-dd`), the newest
-/// night with a shift when `None`; `None` when no shift began in that night.
+/// night with a shift when `None`, and the start of the newest report on it;
+/// `None` when no shift began in that night.
 pub(crate) fn page(
     data_root: &Path,
     threads: &Path,
     night: Night,
     wanted: Option<&str>,
-) -> Option<String> {
+) -> Option<(String, Option<Timestamp>)> {
     let nights = nights(data_root, night);
     let chosen = match wanted {
         Some(key) => Some(nights.get(key)?),
@@ -261,9 +263,12 @@ pub(crate) fn page(
         .into_iter()
         .filter(|p| p.awaiting)
         .collect();
-    let (mut eye, mut details, mut head, mut rows) =
-        (String::new(), String::new(), None, Vec::new());
+    let (mut eye, mut details, mut head, mut rows, mut newest) =
+        (String::new(), String::new(), None, Vec::new(), None);
     for shift in chosen.iter().flat_map(|(_, shifts)| shifts.iter().rev()) {
+        if !shift.report.is_empty() {
+            newest = newest.max(shift.meta.started);
+        }
         let id = escape(&shift.meta.shift);
         let link = format!("<a href=\"#{id}\">{id}</a>");
         for line in section(&shift.report, HEADINGS[0]).filter(|line| line.starts_with("- ")) {
@@ -342,13 +347,16 @@ pub(crate) fn page(
         .map(|key| format!("<a href=\"/?night={key}\">{key}</a>"))
         .collect::<Vec<_>>()
         .concat();
-    Some(format!(
-        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>sandman · nights</title><style>{STYLE}</style></head><body><main><header><h1>sandman · nights</h1><p>{}</p></header><section><h2>Proposals awaiting you</h2>{}</section><section><h2>Worth your eye</h2>{}</section><section><h2>Landed</h2>{}</section><section><h2>Shifts</h2>{}</section><footer><nav>{nav}</nav></footer></main></body></html>\n",
-        escape(&line),
-        list("div", &forms),
-        list("ul", &eye),
-        list("div", &landed),
-        list("div", &details)
+    Some((
+        format!(
+            "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>sandman · nights</title><style>{STYLE}</style></head><body><main><header><h1>sandman · nights</h1><p>{}</p></header><section><h2>Proposals awaiting you</h2>{}</section><section><h2>Worth your eye</h2>{}</section><section><h2>Landed</h2>{}</section><section><h2>Shifts</h2>{}</section><footer><nav>{nav}</nav></footer></main></body></html>\n",
+            escape(&line),
+            list("div", &forms),
+            list("ul", &eye),
+            list("div", &landed),
+            list("div", &details)
+        ),
+        newest,
     ))
 }
 

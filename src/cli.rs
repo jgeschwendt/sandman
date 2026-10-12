@@ -204,14 +204,16 @@ usage: sandman <verb> [args]
       him; `nothing new.` when there are none. --since, --week and --all
       select by the shift's start and ignore the cursor; --mark-read moves it
       to the newest report printed. --hook answers with the hook envelope,
-      capped at 6,000 characters (whole reports cut oldest first), and moves
-      the cursor; silent when nothing is unread and for the machine's own
-      sessions — the open shift's session_id, or a cwd under the data root.
+      capped at 6,000 characters (whole reports cut oldest first), and never
+      moves the cursor; silent when nothing is unread and for the machine's
+      own sessions — the open shift's session_id, a cwd that is its path, or
+      a cwd under the data root.
 
   report serve [--bind 127.0.0.1:1705] [--requests N]
       The report as a loopback page (a non-loopback --bind exits 2), printing
       `listening on http://<address>`: GET / shows a night — the newest with
-      a shift, or ?night=yyyy-mm-dd, a night keyed by the day it began on —
+      a shift, which moves the read cursor to its newest report, or
+      ?night=yyyy-mm-dd, a night keyed by the day it began on —
       its header, the proposal: threads awaiting the owner each with an
       approve/revise/decline form, Worth your eye, Landed, every shift's
       report, and the last 14 nights. POST /answer (key, answer, note) runs
@@ -1588,7 +1590,7 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
     }
     let data_root = paths::data_root()?;
     let threads = paths::threads_dir(&paths::home()?);
-    let digest = if hook {
+    if hook {
         let start = hook::session_start(&stdin()?)?;
         if report::own(&data_root, &start) {
             note(
@@ -1598,18 +1600,17 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
             );
             return Ok(());
         }
+        // never the cursor: a shift's session can start before `attach` names
+        // it, and only the page the owner opens marks reports read
         let digest = report::digest(&data_root, &threads, select, report::REPORT_CHARS);
-        if digest.newest.is_none() {
-            return Ok(());
+        if digest.newest.is_some() {
+            println!("{}", hook::session_start_reply(&digest.text));
         }
-        println!("{}", hook::session_start_reply(&digest.text));
-        digest
-    } else {
-        let digest = report::digest(&data_root, &threads, select, usize::MAX);
-        print!("{}", digest.text);
-        digest
-    };
-    if (hook || switch("--mark-read"))
+        return Ok(());
+    }
+    let digest = report::digest(&data_root, &threads, select, usize::MAX);
+    print!("{}", digest.text);
+    if switch("--mark-read")
         && let Some(newest) = digest.newest
     {
         report::mark_read(&data_root, newest)?;

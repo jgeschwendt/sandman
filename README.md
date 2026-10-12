@@ -40,7 +40,7 @@ without one — and opens a `proposal:` thread for any work larger than itself.
 ```sh
 sandman report                  # the reports since you last read, Worth-your-eye and open proposals first
 sandman report --week 2026-W42  # or --since <instant>, --all; --mark-read moves the cursor
-sandman report --hook           # SessionStart: each report once, never in the machine's own sessions
+sandman report --hook           # SessionStart: the unread reports until the page is opened, never in the machine's own sessions
 sandman report serve            # http://127.0.0.1:1705 — each night's reports; approve/revise/decline proposals by form
 ```
 

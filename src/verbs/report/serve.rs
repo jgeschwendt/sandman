@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use super::html::{self, ANSWERS, escape};
-use super::proposals;
+use super::{mark_read, proposals};
 use crate::verbs::shift::Night;
 use crate::verbs::trail;
 
@@ -169,7 +169,15 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
             )
             .map_or_else(
                 || status("404 Not Found", "<p>no shift began that night</p>"),
-                |page| ("200 OK", String::new(), page),
+                |(page, newest)| {
+                    // the owner's eyes on the newest night are the acknowledgment;
+                    // an older night's page leaves the cursor; a cursor that will
+                    // not write still serves the page
+                    if let Some(at) = newest.filter(|_| night.is_none()) {
+                        let _ = mark_read(&server.data_root, at);
+                    }
+                    ("200 OK", String::new(), page)
+                },
             )
         }
         ("POST", "/answer") => answer(server, &form(&body)),

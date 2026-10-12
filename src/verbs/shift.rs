@@ -734,10 +734,11 @@ fn read_current(data_root: &Path) -> Result<Option<Value>> {
     }
 }
 
-/// The open shift's session id, once the runner has attached it.
-pub(crate) fn session(data_root: &Path) -> Option<String> {
+/// A string field of the open shift's `current.json` — `path` from the
+/// brief, `session_id` once the runner has attached it.
+pub(crate) fn current(data_root: &Path, key: &str) -> Option<String> {
     let current = read_current(data_root).ok()??;
-    current.get("session_id")?.as_str().map(ToOwned::to_owned)
+    current.get(key)?.as_str().map(ToOwned::to_owned)
 }
 
 /// Every trunk the rotation covers: each grove repo of an allowed owner at its

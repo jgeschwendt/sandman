@@ -48,7 +48,10 @@ impl Home {
         }
         home.write(
             ".sandman/shifts/current.json",
-            r#"{"session_id":"own","shift":"s-20261015T1400Z"}"#,
+            &format!(
+                r#"{{"path":"{}/trunk","session_id":"own","shift":"s-20261015T1400Z"}}"#,
+                home.0.display()
+            ),
         );
         for (id, front) in [
             (
@@ -230,20 +233,27 @@ fn the_digest_reads_unread_reports_newest_first_and_marks_them_read() {
 }
 
 #[test]
-fn the_hook_shows_the_owner_each_report_once_within_the_cap() {
+fn the_hook_shows_the_owner_unread_reports_within_the_cap_and_never_marks_them() {
     let home = Home::new(3_500);
     let root = home.0.join(".sandman").display().to_string();
-    // The machine's own sessions: the open shift's, and any under the data root.
+    // The machine's own sessions: any under the data root, and the open
+    // shift's — by session_id, or by its path before `attach` writes one.
+    fs::create_dir(home.0.join("trunk")).expect("trunk");
+    std::os::unix::fs::symlink(home.0.join("trunk"), home.0.join("link")).expect("link");
     for payload in [
         r#"{"session_id":"own","cwd":"/tmp"}"#.to_owned(),
         format!(r#"{{"session_id":"breath","cwd":"{root}/breath"}}"#),
+        format!(
+            r#"{{"session_id":"early","cwd":"{}/link"}}"#,
+            home.0.display()
+        ),
     ] {
         assert_eq!(home.out(&["--hook"], &payload, 0), "");
     }
     assert_eq!(home.cursor(), "");
     home.out(&["--hook"], "not json", 1);
 
-    let owner = r#"{"session_id":"owner","cwd":"/tmp"}"#;
+    let owner = r#"{"session_id":"owner","cwd":"/nowhere"}"#;
     let shown = home.out(&["--hook"], owner, 0);
     assert!(shown.starts_with(r#"{"hookSpecificOutput":{"#), "{shown}");
     assert!(shown.contains("additionalContext"), "{shown}");
@@ -257,8 +267,8 @@ fn the_hook_shows_the_owner_each_report_once_within_the_cap() {
         assert!(shown.contains(kept), "{kept} missing: {shown}");
     }
     assert_eq!(shown.matches("## Landed").count(), 1, "{shown}");
-    assert_eq!(home.cursor(), "2026-10-14T14:00:00Z\n");
-    assert_eq!(home.out(&["--hook"], owner, 0), "", "each report once");
+    assert_eq!(home.cursor(), "", "only the page marks reports read");
+    assert_eq!(home.out(&["--hook"], owner, 0), shown);
 }
 
 #[test]
@@ -300,7 +310,14 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
     // a shift that never started belongs to no night
     home.write(".sandman/shifts/s-20261016T0000Z/meta.json", "{}");
     let (mut server, ask) = serve(&home, 17);
+    let tuesday = ask("GET /?night=2026-10-13", "", "");
+    assert_eq!(home.cursor(), "", "an older night's page leaves the cursor");
     let page = ask("GET /", "", "");
+    assert_eq!(
+        home.cursor(),
+        "2026-10-17T07:00:00Z\n",
+        "the newest night marks it"
+    );
     for expected in [
         "HTTP/1.1 200 OK\r\n",
         "<p>Friday→Saturday night · 2 shifts · $3.50 · 2 landed · 1 proposals</p>",
@@ -315,7 +332,6 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
         assert!(page.contains(expected), "{expected} missing: {page}");
     }
     assert!(!page.contains("<script"), "{page}");
-    let tuesday = ask("GET /?night=2026-10-13", "", "");
     assert!(
         tuesday
             .contains("<p>Tuesday→Wednesday night · 1 shifts · $0.00 · 0 landed · 1 proposals</p>")

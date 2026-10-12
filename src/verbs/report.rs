@@ -237,17 +237,19 @@ pub fn digest(data_root: &Path, threads: &Path, select: Select, cap: usize) -> D
     }
 }
 
-/// Whether a starting session is the machine's own — the open shift's, or
-/// one working under the data root (breath passes, dream minds) — which the
-/// hook leaves unprimed: the report is the owner's.
+/// Whether a starting session is the machine's own — one working under the
+/// data root (breath passes, dream minds), or the open shift's: its
+/// `session_id`, or before `attach` writes that, its `path` as the cwd —
+/// which the hook leaves unprimed: the report is the owner's.
 #[must_use]
 pub fn own(data_root: &Path, start: &SessionStart) -> bool {
-    start
-        .cwd
+    let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    start.cwd.as_deref().is_some_and(|cwd| {
+        cwd.starts_with(data_root)
+            || shift::current(data_root, "path")
+                .is_some_and(|path| real(Path::new(&path)) == real(cwd))
+    }) || start
+        .session_id
         .as_deref()
-        .is_some_and(|cwd| cwd.starts_with(data_root))
-        || start
-            .session_id
-            .as_deref()
-            .is_some_and(|id| shift::session(data_root).as_deref() == Some(id))
+        .is_some_and(|id| shift::current(data_root, "session_id").as_deref() == Some(id))
 }
