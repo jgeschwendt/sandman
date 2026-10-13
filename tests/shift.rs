@@ -282,6 +282,25 @@ fn pick_rotates_to_the_least_recently_shifted_trunk() {
         machine.ok(FRIDAY, &["shift", "pick"]).trim(),
         "jgeschwendt/beta"
     );
+    // A failing `stele check` on alpha's committed lock outranks the thread; a
+    // stele that cannot run reads as passing.
+    let lock = alpha.join(".stele/graph.lock");
+    fs::create_dir_all(alpha.join(".stele")).expect("stele dir");
+    fs::write(&lock, "").expect("lock");
+    let stele = machine.script("bin/stele", "exit 1\n");
+    let path = format!(
+        "{}:{}",
+        stele.parent().expect("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    for (path, picked) in [
+        (path.as_str(), "jgeschwendt/alpha"),
+        ("/nonexistent", "jgeschwendt/beta"),
+    ] {
+        let output = machine.run(FRIDAY, &["shift", "pick"], &[("PATH", path)]);
+        assert_eq!(stdout(&output).trim(), picked, "{}", stderr(&output));
+    }
+    fs::remove_file(lock).expect("rm lock");
 
     // Both shifted: the older meta.json is the one rested longest, and goes.
     machine.meta(
@@ -913,6 +932,15 @@ fn a_missing_template_fails_with_its_path() {
         "{}",
         stderr(&output)
     );
+    // A template naming a slot the brief does not fill, or one that is no
+    // file, fails the same way.
+    machine.write("prompts/shift.md", "{{nope}}");
+    let output = machine.run(FRIDAY, &["shift", "brief"], &[]);
+    assert_eq!(code(&output), 1);
+    assert!(stderr(&output).contains("nope"), "{}", stderr(&output));
+    fs::remove_file(machine.home.join("prompts/shift.md")).expect("rm");
+    fs::create_dir_all(machine.home.join("prompts/shift.md")).expect("dir");
+    assert_eq!(code(&machine.run(FRIDAY, &["shift", "brief"], &[])), 1);
     assert!(!machine.root().join("shifts").exists());
 }
 
@@ -1822,5 +1850,35 @@ fn cloud_shifts_lock_through_the_state_remote() {
     assert!(
         meta.contains(r#""cloud":true"#) && meta.contains(r#""ended":"2026-10-16T17:40:00Z""#),
         "{meta}"
+    );
+}
+
+#[test]
+fn a_shift_file_that_cannot_be_read_is_an_error_and_odd_values_still_show() {
+    let machine = Machine::prompted("unreadable");
+    let current = ".sandman/shifts/current.json";
+    for (meta, text) in [("s-bad", "nope"), ("s-nopath", r#"{"repo":"o/r"}"#)] {
+        machine.write(format!(".sandman/shifts/{meta}/meta.json"), text);
+    }
+    fs::create_dir_all(machine.root().join("shifts/s-dir/meta.json")).expect("dir");
+    for shift in ["s-bad", "s-nopath", "s-dir"] {
+        let output = machine.run(FRIDAY, &["shift", "pick", "--shift", shift], &[]);
+        assert_eq!(code(&output), 1, "{shift}: {}", stderr(&output));
+    }
+    machine.write(current, "nope");
+    assert_eq!(code(&machine.run(FRIDAY, &["shift", "status"], &[])), 1);
+    fs::remove_file(machine.root().join("shifts/current.json")).expect("rm");
+    fs::create_dir_all(machine.root().join("shifts/current.json")).expect("dir");
+    assert_eq!(code(&machine.run(FRIDAY, &["shift", "status"], &[])), 1);
+    fs::remove_dir(machine.root().join("shifts/current.json")).expect("rmdir");
+    machine.write(current, r#"{"n":3,"shift":"s-x"}"#);
+    machine.ok(
+        FRIDAY,
+        &["shift", "attach", "--shift", "s-x", "--session-id", "s1"],
+    );
+    let status = machine.ok(FRIDAY, &["shift", "status"]);
+    assert!(
+        status.starts_with("n: 3\nsession_id: s1\nshift: s-x\n"),
+        "{status}"
     );
 }

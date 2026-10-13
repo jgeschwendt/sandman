@@ -1925,9 +1925,7 @@ fn upsert_problems(data_root: &Path, (heading, section): &(String, String)) -> R
         }
         out.push_str(section);
     }
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
-    }
+    atomic::ensure_parent(&path)?;
     atomic::write(&path, &out)
 }
 
@@ -2219,10 +2217,11 @@ pub fn status(ctx: &Context) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Clock, DEFAULT_NIGHT, Local, Night, PROFILE, Week, Window, fenced, fill, fnv1a, names,
-        new_york_offset_hours, profile, shift_id, slot_names,
+        Clock, DEFAULT_NIGHT, Local, Night, PROFILE, Week, Window, capped, fenced, fill, fnv1a,
+        names, new_york_offset_hours, profile, shift_id, slot_names, upsert_problems,
     };
     use crate::json::{self, Value};
+    use crate::testutil::TempDir;
     use crate::time::Timestamp;
 
     /// Every object's keys, at every depth, in sorted order.
@@ -2240,9 +2239,7 @@ mod tests {
     #[test]
     fn the_profile_is_json_with_sorted_keys_and_both_kinds_share_it() {
         let value = json::parse(PROFILE).expect("valid JSON");
-        let Value::Object(entries) = &value else {
-            panic!("an object: {value:?}");
-        };
+        let entries = value.as_object().expect("an object");
         let keys: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
         assert_eq!(keys, ["permissions", "sandbox"]);
         assert!(sorted(&value), "keys out of order");
@@ -2397,8 +2394,23 @@ mod tests {
     #[test]
     fn slots_are_named_once_in_order() {
         assert_eq!(
-            slot_names("{{a.b}} x {{c}} {{a.b}} {{ d }}"),
+            slot_names("{{a.b}} x {{c}} {{a.b}} {{ d }} {{open"),
             ["a.b", "c", "d"]
+        );
+        assert_eq!(capped("abcd", 2), "ab…");
+    }
+
+    #[test]
+    fn a_problems_section_is_replaced_under_its_heading() {
+        let temp = TempDir::new("shift-problems");
+        let path = crate::paths::breath_problems(temp.path());
+        crate::atomic::ensure_parent(&path).expect("dir");
+        std::fs::write(&path, "# P\n## o/r · d\nold\n## o/s · d\nkept\n").expect("seed");
+        let section = ("## o/r · d".to_owned(), "## o/r · d\n\nnew\n\n".to_owned());
+        upsert_problems(temp.path(), &section).expect("upsert");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "# P\n\n## o/r · d\n\nnew\n\n## o/s · d\nkept\n"
         );
     }
 

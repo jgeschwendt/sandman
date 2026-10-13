@@ -114,6 +114,17 @@ fn the_toml_reader_round_trips_the_seed_and_refuses_a_nested_table() {
     let sources = Sources::parse(SEED).expect("the seed meets the schema");
     assert_eq!(Sources::parse(&sources.render()).expect("again"), sources);
 
+    let table = "[x]\nkind = \"rss\"\nurl = \"u\"\nweight = 1.0\nbears_on = [\"*\"]\n";
+    for (text, why) in [
+        ("answer = 1\n", "unknown root key `answer`"),
+        (
+            &format!("{table}budget = 5\nnope = 1\n"),
+            "[x]: unknown key `nope`",
+        ),
+        (table, "[x]: `budget` is required"),
+    ] {
+        assert_eq!(Sources::parse(text).expect_err(why), why);
+    }
     let nested = toml::parse("[a]\nkind = \"rss\"\n[a.b]\nx = 1\n").expect_err("nested");
     assert_eq!(nested.line, 3);
     assert!(nested.message.contains("nested table"), "{nested}");
@@ -1024,4 +1035,207 @@ fn problems_and_sources_arrive_fenced_and_unexpanded() {
         2,
         "the template's and the fenced one"
     );
+}
+
+#[test]
+fn the_store_refuses_what_it_cannot_read_and_skips_what_it_cannot_parse() {
+    let machine = Machine::prompted("refusals");
+    let fails = |args: &[&str], exit: i32, why: &str| {
+        let output = machine.run(NOW, args, &[]);
+        assert_eq!(code(&output), exit, "{args:?}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains(why),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+    };
+    machine.write(".sandman/breath", "");
+    fails(&["breathe", "list"], 1, "breath");
+    fs::remove_file(machine.root().join("breath")).expect("rm");
+    fails(&["breathe", "reweight"], 1, "run `sandman breathe init`");
+    fs::create_dir_all(machine.root().join("breath/sources.toml")).expect("dir");
+    fails(&["breathe", "sources"], 1, "sources.toml");
+    fs::remove_dir(machine.root().join("breath/sources.toml")).expect("rmdir");
+    machine.ok(NOW, &["breathe", "init"]);
+    fails(&["breathe", "list", "--state", "nope"], 1, "state");
+    fails(&["breathe", "pass", "--kind", "nope"], 1, "pass kind");
+    fails(&["breathe", "attach", "--id", "../x"], 1, "pass id");
+    fails(&["breathe", "attach", "--id", "b-nope"], 1, "b-nope");
+    machine.write(".sandman/breath/passes/b-bad/pass.json", "nope");
+    fails(&["breathe", "attach", "--id", "b-bad"], 1, "pass.json");
+    fs::create_dir_all(machine.root().join("breath/passes/b-dir/pass.json")).expect("dir");
+    fails(&["breathe", "attach", "--id", "b-dir"], 1, "pass.json");
+    fails(&["breathe", "adopt", "nope"], 1, "nope");
+    for blank in ["title", "summary"] {
+        let mut args = vec![
+            "breathe",
+            "file",
+            "--url",
+            "u",
+            "--repo",
+            "*",
+            "--problem",
+            "p",
+        ];
+        args.extend(["--title", "t", "--summary", "s"]);
+        let at = args
+            .iter()
+            .position(|arg| *arg == format!("--{blank}"))
+            .expect("flag");
+        args[at + 1] = " ";
+        fails(&args, 1, blank);
+    }
+
+    // A breath scored for novelty, spiked; and one whose source is gone, dropped.
+    let novel = filed_name(&machine.file(NOW, "https://n", "novel", &["--novelty", "0.5"]));
+    assert!(
+        machine
+            .read(&format!(".sandman/breath/{novel}"))
+            .contains("novelty: 0.5\n")
+    );
+    assert_eq!(
+        machine.ok(NOW, &["breathe", "spike", &novel]),
+        format!("spiked  {novel}\n")
+    );
+    let orphan =
+        filed_name(&machine.file(NOW, "https://o", "orphan", &["--source", "releases-oxc"]));
+    let path = format!(".sandman/breath/{orphan}");
+    machine.write(&path, &machine.read(&path).replace("releases-oxc", "ghost"));
+    machine.ok(NOW, &["breathe", "drop", &orphan, "--reason", "gone"]);
+    // Dropping a fresh source's breath starts its silence.
+    let fresh = filed_name(&machine.file(NOW, "https://f", "fresh", &["--source", "releases-oxc"]));
+    machine.ok(NOW, &["breathe", "drop", &fresh, "--reason", "noise"]);
+    let oxc = machine
+        .sources()
+        .sources
+        .into_iter()
+        .find(|source| source.name == "releases-oxc");
+    assert_eq!(
+        oxc.and_then(|source| source.silent_since)
+            .map(sandman::Timestamp::iso8601)
+            .as_deref(),
+        Some(NOW)
+    );
+
+    // A pass left open long ago is dead; a dry run says so and writes nothing.
+    let dead = ".sandman/breath/passes/b-dead/pass.json";
+    let open =
+        r#"{"ended":null,"kind":"deep","sources":["ghost"],"started":"2026-10-16T10:00:00Z"}"#;
+    machine.write(dead, open);
+    machine.ok(NOW, &["breathe", "pass", "--kind", "skim", "--dry-run"]);
+    assert_eq!(machine.read(dead), open);
+    fails(
+        &[
+            "breathe",
+            "close",
+            "--id",
+            "b-dead",
+            "--read",
+            "1",
+            "--filed",
+            "0",
+            "--dropped",
+            "1",
+            "--cost",
+            "-1",
+        ],
+        1,
+        "cost",
+    );
+    fails(
+        &[
+            "breathe",
+            "close",
+            "--id",
+            "b-dead",
+            "--read",
+            "1",
+            "--filed",
+            "0",
+            "--dropped",
+            "1",
+            "--cost",
+            "0",
+            "--cursor",
+            "arxiv-cs-se=1",
+        ],
+        1,
+        "not in the pass",
+    );
+    machine.ok(
+        NOW,
+        &[
+            "breathe",
+            "close",
+            "--id",
+            "b-dead",
+            "--read",
+            "1",
+            "--filed",
+            "0",
+            "--dropped",
+            "1",
+            "--cost",
+            "0",
+        ],
+    );
+    // A deep pass in flight holds the next deep one.
+    machine.write(
+        ".sandman/breath/passes/b-live/pass.json",
+        &open.replace("10:00", "15:30"),
+    );
+    fails(&["breathe", "pass", "--kind", "deep"], 1, "pass in flight");
+    // A pass directory already there, unreadable, is never overwritten.
+    machine.write(
+        ".sandman/breath/passes/b-20261016T160000Z-skim/pass.json",
+        "nope",
+    );
+    fails(&["breathe", "pass", "--kind", "skim"], 1, "already exists");
+
+    // Problems past the cap are cut; a template naming an unknown slot, or none
+    // readable, is a fault.
+    machine.write(".sandman/breath/problems.md", &"p".repeat(6_001));
+    let dry = machine.ok(
+        "2026-10-16T16:01:00Z",
+        &["breathe", "pass", "--kind", "skim", "--dry-run"],
+    );
+    assert!(dry.contains("… cut at 6000 characters"), "{dry}");
+    machine.write("prompts/breathe.md", "{{nope}}");
+    fails(
+        &["breathe", "pass", "--kind", "skim", "--dry-run"],
+        3,
+        "nope",
+    );
+    fs::remove_file(machine.home.join("prompts/breathe.md")).expect("rm");
+    fs::create_dir_all(machine.home.join("prompts/breathe.md")).expect("dir");
+    fails(
+        &["breathe", "pass", "--kind", "skim", "--dry-run"],
+        3,
+        "breathe.md",
+    );
+
+    // A title whose every name is taken cannot be filed.
+    for nth in 1..=1_000 {
+        let suffix = if nth == 1 {
+            String::new()
+        } else {
+            format!("-{nth}")
+        };
+        machine.write(format!(".sandman/breath/2026-10-16-crowded{suffix}.md"), "");
+    }
+    let output = machine.file(NOW, "https://c", "crowded", &[]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+
+    // A trail that cannot be written fails the verbs that append to it.
+    let kept = filed_name(&machine.file(NOW, "https://k", "kept", &[]));
+    fs::rename(machine.root().join("trail"), machine.home.join("trail")).expect("mv");
+    machine.write(".sandman/trail", "");
+    let output = machine.file(NOW, "https://t", "trail-less", &[]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    fails(&["breathe", "adopt", &kept], 1, "trail");
+    fails(&["breathe", "reweight"], 1, "trail");
+
+    // A breath that is a directory cannot be read.
+    fs::create_dir_all(machine.root().join("breath/2026-10-16-dir.md")).expect("dir");
+    fails(&["breathe", "spike", "2026-10-16-dir"], 1, "2026-10-16-dir");
 }

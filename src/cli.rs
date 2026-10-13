@@ -12,7 +12,7 @@
 
 use std::env;
 use std::fmt::Write as _;
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
@@ -790,9 +790,7 @@ fn note(data_root: Option<&Path>, verb: &str, line: &str) {
 /// take — the queue is still there for the next run.
 fn spawn_dream(data_root: &Path) -> Result<PathBuf, Error> {
     let log = paths::run_log(data_root, "dream", Timestamp::now()?);
-    if let Some(dir) = log.parent() {
-        fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
-    }
+    crate::atomic::ensure_parent(&log)?;
     let out = OpenOptions::new()
         .append(true)
         .create(true)
@@ -1038,11 +1036,7 @@ fn recall_run(
     // `budget=` is the one comparison worth making, so both are in the unit
     // the budget is actually spent in — `trimmed=`, `banks_degraded=` and
     // `cut_lines=` say what it cost to get there, which a size alone cannot.
-    let trimmed = if composed.trimmed.sections.is_empty() {
-        EMPTY.to_owned()
-    } else {
-        composed.trimmed.sections.join(",")
-    };
+    let trimmed = composed.trimmed.listed();
     note(
         journal,
         "recall",
@@ -1718,7 +1712,7 @@ fn pinned_now() -> Result<Timestamp, Failure> {
     match env::var("SANDMAN_NOW").ok().filter(|now| !now.is_empty()) {
         Some(text) => Timestamp::parse_iso8601(&text)
             .ok_or_else(|| Failure::Usage(format!("$SANDMAN_NOW wants ISO-8601, got `{text}`"))),
-        None => Ok(Timestamp::now()?),
+        None => Timestamp::now().map_err(Failure::from),
     }
 }
 
@@ -2015,10 +2009,11 @@ fn breathe_pass(args: &[String]) -> Result<(), Failure> {
         breathe::pass(&ctx, kind, budget_usd, dead_usd, dry_run),
     )
     .map_err(|failure| match failure {
-        Failure::Error(error @ (Error::Refused { .. } | Error::LockHeld { .. })) => {
-            Failure::Error(error)
+        Failure::Error(error)
+            if !matches!(error, Error::Refused { .. } | Error::LockHeld { .. }) =>
+        {
+            Failure::Fault(error)
         }
-        Failure::Error(error) => Failure::Fault(error),
         other => other,
     })?;
     if dry_run {
@@ -2211,19 +2206,7 @@ fn shift_attach(args: &[String]) -> Result<(), Failure> {
 /// What a brief is composed for: `--mind`, else `$SANDMAN_SHIFT_MIND`, else
 /// opus, and `$SANDMAN_SHIFT_BUDGET_USD`, else 15.
 fn brief_options(parsed: &Args, dry_run: bool) -> Result<shift::BriefOptions, Failure> {
-    let budget = env::var("SANDMAN_SHIFT_BUDGET_USD")
-        .ok()
-        .filter(|budget| !budget.is_empty());
-    let budget_usd = match budget {
-        None => 15.0,
-        Some(text) => text
-            .parse::<f64>()
-            .ok()
-            .filter(|budget| budget.is_finite() && *budget >= 0.0)
-            .ok_or_else(|| {
-                Failure::Usage(format!("$SANDMAN_SHIFT_BUDGET_USD wants USD, got `{text}`"))
-            })?,
-    };
+    let budget_usd = usd_env("SANDMAN_SHIFT_BUDGET_USD", 15.0)?;
     let mind = parsed
         .flag("--mind")
         .or_else(|| {
@@ -2499,4 +2482,14 @@ fn stdin() -> Result<String, Failure> {
         .read_to_string(&mut payload)
         .map_err(|source| Error::io("<stdin>", source))?;
     Ok(payload)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_long_bank_line_is_cut_with_a_count_for_the_tail() {
+        let files = ["a".repeat(1_500), "b".repeat(400), "c".repeat(400)];
+        let listed = super::bank_memories(&files);
+        assert_eq!(listed, format!("{},{}…+1", files[0], files[1]));
+    }
 }

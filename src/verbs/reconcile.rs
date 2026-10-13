@@ -188,11 +188,8 @@ fn reconcile_repo(
         label: repo.label.clone(),
         ..RepoReport::default()
     };
-    let Some(first) = repo.checkouts.first() else {
-        report.failed = Some("no checkout".to_owned());
-        return report;
-    };
-    let dir = &first.path;
+    // grove never yields a repo without a checkout
+    let dir = &repo.checkouts[0].path;
     report.checkout.clone_from(dir);
     let trunk = match trunk_ref(dir, &repo.label, trunks.get(&repo.label)) {
         Ok(trunk) => trunk,
@@ -344,8 +341,6 @@ struct Scratch {
     checkout: PathBuf,
     /// Its working tree.
     path: PathBuf,
-    /// Whether it still has to be removed.
-    live: bool,
 }
 
 impl Scratch {
@@ -365,15 +360,13 @@ impl Scratch {
         let scratch = Self {
             checkout: checkout.to_path_buf(),
             path,
-            live: true,
         };
         hookless(checkout, &args)?;
         Ok(scratch)
     }
 
-    /// Remove it now, reporting a failure.
-    fn remove(mut self) -> Result<()> {
-        self.live = false;
+    /// Remove it now, reporting a failure; the drop that follows sweeps up.
+    fn remove(self) -> Result<()> {
         let arg = self.path.to_string_lossy().into_owned();
         hookless(&self.checkout, &["worktree", "remove", "--force", &arg]).map(drop)
     }
@@ -381,12 +374,8 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        if self.live {
-            let arg = self.path.to_string_lossy().into_owned();
-            let _ = hookless(&self.checkout, &["worktree", "remove", "--force", &arg]);
-            let _ = fs::remove_dir_all(&self.path);
-            let _ = git(&self.checkout, &["worktree", "prune"]);
-        }
+        let _ = fs::remove_dir_all(&self.path);
+        let _ = git(&self.checkout, &["worktree", "prune"]);
     }
 }
 
@@ -395,9 +384,7 @@ impl Drop for Scratch {
 /// reconcile keeps.
 fn reverted_by(dir: &Path, base: &str) -> BTreeMap<String, Vec<String>> {
     let mut reverts: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let Ok(log) = git(dir, &["log", base, "--format=%x00%H%n%B"]) else {
-        return reverts;
-    };
+    let log = git(dir, &["log", base, "--format=%x00%H%n%B"]).unwrap_or_default();
     for commit in log.split('\0') {
         let mut lines = commit.lines();
         let Some(reverter) = lines.next() else {
@@ -532,6 +519,7 @@ mod tests {
         memory(bank.join("project_hit.md"), "shift s-1 · event e-2");
         memory(bank.join("project_miss.md"), "remember 2026-10-09");
         memory(bank.join("_archive").join("old_project_hit.md"), "e-2");
+        fs::write(bank.join("project_bare.md"), "e-2\n").expect("no frontmatter");
         let events: BTreeSet<String> = ["e-1".to_owned(), "e-2".to_owned()].into();
         assert_eq!(
             memories_naming(temp.path(), &events),

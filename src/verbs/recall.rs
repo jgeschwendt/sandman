@@ -104,6 +104,18 @@ pub struct Trimmed {
     pub sections: Vec<&'static str>,
 }
 
+impl Trimmed {
+    /// The sections as a journal value: comma-joined, `-` for none.
+    #[must_use]
+    pub fn listed(&self) -> String {
+        if self.sections.is_empty() {
+            "-".to_owned()
+        } else {
+            self.sections.join(",")
+        }
+    }
+}
+
 /// Compose the recall payload for `cwd`. Empty means nothing to recall.
 #[must_use]
 pub fn recall(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> String {
@@ -1411,7 +1423,7 @@ mod tests {
         // And the report says exactly that: one bank degraded, nothing left
         // out in the end — the reinstatement is not a trim.
         assert_eq!(composed.trimmed.banks_degraded, 1);
-        assert!(composed.trimmed.sections.is_empty(), "{composed:?}");
+        assert_eq!(composed.trimmed.listed(), "-", "{composed:?}");
         assert_eq!(composed.banks.len(), 1);
         assert!(composed.banks[0].degraded);
         assert_eq!(composed.banks[0].key, root.bank());
@@ -1451,7 +1463,7 @@ mod tests {
         assert!(!text.contains("## Tool index"));
         // The report names both, in the order the budget went after them, and
         // the one bank that had to give up its bodies.
-        assert_eq!(composed.trimmed.sections, ["tools", "recent"]);
+        assert_eq!(composed.trimmed.listed(), "tools,recent");
         assert_eq!(composed.trimmed.banks_degraded, 1);
         assert!(!composed.banks[0].degraded, "the cwd bank kept its bodies");
         assert!(composed.banks[1].degraded, "the ancestor gave them up");

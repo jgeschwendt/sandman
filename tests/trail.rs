@@ -250,6 +250,11 @@ fn revoke_is_idempotent_and_show_lists_descendants_and_commits() {
     );
     assert_eq!(code(&machine.run(&["trail", "revoke", &root])), 2);
 
+    let alone = machine.ok(&["trail", "show", &stranger]);
+    assert!(
+        alone.contains("descendants:\n  -\n") && alone.ends_with("commits:\n  -\n"),
+        "{alone}"
+    );
     let shown = machine.ok(&["trail", "show", &root]);
     assert!(shown.contains(&format!("id: {root}")), "{shown}");
     assert!(shown.contains("rationale: the root"), "{shown}");
@@ -381,6 +386,39 @@ fn a_dry_run_reports_the_plan_and_changes_nothing() {
 
     assert_eq!(code(&machine.run(&["reconcile", "e-nope"])), 1);
     assert_eq!(code(&machine.run(&["reconcile"])), 2);
+    let lonely = machine.append(&["--kind", "change"]);
+    let report = machine.ok(&["reconcile", &lonely, "--dry-run"]);
+    assert!(
+        report.contains("no commit carries a revoked event"),
+        "{report}"
+    );
+
+    // A reconcile branch left behind trunk fails the repo; one at trunk is reused.
+    let branch = format!("reconcile/{first}");
+    git(&checkout, &["branch", &branch, "main~2"]);
+    let behind = machine.run(&["reconcile", &first]);
+    assert_eq!(code(&behind), 1);
+    assert!(
+        stdout(&behind).contains(&format!("{branch} does not contain refs/heads/main")),
+        "{}",
+        stdout(&behind)
+    );
+    git(&checkout, &["branch", "--force", &branch, "main"]);
+    // Checked out elsewhere, it cannot be added as the scratch tree.
+    let elsewhere = machine.home.join("elsewhere");
+    let elsewhere_arg = elsewhere.display().to_string();
+    git(
+        &checkout,
+        &["worktree", "add", "--quiet", &elsewhere_arg, &branch],
+    );
+    assert_eq!(code(&machine.run(&["reconcile", &first])), 1);
+    git(&checkout, &["worktree", "remove", &elsewhere_arg]);
+    let reused = machine.ok(&["reconcile", &first]);
+    assert!(
+        reused.contains(&format!("reverted: {}", shas[0])),
+        "{reused}"
+    );
+    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
 }
 
 #[test]

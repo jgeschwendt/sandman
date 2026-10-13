@@ -41,7 +41,7 @@ recall
 remember
     input:  { body: string, bank?: string, cwd?: string, type?: "user"|"feedback"|"project"|"reference",
               name?: string, description?: string }
-    output: { bank: string, file: string, outcome: "created"|"replaced"|"collided", index: string }
+    output: { bank: string, file: string, outcome: "created"|"collided", index: string }
     Commits through verbs::remember::remember with the same defaults as the CLI.
     Exactly one of bank/cwd resolves the bank; both given is an invalid-params
     error, and neither given is the home bank.

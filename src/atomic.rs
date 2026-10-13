@@ -40,15 +40,19 @@ pub(crate) fn write(path: &Path, contents: &str) -> Result<()> {
 
 /// Append one line to `path`, creating it and its directory if need be.
 pub(crate) fn append_line(path: &Path, line: &str) -> Result<()> {
-    if let Some(directory) = path.parent() {
-        fs::create_dir_all(directory).map_err(|source| Error::io(directory, source))?;
-    }
+    ensure_parent(path)?;
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)
         .open(path)
         .map_err(|source| Error::io(path, source))?;
     writeln!(file, "{line}").map_err(|source| Error::io(path, source))
+}
+
+/// Create `path`'s directory.
+pub(crate) fn ensure_parent(path: &Path) -> Result<()> {
+    let dir = path.parent().unwrap_or(path);
+    fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))
 }
 
 /// Write the temp file and flush it to the device.

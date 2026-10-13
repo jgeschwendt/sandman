@@ -26,7 +26,6 @@
 //! `println!` anywhere under this verb breaks the client.
 
 use std::ffi::OsStr;
-use std::fmt;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -61,9 +60,6 @@ const MAX_KEY_COMPONENTS: usize = 64;
 /// The journal's stand-in for a field that could not be read. Same word the
 /// CLI's own lines use, so the two logs read alike.
 const NONE: &str = "none";
-
-/// The journal's stand-in for an empty list, as in `trimmed=-`.
-const EMPTY: &str = "-";
 
 /// The four `type` values, named back at a caller that sent a fifth.
 const TYPES: &str = "user, feedback, project, reference";
@@ -151,24 +147,6 @@ pub enum McpError {
     InvalidParams(String),
     /// The verb ran and failed — a tool result with `isError: true` upstream.
     Verb(Error),
-}
-
-impl fmt::Display for McpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidParams(message) => write!(f, "{message}"),
-            Self::Verb(source) => write!(f, "{source}"),
-        }
-    }
-}
-
-impl std::error::Error for McpError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidParams(_) => None,
-            Self::Verb(source) => Some(source),
-        }
-    }
 }
 
 impl From<Error> for McpError {
@@ -483,24 +461,13 @@ fn note(ctx: &Context, line: &str) {
 
 /// A verb failure's variant name — what the journal records instead of the
 /// message, which can quote the value that was rejected.
-fn error_kind(error: &Error) -> &'static str {
-    match error {
-        Error::Clock => "Clock",
-        Error::CrossDevice { .. } => "CrossDevice",
-        Error::Git(_) => "Git",
-        Error::InvalidInput { .. } => "InvalidInput",
-        Error::Io { .. } => "Io",
-        Error::Json { .. } => "Json",
-        Error::LockHeld { .. } => "LockHeld",
-        Error::MissingEnv { .. } => "MissingEnv",
-        Error::MissingField { .. } => "MissingField",
-        Error::NotFound { .. } => "NotFound",
-        Error::Parse { .. } => "Parse",
-        Error::Refused { .. } => "Refused",
-        Error::ReplacesMissing { .. } => "ReplacesMissing",
-        Error::TooManyCollisions { .. } => "TooManyCollisions",
-        Error::Untrusted(_) => "Untrusted",
-    }
+fn error_kind(error: &Error) -> String {
+    let debug = format!("{error:?}");
+    debug
+        .split(|c: char| !c.is_alphanumeric())
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// The `tools/list` array: `recall`, `remember`, `banks`, in that order.
@@ -589,11 +556,7 @@ pub(crate) fn recall(ctx: &Context, params: &Value) -> Result<Answer, McpError> 
     // The shape of the priming, never its content — the same line `sandman
     // recall` writes, for the same reason: a journal that quoted the memories
     // back would be a second copy of the banks.
-    let sections = if composed.trimmed.sections.is_empty() {
-        EMPTY.to_owned()
-    } else {
-        composed.trimmed.sections.join(",")
-    };
+    let sections = composed.trimmed.listed();
     let note = format!(
         "cwd={} banks={} memories={} pointers={} chars={} budget={BUDGET_CHARS} \
 trimmed={sections} banks_degraded={} cut_lines={}",
@@ -676,9 +639,8 @@ pub(crate) fn remember(ctx: &Context, params: &Value) -> Result<Answer, McpError
         .and_then(OsStr::to_str)
         .unwrap_or(NONE);
     let kind = outcome.filename.split('_').next().unwrap_or(NONE);
-    let result = if outcome.archived.is_some() {
-        "replaced"
-    } else if outcome.collided {
+    // remember never names a file to replace, so nothing is archived
+    let result = if outcome.collided {
         "collided"
     } else {
         "created"
@@ -955,7 +917,9 @@ mod tests {
     use crate::time::Timestamp;
     use crate::verbs;
     use std::fs;
-    use std::io::{self, Cursor, Write};
+    use std::io::{self, Cursor};
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::os::unix::net::UnixStream;
     use std::path::PathBuf;
 
     /// The body every seeded memory carries — one sentence, no secrets.
@@ -997,20 +961,6 @@ mod tests {
                 session_id: None,
             },
         )
-    }
-
-    /// A stream that is not there: every write is the client having hung up,
-    /// with the kind the caller wants to see handled.
-    struct Gone(io::ErrorKind);
-
-    impl Write for Gone {
-        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
-            Err(io::Error::new(self.0, "the client is not there"))
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
     }
 
     /// Drive [`serve`] over one scripted stdin — bytes, so a line that is not
@@ -1078,8 +1028,7 @@ mod tests {
         assert!(answered[5].contains(r#""id":5"#), "{}", answered[5]);
         assert!(
             answered[5].contains("not initialized: send initialize first"),
-            "{}",
-            answered[5]
+            "{answered:?}"
         );
         // A ping is answered before the handshake: it asks only whether the
         // server is there.
@@ -1087,15 +1036,10 @@ mod tests {
         // A handshake with no params at all still negotiates.
         assert!(
             answered[7].contains(&format!(r#""protocolVersion":"{}""#, PROTOCOL_VERSIONS[0])),
-            "{}",
-            answered[7]
+            "{answered:?}"
         );
         // …and the request that was too early now answers.
-        assert!(
-            answered[8].contains(r#""name":"recall""#),
-            "{}",
-            answered[8]
-        );
+        assert!(answered[8].contains(r#""name":"recall""#), "{answered:?}");
         assert!(answered[9].contains(r#""code":-32601"#), "{}", answered[9]);
 
         let journal = fs::read_to_string(paths::run_log(
@@ -1126,8 +1070,7 @@ mod tests {
             let answered = conversation(&ctx, format!("{line}\n").as_bytes());
             assert!(
                 answered[0].contains(&format!(r#""protocolVersion":"{requested}""#)),
-                "{}",
-                answered[0]
+                "{answered:?}"
             );
         }
         // A revision this server does not speak, a version that is not a
@@ -1143,8 +1086,7 @@ mod tests {
             let answered = conversation(&ctx, format!("{line}\n").as_bytes());
             assert!(
                 answered[0].contains(&format!(r#""protocolVersion":"{}""#, PROTOCOL_VERSIONS[0])),
-                "{params}: {}",
-                answered[0]
+                "{params}: {answered:?}"
             );
             assert!(!answered[0].contains(r#""error""#), "{}", answered[0]);
         }
@@ -1177,19 +1119,17 @@ mod tests {
         let mut script = line.to_vec();
         script.push(b'\n');
 
-        serve(
-            &ctx,
-            Cursor::new(script.clone()),
-            Gone(io::ErrorKind::BrokenPipe),
-        )
-        .expect("a client that went away is a normal ending");
-        let refused = serve(
-            &ctx,
-            Cursor::new(script),
-            Gone(io::ErrorKind::PermissionDenied),
-        )
-        .expect_err("a write that failed for any other reason is a failure");
-        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+        // The hang-up lands on the parse error a non-UTF-8 line is owed.
+        let (hung_up, peer) = UnixStream::pair().expect("a socket pair");
+        drop(peer);
+        serve(&ctx, Cursor::new(b"\xff\n".to_vec()), hung_up)
+            .expect("a client that went away is a normal ending");
+        let refused = serve(&ctx, Cursor::new(script), &mut [][..])
+            .expect_err("a write that failed for any other reason is a failure");
+        assert_eq!(refused.kind(), io::ErrorKind::WriteZero);
+        // So is a read that failed: a directory is no stream.
+        let unread = fs::File::open(ctx.data_root.as_path()).expect("open a directory");
+        assert!(serve(&ctx, io::BufReader::new(unread), Vec::new()).is_err());
     }
 
     #[test]
@@ -1217,16 +1157,11 @@ mod tests {
 
         let answered = conversation(&ctx, script.as_bytes());
         assert_eq!(answered.len(), 6, "{answered:#?}");
-        assert!(
-            answered[1].contains(r#""isError":false"#),
-            "{}",
-            answered[1]
-        );
+        assert!(answered[1].contains(r#""isError":false"#), "{answered:?}");
         // The tool's own output shape rides inside the text block, escaped.
         assert!(
             answered[2].contains(r#"\"outcome\":\"created\""#),
-            "{}",
-            answered[2]
+            "{answered:?}"
         );
         // A verb that refused is a result the model can read; a call the caller
         // got wrong is a protocol error it cannot.
@@ -1434,12 +1369,10 @@ mod tests {
             Err(McpError::InvalidParams(_))
         ));
         // A parameter of the wrong JSON type names itself.
-        let Err(McpError::InvalidParams(message)) =
-            recall(&ctx, &Value::object([("cwd", Value::Number(5.0))]))
-        else {
-            panic!("a numeric cwd must be refused");
-        };
-        assert!(message.contains("cwd"), "{message}");
+        assert!(matches!(
+            recall(&ctx, &Value::object([("cwd", Value::Number(5.0))])),
+            Err(McpError::InvalidParams(message)) if message.contains("cwd")
+        ));
         // Arguments that are not an object at all.
         assert!(matches!(
             recall(&ctx, &Value::array([Value::string("cwd")])),
@@ -1544,6 +1477,17 @@ mod tests {
         assert!(is_live("-"));
         assert!(!is_live("Users-you-code"));
         assert!(!is_live(""));
+        // A walk deeper than the bound ends there; an unreadable directory is
+        // not live.
+        let deep = temp.path().join("d/".repeat(70));
+        fs::create_dir_all(&deep).expect("a deep chain");
+        assert!(!is_live(&Bank::key_for(&deep)));
+        let locked = temp.path().join("locked");
+        fs::create_dir_all(locked.join("inner")).expect("locked");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod");
+        let unreadable = is_live(&Bank::key_for(&locked.join("inner")));
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("chmod back");
+        assert!(!unreadable);
     }
 
     #[test]
@@ -1565,5 +1509,15 @@ mod tests {
                 .expect("an index path"),
         );
         assert!(path.is_file(), "{}", path.display());
+        // A bank and no cwd: the bank named, not the home one.
+        let banked = Value::object([
+            ("bank", Value::string("-nonexistent-place-xyz")),
+            ("body", Value::string("a bank by key")),
+        ]);
+        let written = call(&ctx, "remember", &banked).expect("remember");
+        assert_eq!(
+            written.result.get("bank").and_then(Value::as_str),
+            Some("-nonexistent-place-xyz")
+        );
     }
 }

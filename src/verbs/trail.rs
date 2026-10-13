@@ -365,8 +365,14 @@ fn day_files(data_root: &Path) -> Result<Vec<PathBuf>> {
 fn sorted_children(dir: &Path) -> Result<Vec<PathBuf>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) if source.kind() == ErrorKind::NotADirectory => return Ok(Vec::new()),
+        Err(source)
+            if matches!(
+                source.kind(),
+                ErrorKind::NotFound | ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(Vec::new());
+        }
         Err(source) => return Err(Error::io(dir, source)),
     };
     let mut children: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
@@ -377,14 +383,7 @@ fn sorted_children(dir: &Path) -> Result<Vec<PathBuf>> {
 /// The `yyyy-mm-dd` a day file covers, read off its path.
 fn day_of(data_root: &Path, path: &Path) -> Option<String> {
     let rest = path.strip_prefix(paths::trail_dir(data_root)).ok()?;
-    let parts: Vec<&str> = rest.iter().filter_map(|part| part.to_str()).collect();
-    match parts.as_slice() {
-        [year, month, day] => Some(format!(
-            "{year}-{month}-{}",
-            day.strip_suffix(".jsonl").unwrap_or(day)
-        )),
-        _ => None,
-    }
+    Some(rest.to_str()?.trim_end_matches(".jsonl").replace('/', "-"))
 }
 
 /// The event with `id`, if the trail holds one.
@@ -554,9 +553,7 @@ fn append_locked(data_root: &Path, mut event: Event, remint: bool) -> Result<Eve
     }
     text.push_str(&event.render());
     text.push('\n');
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
-    }
+    atomic::ensure_parent(&path)?;
     atomic::write(&path, &text)?;
     Ok(event)
 }
@@ -598,9 +595,7 @@ pub fn revoke(data_root: &Path, id: &str, reason: &str) -> Result<Revoked> {
 /// Today's file — its parents created, the file itself not.
 pub fn today(data_root: &Path) -> Result<PathBuf> {
     let path = paths::trail_day(data_root, Timestamp::now()?);
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
-    }
+    atomic::ensure_parent(&path)?;
     Ok(path)
 }
 
@@ -619,6 +614,8 @@ mod tests {
     use crate::error::Error;
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt as _;
 
     fn draft(kind: &str, parent: Option<&str>) -> Draft {
         Draft {
@@ -679,6 +676,17 @@ mod tests {
             append(temp.path(), draft("change", Some("e-nope"))),
             Err(Error::NotFound { .. })
         ));
+        let negative = Draft {
+            cost_usd: Some(-1.0),
+            ..draft("change", None)
+        };
+        assert!(matches!(
+            append(temp.path(), negative),
+            Err(Error::InvalidInput {
+                what: "cost_usd",
+                ..
+            })
+        ));
         assert!(read(temp.path(), None).expect("read").is_empty());
     }
 
@@ -687,6 +695,8 @@ mod tests {
         let temp = TempDir::new("trail-fixed");
         let event = Event::new(draft("change", None), Timestamp::now().expect("now"));
         append_event(temp.path(), event.clone(), false).expect("first");
+        let reminted = append_event(temp.path(), event.clone(), true).expect("reminted");
+        assert_ne!(reminted.id, event.id);
         assert!(matches!(
             append_event(temp.path(), event, false),
             Err(Error::Refused { .. })
@@ -700,11 +710,10 @@ mod tests {
         let child = append(temp.path(), draft("change", Some(&root.id))).expect("child");
         let grandchild = append(temp.path(), draft("change", Some(&child.id))).expect("grandchild");
         append(temp.path(), draft("change", None)).expect("unrelated");
-        let first = revoke(temp.path(), &root.id, "wrong path").expect("revoke");
-        let Revoked::Now(revocation) = first else {
-            panic!("expected a new revoke");
-        };
-        assert_eq!(revocation.draft.parent.as_deref(), Some(root.id.as_str()));
+        assert!(matches!(
+            revoke(temp.path(), &root.id, "wrong path").expect("revoke"),
+            Revoked::Now(revocation) if revocation.draft.parent == Some(root.id.clone())
+        ));
         assert!(matches!(
             revoke(temp.path(), &root.id, "again").expect("again"),
             Revoked::Already(_)
@@ -776,8 +785,39 @@ mod tests {
         assert_eq!(draft.kind, "breath");
         assert_eq!(draft.refs, ["a", "b"]);
         assert_eq!(draft.cost_usd, Some(1.5));
-        assert!(Draft::from_json(r#"{"kind":"breath","id":"e-x"}"#).is_err());
-        assert!(Draft::from_json("[]").is_err());
+        for bad in [
+            r#"{"kind":"breath","id":"e-x"}"#,
+            "[]",
+            "{",
+            r#"{"kind":1}"#,
+            r#"{"cost_usd":"x"}"#,
+            r#"{"refs":"x"}"#,
+        ] {
+            assert!(Draft::from_json(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            Draft::from_json(r#"{"cost_usd":null,"refs":null}"#).expect("nulls"),
+            Draft::default()
+        );
+        assert!(Event::parse("{").is_err() && Event::parse("{}").is_err());
+    }
+
+    #[test]
+    fn a_stray_file_is_skipped_and_an_unreadable_day_is_an_error() {
+        let temp = TempDir::new("trail-files");
+        let day = temp.path().join("trail/2026/10/01.jsonl");
+        std::fs::create_dir_all(&day).expect("a directory where a day goes");
+        std::fs::write(temp.path().join("trail/notes"), "").expect("a stray file");
+        assert!(matches!(read(temp.path(), None), Err(Error::Io { .. })));
+        std::fs::remove_dir(&day).expect("rmdir");
+        std::fs::write(&day, "nope\n").expect("a garbled day");
+        assert!(matches!(read(temp.path(), None), Err(Error::Json { .. })));
+        let year = temp.path().join("trail/2027");
+        std::fs::create_dir(&year).expect("a year");
+        std::fs::set_permissions(&year, Permissions::from_mode(0o000)).expect("chmod");
+        let unreadable = read(temp.path(), None);
+        std::fs::set_permissions(&year, Permissions::from_mode(0o755)).expect("chmod back");
+        assert!(matches!(unreadable, Err(Error::Io { .. })));
     }
 
     #[test]

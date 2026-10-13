@@ -293,7 +293,7 @@ impl Sources {
     /// Replace `sources.toml`. The caller holds the lock.
     fn write(&self, data_root: &Path) -> Result<()> {
         let path = paths::breath_sources(data_root);
-        ensure_parent(&path)?;
+        atomic::ensure_parent(&path)?;
         atomic::write(&path, &self.render())
     }
 
@@ -796,7 +796,8 @@ fn unit(what: &'static str, value: Option<f64>) -> Result<Option<f64>> {
     }
 }
 
-/// File a breath, or count it seen again — see [`repeat_of`].
+/// File a breath, or count it seen again — see [`repeat_of`]. `repo` is the
+/// command line's to check.
 pub fn file(ctx: &Context, filing: &Filing) -> Result<Filed> {
     let title = one_line(&filing.title);
     let url = one_line(&filing.url);
@@ -808,9 +809,6 @@ pub fn file(ctx: &Context, filing: &Filing) -> Result<Filed> {
     }
     if filing.summary.trim().is_empty() {
         return Err(Error::invalid("summary", "empty"));
-    }
-    if !valid_repo(&filing.repo) {
-        return Err(Error::invalid("repo", filing.repo.clone()));
     }
     let bearing = unit("bearing", filing.bearing)?;
     let novelty = unit("novelty", filing.novelty)?;
@@ -969,10 +967,8 @@ pub fn transition(
     reason: Option<&str>,
 ) -> Result<(Breath, Option<trail::Event>)> {
     let name = breath_name(file)?;
+    // a drop without a reason is the command line's to refuse
     let reason = reason.map(one_line).filter(|reason| !reason.is_empty());
-    if to == Transition::Drop && reason.is_none() {
-        return Err(Error::refused("drop needs --reason"));
-    }
     let breath = {
         let _lock = CommitLock::acquire(&ctx.data_root)?;
         let path = paths::breath_dir(&ctx.data_root).join(&name);
@@ -1592,14 +1588,6 @@ pub fn reweight(ctx: &Context, dry_run: bool) -> Result<(Vec<Change>, Option<tra
     Ok((changes, Some(event)))
 }
 
-/// Create `path`'s directory.
-fn ensure_parent(path: &Path) -> Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1635,6 +1623,7 @@ mod tests {
             normal_url("https://example.com/p?id=3&utm_campaign=z&ref=y"),
             "https://example.com/p?id=3&ref=y"
         );
+        assert_eq!(normal_url("Example.com/a/"), "example.com/a");
         for (left, right) in [
             (
                 "https://example.com/#/post/1",

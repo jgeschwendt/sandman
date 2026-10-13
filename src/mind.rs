@@ -529,11 +529,8 @@ fn one_line_200(text: &str) -> String {
 /// Read a child pipe to the end, lossily — a mind's bytes are not sandman's
 /// to validate.
 fn drain<R: Read>(pipe: Option<R>) -> String {
-    let Some(mut pipe) = pipe else {
-        return String::new();
-    };
     let mut bytes = Vec::new();
-    let _ = pipe.read_to_end(&mut bytes);
+    let _ = pipe.map(|mut pipe| pipe.read_to_end(&mut bytes));
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
@@ -571,14 +568,15 @@ mod tests {
         assert_eq!(minds.len(), 3);
         for (mind, tier) in minds.iter().zip(Tier::ALL) {
             assert_eq!(mind.tier, tier);
-            if std::env::var_os(tier.model_env()).is_none() {
-                assert_eq!(mind.model, tier.model_default());
-            }
+            assert!(
+                std::env::var_os(tier.model_env()).is_some() || mind.model == tier.model_default()
+            );
         }
-        if std::env::var_os(super::UPKEEP_ENV).is_none() {
-            assert_eq!(upkeep().model, super::UPKEEP_MODEL_DEFAULT);
-            assert_eq!(upkeep().tier, Tier::Opus);
-        }
+        assert_eq!(upkeep().tier, Tier::Opus);
+        assert!(
+            std::env::var_os(super::UPKEEP_ENV).is_some()
+                || upkeep().model == super::UPKEEP_MODEL_DEFAULT
+        );
     }
 
     #[test]
@@ -679,10 +677,15 @@ mod tests {
             prompt: "hello".to_owned(),
             timeout: Duration::from_secs(30),
         };
-        match ask(&request) {
-            Err(Abstained::Failed(detail)) => assert!(detail.contains("exit 3"), "{detail}"),
-            other => panic!("expected Failed, got {other:?}"),
-        }
+        assert!(matches!(
+            ask(&request),
+            Err(Abstained::Failed(detail)) if detail.contains("exit 3")
+        ));
+        assert_eq!(
+            Abstained::Unreadable("x".to_owned()).to_string(),
+            "unreadable: x"
+        );
+        assert_eq!(Abstained::Timeout.to_string(), "timeout");
     }
 
     #[test]

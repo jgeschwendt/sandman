@@ -97,6 +97,19 @@ impl Machine {
         path
     }
 
+    /// Nine pointers already queued: the next take fills the queue.
+    fn nine_queued(&self) {
+        let recent = self.root().join("memories").join(".recent");
+        fs::create_dir_all(&recent).expect("recent dir");
+        for index in 0..9 {
+            fs::write(
+                recent.join(format!("older-{index}.json")),
+                format!("{{\"ended\":\"2026-08-0{}T12:00:00Z\"}}\n", index + 1),
+            )
+            .expect("pointer");
+        }
+    }
+
     fn run(&self, args: &[&str]) -> Output {
         self.run_with_stdin(args, "")
     }
@@ -118,20 +131,26 @@ impl Machine {
 #[test]
 fn the_usage_screen_lists_the_verbs() {
     let machine = Machine::new("usage");
-    let output = machine.run(&["--help"]);
-    assert_eq!(code(&output), 0);
-    for verb in [
-        "dream",
-        "forget",
-        "recall",
-        "reconcile",
-        "reflect",
-        "remember",
-        "take",
-        "trail",
-        "version",
+    for args in [
+        &["--help"][..],
+        &["breathe", "file", "-h"],
+        &["shift", "pick", "-h"],
     ] {
-        assert!(stdout(&output).contains(verb), "usage omits {verb}");
+        let output = machine.run(args);
+        assert_eq!(code(&output), 0);
+        for verb in [
+            "dream",
+            "forget",
+            "recall",
+            "reconcile",
+            "reflect",
+            "remember",
+            "take",
+            "trail",
+            "version",
+        ] {
+            assert!(stdout(&output).contains(verb), "usage omits {verb}");
+        }
     }
 }
 
@@ -807,6 +826,13 @@ fn the_hooks_read_their_payloads_from_stdin() {
     let broken = machine.run_with_stdin(&["take", "--hook"], "not json");
     assert_eq!(code(&broken), 1);
     assert!(stderr(&broken).contains("hook payload"));
+    let broken = machine.run_with_stdin(&["recall", "--hook"], "not json");
+    assert_eq!(code(&broken), 1);
+    let log = machine.journal("recall");
+    assert!(
+        log.contains("hook payload unparseable: ") && log.contains(" error: "),
+        "{log}"
+    );
 
     // SessionStart → recall, answered in the hook envelope.
     let recalled = machine.run_with_stdin(
@@ -1518,15 +1544,7 @@ fn a_live_transcript_is_refused_with_one_line() {
 #[test]
 fn a_full_queue_spawns_a_detached_dream() {
     let machine = Machine::new("queue");
-    let recent = machine.root().join("memories").join(".recent");
-    fs::create_dir_all(&recent).expect("recent dir");
-    for index in 0..9 {
-        fs::write(
-            recent.join(format!("older-{index}.json")),
-            format!("{{\"ended\":\"2026-08-0{}T12:00:00Z\"}}\n", index + 1),
-        )
-        .expect("pointer");
-    }
+    machine.nine_queued();
     machine.transcript(&[r#"{"type":"user","message":{"content":"the tenth"}}"#]);
 
     // The spawned dream reaches a stub, never the real binary.
@@ -1590,10 +1608,67 @@ fn bad_flags_are_usage_failures_and_write_nothing() {
         vec!["take", SID, "--hook"],
         vec!["forget"],
         vec!["recall", "positional"],
+        vec!["breathe"],
+        vec!["breathe", "nope"],
+        vec!["breathe", "attach", "--nope"],
+        vec!["breathe", "close", "--nope"],
+        vec!["breathe", "file", "--nope"],
+        vec!["breathe", "sources", "--nope"],
+        vec!["shift"],
+        vec!["shift", "nope"],
+        vec!["shift", "attach", "--nope"],
+        vec!["shift", "handoff", "--nope"],
+        vec!["shift", "pick", "--nope"],
+        vec!["trail"],
+        vec!["trail", "append", "--nope"],
+        vec!["trail", "log", "--nope"],
+        vec!["trail", "log", "--since", "yesterday"],
     ] {
         let output = machine.run(&args);
         assert_eq!(code(&output), 2, "{args:?}");
         assert!(stderr(&output).starts_with("sandman: "), "{args:?}");
     }
+    for (args, knob) in [
+        (&["shift", "brief"][..], "SANDMAN_SHIFT_BUDGET_USD"),
+        (
+            &["breathe", "pass", "--kind", "skim"],
+            "SANDMAN_BREATH_DEAD_COST_USD",
+        ),
+    ] {
+        let output = machine.run_with(args, "", &[(knob, "-1")]);
+        assert_eq!(code(&output), 2, "{args:?}");
+        assert!(stderr(&output).contains(&format!("${knob} wants USD, got `-1`")));
+    }
     assert!(!Path::new(&machine.root()).exists());
+}
+
+#[test]
+fn a_full_queue_under_a_held_dream_lock_spawns_nothing() {
+    let machine = Machine::new("queue-held");
+    machine.nine_queued();
+    fs::write(machine.root().join("dream.lock"), "").expect("a held lock");
+    machine.transcript(&[r#"{"type":"user","message":{"content":"the tenth"}}"#]);
+    fs::create_dir_all(machine.project().join(SID)).expect("a sidecar directory");
+    let taken = machine.run(&["take", SID]);
+    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    assert!(
+        stderr(&taken).starts_with("queue at 10 — a dream is already running"),
+        "{}",
+        stderr(&taken)
+    );
+    let log = machine.journal("take");
+    assert!(
+        log.contains(" directory=") && log.contains("dream held queue=10"),
+        "{log}"
+    );
+}
+
+#[test]
+fn a_root_that_is_a_file_fails_both_reflects() {
+    let machine = Machine::new("root-file");
+    let root = machine.write("root", "");
+    for args in [&["reflect"][..], &["reflect", "--day", "2026-08-31"]] {
+        let output = feed(machine.sandman(args).env("SANDMAN_ROOT", &root), "");
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+    }
 }
