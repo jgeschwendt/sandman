@@ -6,7 +6,7 @@ on_error: claude
 
 # Shift
 
-The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it only opens and closes shifts, and pushes what they landed. Every tick opens with the push sweep: each trunk checkout `~/.grove/code/jgeschwendt/*/main` with a `Shift:` trailer on any commit its upstream lacks is pushed — the session cannot reach the remote, this host can — and a trunk ahead only by the owner's own commits is never the machine's to push. The block runs with mise's shims and `~/.local/bin` on `PATH`, so the repos' pre-push gates find their tools under launchd's bare one. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once spawn lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
+The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it opens and closes shifts and carries what they landed to GitHub — the session cannot reach it, this host can, `gh` authenticated as the owner. Trunk is never pushed: every tick opens with the landing sweep, which opens each handed-off shift's `landing` (`sandman shift land`) as a pull request, reads every open one back, and merges by rebase the green ones no merge queue or auto-merge will; red CI, a refused push and a pull request closed unmerged are corrections on the trail, once each; a merge is a `change` event and fast-forwards the local trunk when it is clean (sandman's `docs/BANK-FORMAT.md` § shifts, Landing). The block runs with mise's shims and `~/.local/bin` on `PATH`, so the repos' pre-push gates find their tools under launchd's bare one. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once spawn lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
 
 ## The creation week
 
@@ -25,7 +25,7 @@ Local time, America/New_York; Sunday is Day 1, Saturday the Sabbath. The owner w
 ## State
 
 - `~/.sandman/shifts/current.json` — the lock: `{bg_id, handoff_by, path, repo, session_id, shift, started, theme}` while a shift is open, absent otherwise. `sandman shift brief` writes it, `sandman shift attach` adds the session ids, `sandman shift handoff` removes it. Never delete it by hand: `handoff --abandoned` is the release, and it records the abandonment on the trail.
-- `~/.sandman/shifts/<id>/` — `brief.md` (the prompt the session got), `handoff.md` (the session writes it, then runs `sandman shift handoff --shift <id> --from-session` itself), `meta.json` (`handoff` copies the session ids in from `current.json`; the reap stamps `reaped`).
+- `~/.sandman/shifts/<id>/` — `brief.md` (the prompt the session got), `handoff.md` (the session writes it, then runs `sandman shift handoff --shift <id> --from-session` itself), `meta.json` (`handoff` copies the session ids in from `current.json`; the reap stamps `reaped`; `shift land` writes `landing`, the sweep's `shift pr` writes `pr`).
 - `~/.sandman/shifts/PAUSE` — the owner's off switch. While it exists no shift opens; an open one still closes. Only the owner removes it.
 - `~/.local/state/claude/window.json` — the five-hour window as the harness statusline last saw it; `sandman shift clock --check` exits 1 by day, with under `SANDMAN_SHIFT_MIN_WINDOW_MIN` minutes of night or window left, or at 90 % used, 3 when the file is unreadable or of the wrong shape, and 0 when the file is missing or stale — over 30 minutes old, as it is overnight with no interactive session to refresh it (the session then runs until the window or the runner's timeout cuts it off).
 
@@ -42,7 +42,7 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 
 ## The sandbox
 
-A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove`, `~/.sandman`, `~/.routines`, `~/.threads`, `~/.local/state/claude`, mise's state and the toolchain caches (`~/.bun`, `~/.cache`, `~/.cargo`, `~/.hex`, `~/.mix`, `~/Library/Caches`; never their `bin/` or config), never `.claude/` config or `~/.claude`; no project `.mcp.json` server; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. Tests run as `~/.local/bin/shift-test [--log <file>] <command>` — the whole Bash call, or it stays sandboxed and exits 71 — the one other exclusion, inside its own narrower Seatbelt profile (`profiles/shift-test.sb`: credentials unreadable, writes to checkouts, caches and temp, loopback only). `git fetch`, `git pull`, `git push`, `git merge --ff-only` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift lands on trunk by fast-forward and the push sweep pushes it. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
+A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove`, `~/.sandman`, `~/.routines`, `~/.threads`, `~/.local/state/claude`, mise's state and the toolchain caches (`~/.bun`, `~/.cache`, `~/.cargo`, `~/.hex`, `~/.mix`, `~/Library/Caches`; never their `bin/` or config), never `.claude/` config or `~/.claude`; no project `.mcp.json` server; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. Tests run as `~/.local/bin/shift-test [--log <file>] <command>` — the whole Bash call, or it stays sandboxed and exits 71 — the one other exclusion, inside its own narrower Seatbelt profile (`profiles/shift-test.sb`: credentials unreadable, writes to checkouts, caches and temp, loopback only). `git fetch`, `git pull`, `git push` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift records its landing with `sandman shift land` and the landing sweep pushes the branch and opens the pull request. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
 
 ## Spawn's answers
 
@@ -57,37 +57,114 @@ A shift runs in `dontAsk` — no prompts, no classifier, anything that would hav
 - `brief` refusing with `shift … is open`: `current.json` exists, so the open block should not have reached it; a concurrent hand run is the cause. Wait for the next tick.
 - `brief` refusing on a template slot: `prompts/shift.md` in sandman's trunk names a slot the binary does not fill — a template ahead of the installed binary. Install the newer binary; do not edit the template here.
 - `spawn start` answering `Workspace not trusted`: the picked trunk has never had Claude Code's trust prompt accepted, and `--bg` will not start there (`-p` would; `--bg` will not). Accepting trust is the owner's call, so never set `hasTrustDialogAccepted` yourself. `sandman shift pick` skips untrusted trunks and `shift pick --untrusted` lists them; abandon the shift with the cause as its `--reason`, then open a thread keyed `shift:trust:<repo>` asking the owner to run `claude` once in that path or add the repo to `SANDMAN_SHIFT_SKIP`. (observed 2026-10-10 · s-20261010T0225Z, jlg.io/main)
-- A push the sweep finds rejected (trunk diverged from `origin`, a red pre-push gate) is a `correction` event on the trail naming the repo, the branch and the trailer's shift, never a fault: the tick goes on to close and open, and the commits wait on trunk for the owner or the next shift on that repo. A refusal citing `repository rule violations` is a `guard` instead — the repo's ruleset refuses every direct push, and only the owner can add a bypass actor or move it to a PR flow. Either is recorded once per (repo, HEAD): `$ROUTINE_STATE_DIR/rejected/<repo>` holds the refused sha (written before the push, so a gate the watchdog kills mid-push counts), the trunk is skipped until HEAD moves or six hours pass, and a retry of the same HEAD refused again adds nothing to the trail. Every push runs the repo's pre-push gate, minutes of tests; three red trunks retried each tick ran the block past `timeout` and logged 150–267 identical corrections a night (observed 2026-10-12/13).
+- A branch push the sweep finds rejected (a red pre-push gate, a ruleset) is a `correction` event on the trail naming the repo, the branch and the shift, never a fault: the tick goes on, and the landing waits. It is recorded once per (shift, head): `$ROUTINE_STATE_DIR/rejected/<shift>` holds the refused sha (written before the push, so a gate the watchdog kills mid-push counts), the landing is skipped until its head moves or six hours pass, and a retry refused again adds nothing to the trail. Every push runs the repo's pre-push gate, minutes of tests; three red trunks retried each tick ran the block past `timeout` and logged 150–267 identical corrections a night (observed 2026-10-12/13).
+- A `CI red on PR` correction is the next shift's on that repo: its brief lists the pull request under `prs.open` marked `CI red`, and it branches from it, fixes, and lands on its own `shift/<id>`; `shift land` stamps the red one `superseded_by`, and the merge pass closes it. A `gh` that fails (network, auth) skips that pull request for the tick.
 - A session spawn lists `working` with no transcript (its row has no `last_activity`) ten minutes after `started` never took its first turn: a `--bg` `dontAsk` session cannot answer a start-up prompt such as a project `.mcp.json` server's approval. The close block stops it, abandons the shift with `session never started (a project MCP prompt?)` and appends a `correction`; the fix is the server's name in the profile's `disabledMcpjsonServers` (sandman's `docs/BANK-FORMAT.md` § The sandbox). (observed 2026-10-12/13 · stele, s-20261012T0855Z and s-20261013T0816Z, each stalled until handoff_by)
 - Exit 124 is the routine watchdog and fires no catch. A start that timed out may still have started a session: the close block finds `current.json` without `bg_id`, stops any session named `shift <id>`, and abandons it.
 
 ```sh
-# sweep: push every trunk ahead of origin that a shift landed on (a Shift: trailer anywhere in what is unpushed); the owner's own commits alone are never pushed
+# sweep: every landing becomes a pull request and CI decides — the queue, auto-merge or this sweep merges it by rebase; trunk is never pushed
 export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"   # launchd's bare PATH hides mise's tools from the pre-push gates
 sm="$HOME/.local/bin/sandman"
-for trunk in "$HOME"/.grove/code/jgeschwendt/*/main; do
-  landed=$(git -C "$trunk" log --format='%(trailers:key=Shift,valueonly)' '@{upstream}..HEAD' 2>/dev/null | grep -m 1 .) || continue
-  repo=${trunk#"$HOME/.grove/code/"}
-  repo=${repo%/main}
-  # a HEAD rejected within six hours waits for a new commit: each push runs the repo's pre-push gate (minutes of tests)
-  seen="$ROUTINE_STATE_DIR/rejected/${repo##*/}"
-  head=$(git -C "$trunk" rev-parse HEAD)
-  told=$(cat "$seen" 2>/dev/null) || told=
-  [ -z "$(find "$seen" -mmin -360 2>/dev/null)" ] || [ "${told%% *}" != "$head" ] || continue
-  # recorded before the push: a gate the watchdog kills mid-push still counts as rejected
-  mkdir -p "${seen%/*}" && printf '%s\n' "$head" > "$seen"
-  err=$(git -C "$trunk" push origin HEAD 2>&1 >/dev/null) && { rm -f "$seen"; continue; }
-  printf '%s told\n' "$head" > "$seen"
-  [ "$told" != "$head told" ] || continue   # one trail event per (repo, HEAD), however often the retry is refused
-  why=$(printf '%s\n' "$err" | awk 'NR == 1 { first = $0 } /^(error|fatal):|^ ?! / { first = $0; exit } END { gsub(/ +/, " ", first); sub(/^ /, "", first); print first }')
-  branch=$(git -C "$trunk" symbolic-ref --short HEAD 2>/dev/null) || branch=HEAD
-  echo "push of $branch in $trunk rejected: $err" >&2
-  kind=correction note="push rejected: $why"
-  case $err in *"repository rule violations"*) kind=guard note="push refused by the repo's ruleset; the owner decides: bypass actor or PR flow" ;; esac
-  "$sm" trail append --kind "$kind" --shift "$landed" --repo "$repo" --branch "$branch" --rationale "$note" >/dev/null
-done
-# reap: every ended shift or breath pass not yet reaped — its session leaves Claude Code's listing, its transcript goes to the archive
 root="${SANDMAN_ROOT:-$HOME/.sandman}"
+# one line per shift whose landing is unsettled: id repo path branch head theme ended superseded_by number url auto red, "-" for none
+landings=$(python3 -I -c '
+import glob, json, sys
+for path in sorted(glob.glob(sys.argv[1] + "/shifts/s-*/meta.json")):
+    try:
+        m = json.load(open(path))
+        land, pr = m["landing"], m.get("pr") or {}
+        row = [m.get("shift"), m.get("repo"), m.get("path"), land.get("branch"), land.get("head"), m.get("theme"), m.get("ended"),
+               land.get("superseded_by"), pr.get("number"), pr.get("url"), pr.get("auto"), pr.get("red")]
+    except (OSError, ValueError, LookupError, TypeError, AttributeError):
+        continue
+    if "merged" not in pr and "closed" not in pr:
+        print(" ".join("-" if v is None else str(v).lower() if isinstance(v, bool) else str(v) for v in row))
+' "$root")
+# merge pass first, so a pull request opened this tick is first read on the next, its checks registered by then
+while read -r id repo path branch head theme ended sup number url auto red <&3; do
+  [ "${number:--}" != - ] || continue   # the heredoc of no landings is one empty line
+  view=$(gh pr view "$number" --repo "$repo" --json state,mergeStateStatus,statusCheckRollup,headRefOid) || continue
+  read -r verdict status prhead failing <<VIEW
+$(printf '%s' "$view" | python3 -I -c '
+import json, sys
+v = json.load(sys.stdin)
+red, pending = [], False
+for check in v.get("statusCheckRollup") or []:
+    said = (check.get("conclusion") or check.get("state") or "").upper()
+    if check.get("status", "COMPLETED") != "COMPLETED" or said in ("", "PENDING", "EXPECTED"):
+        pending = True
+    elif said not in ("SUCCESS", "SKIPPED", "NEUTRAL"):
+        red.append(check.get("name") or check.get("context") or "?")
+status = v.get("mergeStateStatus") or "UNKNOWN"
+if status == "DIRTY":
+    red.append("conflicts with main")
+state = v.get("state")
+verdict = state.lower() if state in ("MERGED", "CLOSED") else "red" if red else "pending" if pending or status == "UNKNOWN" else "green"
+print(verdict, status, v.get("headRefOid") or "-", ", ".join(red))
+')
+VIEW
+  case $verdict in
+    merged)
+      "$sm" shift pr --shift "$id" --merged
+      "$sm" trail append --kind change --shift "$id" --repo "$repo" --branch "$branch" --rationale "merged PR $url" >/dev/null
+      # the local trunk follows when clean, as grove sync would within five minutes: never ahead of origin, never dirtied
+      if git -C "$path" fetch -q origin main && [ -z "$(git -C "$path" status --porcelain --untracked-files=no)" ]; then
+        git -C "$path" merge -q --ff-only '@{upstream}' || :
+      fi ;;
+    closed)
+      "$sm" shift pr --shift "$id" --closed
+      [ "$sup" != - ] || "$sm" trail append --kind correction --shift "$id" --repo "$repo" --branch "$branch" --rationale "PR $url closed unmerged" >/dev/null ;;
+    red|pending|green)
+      if [ "$sup" != - ]; then   # a later shift's landing carries this work on
+        gh pr close "$number" --repo "$repo" --delete-branch --comment "Superseded by $sup's pull request." >/dev/null && "$sm" shift pr --shift "$id" --closed
+      elif [ "$verdict" = red ]; then   # one correction per (shift, head)
+        [ "$red" = "$prhead" ] || "$sm" trail append --kind correction --shift "$id" --repo "$repo" --branch "$branch" --rationale "CI red on PR $url: $failing" >/dev/null
+        [ "$red" = "$prhead" ] || "$sm" shift pr --shift "$id" --red "$prhead"
+      else
+        if [ "$auto" = - ] && [ "$status" != UNKNOWN ]; then
+          # gh merges at once, CI or not, a branch nothing blocks (CLEAN, HAS_HOOKS, UNSTABLE): only a blocked one tries auto-merge or the queue
+          auto=false
+          case $status in CLEAN | HAS_HOOKS | UNSTABLE) ;; *) gh pr merge "$number" --repo "$repo" --auto --rebase --delete-branch >/dev/null 2>&1 && auto=true ;; esac
+          "$sm" shift pr --shift "$id" --auto "$auto"
+        fi
+        # nothing merges it for us: merge on green; the next tick reads it merged
+        [ "$verdict $auto" != "green false" ] || gh pr merge "$number" --repo "$repo" --rebase --delete-branch >/dev/null || :
+      fi ;;
+  esac
+done 3<<LANDINGS
+$landings
+LANDINGS
+# landing pass: a handed-off shift's landing is pushed as its branch, then opened as a pull request
+while read -r id repo path branch head theme ended sup number url auto red <&3; do
+  [ "$number$sup" = "--" ] && [ "$ended" != - ] || continue
+  if [ "$(git -C "$path" rev-parse -q --verify "refs/remotes/origin/$branch")" != "$head" ]; then
+    # a head refused within six hours waits for a new one: each push runs the repo's pre-push gate (minutes of tests)
+    seen="$ROUTINE_STATE_DIR/rejected/$id"
+    told=$(cat "$seen" 2>/dev/null) || told=
+    [ -z "$(find "$seen" -mmin -360 2>/dev/null)" ] || [ "${told%% *}" != "$head" ] || continue
+    # recorded before the push: a gate the watchdog kills mid-push still counts as rejected
+    mkdir -p "${seen%/*}" && printf '%s\n' "$head" > "$seen"
+    if ! err=$(git -C "$path" push origin "$head:refs/heads/$branch" 2>&1 >/dev/null); then
+      printf '%s told\n' "$head" > "$seen"
+      echo "push of $branch in $path rejected: $err" >&2
+      why=$(printf '%s\n' "$err" | awk 'NR == 1 { first = $0 } /^(error|fatal):|^ ?! / { first = $0; exit } END { gsub(/ +/, " ", first); sub(/^ /, "", first); print first }')
+      [ "$told" = "$head told" ] || "$sm" trail append --kind correction --shift "$id" --repo "$repo" --branch "$branch" --rationale "push rejected: $why" >/dev/null
+      continue
+    fi
+    rm -f "$seen"
+  fi
+  body="$root/shifts/$id/report.md"
+  [ -f "$body" ] || body="$root/shifts/$id/handoff.md"
+  # a pull request already open for the branch (a create whose record failed) is adopted: gh names it in its refusal
+  out=$(gh pr create --repo "$repo" --base main --head "$branch" --title "$theme $id · $repo" --body-file "$body" 2>&1) || :
+  url=$(printf '%s\n' "$out" | grep -Eo 'https://[^ ]+/pull/[0-9]+' | tail -n 1)
+  [ -n "$url" ] || { echo "gh pr create for $id: $out" >&2; continue; }
+  "$sm" shift pr --shift "$id" --number "${url##*/}" --url "$url"
+done 3<<LANDINGS
+$landings
+LANDINGS
+# reap: every ended shift or breath pass not yet reaped — its session leaves Claude Code's listing, its transcript goes to the archive
 sp="$HOME/.local/bin/spawn"
 python3 -I -c '
 import glob, json, os, sys

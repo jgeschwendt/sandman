@@ -312,6 +312,13 @@ fn reconcile_reverts_the_revoked_line_and_names_the_memories_to_retire() {
     for sha in &shas {
         assert!(report.contains(&format!("reverted: {sha}")), "{report}");
     }
+    // the machine never merges a reconcile: the owner is handed the pull request
+    assert!(
+        report.contains(&format!(
+            "git push -u origin {branch} && gh pr create --base main --head {branch} --fill"
+        )),
+        "{report}"
+    );
 
     // The operator's checkout is where it was, no scratch tree is left, and
     // their own worktree is unpruned.
@@ -657,7 +664,7 @@ fn refused_at(machine: &Machine, checkout: &Path, event: &str, merge: &str) {
     let report = stdout(&output);
     assert_eq!(code(&output), 1, "{report}");
     assert!(report.contains(&format!("conflict: {merge}")), "{report}");
-    assert!(report.contains("fast-forward only"), "{report}");
+    assert!(report.contains("merges by rebase only"), "{report}");
     assert!(!report.contains("reverted:"), "{report}");
     assert_eq!(git(checkout, &["for-each-ref", "refs/heads/reconcile"]), "");
 }

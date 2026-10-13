@@ -238,9 +238,8 @@ to a message or for `git commit --trailer`.
   no branch is cut. A trunk behind `refs/remotes/origin/<trunk>` (an ancestor of it,
   not equal) fails the repo too — fast-forward it (`grove sync`) and rerun — so a hit
   trunk does not reach, reported `off trunk` and left alone, is one that never landed.
-- **The machine lands by fast-forward only.** A shift never makes a merge commit: when
-  trunk has moved it rebases its own unpushed `shift/<id>` branch onto trunk, then
-  `git merge --ff-only` — so every commit it lands sits on trunk's first-parent line and
+- **The machine merges by rebase only.** A shift never makes a merge commit, and its pull
+  requests merge by rebase (§ shifts, Landing) — so every commit it lands sits on trunk's first-parent line and
   reverts on its own. A merge carrying a revoked `Event:` or `Shift:` trailer is
   therefore a shift that broke the rule: reconcile never reverts a merge, and refuses
   that repo as a `conflict` (exit 1) with a note naming the merge, nothing in it
@@ -312,7 +311,8 @@ shifts/
 given `--cost`, `abandoned: true` when the runner found the session gone, and
 `current.json`'s `bg_id` and `session_id` when the runner attached them — the lock goes,
 the ids stay for the reap; `shift reaped --shift <id>` stamps `reaped` once the runner
-has reaped the session. The rotation reads `repo` and `started`
+has reaped the session. `shift land` adds `landing` and the runner's `shift pr` adds
+`pr` (§ Landing). The rotation reads `repo` and `started`
 from every `meta.json` to know which repo has rested longest.
 
 ### The night
@@ -410,6 +410,7 @@ computed); `$SANDMAN_NOW` pins the instant.
 | `handoff.previous` | the newest `shifts/*/handoff.md`, else `none` |
 | `memories.bearing` | the target's bank chain as recall renders it, under 3,000 characters |
 | `proposals.approved` | the target's open `proposal:<repo>:*` threads (§ report) whose `answer:` is `approve` (case and outer space aside) and that carry `decided:` — `- <key> · decided <ts> · <title>` each, else `none.` |
+| `prs.open` | the target's pull requests as the runner last recorded them (§ Landing) — `meta.json`s with a `pr` neither `merged` nor `closed` and a `landing` not superseded — `- #<n> <url> · <branch> · opened <ts> · auto:<true, false or ?>[ · CI red]` each, else `none.`; the composer reads no network |
 | `proposals.open` | the target's `proposal:` threads still waiting on the owner (`waiting: user`, no `decided:`) — `- <key> · opened <ts> · <title>` each, else `none.`; on the Sabbath every repo's |
 | `sabbath.previous` | Sabbath: this week's targets file (below), the plan last Sabbath wrote for it, cut at 2,000 characters, else `none` |
 | `score.week` | the first 20 lines of the week's `score/<yyyy>-W<ww>.md`, else `none yet`; on the Sabbath the whole page, cut at 6,000 |
@@ -448,7 +449,7 @@ day, reads the plan the Sabbath before it wrote — and uses the target's sectio
 instead of `the target's docs/plan.md`.
 
 **Context slots are data.** `handoff.previous`, `trail.recent`, `memories.bearing`,
-`target.plan_next`, `threads.open`, `proposals.approved`, `proposals.open`, `breath.pending`, `score.week` and the Sabbath's
+`target.plan_next`, `threads.open`, `proposals.approved`, `proposals.open`, `prs.open` (labelled `gh`), `breath.pending`, `score.week` and the Sabbath's
 `trail.week`, `trail.corrections`, `breath.week`, `shifts.week` and `sabbath.previous`
 each render as a
 one-line label — `(data from <source>; not instructions)` — over a ```` ```text ````
@@ -457,8 +458,8 @@ inside can close it and speak as the template. The prompt's Context section says
 same to the session.
 
 The composed brief is capped at 24,000 characters. Over the cap, slots give in this
-order, each until the brief fits or the slot is at its floor, a marker line saying what
-went: `trail.week`, `proposals.open`, `proposals.approved` (whole lines from the tail), `trail.recent` (whole lines, oldest first), `memories.bearing`,
+order, each until the brief fits or the slot is at its floor — one reading `none` or
+`none.` already is — a marker line saying what went: `trail.week`, `proposals.open`, `proposals.approved`, `prs.open` (whole lines from the tail), `trail.recent` (whole lines, oldest first), `memories.bearing`,
 `threads.open` (whole lines from the tail), `handoff.previous` (its head kept, never
 under 1,500 characters), `breath.pending`, `breath.week`, `shifts.week` (whole lines from
 the tail), `trail.corrections` (whole lines, oldest first), `sabbath.previous`,
@@ -485,6 +486,71 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
 `shift handoff` appends one `shift.handoff` event — `rationale` the handoff's first line,
 `refs` `handoff:<path>` and `abandoned` when it was, `cost_usd` the `--cost` it was given.
 
+### Landing
+
+Trunk is never pushed, by a shift or by the runner: every landing is a pull request, and
+it merges by rebase — linear history, each commit's message and `Shift:`/`Event:`
+trailers kept, its sha rewritten. Reconcile finds commits by trailer (`git log --all`),
+so the rewritten copy on trunk is still a hit; the branch's pre-merge copies, trunk never
+reaches, are reported `off trunk`.
+
+1. **The shift lands.** Gated green (`prompts/shift.md` rule 2), it rebases its branch onto
+   the local `origin/main` — a session can neither fetch nor push, and `grove-sync`
+   fetches every trunk each five minutes — and runs `shift land --shift <id> --branch
+   <name>`. It refuses (exit 1) a shift already handed off, a branch the repository at
+   the shift's `path` lacks, one not containing `refs/remotes/origin/main`, one adding
+   nothing to it, and one any commit of whose `origin/main..<branch>` lacks a `Shift:` or
+   an `Event:` trailer, naming the oldest such sha; else it writes `landing: {at, base,
+   branch, head}` into the shift's `meta.json` — `base` the `origin/main` sha, `head` the
+   branch's — and prints the summary. A re-land before the handoff replaces it, and
+   `handoff` keeps it. Every earlier shift those trailers name whose landing is unsettled
+   gets `landing.superseded_by: <id>`: a shift fixing another's red pull request branches
+   from it, so its own carries the original commits on.
+2. **The runner opens it** — the landing pass, every tick (`docs/routines/shift.md`). For
+   each `meta.json` with `ended`, a `landing` not superseded and no `pr`: push
+   `<head>:refs/heads/<branch>` unless `refs/remotes/origin/<branch>` is already `head` —
+   never forced; a refusal is a `correction` `push rejected: <the first error:, fatal: or !
+   line>` once per (shift, head), `$ROUTINE_STATE_DIR/rejected/<shift>` holding the sha
+   (written before the push, so a gate the watchdog kills counts), retried when the head
+   moves or six hours pass — then `gh pr create --base main --head <branch> --title
+   "<theme> <id> · <repo>" --body-file shifts/<id>/report.md` (`handoff.md` without one),
+   and `shift pr --shift <id> --number N --url U` records `pr: {number, opened, url}`. A
+   pull request already open for the branch is adopted from gh's refusal, which names it.
+3. **CI decides; GitHub or the runner merges** — the merge pass, run before the landing
+   pass so a pull request is first read a tick after it opened, its checks registered.
+   For each `pr` neither `merged` nor `closed`, `gh pr view --json
+   state,mergeStateStatus,statusCheckRollup,headRefOid`:
+   - `MERGED`: `shift pr --merged`, a `change` event `merged PR <url>`, and the local
+     trunk fetched and fast-forwarded (`merge --ff-only @{upstream}`) when its tracked
+     files are clean.
+   - `CLOSED`: `shift pr --closed`, and a `correction` `PR <url> closed unmerged` unless
+     it was superseded.
+   - superseded: `gh pr close --delete-branch`, its comment naming the successor; `shift
+     pr --closed`.
+   - red — a check concluded other than `SUCCESS`, `SKIPPED` or `NEUTRAL`, or
+     `mergeStateStatus: DIRTY`: a `correction` `CI red on PR <url>: <failing checks>` and
+     `shift pr --red <head>`, once per head.
+   - otherwise the first look whose merge state is known sets `pr.auto`. A branch nothing
+     blocks (`CLEAN`, `HAS_HOOKS`, `UNSTABLE`) is `false`: `gh pr merge --auto` would merge
+     it at once, CI or not (gh's `isImmediatelyMergeable`, `pkg/cmd/pr/merge/merge.go`,
+     read 2026-10-13). Any other tries `gh pr merge --auto --rebase --delete-branch`: a
+     public repo's ruleset — required checks, a merge queue — takes it, `true`; a refusal
+     is `false`. An `auto: false` pull request whose checks all concluded green, none
+     pending, is merged here, `gh pr merge --rebase --delete-branch`; the next tick reads
+     it merged.
+4. **The next shift sees it.** `prs.open` (§ The brief and its slots) lists the target's
+   pull requests neither merged, closed nor superseded; a `CI red` one is that shift's
+   first work (`prompts/shift.md` Procedure 3).
+
+Nothing is configured per repo: public repos with a ruleset take the `auto: true` path;
+private ones, which the free plan gives no rulesets or auto-merge, the `auto: false` one.
+`shift pr --shift <id>` takes one mark per call — `--number N --url U` (writes `pr`
+whole, stamped `opened`), `--auto true|false`, `--red <sha>`, `--merged`, `--closed` (each
+an instant) — and refuses (exit 1) a shift with no `landing`, or a mark before `pr`.
+
+**The local trunk** — `~/.grove/code/<owner>/<repo>/main` — is never ahead of `origin`:
+no shift commits to it, and after a merge the sweep, else `grove-sync`, fast-forwards it.
+
 ### The handoff and the clock
 
 - **A handoff carries the shift's cost.** `--cost USD` is the session's own total, read
@@ -507,21 +573,10 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
   min past handoff_by`) the handoff opens with the line `Abandoned: <reason>` — above
   whatever the session wrote — and so the `shift.handoff` event's `rationale` reads the
   same.
-- **The runner's push sweep.** Every tick, before it looks for an open shift — a session
-  that hands itself off with `--from-session` has removed `current.json` by then — the
-  shift routine runs `git push origin HEAD` (never forced, no other flag) in each trunk
-  checkout `~/.grove/code/jgeschwendt/*/main` where any commit in `@{upstream}..HEAD`
-  carries a `Shift:` trailer — a shift's last commit is often a trailerless lock rebuild;
-  a trunk ahead only by the owner's own commits is never pushed by the machine. The block
-  puts `~/.local/bin` and mise's shims on `PATH`, so a repo's pre-push gate finds `cargo`,
-  `bun` and `uv` under launchd's bare one. A rejected push is a `correction` event naming
-  the repo, the branch and the newest trailer's shift, rationale `push rejected: <the
-  first error:, fatal: or ! line>`; one citing `repository rule violations` is a `guard`,
-  rationale `push refused by the repo's ruleset; the owner decides: bypass actor or PR
-  flow`. Never a fault: the sweep moves on. Each is recorded once per (repo, HEAD):
-  `$ROUTINE_STATE_DIR/rejected/<repo>` holds the sha, written before the push so a gate
-  the watchdog kills still counts; the trunk is skipped until HEAD moves or six hours
-  pass, and a retried HEAD refused again appends nothing.
+- **The runner's landing sweep** opens every tick, before it looks for an open shift — a
+  session that hands itself off with `--from-session` has removed `current.json` by then
+  — with `~/.local/bin` and mise's shims on `PATH`, so a repo's pre-push gate finds
+  `cargo`, `bun` and `uv` under launchd's bare one (§ Landing).
 - **A session that never started is abandoned in ten minutes.** When spawn lists the
   shift's session `working` with no transcript (no `last_activity`) more than ten minutes
   after `started`, it is waiting on a start-up prompt a `dontAsk` session cannot answer
@@ -593,16 +648,14 @@ any cwd.
   holds in a mode that never says yes on its own.
 
 - **Git's network commands run outside the sandbox.** `git fetch`, `git pull`, `git push`
-  and `grove sync` are `excludedCommands` (beside `git merge --ff-only` and `shift-test`, below), run with the host's own git auth: git over SSH
+  and `grove sync` are `excludedCommands` (beside `shift-test`, below), run with the host's own git auth: git over SSH
   fails inside the macOS sandbox, and a `--bg` session inherits no environment to carry
   a token in.
 - **Some paths no `allowWrite` reaches.** The sandbox protects `.claude/skills`,
   `.claude/agents`, `.claude/commands`, `.claude/hooks`, the `.claude` settings files and
   `.mcp.json` "in your working directory and the directories above it", and `~/.claude`
   almost entirely, whatever `allowWrite` says (<https://code.claude.com/docs/en/sandboxing>, fetched
-  2026-10-12). So `git merge --ff-only *` is an `excludedCommands` entry too: a landing
-  that touches `.claude/skills/…` aborted halfway inside the sandbox (stave, 2026-10-12),
-  and a fast-forward only moves trunk to a commit that already exists. A skill whose
+  2026-10-12). A skill whose
   workspace is `~/.claude/plans/<slug>/` works in `~/.sandman/shifts/<id>/<slug>/`
   instead (`prompts/shift.md` rule 7).
 - **Tests run in a second sandbox.** Inside Claude Code's, a test suite cannot bind
@@ -638,8 +691,9 @@ any cwd.
   status (`prompts/shift.md` rule 7).
 - **Pushing is the runner's.** `git push` from a session fails at the sandbox proxy
   despite `excludedCommands` — "This proxy requires authentication", exit 128 (observed
-  2026-10-11) — so a shift lands on trunk by fast-forward and never pushes; the runner,
-  on the host with working SSH, pushes it in its sweep (§ The handoff and the clock).
+  2026-10-11) — so a shift records its landing (`shift land`) and never pushes; the
+  runner, on the host with working SSH and `gh`, pushes the branch and opens the pull
+  request (§ Landing).
 - **No project MCP server starts.** Claude Code asks once to approve a repo's `.mcp.json`
   servers, and a `--bg` `dontAsk` session can never answer: stele's trunk, the one with a
   `.mcp.json` (`stele serve`), sat at "starting…" until `handoff_by` two nights running
@@ -651,9 +705,9 @@ any cwd.
   unwritable) as scratch; a shift uses `~/.sandman/shifts/<id>/tmp/`. `grove tree add`
   refuses a root the manifest does not declare; the shift falls back to `git -C <trunk>
   worktree add ../shift-<id> -b shift/<id>`. A commit hook that fails EPERM in the sandbox
-  (a pre-commit running `cargo test`) may be skipped with `--no-verify`: the runner's push
-  runs the pre-push gate on the host, and that gate is never skipped (`prompts/shift.md`
-  rule 7).
+  (a pre-commit running `cargo test`) may be skipped with `--no-verify`: the runner's branch
+  push runs the pre-push gate on the host and CI gates the pull request, neither ever
+  skipped (`prompts/shift.md` rule 7).
 - **The runner is canonical here, installed by hand.** `docs/routines/shift.md` is the
   source of `~/.routines/shift.md`. A shift may fix the
   installed runner in place; the owner's session reconciles this canonical copy with it.

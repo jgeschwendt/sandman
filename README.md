@@ -8,7 +8,7 @@ Memory engine for Claude sessions — sandman-format banks, session archiving, a
 JSONL file per UTC day under `<root>/trail/`, every machine commit joined to it by
 `Shift:`/`Event:` trailers. `sandman reconcile <event-id>` reverts the commits of a
 revoked event and its descendants across the grove, on a `reconcile/<event-id>` branch
-cut from each repo's trunk — never a merge: the machine lands by fast-forward only, so a
+cut from each repo's trunk — never a merge: the machine's pull requests merge by rebase, so a
 trailered merge refuses its repo for the operator; a shift id (`s-…`) in place of the event takes back the
 whole shift.
 

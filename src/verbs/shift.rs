@@ -58,13 +58,14 @@ const MAX_SKEW_SECONDS: i64 = 300;
 const CHECK_USED_PERCENT: f64 = 90.0;
 /// The brief's Context slots, each fenced as data under a label naming
 /// where it came from.
-const CONTEXT_SOURCES: [(&str, &str); 14] = [
+const CONTEXT_SOURCES: [(&str, &str); 15] = [
     ("breath.pending", "the breath store"),
     ("breath.week", "the breath store"),
     ("handoff.previous", "the previous shift's handoff.md"),
     ("memories.bearing", "the target's bank chain"),
     ("proposals.approved", "~/.threads"),
     ("proposals.open", "~/.threads"),
+    ("prs.open", "gh"),
     ("sabbath.previous", "last Sabbath's targets file"),
     ("score.week", "this week's score page"),
     ("shifts.week", "shifts/*/meta.json"),
@@ -102,10 +103,11 @@ pub fn profile(kind: &str) -> Option<&'static str> {
 /// What the cap leaves of the previous handoff, at the least.
 const HANDOFF_FLOOR: usize = 1_500;
 /// The order the cap cuts slots in, and how each gives.
-const TRIM_ORDER: [(&str, Cut); 14] = [
+const TRIM_ORDER: [(&str, Cut); 15] = [
     ("trail.week", Cut::OldestLines),
     ("proposals.open", Cut::TailLines),
     ("proposals.approved", Cut::TailLines),
+    ("prs.open", Cut::TailLines),
     ("trail.recent", Cut::OldestLines),
     ("memories.bearing", Cut::TailLines),
     ("threads.open", Cut::TailLines),
@@ -1629,7 +1631,10 @@ fn trim_slot(
     if over == 0 || !slot_names(template).iter().any(|name| name == slot) {
         return false;
     }
-    let Some(text) = slots.get(slot).filter(|text| text.as_str() != "none") else {
+    let Some(text) = slots
+        .get(slot)
+        .filter(|text| !matches!(text.as_str(), "none" | "none."))
+    else {
         return false;
     };
     // Room for the marker line that replaces what went.
@@ -1802,6 +1807,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         ),
     );
     slots.insert("proposals.open", open_proposals(&proposals));
+    slots.insert("prs.open", open_prs(&ctx.data_root, &target.label));
     slots.insert("score.week", score.unwrap_or_else(|| "none yet".to_owned()));
     slots.insert("shift.creation", day.creation.to_owned());
     slots.insert("shift.id", shift.clone());
@@ -2207,24 +2213,261 @@ fn cut_handoff(text: &str) -> String {
     format!("{head}{}", note(length - keep))
 }
 
-/// Stamp `reaped` into `shift`'s `meta.json`: the runner has removed its
-/// session from Claude Code's listing and taken its transcript.
-pub fn reaped(ctx: &Context, shift: &str) -> Result<()> {
-    if shift.contains(['/', '\\']) || shift.starts_with('.') {
-        return Err(Error::invalid("shift id", shift.to_owned()));
-    }
-    let _lock = CommitLock::acquire(&ctx.data_root)?;
-    let mut entries = read_meta(&ctx.data_root, shift)?
-        .value
+/// `value`'s keys with `pairs` set over them, sorted — how every rewrite of
+/// a `meta.json` or `current.json` merges.
+fn with(value: &Value, pairs: impl IntoIterator<Item = (String, Value)>) -> Value {
+    let mut entries = value
         .as_object()
         .map(<[(String, Value)]>::to_vec)
         .unwrap_or_default();
-    entries.retain(|(key, _)| key != "reaped");
-    entries.push(("reaped".to_owned(), Value::string(ctx.now.iso8601())));
+    for (key, value) in pairs {
+        entries.retain(|(name, _)| *name != key);
+        entries.push((key, value));
+    }
     entries.sort_by(|left, right| left.0.cmp(&right.0));
+    Value::Object(entries)
+}
+
+/// `shift`, refused when it would reach outside `shifts/`.
+fn checked(shift: &str) -> Result<&str> {
+    if shift.contains(['/', '\\']) || shift.starts_with('.') {
+        return Err(Error::invalid("shift id", shift.to_owned()));
+    }
+    Ok(shift)
+}
+
+/// Rewrite `shift`'s `meta.json` under the lock as `edit` makes it from the
+/// one on disk.
+fn edit_meta(ctx: &Context, shift: &str, edit: impl FnOnce(&Meta) -> Result<Value>) -> Result<()> {
+    checked(shift)?;
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
+    let value = edit(&read_meta(&ctx.data_root, shift)?)?;
     atomic::write(
         &paths::shift_dir(&ctx.data_root, shift).join("meta.json"),
-        &format!("{}\n", Value::Object(entries).render()),
+        &format!("{}\n", value.render()),
+    )
+}
+
+/// Stamp `reaped` into `shift`'s `meta.json`: the runner has removed its
+/// session from Claude Code's listing and taken its transcript.
+pub fn reaped(ctx: &Context, shift: &str) -> Result<()> {
+    edit_meta(ctx, shift, |meta| {
+        Ok(with(
+            &meta.value,
+            [("reaped".to_owned(), Value::string(ctx.now.iso8601()))],
+        ))
+    })
+}
+
+// ─── the landing ─────────────────────────────────────────────────────────
+
+/// The trunk every landing is rebased onto and every pull request targets.
+const LANDING_BASE: &str = "refs/remotes/origin/main";
+
+/// `meta`'s landing while it is live: not superseded, its pull request
+/// neither merged nor closed.
+fn live_landing(meta: &Meta) -> Option<&Value> {
+    let pr = meta.value.get("pr");
+    meta.value.get("landing").filter(|landing| {
+        landing.get("superseded_by").is_none()
+            && pr.is_none_or(|pr| pr.get("merged").is_none() && pr.get("closed").is_none())
+    })
+}
+
+/// What `land` recorded.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Landed {
+    /// The `origin/main` the branch contains.
+    pub base: String,
+    /// How many commits it adds to it.
+    pub commits: usize,
+    /// The branch head recorded.
+    pub head: String,
+    /// The earlier shifts whose unmerged landings this one carries, and so
+    /// supersedes.
+    pub superseded: Vec<String>,
+}
+
+/// Record `branch` as the open `shift`'s landing — `landing: {at, base,
+/// branch, head}` in its `meta.json` — once it contains the local
+/// `origin/main` and every commit it adds carries `Shift:` and `Event:`
+/// trailers. Any earlier shift those trailers name whose landing is still
+/// unmerged is stamped `superseded_by` this one: its pull request closes
+/// when the runner next looks. The runner pushes the branch and opens the
+/// pull request after the handoff; a re-land before it replaces the record.
+pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
+    let dir = PathBuf::from(
+        read_meta(&ctx.data_root, checked(shift)?)?
+            .path
+            .unwrap_or_default(),
+    );
+    let head = grove::git(
+        &dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}^{{commit}}"),
+        ],
+    )
+    .map_err(|_| Error::not_found("branch", format!("{branch} in {}", dir.display())))?
+    .trim()
+    .to_owned();
+    let base = grove::git(&dir, &["rev-parse", "--verify", LANDING_BASE])?
+        .trim()
+        .to_owned();
+    if !grove::git_ok(&dir, &["merge-base", "--is-ancestor", &base, &head]) {
+        return Err(Error::refused(format!(
+            "{branch} does not contain origin/main ({base}): git rebase origin/main, then land again"
+        )));
+    }
+    let log = grove::git(
+        &dir,
+        &[
+            "log",
+            "--reverse",
+            "-z",
+            "--format=%H%x1f%(trailers:key=Shift,valueonly,separator=%x2C)%x1f%(trailers:key=Event,valueonly,separator=%x2C)",
+            &format!("{base}..{head}"),
+        ],
+    )
+    .unwrap_or_default();
+    let mut named = BTreeSet::new();
+    let mut commits = 0;
+    for record in log
+        .split('\0')
+        .map(|record| record.trim_start_matches('\n'))
+        .filter(|record| !record.is_empty())
+    {
+        let mut fields = record.split('\x1f').map(str::trim);
+        let sha = fields.next().unwrap_or_default();
+        let (shifts, events) = (fields.next().unwrap_or_default(), fields.next());
+        if shifts.is_empty() || events.is_none_or(str::is_empty) {
+            return Err(Error::refused(format!(
+                "{sha} carries no Shift: and Event: trailers — every landed commit names its event (sandman trail trailers)"
+            )));
+        }
+        named.extend(shifts.split(',').map(|one| one.trim().to_owned()));
+        commits += 1;
+    }
+    if commits == 0 {
+        return Err(Error::refused(format!(
+            "{branch} adds nothing to origin/main"
+        )));
+    }
+    let landing = Value::object([
+        ("at", Value::string(ctx.now.iso8601())),
+        ("base", Value::string(base.clone())),
+        ("branch", Value::string(branch)),
+        ("head", Value::string(head.clone())),
+    ]);
+    let superseded: Vec<String> = metas(&ctx.data_root)
+        .into_iter()
+        .filter(|meta| {
+            meta.shift != shift && named.contains(&meta.shift) && live_landing(meta).is_some()
+        })
+        .map(|meta| meta.shift)
+        .collect();
+    edit_meta(ctx, shift, |meta| match &meta.ended {
+        Some(ended) => Err(Error::refused(format!(
+            "shift {shift} was handed off at {ended}; the next shift lands on a branch of its own"
+        ))),
+        None => Ok(with(&meta.value, [("landing".to_owned(), landing)])),
+    })?;
+    for old in &superseded {
+        edit_meta(ctx, old, |meta| {
+            let landing = meta.value.get("landing").unwrap_or(&Value::Null);
+            let mark = [("superseded_by".to_owned(), Value::string(shift))];
+            Ok(with(
+                &meta.value,
+                [("landing".to_owned(), with(landing, mark))],
+            ))
+        })?;
+    }
+    Ok(Landed {
+        base,
+        commits,
+        head,
+        superseded,
+    })
+}
+
+/// What the runner learned of a shift's pull request.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Mark {
+    /// Whether GitHub took auto-merge (or the merge queue) for it.
+    Auto(bool),
+    /// It was closed unmerged.
+    Closed,
+    /// It was merged.
+    Merged,
+    /// It was opened.
+    Opened {
+        /// Its number.
+        number: u32,
+        /// Its page.
+        url: String,
+    },
+    /// CI was red at this head, and the trail has been told.
+    Red(String),
+}
+
+/// Record `mark` in `shift`'s `meta.json` `pr`: [`Mark::Opened`] writes it
+/// whole, stamped `opened`; every other mark is set on the one recorded,
+/// `merged` and `closed` as the instant.
+pub fn pr(ctx: &Context, shift: &str, mark: &Mark) -> Result<()> {
+    let now = || Value::string(ctx.now.iso8601());
+    edit_meta(ctx, shift, |meta| {
+        let set =
+            |key: &str, value| (meta.value.get("pr")).map(|pr| with(pr, [(key.to_owned(), value)]));
+        let pr = match mark {
+            _ if meta.value.get("landing").is_none() => None,
+            Mark::Auto(auto) => set("auto", Value::Bool(*auto)),
+            Mark::Closed => set("closed", now()),
+            Mark::Merged => set("merged", now()),
+            Mark::Opened { number, url } => Some(Value::object([
+                ("number", Value::Number(f64::from(*number))),
+                ("opened", now()),
+                ("url", Value::string(url.clone())),
+            ])),
+            Mark::Red(head) => set("red", Value::string(head.clone())),
+        }
+        .ok_or_else(|| {
+            Error::refused(format!(
+                "shift {shift} has no landing, or no pull request, to mark"
+            ))
+        })?;
+        Ok(with(&meta.value, [("pr".to_owned(), pr)]))
+    })
+}
+
+/// The target's open pull requests, as the runner last recorded them in
+/// `meta.json` — one line each, else `none.`.
+fn open_prs(data_root: &Path, repo: &str) -> String {
+    report::listed(
+        &metas(data_root)
+            .iter()
+            .filter(|meta| meta.repo.as_deref() == Some(repo))
+            .filter_map(|meta| {
+                let (landing, pr) = (live_landing(meta)?, meta.value.get("pr")?);
+                let text = |value: Option<&Value>| {
+                    value.map_or("?".to_owned(), |value| {
+                        value
+                            .as_str()
+                            .map_or_else(|| value.render(), ToOwned::to_owned)
+                    })
+                };
+                Some(format!(
+                    "- #{} {} · {} · opened {} · auto:{}{}",
+                    text(pr.get("number")),
+                    text(pr.get("url")),
+                    text(landing.get("branch")),
+                    text(pr.get("opened")),
+                    text(pr.get("auto")),
+                    pr.get("red").map_or("", |_| " · CI red")
+                ))
+            })
+            .collect::<Vec<_>>(),
     )
 }
 
@@ -2240,20 +2483,12 @@ pub fn attach(
     let current = read_current(&ctx.data_root)?
         .filter(|value| value.get("shift").and_then(Value::as_str) == Some(shift))
         .ok_or_else(|| Error::not_found("open shift", shift.to_owned()))?;
-    let mut entries: Vec<(String, Value)> = current
-        .as_object()
-        .map(<[(String, Value)]>::to_vec)
-        .unwrap_or_default();
-    for (key, value) in [("bg_id", bg_id), ("session_id", session_id)] {
-        if let Some(value) = value {
-            entries.retain(|(name, _)| name != key);
-            entries.push((key.to_owned(), Value::string(value)));
-        }
-    }
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let ids = [("bg_id", bg_id), ("session_id", session_id)]
+        .into_iter()
+        .filter_map(|(key, id)| Some((key.to_owned(), Value::string(id?))));
     atomic::write(
         &paths::shift_current(&ctx.data_root),
-        &format!("{}\n", Value::Object(entries).render()),
+        &format!("{}\n", with(&current, ids).render()),
     )
 }
 

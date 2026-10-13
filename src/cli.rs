@@ -191,7 +191,7 @@ usage: sandman <verb> [args]
       else main, else origin/HEAD; a repo with none, or a trunk behind
       origin, fails), in a scratch worktree, with the repo's hooks off; hits
       trunk does not reach are reported off trunk. A conflict ends that repo,
-      and so does a trailered merge: the machine lands by fast-forward only,
+      and so does a trailered merge: the machine merges by rebase only,
       so merges are never reverted but left to the operator. Appends one
       reconcile event — none when nothing new was reverted — and lists the
       memories whose source: names a revoked event, for reflect to retire;
@@ -243,8 +243,11 @@ usage: sandman <verb> [args]
   shift clock [--check]
   shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] |
                 --file PATH) [--cost USD] [--truncate] [--cloud]
+  shift land --shift ID --branch NAME
   shift open --cloud [--mind M]
   shift pick [--path] [--shift ID | --untrusted]
+  shift pr --shift ID (--number N --url U | --auto BOOL | --red SHA |
+           --merged | --closed)
   shift profile [--kind shift|breath]
   shift reaped --shift ID
   shift rotation [--off REPO]... [--on REPO]...
@@ -302,7 +305,18 @@ usage: sandman <verb> [args]
       shifts/<id>/report.md carrying the report's five headings in order, under
       6,000 characters. attach records the session the runner
       started in current.json; reaped stamps reaped: <now> into meta.json once
-      the runner has removed the session and taken its transcript. status
+      the runner has removed the session and taken its transcript. land
+      records the open shift's gated branch as meta.json's landing ({at,
+      base, branch, head}) once it contains the local origin/main and every
+      commit it adds carries Shift: and Event: trailers (exit 1 naming the
+      first that does not, or for an unknown branch, an unrebased one, an
+      empty one, or a handed-off shift), and stamps superseded_by on the
+      unmerged landings of earlier shifts those trailers name; trunk is never
+      pushed — the runner pushes the branch and opens the pull request after
+      the handoff. pr is the runner's record of that pull request in
+      meta.json's pr — --number/--url opens it (opened), --auto, --red,
+      --merged and --closed mark it; the brief's prs.open lists the
+      target's open ones. status
       prints current.json and the clock.
       handoff_by is the window's reset less 15 min (now + 5 h less 15 min
       when unknown), never past the night's end.
@@ -1401,6 +1415,15 @@ fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
         if let Some(failed) = &repo.failed {
             println!("  failed: {failed}");
         }
+        // the machine never merges its own reconcile: the owner opens the pull request
+        if !repo.reverted.is_empty() {
+            println!(
+                "  pull request (yours to open and merge): cd {} && git push -u origin {branch} && gh pr create --base {} --head {branch} --fill",
+                paths::tildify(&repo.checkout, &home),
+                repo.base.trim_start_matches("refs/heads/"),
+                branch = repo.branch,
+            );
+        }
     }
     if report.repos.is_empty() {
         println!("\nno commit carries a revoked event");
@@ -1596,8 +1619,10 @@ fn shift_verb(args: &[String]) -> Result<(), Failure> {
         "brief" => shift_brief(rest),
         "clock" => shift_clock(rest),
         "handoff" => shift_handoff(rest),
+        "land" => shift_land(rest),
         "open" => shift_open(rest),
         "pick" => shift_pick(rest),
+        "pr" => shift_pr(rest),
         "profile" => shift_profile(rest),
         "reaped" => shift_reaped(rest),
         "rotation" => shift_rotation(rest),
@@ -2178,6 +2203,62 @@ fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
         );
     }
     Ok(())
+}
+
+/// `shift land --shift ID --branch NAME`.
+fn shift_land(args: &[String]) -> Result<(), Failure> {
+    let parsed = Args::parse(args, "shift land", &["--branch", "--shift"], &[], 0)?;
+    let (id, branch) = (parsed.required("--shift")?, parsed.required("--branch")?);
+    let landed = shift::land(&shift_context()?, &id, &branch)?;
+    println!(
+        "landed {branch} at {} on origin/main {}: {} commit(s); the runner pushes it and opens the pull request after the handoff",
+        landed.head, landed.base, landed.commits
+    );
+    for old in &landed.superseded {
+        println!("superseded: {old}, whose pull request the runner closes");
+    }
+    Ok(())
+}
+
+/// `shift pr --shift ID (--number N --url U | --auto BOOL | --red SHA |
+/// --merged | --closed)`.
+fn shift_pr(args: &[String]) -> Result<(), Failure> {
+    let parsed = Args::parse(
+        args,
+        "shift pr",
+        &["--auto", "--number", "--red", "--shift", "--url"],
+        &["--closed", "--merged"],
+        0,
+    )?;
+    let id = parsed.required("--shift")?;
+    let wants = |flag: &str, value: &str, what: &str| {
+        Failure::Usage(format!("{flag} wants {what}, got `{value}`"))
+    };
+    let mut marks = Vec::new();
+    if let Some(auto) = parsed.flag("--auto") {
+        let auto = auto
+            .parse()
+            .map_err(|_| wants("--auto", &auto, "true or false"))?;
+        marks.push(shift::Mark::Auto(auto));
+    }
+    marks.extend(parsed.set("--closed").then_some(shift::Mark::Closed));
+    marks.extend(parsed.set("--merged").then_some(shift::Mark::Merged));
+    if let Some(number) = parsed.flag("--number") {
+        marks.push(shift::Mark::Opened {
+            number: number
+                .parse()
+                .map_err(|_| wants("--number", &number, "a count"))?,
+            url: parsed.required("--url")?,
+        });
+    }
+    marks.extend(parsed.flag("--red").map(shift::Mark::Red));
+    let [mark] = &marks[..] else {
+        return Err(Failure::Usage(
+            "shift pr takes one of --number N --url U, --auto BOOL, --red SHA, --merged, --closed"
+                .to_owned(),
+        ));
+    };
+    Ok(shift::pr(&shift_context()?, &id, mark)?)
 }
 
 /// `shift reaped --shift ID`.

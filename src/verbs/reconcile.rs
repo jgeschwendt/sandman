@@ -6,8 +6,8 @@
 //! whose `Shift:` trailer names the shift); the hits its trunk reaches are
 //! reverted newest-first on a `reconcile/<event-id>` branch cut from that
 //! trunk, one per repo: new commits, never a reset, never a force, never the
-//! repo's commit hooks. Merges are never reverted: the machine lands by
-//! fast-forward only, so a trailered merge refuses its repo for the operator,
+//! repo's commit hooks. Merges are never reverted: the machine's pull
+//! requests merge by rebase, so a trailered merge refuses its repo for the operator,
 //! as does a repo with no trunk to name. Then one
 //! `reconcile` event goes on the trail, and the memories whose `source:` names
 //! a revoked event are listed for reflect to retire; reconcile itself never
@@ -243,7 +243,7 @@ fn reconcile_repo(
             report.planned.clear();
             report.conflicts.push(sha.to_owned());
             report.notes.push(format!(
-                "merge {sha} carries a revoked trailer, but the machine lands by fast-forward only: a trailered merge is a shift that broke the rule, so the operator reverts it by hand"
+                "merge {sha} carries a revoked trailer, but the machine merges by rebase only: a trailered merge is a shift that broke the rule, so the operator reverts it by hand"
             ));
             return report;
         } else {

@@ -43,7 +43,6 @@
     "excludedCommands": [
       "/Users/jlg/.local/bin/shift-test *",
       "git fetch *",
-      "git merge --ff-only *",
       "git pull *",
       "git push *",
       "grove sync *",
