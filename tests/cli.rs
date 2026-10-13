@@ -848,7 +848,8 @@ fn the_hooks_read_their_payloads_from_stdin() {
 #[test]
 fn recall_is_silent_with_nothing_to_say_and_for_the_pipeline() {
     let machine = Machine::new("recall-silent");
-    let output = machine.run(&["recall", "--cwd", "/Users/you/code"]);
+    // Unnamed, the cwd is the process's own.
+    let output = machine.run(&["recall"]);
     assert_eq!(code(&output), 0);
     assert!(stdout(&output).is_empty());
     assert!(stderr(&output).is_empty());
@@ -987,13 +988,18 @@ fn take_hook_declines_a_session_a_live_job_still_names() {
 
     // The daemon retires an idle worker and its exit fires SessionEnd like any
     // other ending — but the job still names the session, so the conversation
-    // is resumable and will be resumed. A retirement is not an ending.
+    // is resumable and will be resumed. A retirement is not an ending — even
+    // when the ledger cannot write the debt down, which is journalled.
+    let ledger = machine.write(".sandman/pending-takes", "");
     let declined = machine.run_with_stdin(&["take", "--hook"], &payload);
     assert_eq!(code(&declined), 0, "{}", stderr(&declined));
     assert!(stdout(&declined).is_empty());
     assert!(stderr(&declined).is_empty());
     assert!(source.is_file(), "the transcript stays in the live set");
     assert!(machine.took_nothing(), "and nothing is taken");
+    let log = machine.journal("take");
+    assert!(log.contains("pending unrecorded session="), "{log}");
+    fs::remove_file(ledger).expect("rm");
 
     // A job naming somebody else's session is not this session's job.
     machine.job("33334444", Some(r#"{"sessionId":"99990000-dead"}"#));

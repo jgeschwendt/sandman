@@ -959,12 +959,8 @@ fn names(text: &str, slug: &str) -> bool {
     })
 }
 
-/// Open threads whose text names `slug`, one line each. `~` alone names
-/// nothing — every path under home would match it.
+/// Open threads whose text names `slug`, one line each.
 fn open_threads(ctx: &Context, slug: &str) -> Vec<String> {
-    if slug == "~" {
-        return Vec::new();
-    }
     front_files(&ctx.threads)
         .into_iter()
         .filter(|(_, fields, body)| {

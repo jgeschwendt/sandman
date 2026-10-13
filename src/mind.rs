@@ -805,4 +805,25 @@ mod tests {
             "a failed run still wrote a transcript"
         );
     }
+
+    #[test]
+    fn a_transcript_that_will_not_move_stays_put() {
+        let temp = TempDir::new("mind-unmoved");
+        let projects = temp.path().join("projects");
+        let source = projects.join("-a-slug").join("s.jsonl");
+        std::fs::create_dir_all(projects.join("-a-slug")).expect("slug");
+        std::fs::write(&source, "said\n").expect("transcript");
+        let keep = Keep {
+            cwd: temp.path().to_owned(),
+            into: temp.path().join("kept"),
+            projects,
+        };
+        // A file where `into` goes, then a directory where the transcript goes.
+        std::fs::write(&keep.into, "").expect("file");
+        super::relocate(&keep, "s");
+        std::fs::remove_file(&keep.into).expect("rm");
+        std::fs::create_dir_all(keep.into.join("s.jsonl").join("full")).expect("dir");
+        super::relocate(&keep, "s");
+        assert!(source.is_file());
+    }
 }
