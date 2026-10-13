@@ -1585,6 +1585,7 @@ fn bad_flags_are_usage_failures_and_write_nothing() {
         vec!["remember", "body", "--type", "nonsense"],
         vec!["remember", "body", "--name"],
         vec!["remember", "body", "--nope"],
+        vec!["remember", "body", "second"],
         vec!["take"],
         vec!["take", SID, "--hook"],
         vec!["forget"],

@@ -184,10 +184,16 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 /// The bank key rule, duplicated here on purpose: an integration test drives
 /// the binary and must not borrow the crate's own implementation to check it.
 pub fn bank_key(cwd: &Path) -> String {
-    cwd.to_str()
-        .expect("a utf-8 cwd")
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+    cwd.as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .map(|&byte| {
+            if byte.is_ascii_alphanumeric() {
+                char::from(byte)
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
