@@ -2395,7 +2395,7 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
 /// What the runner learned of a shift's pull request.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mark {
-    /// Whether GitHub took auto-merge (or the merge queue) for it.
+    /// Whether GitHub took auto-merge for it.
     Auto(bool),
     /// It was closed unmerged.
     Closed,

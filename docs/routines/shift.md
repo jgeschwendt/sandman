@@ -6,7 +6,7 @@ on_error: claude
 
 # Shift
 
-The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it opens and closes shifts and carries what they landed to GitHub — the session cannot reach it, this host can, `gh` authenticated as the owner. Trunk is never pushed: every tick opens with the landing sweep, which opens each handed-off shift's `landing` (`sandman shift land`) as a pull request, reads every open one back, and merges by rebase the green ones no merge queue or auto-merge will; red CI, a refused push and a pull request closed unmerged are corrections on the trail, once each; a merge is a `change` event and fast-forwards the local trunk when it is clean (sandman's `docs/BANK-FORMAT.md` § shifts, Landing). The block runs with mise's shims and `~/.local/bin` on `PATH`, so the repos' pre-push gates find their tools under launchd's bare one. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once spawn lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
+The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it opens and closes shifts and carries what they landed to GitHub — the session cannot reach it, this host can, `gh` authenticated as the owner. Trunk is never pushed: every tick opens with the landing sweep, which opens each handed-off shift's `landing` (`sandman shift land`) as a pull request, reads every open one back, and merges by rebase the green ones auto-merge will not (a queue needs an organization-owned repo), asking GitHub to rebase any branch behind main; red CI, a refused push and a pull request closed unmerged are corrections on the trail, once each; a merge is a `change` event and fast-forwards the local trunk when it is clean (sandman's `docs/BANK-FORMAT.md` § shifts, Landing). The block runs with mise's shims and `~/.local/bin` on `PATH`, so the repos' pre-push gates find their tools under launchd's bare one. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once spawn lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
 
 ## The creation week
 
@@ -63,7 +63,7 @@ A shift runs in `dontAsk` — no prompts, no classifier, anything that would hav
 - Exit 124 is the routine watchdog and fires no catch. A start that timed out may still have started a session: the close block finds `current.json` without `bg_id`, stops any session named `shift <id>`, and abandons it.
 
 ```sh
-# sweep: every landing becomes a pull request and CI decides — the queue, auto-merge or this sweep merges it by rebase; trunk is never pushed
+# sweep: every landing becomes a pull request and CI decides — auto-merge or this sweep merges it by rebase (a queue needs an organization-owned repo), a branch behind main is rebased by GitHub; trunk is never pushed
 export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"   # launchd's bare PATH hides mise's tools from the pre-push gates
 sm="$HOME/.local/bin/sandman"
 root="${SANDMAN_ROOT:-$HOME/.sandman}"
@@ -121,9 +121,11 @@ VIEW
       elif [ "$verdict" = red ]; then   # one correction per (shift, head)
         [ "$red" = "$prhead" ] || "$sm" trail append --kind correction --shift "$id" --repo "$repo" --branch "$branch" --rationale "CI red on PR $url: $failing" >/dev/null
         [ "$red" = "$prhead" ] || "$sm" shift pr --shift "$id" --red "$prhead"
+      elif [ "$status" = BEHIND ]; then   # strict required checks hold auto-merge until the branch is current: GitHub rebases it, the next tick reads the new head
+        gh pr update-branch "$number" --repo "$repo" --rebase >/dev/null 2>&1 && echo "updated PR $url onto main" >&2 || :
       else
         if [ "$auto" = - ] && [ "$status" != UNKNOWN ]; then
-          # gh merges at once, CI or not, a branch nothing blocks (CLEAN, HAS_HOOKS, UNSTABLE): only a blocked one tries auto-merge or the queue
+          # gh merges at once, CI or not, a branch nothing blocks (CLEAN, HAS_HOOKS, UNSTABLE): only a blocked one tries auto-merge
           auto=false
           case $status in CLEAN | HAS_HOOKS | UNSTABLE) ;; *) gh pr merge "$number" --repo "$repo" --auto --rebase --delete-branch >/dev/null 2>&1 && auto=true ;; esac
           "$sm" shift pr --shift "$id" --auto "$auto"
