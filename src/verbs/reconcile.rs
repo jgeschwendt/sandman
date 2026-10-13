@@ -374,8 +374,10 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-        let _ = git(&self.checkout, &["worktree", "prune"]);
+        // Prune only what `remove` left behind: a prune also drops the operator's
+        // own worktrees whose directories are missing right now.
+        let _ =
+            fs::remove_dir_all(&self.path).map(|()| git(&self.checkout, &["worktree", "prune"]));
     }
 }
 

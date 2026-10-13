@@ -815,9 +815,10 @@ mod tests {
         let year = temp.path().join("trail/2027");
         std::fs::create_dir(&year).expect("a year");
         std::fs::set_permissions(&year, Permissions::from_mode(0o000)).expect("chmod");
-        let unreadable = read(temp.path(), None);
+        let (unreadable, bites) = (read(temp.path(), None), std::fs::read_dir(&year).is_err());
         std::fs::set_permissions(&year, Permissions::from_mode(0o755)).expect("chmod back");
-        assert!(matches!(unreadable, Err(Error::Io { .. })));
+        // root reads through any mode
+        assert!(!bites || matches!(unreadable, Err(Error::Io { .. })));
     }
 
     #[test]

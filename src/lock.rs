@@ -116,9 +116,12 @@ mod tests {
         };
         mode(0o555);
         let taken = CommitLock::acquire(temp.path());
+        // root writes through any mode
+        let bites = std::fs::write(temp.path().join("probe"), "").is_err();
         mode(0o755);
         assert!(
-            matches!(taken, Err(Error::Io { path, .. }) if path == temp.path().join(LOCK_FILE_NAME))
+            !bites
+                || matches!(taken, Err(Error::Io { path, .. }) if path == temp.path().join(LOCK_FILE_NAME))
         );
     }
 

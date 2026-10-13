@@ -9,20 +9,24 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command, Output};
 
 use common::{GIT_ENV, Machine, code, stderr, stdout};
 
 /// `$HOME` holding `.sandman` and `.grove`.
 impl Machine {
-    fn run(&self, args: &[&str]) -> Output {
-        self.sandman(args)
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = self.sandman(args);
+        command
             .env("SANDMAN_GROVE_CODE", self.grove_code())
             .env("SANDMAN_RECONCILE_EXTRA", "")
             .env("SANDMAN_ROOT", self.root())
-            .envs(GIT_ENV)
-            .output()
-            .expect("run sandman")
+            .envs(GIT_ENV);
+        command
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        self.command(args).output().expect("run sandman")
     }
 
     /// Run the binary and hand back its stdout, asserting it exited 0.
@@ -280,6 +284,11 @@ fn reconcile_reverts_the_revoked_line_and_names_the_memories_to_retire() {
     let doomed = memory(&machine, "project_doomed.md", &format!("dream · {second}"));
     memory(&machine, "project_kept.md", "remember 2026-10-09T00:00:00Z");
 
+    // The operator's own worktree, its directory gone for now: reconcile must not prune it.
+    let away = machine.home.join("away").display().to_string();
+    git(&checkout, &["worktree", "add", "-q", "-b", "away", &away]);
+    fs::remove_dir_all(&away).expect("unmount");
+
     machine.ok(&["trail", "revoke", &first, "--reason", "wrong path"]);
     let report = machine.ok(&["reconcile", &first]);
 
@@ -304,13 +313,16 @@ fn reconcile_reverts_the_revoked_line_and_names_the_memories_to_retire() {
         assert!(report.contains(&format!("reverted: {sha}")), "{report}");
     }
 
-    // The operator's checkout is where it was, and no scratch tree is left.
+    // The operator's checkout is where it was, no scratch tree is left, and
+    // their own worktree is unpruned.
     assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), head);
     assert_eq!(
         fs::read_to_string(checkout.join("file.txt")).expect("file"),
         "two\n"
     );
-    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+    let worktrees = git(&checkout, &["worktree", "list"]);
+    assert_eq!(worktrees.lines().count(), 2, "{worktrees}");
+    assert!(worktrees.contains(&away), "{worktrees}");
 
     // One reconcile event, its id on every revert commit.
     let events = machine.ok(&["trail", "log", "--kind", "reconcile", "--json"]);
@@ -418,6 +430,31 @@ fn a_dry_run_reports_the_plan_and_changes_nothing() {
         reused.contains(&format!("reverted: {}", shas[0])),
         "{reused}"
     );
+    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+}
+
+#[test]
+fn a_scratch_tree_git_will_not_remove_is_swept_and_the_run_fails() {
+    let machine = Machine::new("unremovable");
+    let first = machine.append(&["--kind", "change"]);
+    let (checkout, shas) = fixture(&machine, &[("one", &first)]);
+    let path = std::env::var("PATH").unwrap_or_default();
+    machine.script(
+        "bin/git",
+        &format!(
+            "case \"$*\" in *'worktree remove'*) exit 1;; esac\nPATH='{path}' exec git \"$@\"\n"
+        ),
+    );
+    let output = machine
+        .command(&["reconcile", &first])
+        .env(
+            "PATH",
+            format!("{}:{path}", machine.home.join("bin").display()),
+        )
+        .output()
+        .expect("run sandman");
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(stdout(&output).contains(&format!("reverted: {}", shas[0])));
     assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
 }
 

@@ -1485,9 +1485,13 @@ mod tests {
         let locked = temp.path().join("locked");
         fs::create_dir_all(locked.join("inner")).expect("locked");
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod");
-        let unreadable = is_live(&Bank::key_for(&locked.join("inner")));
+        let (unreadable, bites) = (
+            is_live(&Bank::key_for(&locked.join("inner"))),
+            fs::read_dir(&locked).is_err(),
+        );
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("chmod back");
-        assert!(!unreadable);
+        // root reads through any mode
+        assert!(!bites || !unreadable);
     }
 
     #[test]
