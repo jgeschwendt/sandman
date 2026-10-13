@@ -575,8 +575,9 @@ no shift commits to it, and after a merge the sweep, else `grove-sync`, fast-for
   same.
 - **The runner's landing sweep** opens every tick, before it looks for an open shift — a
   session that hands itself off with `--from-session` has removed `current.json` by then
-  — with `~/.local/bin` and mise's shims on `PATH`, so a repo's pre-push gate finds
-  `cargo`, `bun` and `uv` under launchd's bare one (§ Landing).
+  — with `~/.local/bin` and mise's shims on `PATH` for `gh` and git; the branch push is
+  `--no-verify`, since the trunk checkout's pre-push hook would test main, not the branch,
+  and the pull request's CI is the gate (§ Landing).
 - **A session that never started is abandoned in ten minutes.** When spawn lists the
   shift's session `working` with no transcript (no `last_activity`) more than ten minutes
   after `started`, it is waiting on a start-up prompt a `dontAsk` session cannot answer
@@ -705,9 +706,8 @@ any cwd.
   unwritable) as scratch; a shift uses `~/.sandman/shifts/<id>/tmp/`. `grove tree add`
   refuses a root the manifest does not declare; the shift falls back to `git -C <trunk>
   worktree add ../shift-<id> -b shift/<id>`. A commit hook that fails EPERM in the sandbox
-  (a pre-commit running `cargo test`) may be skipped with `--no-verify`: the runner's branch
-  push runs the pre-push gate on the host and CI gates the pull request, neither ever
-  skipped (`prompts/shift.md` rule 7).
+  (a pre-commit running `cargo test`) may be skipped with `--no-verify`: CI on the pull
+  request is the gate, never skipped (`prompts/shift.md` rule 7).
 - **The runner is canonical here, installed by hand.** `docs/routines/shift.md` is the
   source of `~/.routines/shift.md`. A shift may fix the
   installed runner in place; the owner's session reconciles this canonical copy with it.
