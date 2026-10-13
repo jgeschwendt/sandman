@@ -1,4 +1,5 @@
 {
+  "disabledMcpjsonServers": ["stele"],
   "permissions": {
     "additionalDirectories": ["~/.grove/code", "~/.routines", "~/.sandman"],
     "allow": [
@@ -50,14 +51,28 @@
     ],
     "filesystem": {
       "allowWrite": [
+        "~/.bun",
+        "~/.cache",
+        "~/.cargo",
         "~/.grove",
+        "~/.hex",
         "~/.local/state/claude",
         "~/.local/state/mise",
+        "~/.mix",
         "~/.routines",
         "~/.sandman",
-        "~/Library/Caches/mise"
+        "~/.threads",
+        "~/Library/Caches"
       ],
-      "denyRead": ["~/.aws", "~/.netrc", "~/.npmrc", "~/.ssh", "~/Codes"]
+      "denyRead": ["~/.aws", "~/.netrc", "~/.npmrc", "~/.ssh", "~/Codes"],
+      "denyWrite": [
+        "~/.bun/bin",
+        "~/.cargo/bin",
+        "~/.cargo/config",
+        "~/.cargo/config.toml",
+        "~/.mix/archives",
+        "~/.mix/escripts"
+      ]
     },
     "network": {
       "allowedDomains": [

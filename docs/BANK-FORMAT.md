@@ -345,7 +345,11 @@ missing binary skipped), then the most open threads naming the slug, then the mo
 untried breaths (`state: new` or `spiked`) filed against it, then the name. On a Redesign
 night, and every night in the cloud (§ The cloud), repos with an approved `proposal:`
 thread come before all the rest, least recently shifted first among them. The open shift's repo and
-`$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over. A shift started in Saturday's
+`$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over, and so is a repo the owner
+froze: its section of the week's targets file (§ The brief and its slots) says `freeze`,
+`frozen` or `on ice`, or his answer on any `proposal:<repo>:*` thread — open or resolved,
+text under a `## user` heading — says `on ice`, case aside. Each is named once on `pick`'s
+(and `brief`'s) stderr, `skipped: <repo> (frozen)`. A shift started in Saturday's
 night never counts as a repo's last: the Sabbath works sandman whatever the rotation
 says, and must not stand in for its turn.
 
@@ -494,11 +498,23 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
 - **The runner's push sweep.** Every tick, before it looks for an open shift — a session
   that hands itself off with `--from-session` has removed `current.json` by then — the
   shift routine runs `git push origin HEAD` (never forced, no other flag) in each trunk
-  checkout `~/.grove/code/jgeschwendt/*/main` whose `git status -sb` shows `[ahead ` and
-  whose HEAD carries a `Shift:` trailer; a trunk whose HEAD is the owner's own commit is
-  never pushed by the machine. A rejected push is a `correction` event naming the repo,
-  the branch and the trailer's shift, rationale `push rejected: <the first error:,
-  fatal: or ! line>`, never a fault: the sweep moves on, and retries next tick.
+  checkout `~/.grove/code/jgeschwendt/*/main` where any commit in `@{upstream}..HEAD`
+  carries a `Shift:` trailer — a shift's last commit is often a trailerless lock rebuild;
+  a trunk ahead only by the owner's own commits is never pushed by the machine. The block
+  puts `~/.local/bin` and mise's shims on `PATH`, so a repo's pre-push gate finds `cargo`,
+  `bun` and `uv` under launchd's bare one. A rejected push is a `correction` event naming
+  the repo, the branch and the newest trailer's shift, rationale `push rejected: <the
+  first error:, fatal: or ! line>`; one citing `repository rule violations` is a `guard`,
+  rationale `push refused by the repo's ruleset; the owner decides: bypass actor or PR
+  flow`. Never a fault: the sweep moves on. Each is recorded once per (repo, HEAD):
+  `$ROUTINE_STATE_DIR/rejected/<repo>` holds the sha, written before the push so a gate
+  the watchdog kills still counts; the trunk is skipped until HEAD moves or six hours
+  pass, and a retried HEAD refused again appends nothing.
+- **A session that never started is abandoned in ten minutes.** When spawn lists the
+  shift's session `working` with no transcript (no `last_activity`) more than ten minutes
+  after `started`, it is waiting on a start-up prompt a `dontAsk` session cannot answer
+  (§ The sandbox, project MCP servers): the close block stops it, hands off `--abandoned
+  --reason "session never started (a project MCP prompt?)"` and appends a `correction`.
 - **The sweep reaps.** The owner keeps no machine session in his history — not in
   `claude agents`, not in the desktop app's list. In the same sweep, for every
   `shifts/s-*/meta.json` and `breath/passes/*/pass.json` with `ended` and no `reaped`:
@@ -540,9 +556,14 @@ prints — `profiles/session.json`, compiled into the binary, one profile for bo
 today (`--kind` is there so they can diverge). Strict means
 `allowUnsandboxedCommands: false`: a command the sandbox refuses fails rather than
 retrying outside it. Writes reach only `~/.grove` (the checkouts, and the bare repositories and manifest lock under `~/.grove/roots` and `~/.grove` that every commit and `grove tree add` write — observed 2026-10-10, the first Sabbath could not cut its branch with `~/.grove/code` alone), `~/.local/state/claude`,
-`~/.local/state/mise` and `~/Library/Caches/mise` (mise records a config's trust and
-caches there; without them every `mise x -C <worktree>` failed EPERM, observed
-2026-10-12), `~/.routines` and `~/.sandman`; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
+`~/.local/state/mise` (mise records a config's trust there; without it every `mise x -C
+<worktree>` failed EPERM, observed 2026-10-12), the toolchain caches `~/.bun`, `~/.cache`,
+`~/.cargo`, `~/.hex`, `~/.mix` and `~/Library/Caches` (mise's, and mr-boxington's under
+`~/Library/Caches/mbx`, which wraps mise's rust — `mbx[error]: Operation not permitted`
+without it, observed 2026-10-13), `~/.routines`, `~/.sandman` and `~/.threads` (the
+`thread` CLI writes `~/.threads/<id>.md`); `denyWrite` takes back the caches' `bin/`
+directories and cargo's config, which the host runs later. These cache lists are
+`profiles/shift-test.sb`'s write allowances and denials: change one, change both; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
 cannot be read; the network reaches only the profile's `allowedDomains` — among them
 `api.anthropic.com`, because `sandman reflect` and `sandman dream` run `claude -p` from
 Bash, inside the sandbox (observed 2026-10-10: the first Sabbath's reflect was denied).
@@ -594,13 +615,36 @@ any cwd.
   `CARGO_NET_OFFLINE`, `HEX_OFFLINE` and `MIX_ENV=test`. The matcher is literal and keys
   on the spelling: probed 2026-10-12 on 2.1.296, the `/Users/jlg/…` entry let out only
   the `~/…` spelling and the `~/…` entry only the absolute one, so the profile lists both,
-  and denies a bare `shift-test`. A call holding `cd`, a redirect, `$(…)` or another
-  command stays sandboxed, so a shift `cd`s into its worktree in a call of its own
-  (`prompts/shift.md` rule 7).
+  and denies a bare `shift-test`. Every command in a call must match for it to leave, and
+  a call holding `cd`, a pipe, a redirect, `&&` or `$(…)` stays sandboxed, where nested
+  `sandbox-exec` fails `sandbox_apply: Operation not permitted` (observed 2026-10-13: `…
+  bun test 2>&1 | tail -15`); the wrapper probes for that first and exits 71 with
+  `shift-test: still inside the session sandbox — make it the whole Bash call: …`. So a
+  shift `cd`s into its worktree in a call of its own and captures output with
+  `shift-test --log <file> <command…>`, which writes stdout and stderr to `<file>` — under
+  the working tree or `$TMPDIR`, else exit 2 — then prints it and exits with the command's
+  status (`prompts/shift.md` rule 7).
 - **Pushing is the runner's.** `git push` from a session fails at the sandbox proxy
   despite `excludedCommands` — "This proxy requires authentication", exit 128 (observed
   2026-10-11) — so a shift lands on trunk by fast-forward and never pushes; the runner,
   on the host with working SSH, pushes it in its sweep (§ The handoff and the clock).
+- **No project MCP server starts.** Claude Code asks once to approve a repo's `.mcp.json`
+  servers, and a `--bg` `dontAsk` session can never answer: stele's trunk, the one with a
+  `.mcp.json` (`stele serve`), sat at "starting…" until `handoff_by` two nights running
+  (observed 2026-10-12/13). The profile's `disabledMcpjsonServers` lists every server name
+  in a rotation trunk's `.mcp.json` — today `stele` — and a new one is added by hand.
+  Never `enableAllProjectMcpServers`: it would run any repo-authored command outside the
+  sandbox.
+- **Scratch and fallbacks.** Claude Code names `$CLAUDE_JOB_DIR/tmp` (under `~/.claude`,
+  unwritable) as scratch; a shift uses `~/.sandman/shifts/<id>/tmp/`. `grove tree add`
+  refuses a root the manifest does not declare; the shift falls back to `git -C <trunk>
+  worktree add ../shift-<id> -b shift/<id>`. A commit hook that fails EPERM in the sandbox
+  (a pre-commit running `cargo test`) may be skipped with `--no-verify`: the runner's push
+  runs the pre-push gate on the host, and that gate is never skipped (`prompts/shift.md`
+  rule 7).
+- **The runner is canonical here, installed by hand.** `docs/routines/shift.md` is the
+  source of `~/.routines/shift.md`. A shift may fix the
+  installed runner in place; the owner's session reconciles this canonical copy with it.
 - **Installing a binary stays the owner's act.** `~/.local/bin` is not writable, so a
   shift builds and tests its binary but never replaces the installed one.
 - **Deny rules and the mod's guards hold in every mode.** No mode skips

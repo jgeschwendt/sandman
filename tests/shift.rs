@@ -132,18 +132,22 @@ fn profile_prints_the_session_settings_for_either_kind() {
     let shift = machine.ok(now, &["shift", "profile"]);
     assert_eq!(shift, include_str!("../profiles/session.json"));
     let text = shift.trim();
-    assert!(text.starts_with("{\n  \"permissions\": {") && text.ends_with('}'));
+    // a project `.mcp.json` server asks at start, which a `--bg` dontAsk session never answers
+    assert!(
+        text.starts_with("{\n  \"disabledMcpjsonServers\": [\"stele\"],\n  \"permissions\": {")
+            && text.ends_with('}')
+    );
     assert!(text.contains("\n  \"sandbox\": {"), "{text}");
     // `reflect` and `dream` run `claude -p` from Bash; a landing that touches
-    // `.claude/` aborts inside the sandbox; mise records trust and caches
-    // nothing leaves the sandbox but git's network, the fast-forward and
-    // shift-test, which brings its own
+    // `.claude/` aborts inside the sandbox; nothing leaves the sandbox but
+    // git's network, the fast-forward and shift-test, which brings its own;
+    // builds write the toolchain caches shift-test.sb allows, never their bins
     for needed in [
         "\"api.anthropic.com\",",
         "\"Bash(shift-test *)\"\n",
         "\"excludedCommands\": [\n      \"/Users/jlg/.local/bin/shift-test *\",\n      \"git fetch *\",\n      \"git merge --ff-only *\",\n      \"git pull *\",\n      \"git push *\",\n      \"grove sync *\",\n      \"~/.local/bin/shift-test *\"\n    ],",
-        "\"~/.local/state/mise\",",
-        "\"~/Library/Caches/mise\"\n",
+        "\"allowWrite\": [\n        \"~/.bun\",\n        \"~/.cache\",\n        \"~/.cargo\",\n        \"~/.grove\",\n        \"~/.hex\",\n        \"~/.local/state/claude\",\n        \"~/.local/state/mise\",\n        \"~/.mix\",\n        \"~/.routines\",\n        \"~/.sandman\",\n        \"~/.threads\",\n        \"~/Library/Caches\"\n      ],",
+        "\"denyWrite\": [\n        \"~/.bun/bin\",\n        \"~/.cargo/bin\",\n        \"~/.cargo/config\",\n        \"~/.cargo/config.toml\",\n        \"~/.mix/archives\",\n        \"~/.mix/escripts\"\n      ]",
     ] {
         assert!(text.contains(needed), "{needed}: {text}");
     }
@@ -1942,4 +1946,208 @@ fn a_shift_file_that_cannot_be_read_is_an_error_and_odd_values_still_show() {
         status.starts_with("n: 3\nsession_id: s1\nshift: s-x\n"),
         "{status}"
     );
+}
+
+#[test]
+fn pick_passes_over_repos_the_owner_froze() {
+    let machine = Machine::prompted("frozen");
+    for slug in ["alpha", "beta", "gamma"] {
+        machine.repo(&format!("jgeschwendt/{slug}"));
+    }
+    // Friday reads W42's targets: alpha is FROZEN there; beta's line is work.
+    machine.write(
+        ".sandman/score/2026-W42-targets.md",
+        "## jgeschwendt/alpha\nFROZEN for new work.\n\n## jgeschwendt/beta\nFuzz it.\n",
+    );
+    // The owner's answer on a resolved proposal ices beta; the agent's words,
+    // and the owner's on a thread that is no proposal of gamma's, ice nothing.
+    let thread = |id: &str, key: &str, said: &str| {
+        machine.write(
+            format!(".threads/{id}.md"),
+            &format!("---\nstate: resolved\nkey: {key}\n---\n\n# p\n\n## agent · t\n\nput gamma on ice?\n\n## user · t · answer: decline\n\n{said}\n"),
+        );
+    };
+    thread(
+        "p1",
+        "proposal:jgeschwendt/beta:x",
+        "ignore it, this project is On Ice",
+    );
+    thread("p2", "proposal:jgeschwendt/gamma:y", "no");
+    thread("p3", "other:jgeschwendt/gamma:z", "on ice");
+    let output = machine.run(FRIDAY, &["shift", "pick"], &[]);
+    assert_eq!(stdout(&output).trim(), "jgeschwendt/gamma");
+    assert_eq!(
+        stderr(&output),
+        "skipped: jgeschwendt/alpha (frozen)\nskipped: jgeschwendt/beta (frozen)\n"
+    );
+}
+
+/// The routine's push sweep, cut from `docs/routines/shift.md` and run as the
+/// runner runs it (`bash -e`) over fixture trunks, bare remotes and a stub
+/// `sandman` that logs its calls.
+#[test]
+fn the_push_sweep_pushes_shift_work_and_reports_a_refusal_once() {
+    let doc = include_str!("../docs/routines/shift.md");
+    let at = doc.find("# sweep:").expect("the sweep");
+    let sweep = &doc[at..doc.find("# reap:").expect("the reap")];
+    let machine = Machine::new("sweep");
+    machine.script(".local/bin/sandman", "echo \"$*\" >> \"$HOME/calls\"\n");
+    let trunk = |name: &str, hook: &str| {
+        let bare = machine.home.join(format!("remotes/{name}.git"));
+        let trunk = machine
+            .grove_code()
+            .join(format!("jgeschwendt/{name}/main"));
+        git(
+            &machine.home,
+            &["init", "--bare", bare.to_str().expect("utf-8")],
+        )
+        .expect("bare");
+        machine.script(
+            format!("remotes/{name}.git/hooks/pre-receive"),
+            &format!("echo x >> \"{}/tries\"\n{hook}", bare.display()),
+        );
+        for args in [
+            &[
+                "clone",
+                "-q",
+                bare.to_str().expect("utf-8"),
+                trunk.to_str().expect("utf-8"),
+            ][..],
+            &[
+                "-C",
+                trunk.to_str().expect("utf-8"),
+                "checkout",
+                "-q",
+                "-b",
+                "main",
+            ],
+            &[
+                "-C",
+                trunk.to_str().expect("utf-8"),
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "root",
+            ],
+        ] {
+            git(&machine.home, args).expect("trunk");
+        }
+        // the root goes up before the remote starts refusing
+        fs::rename(bare.join("hooks/pre-receive"), bare.join("hooks/off")).expect("off");
+        git(&trunk, &["push", "-q", "-u", "origin", "main"]).expect("root push");
+        fs::rename(bare.join("hooks/off"), bare.join("hooks/pre-receive")).expect("on");
+        (trunk, bare)
+    };
+    let commit = |trunk: &Path, message: &str| {
+        git(trunk, &["commit", "-q", "--allow-empty", "-m", message]).expect("commit");
+    };
+    let (alpha, alpha_remote) = trunk("alpha", "");
+    let (beta, beta_remote) = trunk("beta", "");
+    let (gamma, gamma_remote) = trunk("gamma", "echo 'tests failed' >&2; exit 1\n");
+    let (delta, _) = trunk(
+        "delta",
+        "echo 'error: GH013: push declined due to repository rule violations' >&2; exit 1\n",
+    );
+    // alpha's pre-push gate needs a mise tool, found only on the sweep's PATH
+    machine.script(".local/share/mise/shims/gate", "");
+    machine.script(
+        ".grove/code/jgeschwendt/alpha/main/.git/hooks/pre-push",
+        "gate\n",
+    );
+    commit(&alpha, "work\n\nShift: s-1");
+    commit(&alpha, "lock rebuilt");
+    commit(&beta, "the owner's own");
+    commit(&gamma, "work\n\nShift: s-2");
+    commit(&delta, "work\n\nShift: s-3");
+    let run = || {
+        let output = std::process::Command::new("/bin/bash")
+            .args(["-e", "-c", sweep])
+            .env_clear()
+            .env("HOME", &machine.home)
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("ROUTINE_STATE_DIR", machine.home.join("state"))
+            .envs(GIT_ENV)
+            .output()
+            .expect("bash");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+    };
+    let head = |dir: &Path| git(dir, &["rev-parse", "main"]).expect("rev-parse");
+    let tries = |remote: &Path| {
+        machine
+            .read(remote.join("tries").to_str().expect("utf-8"))
+            .lines()
+            .count()
+    };
+    run();
+    // a trailer below HEAD is enough; the owner's own commit waits for him
+    assert_eq!(head(&alpha_remote), head(&alpha));
+    assert_ne!(head(&beta_remote), head(&beta));
+    assert_eq!(
+        machine.read("calls"),
+        "trail append --kind guard --shift s-3 --repo jgeschwendt/delta --branch main --rationale push refused by the repo's ruleset; the owner decides: bypass actor or PR flow\n\
+         trail append --kind correction --shift s-2 --repo jgeschwendt/gamma --branch main --rationale push rejected: ! [remote rejected] HEAD -> main (pre-receive hook declined)\n"
+    );
+    // a refused HEAD waits: no push, no event
+    run();
+    assert_eq!(tries(&gamma_remote), 1);
+    // six hours on it is retried, still without a second event
+    let seen = machine.home.join("state/rejected/gamma");
+    assert!(
+        std::process::Command::new("touch")
+            .args(["-t", "202001010000"])
+            .arg(&seen)
+            .status()
+            .expect("touch")
+            .success()
+    );
+    run();
+    assert_eq!(tries(&gamma_remote), 2);
+    assert_eq!(machine.read("calls").lines().count(), 2);
+    // a new HEAD is a new refusal
+    commit(&gamma, "more");
+    run();
+    assert_eq!(tries(&gamma_remote), 3);
+    assert_eq!(machine.read("calls").lines().count(), 3);
+}
+
+/// The tick's first block — sweep, reap, close — cut from the routine likewise
+/// and run on a grove with no trunks: a session spawn lists
+/// working with no transcript ten minutes after its start never began — a
+/// start-up prompt nobody can answer — and is abandoned then, not at
+/// `handoff_by`; one with a transcript is left to work.
+#[test]
+fn the_close_block_abandons_a_session_that_never_started() {
+    let doc = include_str!("../docs/routines/shift.md");
+    let at = doc.find("# sweep:").expect("the sweep");
+    let close = &doc[at..at + doc[at..].find("```").expect("the fence")];
+    let machine = Machine::new("close");
+    machine.script(".local/bin/sandman", "echo \"$*\" >> \"$HOME/calls\"\n");
+    for (row, calls) in [
+        (r#"{"id":"b1","state":"working","last_activity":"x"}"#, ""),
+        (
+            r#"{"id":"b1","state":"working"}"#,
+            "shift handoff --shift s-9 --abandoned --reason session never started (a project MCP prompt?)\n\
+             trail append --kind correction --shift s-9 --repo jgeschwendt/stele --rationale session never started (a project MCP prompt?)\n",
+        ),
+    ] {
+        machine.write(
+            ".sandman/shifts/current.json",
+            r#"{"bg_id":"b1","repo":"jgeschwendt/stele","shift":"s-9","started":"2026-01-01T00:00:00Z"}"#,
+        );
+        machine.script(
+            ".local/bin/spawn",
+            &format!("read -r req; case $req in *stop*) echo '{{\"ok\":true}}' ;; *) echo '{{\"sessions\":[{row}]}}' ;; esac\n"),
+        );
+        let _ = fs::remove_file(machine.home.join("calls"));
+        let output = std::process::Command::new("/bin/bash")
+            .args(["-e", "-c", close])
+            .env_clear()
+            .env("HOME", &machine.home)
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .output()
+            .expect("bash");
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert_eq!(machine.read("calls"), calls);
+    }
 }

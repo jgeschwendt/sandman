@@ -1016,7 +1016,9 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
 /// live signals (a failing `stele check`, then open threads, then breaths) and
 /// then by name. On a Redesign night, and on every night in the cloud, repos
 /// with an approved `proposal:` thread come before the rest. Repos the open
-/// shift names, `skip` and untrusted trunks are passed over (the cloud trusts
+/// shift names, `skip`, repos the owner froze (the week's targets line says
+/// `freeze`, `frozen` or `on ice`, or his answer on a `proposal:` thread says
+/// `on ice` — each named on stderr) and untrusted trunks are passed over (the cloud trusts
 /// every clone); when only untrusted ones remain, that is the error. On the
 /// Sabbath the choice is [`SABBATH_REPO`]'s trunk, rotation aside.
 pub fn pick(ctx: &Context) -> Result<Option<Target>> {
@@ -1047,9 +1049,36 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
     let last = last_shifted(ctx);
     let trust = trusted(ctx);
     let weighted = ctx.cloud.is_some() || ctx.night.anchor(ctx.now).weekday == 1;
+    let targets = paths::score_dir(&ctx.data_root)
+        .join(format!("{}-targets.md", Week::targets(ctx.now).name()));
+    let threads = front_files(&ctx.threads);
+    let says = |text: &str, words: &[&str]| {
+        let text = text.to_lowercase();
+        words.iter().any(|word| text.contains(word))
+    };
+    // The owner's word: the week's targets line, or his answer on a proposal.
+    let frozen = |label: &str| {
+        let prefix = format!("proposal:{label}:");
+        planned(&targets, label).is_some_and(|line| says(&line, &["freeze", "frozen", "on ice"]))
+            || threads.iter().any(|(_, fields, body)| {
+                fields
+                    .get("key")
+                    .is_some_and(|key| key.starts_with(&prefix))
+                    && body
+                        .split("\n## ")
+                        .any(|part| part.starts_with("user") && says(part, &["on ice"]))
+            })
+    };
     let (mut candidates, untrusted): (Vec<_>, Vec<_>) = trunks(ctx)
         .into_iter()
         .filter(|(label, _)| !busy.contains(label) && !ctx.skip.contains(label))
+        .filter(|(label, _)| {
+            let cold = frozen(label);
+            if cold {
+                eprintln!("skipped: {label} (frozen)");
+            }
+            !cold
+        })
         .map(|(label, path)| {
             let approved = weighted
                 && report::proposals(&ctx.threads, Some(&label))
@@ -2237,7 +2266,7 @@ mod tests {
         let value = json::parse(PROFILE).expect("valid JSON");
         let entries = value.as_object().expect("an object");
         let keys: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
-        assert_eq!(keys, ["permissions", "sandbox"]);
+        assert_eq!(keys, ["disabledMcpjsonServers", "permissions", "sandbox"]);
         assert!(sorted(&value), "keys out of order");
         let sandbox = value.get("sandbox").expect("sandbox");
         assert_eq!(sandbox.get("enabled").and_then(Value::as_bool), Some(true));

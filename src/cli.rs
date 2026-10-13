@@ -265,8 +265,10 @@ usage: sandman <verb> [args]
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
       (default jgeschwendt), Saturday shifts aside — never ~, ~/.routines or
       the data root — ties broken by a failing stele check, open threads and
-      breaths; it skips the open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs) and
-      every trunk Claude Code has not trusted ($SANDMAN_CLAUDE_JSON, else
+      breaths; it skips the open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs),
+      a repo the owner froze (`freeze`, `frozen` or `on ice` in its targets line,
+      `on ice` in his answer on a proposal: thread; `skipped: <repo> (frozen)` on
+      stderr) and every trunk Claude Code has not trusted ($SANDMAN_CLAUDE_JSON, else
       ~/.claude.json) — exit 1 listing them when no other is left, and brief
       exits 3; --untrusted lists those trunks; --shift prints the target a
       shift was briefed on. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New

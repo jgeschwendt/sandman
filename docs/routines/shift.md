@@ -6,7 +6,7 @@ on_error: claude
 
 # Shift
 
-The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it only opens and closes shifts, and pushes what they landed. Every tick opens with the push sweep: each trunk checkout `~/.grove/code/jgeschwendt/*/main` ahead of its upstream whose HEAD carries a `Shift:` trailer is pushed — the session cannot reach the remote, this host can — and a trunk whose HEAD is the owner's own commit is never the machine's to push. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once spawn lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
+The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it only opens and closes shifts, and pushes what they landed. Every tick opens with the push sweep: each trunk checkout `~/.grove/code/jgeschwendt/*/main` with a `Shift:` trailer on any commit its upstream lacks is pushed — the session cannot reach the remote, this host can — and a trunk ahead only by the owner's own commits is never the machine's to push. The block runs with mise's shims and `~/.local/bin` on `PATH`, so the repos' pre-push gates find their tools under launchd's bare one. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once spawn lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/plan.md`.
 
 ## The creation week
 
@@ -42,7 +42,7 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 
 ## The sandbox
 
-A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove`, `~/.sandman`, `~/.routines`, `~/.local/state/claude` and mise's state and cache, never `.claude/` config or `~/.claude`; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. Tests run as `~/.local/bin/shift-test <command>`, the one other exclusion, inside its own narrower Seatbelt profile (`profiles/shift-test.sb`: credentials unreadable, writes to checkouts, caches and temp, loopback only). `git fetch`, `git pull`, `git push`, `git merge --ff-only` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift lands on trunk by fast-forward and the push sweep pushes it. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
+A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove`, `~/.sandman`, `~/.routines`, `~/.threads`, `~/.local/state/claude`, mise's state and the toolchain caches (`~/.bun`, `~/.cache`, `~/.cargo`, `~/.hex`, `~/.mix`, `~/Library/Caches`; never their `bin/` or config), never `.claude/` config or `~/.claude`; no project `.mcp.json` server; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. Tests run as `~/.local/bin/shift-test [--log <file>] <command>` — the whole Bash call, or it stays sandboxed and exits 71 — the one other exclusion, inside its own narrower Seatbelt profile (`profiles/shift-test.sb`: credentials unreadable, writes to checkouts, caches and temp, loopback only). `git fetch`, `git pull`, `git push`, `git merge --ff-only` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift lands on trunk by fast-forward and the push sweep pushes it. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
 
 ## Spawn's answers
 
@@ -57,22 +57,34 @@ A shift runs in `dontAsk` — no prompts, no classifier, anything that would hav
 - `brief` refusing with `shift … is open`: `current.json` exists, so the open block should not have reached it; a concurrent hand run is the cause. Wait for the next tick.
 - `brief` refusing on a template slot: `prompts/shift.md` in sandman's trunk names a slot the binary does not fill — a template ahead of the installed binary. Install the newer binary; do not edit the template here.
 - `spawn start` answering `Workspace not trusted`: the picked trunk has never had Claude Code's trust prompt accepted, and `--bg` will not start there (`-p` would; `--bg` will not). Accepting trust is the owner's call, so never set `hasTrustDialogAccepted` yourself. `sandman shift pick` skips untrusted trunks and `shift pick --untrusted` lists them; abandon the shift with the cause as its `--reason`, then open a thread keyed `shift:trust:<repo>` asking the owner to run `claude` once in that path or add the repo to `SANDMAN_SHIFT_SKIP`. (observed 2026-10-10 · s-20261010T0225Z, jlg.io/main)
-- A push the sweep finds rejected (trunk diverged from `origin`) is a `correction` event on the trail naming the repo, the branch and the trailer's shift, never a fault: the tick goes on to close and open, and the commits wait on trunk for the owner or the next shift on that repo. The sweep retries every tick, so a rejection repeats on the trail until the trunk is reconciled.
+- A push the sweep finds rejected (trunk diverged from `origin`, a red pre-push gate) is a `correction` event on the trail naming the repo, the branch and the trailer's shift, never a fault: the tick goes on to close and open, and the commits wait on trunk for the owner or the next shift on that repo. A refusal citing `repository rule violations` is a `guard` instead — the repo's ruleset refuses every direct push, and only the owner can add a bypass actor or move it to a PR flow. Either is recorded once per (repo, HEAD): `$ROUTINE_STATE_DIR/rejected/<repo>` holds the refused sha (written before the push, so a gate the watchdog kills mid-push counts), the trunk is skipped until HEAD moves or six hours pass, and a retry of the same HEAD refused again adds nothing to the trail. Every push runs the repo's pre-push gate, minutes of tests; three red trunks retried each tick ran the block past `timeout` and logged 150–267 identical corrections a night (observed 2026-10-12/13).
+- A session spawn lists `working` with no transcript (its row has no `last_activity`) ten minutes after `started` never took its first turn: a `--bg` `dontAsk` session cannot answer a start-up prompt such as a project `.mcp.json` server's approval. The close block stops it, abandons the shift with `session never started (a project MCP prompt?)` and appends a `correction`; the fix is the server's name in the profile's `disabledMcpjsonServers` (sandman's `docs/BANK-FORMAT.md` § The sandbox). (observed 2026-10-12/13 · stele, s-20261012T0855Z and s-20261013T0816Z, each stalled until handoff_by)
 - Exit 124 is the routine watchdog and fires no catch. A start that timed out may still have started a session: the close block finds `current.json` without `bg_id`, stops any session named `shift <id>`, and abandons it.
 
 ```sh
-# sweep: push every trunk ahead of origin whose HEAD a shift landed (a Shift: trailer); the owner's own HEAD is never pushed
+# sweep: push every trunk ahead of origin that a shift landed on (a Shift: trailer anywhere in what is unpushed); the owner's own commits alone are never pushed
+export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"   # launchd's bare PATH hides mise's tools from the pre-push gates
 sm="$HOME/.local/bin/sandman"
 for trunk in "$HOME"/.grove/code/jgeschwendt/*/main; do
-  case $(git -C "$trunk" status -sb 2>/dev/null | head -n 1) in *"[ahead "*) ;; *) continue ;; esac
-  landed=$(git -C "$trunk" log -1 --format='%(trailers:key=Shift,valueonly)' | head -n 1)
-  [ -n "$landed" ] || continue
-  err=$(git -C "$trunk" push origin HEAD 2>&1 >/dev/null) && continue
-  why=$(printf '%s\n' "$err" | awk 'NR == 1 { first = $0 } /^(error|fatal):|^ ?! / { first = $0; exit } END { gsub(/ +/, " ", first); sub(/^ /, "", first); print first }')
+  landed=$(git -C "$trunk" log --format='%(trailers:key=Shift,valueonly)' '@{upstream}..HEAD' 2>/dev/null | grep -m 1 .) || continue
   repo=${trunk#"$HOME/.grove/code/"}
+  repo=${repo%/main}
+  # a HEAD rejected within six hours waits for a new commit: each push runs the repo's pre-push gate (minutes of tests)
+  seen="$ROUTINE_STATE_DIR/rejected/${repo##*/}"
+  head=$(git -C "$trunk" rev-parse HEAD)
+  told=$(cat "$seen" 2>/dev/null) || told=
+  [ -z "$(find "$seen" -mmin -360 2>/dev/null)" ] || [ "${told%% *}" != "$head" ] || continue
+  # recorded before the push: a gate the watchdog kills mid-push still counts as rejected
+  mkdir -p "${seen%/*}" && printf '%s\n' "$head" > "$seen"
+  err=$(git -C "$trunk" push origin HEAD 2>&1 >/dev/null) && { rm -f "$seen"; continue; }
+  printf '%s told\n' "$head" > "$seen"
+  [ "$told" != "$head told" ] || continue   # one trail event per (repo, HEAD), however often the retry is refused
+  why=$(printf '%s\n' "$err" | awk 'NR == 1 { first = $0 } /^(error|fatal):|^ ?! / { first = $0; exit } END { gsub(/ +/, " ", first); sub(/^ /, "", first); print first }')
   branch=$(git -C "$trunk" symbolic-ref --short HEAD 2>/dev/null) || branch=HEAD
   echo "push of $branch in $trunk rejected: $err" >&2
-  "$sm" trail append --kind correction --shift "$landed" --repo "${repo%/main}" --branch "$branch" --rationale "push rejected: $why" >/dev/null
+  kind=correction note="push rejected: $why"
+  case $err in *"repository rule violations"*) kind=guard note="push refused by the repo's ruleset; the owner decides: bypass actor or PR flow" ;; esac
+  "$sm" trail append --kind "$kind" --shift "$landed" --repo "$repo" --branch "$branch" --rationale "$note" >/dev/null
 done
 # reap: every ended shift or breath pass not yet reaped — its session leaves Claude Code's listing, its transcript goes to the archive
 root="${SANDMAN_ROOT:-$HOME/.sandman}"
@@ -105,7 +117,7 @@ print(rows[0].get("state", "") if rows else "gone")
     esac
   fi
   # --force: spawn's state, not the transcript's mtime, says the session is over; "no transcript" means already taken
-  [ "$sid" = "-" ] || "$sm" take "$sid" --force >/dev/null 2>&1
+  [ "$sid" = "-" ] || "$sm" take "$sid" --force >/dev/null 2>&1 || :
   case $name in
     s-*) "$sm" shift reaped --shift "$name" ;;
     *) "$sm" breathe reaped --id "$name" ;;
@@ -121,7 +133,16 @@ v = json.load(open(sys.argv[1])).get(sys.argv[2])
 print(v if isinstance(v, str) and v else "-")
 ' "$cur" "$1"
 }
-id=$(field shift); bg=$(field bg_id); due=$(field handoff_by)   # read before handoff removes current.json
+id=$(field shift); bg=$(field bg_id); due=$(field handoff_by); started=$(field started); repo=$(field repo)   # read before handoff removes current.json
+since() {   # whole minutes since an ISO-8601 instant; -1 for "-"
+  python3 -I -c '
+import sys, datetime
+if sys.argv[1] == "-":
+    print(-1); sys.exit()
+d = datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+print(int((datetime.datetime.now(datetime.timezone.utc) - d).total_seconds() // 60))
+' "$1"
+}
 [ "$id" != "-" ] || { echo "current.json names no shift: $(cat "$cur")" >&2; exit 1; }
 ask() {   # one spawn request; prints the answer; returns 1 when spawn fails, says nothing, or answers an error
   answer=$(printf '%s\n' "$1" | "$sp" run) || return 1
@@ -163,25 +184,26 @@ if [ "$bg" = "-" ]; then
 fi
 req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb": "claude", "action": "list", "ids": [sys.argv[1]]}))' "$bg")
 answer=$(ask "$req") || { echo "spawn list for $bg answered: $answer" >&2; exit 1; }
-state=$(printf '%s' "$answer" | python3 -I -c '
+# a row without last_activity has no transcript: the session never took its first turn
+row=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys
 rows = json.loads(sys.stdin.readline() or "{}").get("sessions", [])
-print(rows[0].get("state", "") if rows else "gone")
+print(rows[0].get("state", "") if rows else "gone", "talking" if rows and "last_activity" in rows[0] else "silent")
 ')
+state=${row% *}; talk=${row#* }
 case "$state" in
   done|failed|gone)
     "$sm" shift handoff --shift "$id" --from-session || "$sm" shift handoff --shift "$id" --abandoned || exit 1
     ;;
   working|blocked)
-    late=$(python3 -I -c '
-import sys, datetime
-due = sys.argv[1]
-if due == "-":
-    print(-1); sys.exit()
-d = datetime.datetime.fromisoformat(due.replace("Z", "+00:00"))
-print(int((datetime.datetime.now(datetime.timezone.utc) - d).total_seconds() // 60))
-' "$due")
-    if [ "$late" -gt "${SANDMAN_SHIFT_GRACE_MIN:-20}" ]; then
+    late=$(since "$due")
+    if [ "$talk" = silent ] && [ "$(since "$started")" -gt 10 ]; then
+      # a --bg dontAsk session cannot answer a start-up prompt (a project .mcp.json server); ten minutes, not handoff_by
+      stop_session "$bg"
+      why="session never started (a project MCP prompt?)"
+      "$sm" shift handoff --shift "$id" --abandoned --reason "$why" || exit 1
+      "$sm" trail append --kind correction --shift "$id" --repo "$repo" --rationale "$why" >/dev/null
+    elif [ "$late" -gt "${SANDMAN_SHIFT_GRACE_MIN:-20}" ]; then
       stop_session "$bg"
       # always abandoned-with-reason: a handoff.md the session wrote is kept beneath the Abandoned line
       "$sm" shift handoff --shift "$id" --abandoned --reason "stopped at $(date -u +%FT%TZ): still $state $late min past handoff_by" || exit 1

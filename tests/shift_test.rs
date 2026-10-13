@@ -59,6 +59,32 @@ fn confines(home: &Path) {
         .current_dir(env::temp_dir())
         .output()
         .expect("shift-test");
+    let run = |args: &[&str]| {
+        Command::new(args[0])
+            .args(&args[1..])
+            .current_dir(&probe)
+            .output()
+            .expect("shift-test")
+    };
+    let wrapper = wrapper.to_str().expect("utf-8 path");
+    let logged = run(&[
+        wrapper,
+        "--log",
+        "t.log",
+        "sh",
+        "-c",
+        "echo out; echo err >&2; exit 3",
+    ]);
+    let log = fs::read_to_string(probe.join("t.log"));
+    let astray = run(&[wrapper, "--log", "/etc/t.log", "true"]);
+    let bare = run(&[wrapper, "--log", "t.log"]);
+    let nested = run(&[
+        "/usr/bin/sandbox-exec",
+        "-p",
+        "(version 1) (allow default)",
+        wrapper,
+        "true",
+    ]);
     let ok = fs::read_to_string(probe.join("ok"));
     fs::remove_dir_all(&probe).expect("probe cleanup");
     assert!(wrong.is_empty(), "{wrong:?}");
@@ -66,4 +92,12 @@ fn confines(home: &Path) {
     assert!(!desktop.exists());
     assert_eq!(outside.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&outside.stderr).contains("is not under ~/.grove/code"));
+    assert_eq!(logged.status.code(), Some(3));
+    assert_eq!(log.expect("t.log"), "out\nerr\n");
+    assert_eq!(String::from_utf8_lossy(&logged.stdout), "out\nerr\n");
+    assert_eq!(astray.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&astray.stderr).contains("is not under"));
+    assert_eq!(bare.status.code(), Some(2));
+    assert_eq!(nested.status.code(), Some(71));
+    assert!(String::from_utf8_lossy(&nested.stderr).contains("make it the whole Bash call"));
 }
