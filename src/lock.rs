@@ -86,6 +86,8 @@ impl Drop for CommitLock {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::{CommitLock, LOCK_FILE_NAME};
     use crate::error::Error;
     use crate::testutil::TempDir;
@@ -96,14 +98,28 @@ mod tests {
         let first = CommitLock::acquire(temp.path()).expect("first acquire");
         assert!(first.path().is_file());
 
-        match CommitLock::try_acquire(temp.path()) {
-            Err(Error::LockHeld { path }) => assert_eq!(path, temp.path().join(LOCK_FILE_NAME)),
-            other => panic!("expected LockHeld, got {other:?}"),
-        }
+        assert!(matches!(
+            CommitLock::try_acquire(temp.path()),
+            Err(Error::LockHeld { path }) if path == temp.path().join(LOCK_FILE_NAME)
+        ));
 
         drop(first);
         let again = CommitLock::acquire(temp.path()).expect("acquire after release");
         assert!(again.path().is_file());
+    }
+
+    #[test]
+    fn an_unwritable_root_is_an_io_error_not_held() {
+        let temp = TempDir::new("lock-readonly");
+        let mode = |mode| {
+            std::fs::set_permissions(temp.path(), PermissionsExt::from_mode(mode)).expect("chmod");
+        };
+        mode(0o555);
+        let taken = CommitLock::acquire(temp.path());
+        mode(0o755);
+        assert!(
+            matches!(taken, Err(Error::Io { path, .. }) if path == temp.path().join(LOCK_FILE_NAME))
+        );
     }
 
     #[test]

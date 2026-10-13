@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn the_flat_shape_reads_every_value_kind() {
         let doc = parse(
-            "top = \"x\" # trailing\n\n[a-b]\ns = \"q\\\"\\u00e9\\n\"\nl = 'raw\\'\ni = -3\nf = 1.5\ne = 2e3\narr = [\"*\", 'x' , \"y\",]\nnone = []\n",
+            "top = \"x\" # trailing\n\n[a-b]\ns = \"q\\\"\\\\\\r\\u00e9\\n\"\nl = 'raw\\'\ni = -3\nf = 1.5\ne = 2e3\narr = [\"*\", 'x' , \"y\",]\nnone = []\n",
         )
         .expect("parse");
         assert_eq!(
@@ -385,7 +385,10 @@ mod tests {
         );
         let table = &doc.tables[0];
         assert_eq!(table.name, "a-b");
-        assert_eq!(table.get("s"), Some(&Value::String("q\"é\n".to_owned())));
+        assert_eq!(
+            table.get("s"),
+            Some(&Value::String("q\"\\\ré\n".to_owned()))
+        );
         assert_eq!(table.get("l"), Some(&Value::String("raw\\".to_owned())));
         assert_eq!(table.get("i"), Some(&Value::Integer(-3)));
         assert_eq!(table.get("f"), Some(&Value::Float(1.5)));
@@ -395,6 +398,17 @@ mod tests {
             Some(&["*".to_owned(), "x".to_owned(), "y".to_owned()][..])
         );
         assert_eq!(table.get("none"), Some(&Value::Strings(Vec::new())));
+        let probe = |key| {
+            let value = table.get(key).expect(key);
+            (
+                value.as_str(),
+                value.as_f64(),
+                value.as_i64(),
+                value.as_strings().map(<[String]>::len),
+            )
+        };
+        assert_eq!(probe("i"), (None, Some(-3.0), Some(-3), None));
+        assert_eq!(probe("l"), (Some("raw\\"), None, None, None));
     }
 
     #[test]
@@ -416,6 +430,11 @@ mod tests {
             ("[a]\nx = 1 2\n", 2, "after the value"),
             ("[a]\nx = \"\\q\"\n", 2, "unsupported escape"),
             ("[a]\nx = inf\n", 2, "unsupported value"),
+            ("[a] x\n", 1, "after the table header"),
+            ("[a b]\n", 1, "not a bare key"),
+            ("[a]\nx y = 1\n", 2, "not a bare key"),
+            ("[a]\nx =\n", 2, "wants a value"),
+            ("[a]\nx = [\"a\" \"b\"]\n", 2, "a `,` between"),
         ] {
             let error = parse(text).expect_err(text);
             assert_eq!(error.line, line, "{text:?}: {error}");
@@ -432,7 +451,10 @@ mod tests {
                     ("w".to_owned(), Value::Float(1.0)),
                     ("b".to_owned(), Value::Integer(10)),
                     ("o".to_owned(), Value::Strings(vec!["a\"b".to_owned()])),
-                    ("c".to_owned(), Value::String("tab\there".to_owned())),
+                    (
+                        "c".to_owned(),
+                        Value::String("tab\there\\ \n\r\u{1}".to_owned()),
+                    ),
                 ],
                 name: "src".to_owned(),
             }],
@@ -440,7 +462,7 @@ mod tests {
         let text = doc.render();
         assert_eq!(
             text,
-            "at = \"t\"\n\n[src]\nw = 1.0\nb = 10\no = [\"a\\\"b\"]\nc = \"tab\\there\"\n"
+            "at = \"t\"\n\n[src]\nw = 1.0\nb = 10\no = [\"a\\\"b\"]\nc = \"tab\\there\\\\ \\n\\r\\u0001\"\n"
         );
         assert_eq!(parse(&text).expect("reparse"), doc);
     }

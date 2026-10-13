@@ -218,8 +218,6 @@ pub(crate) enum JsonError {
     Trailing(usize),
     /// A byte that cannot start what the grammar expects here.
     Unexpected(usize),
-    /// A string's bytes are not UTF-8.
-    Utf8(usize),
 }
 
 impl fmt::Display for JsonError {
@@ -231,7 +229,6 @@ impl fmt::Display for JsonError {
             Self::Number(at) => write!(f, "malformed json number at byte {at}"),
             Self::Trailing(at) => write!(f, "trailing json content at byte {at}"),
             Self::Unexpected(at) => write!(f, "unexpected json byte at {at}"),
-            Self::Utf8(at) => write!(f, "json string is not utf-8, ending at byte {at}"),
         }
     }
 }
@@ -385,7 +382,7 @@ impl Parser<'_> {
             let byte = self.peek().ok_or(JsonError::Eof)?;
             self.pos += 1;
             match byte {
-                b'"' => return String::from_utf8(out).map_err(|_| JsonError::Utf8(self.pos)),
+                b'"' => return Ok(String::from_utf8_lossy(&out).into_owned()),
                 b'\\' => self.escape(&mut out)?,
                 // Raw control bytes are not legal inside a JSON string.
                 0x00..=0x1f => return Err(JsonError::Unexpected(self.pos - 1)),
@@ -473,7 +470,7 @@ fn push_char(out: &mut Vec<u8>, ch: char) {
 
 #[cfg(test)]
 mod tests {
-    use super::{JsonError, Value, escape_into, parse};
+    use super::{Value, escape_into, parse};
 
     fn quoted(text: &str) -> String {
         let mut out = String::new();
@@ -483,10 +480,7 @@ mod tests {
 
     fn round_trip(text: &str) {
         let encoded = quoted(text);
-        match parse(&encoded) {
-            Ok(Value::String(decoded)) => assert_eq!(decoded, text, "via {encoded}"),
-            other => panic!("{encoded} parsed as {other:?}"),
-        }
+        assert_eq!(parse(&encoded), Ok(Value::string(text)), "via {encoded}");
     }
 
     #[test]
@@ -516,23 +510,18 @@ mod tests {
 
     #[test]
     fn unescaping_reads_every_escape_form() {
-        let text = r#""\" \\ \/ \b \f \n \r \t A é 🌙""#;
-        let Ok(Value::String(decoded)) = parse(text) else {
-            panic!("parse failed");
-        };
-        assert_eq!(decoded, "\" \\ / \u{8} \u{c} \n \r \t A é 🌙");
+        assert_eq!(
+            parse(r#""\" \\ \/ \b \f \n \r \t \u0041 \u00e9 🌙 \ud83c\udf19""#),
+            Ok(Value::string("\" \\ / \u{8} \u{c} \n \r \t A é 🌙 🌙"))
+        );
     }
 
     #[test]
     fn a_lone_surrogate_degrades_to_the_replacement_character() {
-        let Ok(Value::String(decoded)) = parse(r#""\ud83c!""#) else {
-            panic!("parse failed");
-        };
-        assert_eq!(decoded, "\u{fffd}!");
-        let Ok(Value::String(decoded)) = parse(r#""\udf19""#) else {
-            panic!("parse failed");
-        };
-        assert_eq!(decoded, "\u{fffd}");
+        assert_eq!(
+            parse(r#""\ud83c!\ud83c\u0041\udf19""#),
+            Ok(Value::string("\u{fffd}!\u{fffd}A\u{fffd}"))
+        );
     }
 
     #[test]
@@ -560,10 +549,7 @@ mod tests {
             ("1e3", 1000.0),
             ("-2.5e-2", -0.025),
         ] {
-            let Ok(Value::Number(value)) = parse(text) else {
-                panic!("{text} did not parse as a number");
-            };
-            assert!((value - expected).abs() < 1e-12, "{text} → {value}");
+            assert_eq!(parse(text), Ok(Value::Number(expected)), "{text}");
         }
         assert_eq!(Value::Number(3.0).render(), "3");
         assert_eq!(Value::Number(1.5).render(), "1.5");
@@ -613,23 +599,27 @@ mod tests {
 
     #[test]
     fn malformed_input_is_a_typed_error() {
-        assert_eq!(parse(""), Err(JsonError::Eof));
-        assert_eq!(parse("{"), Err(JsonError::Eof));
-        assert!(matches!(parse("{}{}"), Err(JsonError::Trailing(2))));
-        assert!(matches!(parse("{\"a\" 1}"), Err(JsonError::Unexpected(_))));
-        assert!(matches!(parse(r#""\q""#), Err(JsonError::Escape(_))));
-        assert!(matches!(parse(r#""\u00g0""#), Err(JsonError::Escape(_))));
-        assert!(matches!(parse("nul"), Err(JsonError::Unexpected(_))));
-        assert!(matches!(parse("[1,]"), Err(JsonError::Unexpected(_))));
-        assert!(matches!(
-            parse("\"raw\nnewline\""),
-            Err(JsonError::Unexpected(_))
-        ));
-    }
-
-    #[test]
-    fn nesting_past_the_bound_is_refused_not_a_crash() {
         let deep = format!("{}{}", "[".repeat(1_000), "]".repeat(1_000));
-        assert!(matches!(parse(&deep), Err(JsonError::Depth(_))));
+        for (text, message) in [
+            ("", "json ended mid-value"),
+            ("{", "json ended mid-value"),
+            ("{}{}", "trailing json content at byte 2"),
+            ("{\"a\" 1}", "unexpected json byte at 5"),
+            ("{\"a\":1]", "unexpected json byte at 6"),
+            ("[1}", "unexpected json byte at 2"),
+            (r#""\q""#, "unsupported json escape at byte 2"),
+            (r#""\u00g0""#, "unsupported json escape at byte 3"),
+            ("-", "malformed json number at byte 0"),
+            ("nul", "unexpected json byte at 0"),
+            ("[1,]", "unexpected json byte at 3"),
+            ("\"raw\nnewline\"", "unexpected json byte at 4"),
+            (deep.as_str(), "json nested past 256 levels at byte 257"),
+        ] {
+            assert_eq!(
+                parse(text).map_err(|error| error.to_string()),
+                Err(message.to_owned()),
+                "{text:?}"
+            );
+        }
     }
 }

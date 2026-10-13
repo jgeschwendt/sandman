@@ -99,9 +99,19 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_directory_is_an_error_not_a_panic() {
+    fn an_unwritable_path_is_an_error_not_a_panic() {
         let temp = TempDir::new("atomic-missing");
-        let path = temp.path().join("nope").join("MEMORY.md");
-        assert!(write(&path, "x").is_err());
+        let occupied = temp.path().join("occupied");
+        std::fs::create_dir_all(occupied.join("full")).expect("mkdir");
+        for path in [
+            temp.path().join("nope").join("MEMORY.md"),
+            "/".into(),
+            temp.path().join(".."),
+            occupied,
+        ] {
+            assert!(write(&path, "x").is_err(), "{path:?}");
+        }
+        assert_eq!(std::fs::read_dir(temp.path()).expect("read dir").count(), 1);
+        assert!(append_line(std::path::Path::new(""), "x").is_err());
     }
 }

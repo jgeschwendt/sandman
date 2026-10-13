@@ -166,15 +166,15 @@ impl fmt::Display for Error {
             Self::TooManyCollisions { filename } => {
                 write!(f, "too many colliding filenames for {filename}")
             }
-            Self::Untrusted(paths) => {
-                write!(
-                    f,
-                    "no trusted target: run claude once in each trunk and accept the trust prompt"
-                )?;
+            Self::Untrusted(paths) => write!(
+                f,
+                "no trusted target: run claude once in each trunk and accept the trust prompt"
+            )
+            .and_then(|()| {
                 paths
                     .iter()
                     .try_for_each(|path| write!(f, "\n{}", path.display()))
-            }
+            }),
         }
     }
 }
@@ -185,6 +185,70 @@ impl std::error::Error for Error {
             Self::Io { source, .. } => Some(source),
             Self::Parse { source, .. } => Some(source),
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+    use std::io;
+    use std::path::PathBuf;
+
+    use super::Error;
+    use crate::memory::{ParseError, ParseErrorKind};
+
+    #[test]
+    fn variants_read_as_one_operator_line_and_chain_their_cause() {
+        let path = || PathBuf::from("/b/x.md");
+        for (error, line) in [
+            (
+                Error::Clock,
+                "system clock reports a time before the unix epoch",
+            ),
+            (
+                Error::CrossDevice {
+                    from: path(),
+                    to: PathBuf::from("/a"),
+                },
+                "/b/x.md and /a are on different filesystems — sandman moves, never copies",
+            ),
+            (Error::io(path(), io::Error::other("gone")), "/b/x.md: gone"),
+            (
+                Error::LockHeld { path: path() },
+                "commit lock held: /b/x.md",
+            ),
+            (Error::MissingEnv { name: "HOME" }, "$HOME is not set"),
+            (
+                Error::MissingField {
+                    key: "name",
+                    path: path(),
+                },
+                "/b/x.md: missing frontmatter key `name`",
+            ),
+            (
+                Error::Parse {
+                    path: path(),
+                    source: ParseError::new(2, ParseErrorKind::EmptyKey),
+                },
+                "/b/x.md: line 2: frontmatter key is empty",
+            ),
+            (
+                Error::ReplacesMissing { path: path() },
+                "replaces target not in bank: /b/x.md",
+            ),
+            (
+                Error::TooManyCollisions {
+                    filename: "x.md".to_owned(),
+                },
+                "too many colliding filenames for x.md",
+            ),
+        ] {
+            assert_eq!(error.to_string(), line);
+            assert_eq!(
+                error.source().map(|cause| format!("/b/x.md: {cause}")),
+                matches!(error, Error::Io { .. } | Error::Parse { .. }).then(|| line.to_owned())
+            );
         }
     }
 }

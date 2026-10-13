@@ -360,7 +360,70 @@ pub(crate) fn page(
 
 #[cfg(test)]
 mod tests {
-    use super::markdown;
+    use super::{markdown, page};
+    use crate::testutil::TempDir;
+    use crate::time::Timestamp;
+    use crate::verbs::shift::DEFAULT_NIGHT;
+
+    #[test]
+    fn page_shows_a_night_its_proposals_and_none_for_what_is_missing() {
+        let temp = TempDir::new("html-page");
+        let root = temp.path();
+        for (path, text) in [
+            (
+                "shifts/s-20261017T0200Z/meta.json",
+                r#"{"cost_usd":1.25,"repo":"o/alpha","started":"2026-10-17T02:00:00Z","theme":"Ship"}"#,
+            ),
+            (
+                "shifts/s-20261017T0200Z/report.md",
+                "# Ship\n## Worth your eye\n- `<b>`\n## Landed\n| sha | what |\n| --- | --- |\n| abc | **parser** |\n",
+            ),
+            (
+                "shifts/s-20261013T0000Z/meta.json",
+                r#"{"started":"2026-10-13T12:00:00Z"}"#,
+            ),
+            ("shifts/s-20261016T0000Z/meta.json", "{}"),
+            (
+                "threads/p1.md",
+                "---\nstate: open\nwaiting: user\nkey: proposal:o/alpha:cache\nopened: 2026-10-12\n---\n\n# Cache <it>\n\nwhy\n",
+            ),
+        ] {
+            std::fs::create_dir_all(root.join(path).parent().expect("parent")).expect("mkdir");
+            std::fs::write(root.join(path), text).expect("write");
+        }
+        let threads = root.join("threads");
+        let at = |night| page(root, &threads, DEFAULT_NIGHT, night).expect("a night");
+        let (newest, started) = at(None);
+        assert_eq!(started, Timestamp::parse_iso8601("2026-10-17T02:00:00Z"));
+        for expected in [
+            "<p>Friday→Saturday night · 1 shifts · $1.25 · 1 landed · 1 proposals</p>",
+            "<article><h3>Cache &lt;it&gt;</h3><p class=\"meta\">o/alpha · opened 2026-10-12</p><p>why</p><form method=\"post\" action=\"/answer\"><input type=\"hidden\" name=\"key\" value=\"proposal:o/alpha:cache\">",
+            "<ul><li><code>&lt;b&gt;</code> — <a href=\"#s-20261017T0200Z\">s-20261017T0200Z</a></li></ul>",
+            "<thead><tr><th>shift</th><th>sha</th><th>what</th></tr></thead><tbody><tr><td><a href=\"#s-20261017T0200Z\">s-20261017T0200Z</a></td><td>abc</td><td><strong>parser</strong></td></tr>",
+            "<summary>s-20261017T0200Z · Ship · o/alpha · $1.25</summary><h1>Ship</h1>",
+            "<nav><a href=\"/?night=2026-10-16\">2026-10-16</a><a href=\"/?night=2026-10-13\">2026-10-13</a></nav>",
+        ] {
+            assert!(newest.contains(expected), "{expected} missing: {newest}");
+        }
+        let (older, started) = at(Some("2026-10-13"));
+        assert_eq!(started, None);
+        for expected in [
+            "<p>Tuesday→Wednesday night · 1 shifts · $0.00 · 0 landed · 1 proposals</p>",
+            "<h2>Worth your eye</h2><p>none.</p></section><section><h2>Landed</h2><p>none.</p>",
+            "<summary>s-20261013T0000Z · - · - · $0.00</summary></details>",
+        ] {
+            assert!(older.contains(expected), "{expected} missing: {older}");
+        }
+        assert!(page(root, &threads, DEFAULT_NIGHT, Some("1999-01-01")).is_none());
+        let none = root.join("none");
+        let empty = page(&none, &none, DEFAULT_NIGHT, None).expect("a page").0;
+        assert!(
+            empty.contains(
+                "<p>no nights yet</p></header><section><h2>Proposals awaiting you</h2><p>none.</p>"
+            ),
+            "{empty}"
+        );
+    }
 
     #[test]
     fn markdown_renders_what_reports_use_and_escapes_the_rest() {

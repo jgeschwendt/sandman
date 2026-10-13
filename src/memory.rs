@@ -446,6 +446,7 @@ mod tests {
         for (text, line, kind) in cases {
             let err = MemoryFile::parse(text).expect_err("must fail");
             assert_eq!((err.line, err.kind), (line, kind), "for {text:?}");
+            assert_eq!(err.to_string(), format!("line {line}: {}", kind.message()));
         }
     }
 
@@ -471,7 +472,7 @@ mod tests {
             MemoryType::Reference,
             MemoryType::User,
         ] {
-            assert_eq!(kind.as_str().parse::<MemoryType>().expect("known"), kind);
+            assert_eq!(kind.to_string().parse::<MemoryType>().expect("known"), kind);
         }
         assert!("lore".parse::<MemoryType>().is_err());
     }
