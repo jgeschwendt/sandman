@@ -18,7 +18,7 @@
 //! The contract is `docs/BANK-FORMAT.md` § shift.
 
 use std::cmp::Reverse;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::ErrorKind;
@@ -36,6 +36,7 @@ use crate::lock::CommitLock;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::{Timestamp, civil_from_days, days_from_civil};
+use crate::toml;
 use crate::verbs::breathe;
 use crate::verbs::recall;
 use crate::verbs::report;
@@ -1012,11 +1013,105 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
         .collect()
 }
 
+/// Whether the owner froze a repo: the week's targets line says `freeze`,
+/// `frozen` or `on ice`, or his answer on a `proposal:` thread says `on ice`.
+fn frozen(ctx: &Context) -> impl Fn(&str) -> bool {
+    let targets = paths::score_dir(&ctx.data_root)
+        .join(format!("{}-targets.md", Week::targets(ctx.now).name()));
+    let threads = front_files(&ctx.threads);
+    let says = |text: &str, words: &[&str]| {
+        let text = text.to_lowercase();
+        words.iter().any(|word| text.contains(word))
+    };
+    move |label| {
+        let prefix = format!("proposal:{label}:");
+        planned(&targets, label).is_some_and(|line| says(&line, &["freeze", "frozen", "on ice"]))
+            || threads.iter().any(|(_, fields, body)| {
+                fields
+                    .get("key")
+                    .is_some_and(|key| key.starts_with(&prefix))
+                    && body
+                        .split("\n## ")
+                        .any(|part| part.starts_with("user") && says(part, &["on ice"]))
+            })
+    }
+}
+
+/// The repos `shifts/rotation.toml` switches off; none when it is absent.
+fn off(data_root: &Path) -> Result<Vec<String>> {
+    let path = paths::shift_rotation(data_root);
+    let text = match fs::read_to_string(&path) {
+        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        read => read.map_err(|source| Error::io(&path, source))?,
+    };
+    toml::parse(&text)
+        .ok()
+        .and_then(|document| match &document.root[..] {
+            [] => Some(Vec::new()),
+            [(key, value)] if key == "off" => value.as_strings().map(<[String]>::to_vec),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            let file = path.display();
+            Error::invalid(
+                "rotation",
+                format!("{file}: want one key, off = [\"owner/repo\", …]"),
+            )
+        })
+}
+
+/// One repo of the rotation, as the owner sees it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rotating {
+    /// Whether the week's targets or his answer on a proposal froze it.
+    pub frozen: bool,
+    /// `owner/repo`.
+    pub label: String,
+    /// When it was last shifted, Saturday's aside.
+    pub last: Option<Timestamp>,
+    /// Whether `shifts/rotation.toml` leaves it on.
+    pub on: bool,
+}
+
+/// Every rotation trunk, by name.
+pub fn rotation(ctx: &Context) -> Result<Vec<Rotating>> {
+    let (off, last, frozen) = (off(&ctx.data_root)?, last_shifted(ctx), frozen(ctx));
+    Ok(trunks(ctx)
+        .into_iter()
+        .map(|(label, _)| Rotating {
+            frozen: frozen(&label),
+            last: last.get(&label).copied(),
+            on: !off.contains(&label),
+            label,
+        })
+        .collect())
+}
+
+/// Write `shifts/rotation.toml` with `off` sorted and deduped, and hand back
+/// its line.
+pub fn set_off(data_root: &Path, off: impl IntoIterator<Item = String>) -> Result<String> {
+    let off: BTreeSet<String> = off.into_iter().collect();
+    let line = toml::Document {
+        root: vec![(
+            "off".to_owned(),
+            toml::Value::Strings(off.into_iter().collect()),
+        )],
+        tables: Vec::new(),
+    }
+    .render();
+    let _lock = CommitLock::acquire(data_root)?;
+    let path = paths::shift_rotation(data_root);
+    fs::create_dir_all(paths::shifts_dir(data_root)).map_err(|source| Error::io(&path, source))?;
+    atomic::write(&path, &line)?;
+    Ok(line.trim_end().to_owned())
+}
+
 /// The rotation's choice: the least recently shifted trunk, ties broken by the
 /// live signals (a failing `stele check`, then open threads, then breaths) and
 /// then by name. On a Redesign night, and on every night in the cloud, repos
 /// with an approved `proposal:` thread come before the rest. Repos the open
-/// shift names, `skip`, repos the owner froze (the week's targets line says
+/// shift names, `skip`, repos the owner switched off (`shifts/rotation.toml`),
+/// repos he froze (the week's targets line says
 /// `freeze`, `frozen` or `on ice`, or his answer on a `proposal:` thread says
 /// `on ice` — each named on stderr) and untrusted trunks are passed over (the cloud trusts
 /// every clone); when only untrusted ones remain, that is the error. On the
@@ -1049,35 +1144,20 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
     let last = last_shifted(ctx);
     let trust = trusted(ctx);
     let weighted = ctx.cloud.is_some() || ctx.night.anchor(ctx.now).weekday == 1;
-    let targets = paths::score_dir(&ctx.data_root)
-        .join(format!("{}-targets.md", Week::targets(ctx.now).name()));
-    let threads = front_files(&ctx.threads);
-    let says = |text: &str, words: &[&str]| {
-        let text = text.to_lowercase();
-        words.iter().any(|word| text.contains(word))
-    };
-    // The owner's word: the week's targets line, or his answer on a proposal.
-    let frozen = |label: &str| {
-        let prefix = format!("proposal:{label}:");
-        planned(&targets, label).is_some_and(|line| says(&line, &["freeze", "frozen", "on ice"]))
-            || threads.iter().any(|(_, fields, body)| {
-                fields
-                    .get("key")
-                    .is_some_and(|key| key.starts_with(&prefix))
-                    && body
-                        .split("\n## ")
-                        .any(|part| part.starts_with("user") && says(part, &["on ice"]))
-            })
-    };
+    let (off, frozen) = (off(&ctx.data_root)?, frozen(ctx));
     let (mut candidates, untrusted): (Vec<_>, Vec<_>) = trunks(ctx)
         .into_iter()
         .filter(|(label, _)| !busy.contains(label) && !ctx.skip.contains(label))
         .filter(|(label, _)| {
-            let cold = frozen(label);
-            if cold {
-                eprintln!("skipped: {label} (frozen)");
-            }
-            !cold
+            let why = if off.contains(label) {
+                "off"
+            } else if frozen(label) {
+                "frozen"
+            } else {
+                return true;
+            };
+            eprintln!("skipped: {label} ({why})");
+            false
         })
         .map(|(label, path)| {
             let approved = weighted

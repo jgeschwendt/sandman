@@ -11,6 +11,7 @@ mod common;
 
 use std::fmt::Write as _;
 use std::fs;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
@@ -1980,6 +1981,78 @@ fn pick_passes_over_repos_the_owner_froze() {
         stderr(&output),
         "skipped: jgeschwendt/alpha (frozen)\nskipped: jgeschwendt/beta (frozen)\n"
     );
+}
+
+#[test]
+fn the_owner_switches_repos_off_the_rotation_and_pick_passes_them_over() {
+    let machine = Machine::prompted("rotation");
+    for slug in ["alpha", "beta", "gamma"] {
+        machine.repo(&format!("jgeschwendt/{slug}"));
+    }
+    machine.meta(
+        "s-20261005T1200Z",
+        "jgeschwendt/beta",
+        "2026-10-05T12:00:00Z",
+    );
+    machine.write(
+        ".sandman/score/2026-W42-targets.md",
+        "## jgeschwendt/gamma\nfrozen\n",
+    );
+    let table = |off: [&str; 3]| {
+        format!(
+            "jgeschwendt/alpha · {} · never shifted\njgeschwendt/beta · {} · 2026-10-05T12:00:00Z\njgeschwendt/gamma · {} · never shifted · frozen\n",
+            off[0], off[1], off[2]
+        )
+    };
+    assert_eq!(machine.ok(FRIDAY, &["shift", "rotation"]), table(["on"; 3]));
+    let off = ["shift", "rotation", "--off", "jgeschwendt/gamma", "--off"];
+    assert_eq!(
+        machine.ok(FRIDAY, &[&off[..], &["jgeschwendt/alpha"]].concat()),
+        table(["off", "on", "off"])
+    );
+    let file = ".sandman/shifts/rotation.toml";
+    assert_eq!(
+        machine.read(file),
+        "off = [\"jgeschwendt/alpha\", \"jgeschwendt/gamma\"]\n"
+    );
+    // An off repo is named once, as off — never also as frozen.
+    let output = machine.run(FRIDAY, &["shift", "pick"], &[]);
+    assert_eq!(stdout(&output), "jgeschwendt/beta\n");
+    assert_eq!(
+        stderr(&output),
+        "skipped: jgeschwendt/alpha (off)\nskipped: jgeschwendt/gamma (off)\n"
+    );
+    machine.ok(FRIDAY, &["shift", "rotation", "--on", "jgeschwendt/alpha"]);
+    assert_eq!(machine.read(file), "off = [\"jgeschwendt/gamma\"]\n");
+    // A repo outside the rotation is the command line's fault, and writes nothing.
+    let output = machine.run(
+        FRIDAY,
+        &[&off[..4], &["--on", "someone/else"]].concat(),
+        &[],
+    );
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert_eq!(machine.read(file), "off = [\"jgeschwendt/gamma\"]\n");
+    // By hand: an empty file leaves all on; any other shape fails the read.
+    for (text, status) in [
+        ("", 0),
+        ("off = 1\n", 1),
+        ("on = []\n", 1),
+        ("off = [\n", 1),
+    ] {
+        machine.write(file, text);
+        let output = machine.run(FRIDAY, &["shift", "pick"], &[]);
+        assert_eq!(code(&output), status, "{text}: {}", stderr(&output));
+    }
+    fs::remove_file(machine.home.join(file)).expect("rm");
+    // A shifts directory that refuses the write, then a file that will not read.
+    let shifts = machine.root().join("shifts");
+    let mode =
+        |mode| fs::set_permissions(&shifts, fs::Permissions::from_mode(mode)).expect("chmod");
+    mode(0o555);
+    assert_eq!(code(&machine.run(FRIDAY, &off[..4], &[])), 1);
+    mode(0o755);
+    fs::create_dir(machine.home.join(file)).expect("a directory in its place");
+    assert_eq!(code(&machine.run(FRIDAY, &["shift", "rotation"], &[])), 1);
 }
 
 /// The routine's push sweep, cut from `docs/routines/shift.md` and run as the

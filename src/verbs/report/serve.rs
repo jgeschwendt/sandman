@@ -1,12 +1,14 @@
 //! `report serve` — the report as a loopback page. HTTP/1.1 over a std
 //! listener, one request at a time, `Connection: close`: `GET /` is a night's
 //! page, `POST /answer` replies to a proposal thread through the `thread`
-//! binary and puts the owner's decision on the trail.
+//! binary and puts the owner's decision on the trail, `POST /rotation` sets
+//! which repos the rotation leaves off and puts that on the trail as a guard.
 //!
 //! The listener is loopback-only, and a request whose `Host` is not the bound
 //! address, or whose `Origin` is not its `http://` origin, is refused — so
 //! neither a rebinding DNS name nor another site's form reaches the answers.
 
+use std::fmt::Display;
 use std::io::{BufRead, BufReader, Read, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -15,8 +17,8 @@ use std::time::Duration;
 
 use super::html::{self, ANSWERS, escape};
 use super::{mark_read, proposals};
-use crate::verbs::shift::Night;
-use crate::verbs::trail;
+use crate::time::Timestamp;
+use crate::verbs::{shift, trail};
 
 /// The default listen address.
 pub const BIND: &str = "127.0.0.1:1705";
@@ -28,16 +30,15 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// What `report serve` reads and runs, resolved by the caller.
 #[derive(Clone, Debug)]
 pub struct Server {
-    /// The data root.
-    pub data_root: PathBuf,
-    /// The hours a night spans, which key the pages.
-    pub night: Night,
+    /// The shift engine's context: the data root, the night that keys the
+    /// pages, `~/.threads`, the rotation's roots.
+    pub ctx: shift::Context,
+    /// Whether `ctx.now` is `$SANDMAN_NOW`'s; else each request reads the clock.
+    pub pinned: bool,
     /// How many requests to answer before returning; `None` serves on.
     pub requests: Option<usize>,
     /// The `thread` binary the answers go through.
     pub thread: PathBuf,
-    /// `~/.threads`.
-    pub threads: PathBuf,
 }
 
 /// Method, target, headers (names lowercase), body.
@@ -143,6 +144,13 @@ fn form(text: &str) -> Vec<(String, String)> {
 
 /// The answer to one request.
 fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
+    let ctx = &shift::Context {
+        now: Timestamp::now()
+            .ok()
+            .filter(|_| !server.pinned)
+            .unwrap_or(server.ctx.now),
+        ..server.ctx.clone()
+    };
     let Some((method, target, headers, body)) = read(stream) else {
         return status("400 Bad Request", "");
     };
@@ -161,11 +169,16 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
     match (method.as_str(), path) {
         ("GET", "/") => {
             let night = form(query).into_iter().find(|(key, _)| key == "night");
+            let rotation = match shift::rotation(ctx) {
+                Ok(rotation) => rotation,
+                Err(error) => return failed(&error),
+            };
             html::page(
-                &server.data_root,
-                &server.threads,
-                server.night,
+                &ctx.data_root,
+                &ctx.threads,
+                ctx.night,
                 night.as_ref().map(|(_, night)| night.as_str()),
+                &rotation,
             )
             .map_or_else(
                 || status("404 Not Found", "<p>no shift began that night</p>"),
@@ -174,13 +187,14 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
                     // an older night's page leaves the cursor; a cursor that will
                     // not write still serves the page
                     if let Some(at) = newest.filter(|_| night.is_none()) {
-                        let _ = mark_read(&server.data_root, at);
+                        let _ = mark_read(&ctx.data_root, at);
                     }
                     ("200 OK", String::new(), page)
                 },
             )
         }
-        ("POST", "/answer") => answer(server, &form(&body)),
+        ("POST", "/answer") => answer(server, ctx, &form(&body)),
+        ("POST", "/rotation") => rotation(ctx, &form(&body)),
         ("GET" | "POST", _) => status("404 Not Found", ""),
         _ => (
             "405 Method Not Allowed",
@@ -192,7 +206,7 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
 
 /// Reply to the open proposal thread `key` names with `answer` (and `note`
 /// as its body) through the `thread` binary, then append the `decision`.
-fn answer(server: &Server, fields: &[(String, String)]) -> Response {
+fn answer(server: &Server, ctx: &shift::Context, fields: &[(String, String)]) -> Response {
     let field = |name: &str| {
         fields
             .iter()
@@ -206,7 +220,7 @@ fn answer(server: &Server, fields: &[(String, String)]) -> Response {
             "<p>answer approve, revise or decline</p>",
         );
     }
-    let Some(thread) = proposals(&server.threads, None)
+    let Some(thread) = proposals(&ctx.threads, None)
         .into_iter()
         .find(|proposal| proposal.key == key)
     else {
@@ -227,8 +241,8 @@ fn answer(server: &Server, fields: &[(String, String)]) -> Response {
     if let Some(why) = failed {
         return status("502 Bad Gateway", &format!("<pre>{}</pre>", escape(&why)));
     }
-    let event = trail::append(
-        &server.data_root,
+    seen(trail::append(
+        &ctx.data_root,
         trail::Draft {
             kind: "decision".to_owned(),
             rationale: Some(format!("owner {said}d proposal {key}")),
@@ -236,12 +250,41 @@ fn answer(server: &Server, fields: &[(String, String)]) -> Response {
             repo: key.split(':').nth(1).map(ToOwned::to_owned),
             ..trail::Draft::default()
         },
-    );
-    match event {
-        Ok(_) => ("303 See Other", "Location: /\r\n".to_owned(), String::new()),
-        Err(error) => status(
-            "500 Internal Server Error",
-            &format!("<pre>{}</pre>", escape(&error.to_string())),
-        ),
-    }
+    ))
+}
+
+/// Leave off every rotation repo the form does not check, then append the
+/// owner's `guard`; names outside the rotation are ignored.
+fn rotation(ctx: &shift::Context, fields: &[(String, String)]) -> Response {
+    let on: Vec<&(String, String)> = fields.iter().filter(|(key, _)| key == "on").collect();
+    let off = shift::trunks(ctx)
+        .into_iter()
+        .map(|(label, _)| label)
+        .filter(|label| !on.iter().any(|(_, repo)| repo == label));
+    seen(shift::set_off(&ctx.data_root, off).and_then(|line| {
+        trail::append(
+            &ctx.data_root,
+            trail::Draft {
+                kind: "guard".to_owned(),
+                rationale: Some(format!("owner set the rotation: {line}")),
+                ..trail::Draft::default()
+            },
+        )
+    }))
+}
+
+/// `303` back to `/` once a write went through, `500` with why it did not.
+fn seen<T, E: Display>(written: Result<T, E>) -> Response {
+    written.map_or_else(
+        |error| failed(&error),
+        |_| ("303 See Other", "Location: /\r\n".to_owned(), String::new()),
+    )
+}
+
+/// `500` with why.
+fn failed(error: &dyn Display) -> Response {
+    status(
+        "500 Internal Server Error",
+        &format!("<pre>{}</pre>", escape(&error.to_string())),
+    )
 }

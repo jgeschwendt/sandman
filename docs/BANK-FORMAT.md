@@ -284,6 +284,7 @@ makes carries that id in its `Shift:` trailer.
 shifts/
   current.json            # the open shift; absent between shifts
   PAUSE                   # the owner's off switch — the runner starts nothing while it exists
+  rotation.toml           # the owner's rotation: the repos `pick` leaves off
   s-20261016T1600Z/
     brief.md              # the composed prompt the session started from
     handoff.md            # what the shift left the next one
@@ -346,12 +347,23 @@ untried breaths (`state: new` or `spiked`) filed against it, then the name. On a
 night, and every night in the cloud (§ The cloud), repos with an approved `proposal:`
 thread come before all the rest, least recently shifted first among them. The open shift's repo and
 `$SANDMAN_SHIFT_SKIP` (colon-separated slugs) are passed over, and so is a repo the owner
+switched off — `shifts/rotation.toml`, versioned content, flat TOML (below) — each named once on stderr, `skipped: <repo> (off)`, before a repo he
 froze: its section of the week's targets file (§ The brief and its slots) says `freeze`,
 `frozen` or `on ice`, or his answer on any `proposal:<repo>:*` thread — open or resolved,
 text under a `## user` heading — says `on ice`, case aside. Each is named once on `pick`'s
 (and `brief`'s) stderr, `skipped: <repo> (frozen)`. A shift started in Saturday's
 night never counts as a repo's last: the Sabbath works sandman whatever the rotation
 says, and must not stand in for its turn.
+
+**The rotation's file.** `shifts/rotation.toml` holds one root key, `off =
+["owner/repo", …]`, sorted and deduped; absent or empty, every repo is on; any other
+key, or `off` not an array of strings, fails `pick`, `brief` and `rotation` (exit 1)
+rather than turn an off repo back on. `sandman shift rotation [--off <repo>]… [--on
+<repo>]…` prints each rotation trunk as `<repo> · on|off · <last shifted, or never
+shifted>[ · frozen]` — the owner's week's word, as above — after the flags rewrite the
+list (`--on` applied last; a repo outside the rotation exits 2 and writes nothing);
+the page's Rotation form (§ report) writes the same file. Every write holds
+`.commit.lock`, tmp → rename. The Sabbath's pick ignores the list.
 
 **The Sabbath's pick.** In Saturday's night `shift pick` returns `jgeschwendt/sandman`'s
 trunk — the machine's own repo, where the self-pass branch `sabbath/<yyyy-Www>` lives —
@@ -970,7 +982,10 @@ The night) — the newest with a shift, which moves the cursor (above), or
 landed · <proposals> proposals` (cost summed over the shifts' `meta.json` `cost_usd`,
 landed the rows of their Landed tables), then **Proposals awaiting you** — every repo's,
 each with its title, repo, opened time, body (a matrix renders as a table) and a form
-of `approve` · `revise` · `decline` with an optional `note` — then Worth your eye (each
+of `approve` · `revise` · `decline` with an optional `note` — then **Rotation**, one
+form of every rotation trunk (§ shifts, The rotation) as a row: a checkbox `name="on"
+value="<repo>"` (id `rot-<slug>`) checked unless the repo is off, its label, its last
+shifted time and a `frozen` mark when the week's word froze it, and one **Save** — then Worth your eye (each
 bullet linking its shift), Landed (one table, a `shift` column first), every shift as a
 `<details>` holding its whole report, and the last 14 nights. The markdown rendered is
 exactly what reports use — `#`/`##` headings, `-` bullets, pipe tables, paragraphs,
@@ -981,7 +996,12 @@ external fetch, the style inline in `ui`'s green-and-gold palette. `POST /answer
 (`$SANDMAN_THREAD_BIN`, else `~/.local/bin/thread`), appends a `decision` event (rationale
 `owner <answer>d proposal <key>`, ref `thread:<id>`, the key's repo) and answers `303` to
 `/`: `400` for another answer, `404` for an unknown key, `502` with thread's stderr when
-it fails, `500` when the trail refuses. A request whose `Host` is not the bound address,
+it fails, `500` when the trail refuses. `POST /rotation` (`on=<repo>`, repeated — what
+the checked boxes send) leaves off every rotation trunk the body does not name, ignoring
+names outside the rotation, writes `shifts/rotation.toml`, appends a `guard` event
+(rationale `owner set the rotation: off = [...]`, the file's line) and answers `303` to
+`/`, `500` when the file or the trail refuses; a rotation file that will not read makes
+`GET /` a `500`. Both POSTs answer to the same Host and Origin checks. A request whose `Host` is not the bound address,
 or whose `Origin` is not `http://<bound address>`, is `403` — no rebinding DNS name or
 foreign form reaches it; other paths `404`, other methods `405`. Open it at
 `http://127.0.0.1:1705`, never `localhost`, which the Host check refuses. The launchd

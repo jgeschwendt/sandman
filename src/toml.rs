@@ -1,4 +1,5 @@
-//! TOML for our own shape only — the ruach's `breath/sources.toml`.
+//! TOML for our own shape only — the ruach's `breath/sources.toml` and the
+//! rotation's `shifts/rotation.toml`.
 //!
 //! The subset is flat: root keys, then `[name]` tables of `key = value` lines,
 //! where a value is a basic or literal string, an integer, a float, or a

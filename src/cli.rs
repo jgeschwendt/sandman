@@ -222,7 +222,9 @@ usage: sandman <verb> [args]
       `thread reply <id> --as user --answer <answer> [--body <note>]`
       ($SANDMAN_THREAD_BIN, else ~/.local/bin/thread), appends a decision
       event and redirects to /; 404 for an unknown key, 502 when thread
-      fails. A Host other than the bound address, or a foreign Origin, is
+      fails. The Rotation form checks every rotation trunk not off; POST
+      /rotation (on, repeated) leaves off the rest, writes
+      <root>/shifts/rotation.toml, appends a guard event and redirects to /. A Host other than the bound address, or a foreign Origin, is
       403. --requests answers N requests, then exits.
 
   score [--week yyyy-Www] [--json]
@@ -245,6 +247,7 @@ usage: sandman <verb> [args]
   shift pick [--path] [--shift ID | --untrusted]
   shift profile [--kind shift|breath]
   shift reaped --shift ID
+  shift rotation [--off REPO]... [--on REPO]...
   shift status
       The perpetual machine's unit of work, bounded by the five-hour window.
       brief picks the target, fills every {{slot}} of prompts/shift.md
@@ -266,12 +269,16 @@ usage: sandman <verb> [args]
       (default jgeschwendt), Saturday shifts aside — never ~, ~/.routines or
       the data root — ties broken by a failing stele check, open threads and
       breaths; it skips the open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs),
-      a repo the owner froze (`freeze`, `frozen` or `on ice` in its targets line,
+      a repo the owner switched off (<root>/shifts/rotation.toml's off = [...];
+      `skipped: <repo> (off)` on stderr), one he froze (`freeze`, `frozen` or
+      `on ice` in its targets line,
       `on ice` in his answer on a proposal: thread; `skipped: <repo> (frozen)` on
       stderr) and every trunk Claude Code has not trusted ($SANDMAN_CLAUDE_JSON, else
       ~/.claude.json) — exit 1 listing them when no other is left, and brief
       exits 3; --untrusted lists those trunks; --shift prints the target a
-      shift was briefed on. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
+      shift was briefed on. rotation prints every trunk · on/off · last
+      shifted · frozen, after --off/--on (repeatable; a repo outside the
+      rotation exits 2) rewrite the off list. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
       York hours HH-HH (default 21-07) — and a night carries the theme of the
       day it began on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
@@ -1536,15 +1543,14 @@ fn report_serve(args: &[String]) -> Result<(), Failure> {
                 .map_err(|_| Failure::Usage(format!("--requests wants a count, got `{text}`")))
         })
         .transpose()?;
-    let home = paths::home()?;
+    let ctx = shift_context()?;
     let server = report::serve::Server {
-        data_root: paths::data_root()?,
-        night: night()?,
+        pinned: env::var_os("SANDMAN_NOW").is_some_and(|now| !now.is_empty()),
         requests,
         thread: env::var_os("SANDMAN_THREAD_BIN")
             .filter(|bin| !bin.is_empty())
-            .map_or(home.join(".local/bin/thread"), PathBuf::from),
-        threads: paths::threads_dir(&home),
+            .map_or(ctx.home.join(".local/bin/thread"), PathBuf::from),
+        ctx,
     };
     let listener = TcpListener::bind(address).map_err(|source| Error::io(&bind, source))?;
     report::serve::serve(&listener, &server);
@@ -1594,6 +1600,7 @@ fn shift_verb(args: &[String]) -> Result<(), Failure> {
         "pick" => shift_pick(rest),
         "profile" => shift_profile(rest),
         "reaped" => shift_reaped(rest),
+        "rotation" => shift_rotation(rest),
         "status" => shift_status(rest),
         other => Err(Failure::Usage(format!(
             "unknown shift subcommand `{other}`"
@@ -2441,6 +2448,39 @@ fn shift_profile(args: &[String]) -> Result<(), Failure> {
         ))
     })?;
     print!("{profile}");
+    Ok(())
+}
+
+/// `shift rotation [--off REPO]… [--on REPO]…`.
+fn shift_rotation(args: &[String]) -> Result<(), Failure> {
+    let parsed = Args::parse(args, "shift rotation", &["--off", "--on"], &[], 0)?;
+    let ctx = shift_context()?;
+    let mut rows = shift::rotation(&ctx)?;
+    for (flag, on) in [("--off", false), ("--on", true)] {
+        for repo in parsed.all(flag) {
+            rows.iter_mut()
+                .find(|row| row.label == repo)
+                .ok_or_else(|| Failure::Usage(format!("{flag}: `{repo}` is not in the rotation")))?
+                .on = on;
+        }
+    }
+    let off = rows
+        .iter()
+        .filter(|row| !row.on)
+        .map(|row| row.label.clone());
+    if !parsed.values.is_empty() {
+        shift::set_off(&ctx.data_root, off)?;
+    }
+    for row in rows {
+        println!(
+            "{} · {} · {}{}",
+            row.label,
+            if row.on { "on" } else { "off" },
+            row.last
+                .map_or_else(|| "never shifted".to_owned(), Timestamp::iso8601),
+            if row.frozen { " · frozen" } else { "" }
+        );
+    }
     Ok(())
 }
 

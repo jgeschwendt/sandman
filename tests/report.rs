@@ -80,6 +80,7 @@ impl Machine {
     fn command(&self, args: &[&str]) -> Command {
         let mut command = self.sandman(args);
         command
+            .env("SANDMAN_NOW", "2026-10-16T16:00:00Z")
             .env("SANDMAN_ROOT", self.root())
             .env("SANDMAN_THREAD_BIN", self.home.join("thread"));
         command
@@ -388,4 +389,75 @@ fn serve_binds_only_loopback_and_shows_an_empty_machine() {
     ] {
         empty.out(args, "", code);
     }
+}
+
+#[test]
+fn serve_keeps_the_rotation_checklist() {
+    let home = Machine::new("report-rotation");
+    for slug in ["alpha", "beta", "gamma"] {
+        fs::create_dir_all(
+            home.grove_code()
+                .join(format!("jgeschwendt/{slug}/main/.git")),
+        )
+        .expect("checkout");
+    }
+    home.write(
+        ".sandman/shifts/s-20261005T1200Z/meta.json",
+        r#"{"repo":"jgeschwendt/beta","started":"2026-10-05T12:00:00Z"}"#,
+    );
+    // Friday 2026-10-16 reads W42's targets, which freeze gamma.
+    home.write(
+        ".sandman/score/2026-W42-targets.md",
+        "## jgeschwendt/gamma\nfrozen\n",
+    );
+    let file = home.write(
+        ".sandman/shifts/rotation.toml",
+        "off = [\"jgeschwendt/alpha\"]\n",
+    );
+    let (mut server, ask) = serve(&home, 4);
+    let page = ask("GET /", "", "");
+    assert!(
+        page.contains(concat!(
+            "<section><h2>Rotation</h2><form method=\"post\" action=\"/rotation\">",
+            "<p><input type=\"checkbox\" id=\"rot-jgeschwendt_alpha\" name=\"on\" value=\"jgeschwendt/alpha\"><label for=\"rot-jgeschwendt_alpha\">jgeschwendt/alpha</label><span class=\"meta\">never shifted</span></p>",
+            "<p><input type=\"checkbox\" id=\"rot-jgeschwendt_beta\" name=\"on\" value=\"jgeschwendt/beta\" checked><label for=\"rot-jgeschwendt_beta\">jgeschwendt/beta</label><span class=\"meta\">2026-10-05T12:00:00Z</span></p>",
+            "<p><input type=\"checkbox\" id=\"rot-jgeschwendt_gamma\" name=\"on\" value=\"jgeschwendt/gamma\" checked><label for=\"rot-jgeschwendt_gamma\">jgeschwendt/gamma</label><span class=\"meta\">never shifted</span><span class=\"meta\">frozen</span></p>",
+            "<button>Save</button></form></section><section><h2>Worth your eye</h2>"
+        )),
+        "{page}"
+    );
+    // Unchecked boxes send nothing: beta and gamma go off; a stranger is ignored.
+    let saved = ask(
+        "POST /rotation",
+        "Content-Type: application/x-www-form-urlencoded\r\n",
+        "on=jgeschwendt%2Falpha&on=someone%2Felse",
+    );
+    assert!(
+        saved.starts_with("HTTP/1.1 303 See Other\r\nLocation: /\r\n"),
+        "{saved}"
+    );
+    let off = r#"off = ["jgeschwendt/beta", "jgeschwendt/gamma"]"#;
+    assert_eq!(
+        fs::read_to_string(&file).expect("rotation"),
+        format!("{off}\n")
+    );
+    let guards = stdout(&feed(
+        &mut home.command(&["trail", "log", "--kind", "guard", "--json"]),
+        "",
+    ));
+    assert!(
+        guards.contains(&format!(
+            r#""kind":"guard","parent":null,"rationale":"owner set the rotation: {}""#,
+            off.replace('"', "\\\"")
+        )),
+        "{guards}"
+    );
+    // A rotation that will not read or write is the server's fault.
+    fs::remove_file(&file).expect("rm");
+    fs::create_dir(&file).expect("a directory in its place");
+    for request in ["GET /", "POST /rotation"] {
+        let response = ask(request, "", "");
+        assert!(response.starts_with("HTTP/1.1 500 "), "{response}");
+    }
+    assert!(server.wait().expect("exit").success());
 }

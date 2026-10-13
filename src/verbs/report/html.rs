@@ -12,8 +12,9 @@ use std::path::Path;
 use super::{HEADINGS, proposals, section};
 use crate::json::Value;
 use crate::paths;
+use crate::slug::slug;
 use crate::time::Timestamp;
-use crate::verbs::shift::{self, Local, Meta, Night, WEEK};
+use crate::verbs::shift::{self, Local, Meta, Night, Rotating, WEEK};
 
 /// The answers a proposal's form offers, in the order its buttons show.
 pub(crate) const ANSWERS: [&str; 3] = ["approve", "revise", "decline"];
@@ -58,6 +59,9 @@ input{background:var(--bg);color:var(--fg);flex:1 1 12rem}
 button{background:var(--soft);color:var(--fg);cursor:pointer}
 button[value=approve]{background:var(--accent);border-color:var(--accent);
 color:var(--accent-fg)}
+form[action="/rotation"]{display:block}
+form[action="/rotation"] p{align-items:center;display:flex;gap:8px;margin:.25rem 0}
+form[action="/rotation"] input{flex:none}
 footer{border-top:1px solid var(--border);margin-top:3rem;padding-top:1rem}
 nav{display:flex;flex-wrap:wrap;font:.75rem var(--mono);gap:4px 12px}
 "#;
@@ -247,12 +251,13 @@ fn list(tag: &str, items: &str) -> String {
 
 /// The page for the night anchored on `wanted` (`yyyy-mm-dd`), the newest
 /// night with a shift when `None`, and the start of the newest report on it;
-/// `None` when no shift began in that night.
+/// `None` when no shift began in that night. `rotation` is the checklist.
 pub(crate) fn page(
     data_root: &Path,
     threads: &Path,
     night: Night,
     wanted: Option<&str>,
+    rotation: &[Rotating],
 ) -> Option<(String, Option<Timestamp>)> {
     let nights = nights(data_root, night);
     let chosen = match wanted {
@@ -334,6 +339,19 @@ pub(crate) fn page(
         })
         .collect::<Vec<_>>()
         .concat();
+    let checklist = rotation
+        .iter()
+        .map(|repo| {
+            let (id, label) = (format!("rot-{}", slug(&repo.label)), escape(&repo.label));
+            format!(
+                "<p><input type=\"checkbox\" id=\"{id}\" name=\"on\" value=\"{label}\"{}><label for=\"{id}\">{label}</label><span class=\"meta\">{}</span>{}</p>",
+                if repo.on { " checked" } else { "" },
+                repo.last.map_or_else(|| "never shifted".to_owned(), Timestamp::iso8601),
+                if repo.frozen { "<span class=\"meta\">frozen</span>" } else { "" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .concat();
     let landed = head
         .filter(|_| !rows.is_empty())
         .map(|head| table(&head, &rows))
@@ -347,7 +365,7 @@ pub(crate) fn page(
         .concat();
     Some((
         format!(
-            "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>sandman · nights</title><style>{STYLE}</style></head><body><main><header><h1>sandman · nights</h1><p>{}</p></header><section><h2>Proposals awaiting you</h2>{}</section><section><h2>Worth your eye</h2>{}</section><section><h2>Landed</h2>{}</section><section><h2>Shifts</h2>{}</section><footer><nav>{nav}</nav></footer></main></body></html>\n",
+            "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>sandman · nights</title><style>{STYLE}</style></head><body><main><header><h1>sandman · nights</h1><p>{}</p></header><section><h2>Proposals awaiting you</h2>{}</section><section><h2>Rotation</h2><form method=\"post\" action=\"/rotation\">{checklist}<button>Save</button></form></section><section><h2>Worth your eye</h2>{}</section><section><h2>Landed</h2>{}</section><section><h2>Shifts</h2>{}</section><footer><nav>{nav}</nav></footer></main></body></html>\n",
             escape(&line),
             list("div", &forms),
             list("ul", &eye),
@@ -392,7 +410,7 @@ mod tests {
             std::fs::write(root.join(path), text).expect("write");
         }
         let threads = root.join("threads");
-        let at = |night| page(root, &threads, DEFAULT_NIGHT, night).expect("a night");
+        let at = |night| page(root, &threads, DEFAULT_NIGHT, night, &[]).expect("a night");
         let (newest, started) = at(None);
         assert_eq!(started, Timestamp::parse_iso8601("2026-10-17T02:00:00Z"));
         for expected in [
@@ -414,9 +432,11 @@ mod tests {
         ] {
             assert!(older.contains(expected), "{expected} missing: {older}");
         }
-        assert!(page(root, &threads, DEFAULT_NIGHT, Some("1999-01-01")).is_none());
+        assert!(page(root, &threads, DEFAULT_NIGHT, Some("1999-01-01"), &[]).is_none());
         let none = root.join("none");
-        let empty = page(&none, &none, DEFAULT_NIGHT, None).expect("a page").0;
+        let empty = page(&none, &none, DEFAULT_NIGHT, None, &[])
+            .expect("a page")
+            .0;
         assert!(
             empty.contains(
                 "<p>no nights yet</p></header><section><h2>Proposals awaiting you</h2><p>none.</p>"

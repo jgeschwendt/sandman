@@ -295,6 +295,13 @@ pub fn shift_current(data_root: &Path) -> PathBuf {
     shifts_dir(data_root).join("current.json")
 }
 
+/// `<root>/shifts/rotation.toml` — the owner's rotation: `off = [...]`, the
+/// repos `shift pick` passes over; absent, every repo is on.
+#[must_use]
+pub fn shift_rotation(data_root: &Path) -> PathBuf {
+    shifts_dir(data_root).join("rotation.toml")
+}
+
 /// `<root>/.reports-read` — `report`'s read cursor, runtime state in the
 /// dotted tier: one ISO-8601 line, the start of the newest report shown.
 #[must_use]
