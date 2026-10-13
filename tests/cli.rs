@@ -3,44 +3,21 @@
 //! Every run here points `$SANDMAN_ROOT` and `$HOME` at a temp directory, so
 //! nothing touches the operator's `~/.sandman` or `~/.claude`.
 
-use std::env;
+mod common;
+
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::process::Output;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Disambiguates directories created within the same process.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+use common::{Machine, bank_key, code, feed, stderr, stdout};
 
 const SID: &str = "aaaabbbb-cccc-dddd-eeee-ffff00001111";
 /// The Claude Code project the fabricated sessions run under.
 const PROJECT: &str = "-Users-you-code";
 
-/// A fabricated machine: `$HOME` with `.claude` and `.sandman` inside it.
-struct Machine {
-    home: PathBuf,
-}
-
+/// `$HOME` with `.claude` and `.sandman` inside it.
 impl Machine {
-    fn new(label: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let home = env::temp_dir().join(format!(
-            "sandman-cli-{label}-{}-{serial}-{nanos}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&home).expect("create the fabricated home");
-        Self { home }
-    }
-
-    fn root(&self) -> PathBuf {
-        self.home.join(".sandman")
-    }
-
     fn projects(&self) -> PathBuf {
         self.home.join(".claude").join("projects")
     }
@@ -73,28 +50,6 @@ impl Machine {
     /// reason to the journal, which is the whole point of the journal.
     fn took_nothing(&self) -> bool {
         !self.root().join(".archive").exists() && !self.root().join("memories").exists()
-    }
-
-    /// Today's journal for `verb`, or empty when the verb wrote none.
-    fn journal(&self, verb: &str) -> String {
-        let dir = self.root().join(".trace");
-        let Ok(entries) = fs::read_dir(&dir) else {
-            return String::new();
-        };
-        let mut logs: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&format!("{verb}-")))
-                    && path.extension().is_some_and(|kind| kind == "log")
-            })
-            .collect();
-        logs.sort();
-        logs.into_iter()
-            .filter_map(|path| fs::read_to_string(path).ok())
-            .collect()
     }
 
     /// One session's pending-take ledger entry.
@@ -142,17 +97,6 @@ impl Machine {
         path
     }
 
-    /// An executable `/bin/sh` script under the fabricated home. This is how
-    /// the tests stand in for `claude`: no test ever runs the real one.
-    fn script(&self, name: &str, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        let path = self.home.join(name);
-        fs::write(&path, format!("#!/bin/sh\n{body}")).expect("write stub");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod stub");
-        path
-    }
-
     fn run(&self, args: &[&str]) -> Output {
         self.run_with_stdin(args, "")
     }
@@ -162,50 +106,13 @@ impl Machine {
     }
 
     fn run_with(&self, args: &[&str], stdin: &str, env: &[(&str, &str)]) -> Output {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            .env_clear()
-            .env("HOME", &self.home)
-            .env("SANDMAN_ROOT", self.root())
-            .env("PATH", env::var("PATH").unwrap_or_default())
-            .envs(env.iter().copied())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn sandman");
-        // A hook that declines (SANDMAN_NO_TAKE) exits before it reads its
-        // payload; the pipe closing under this write is that behavior, not a
-        // failure of the harness.
-        if let Err(error) = child
-            .stdin
-            .as_mut()
-            .expect("stdin")
-            .write_all(stdin.as_bytes())
-            && error.kind() != std::io::ErrorKind::BrokenPipe
-        {
-            panic!("write stdin: {error}");
-        }
-        child.wait_with_output().expect("wait for sandman")
+        feed(
+            self.sandman(args)
+                .env("SANDMAN_ROOT", self.root())
+                .envs(env.iter().copied()),
+            stdin,
+        )
     }
-}
-
-impl Drop for Machine {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.home);
-    }
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn code(output: &Output) -> i32 {
-    output.status.code().expect("an exit code")
 }
 
 #[test]
@@ -761,16 +668,6 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
     // The pointer is stamped, so a second run has nothing to do.
     let pointer = fs::read_to_string(recent.join(format!("{SID}.json"))).expect("pointer");
     assert!(pointer.contains("\"dreamed\":\""), "{pointer}");
-}
-
-/// The bank key rule, duplicated here on purpose: an integration test drives
-/// the binary and must not borrow the crate's own implementation to check it.
-fn bank_key(cwd: &Path) -> String {
-    cwd.to_str()
-        .expect("a utf-8 cwd")
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
-        .collect()
 }
 
 #[test]

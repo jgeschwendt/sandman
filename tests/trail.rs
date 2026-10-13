@@ -5,67 +5,21 @@
 //! environment cleared, `GIT_CONFIG_GLOBAL=/dev/null` and a fixed identity,
 //! so nothing reads the operator's config and nothing reaches the host repo.
 
-use std::env;
+mod common;
+
 use std::fs;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::Output;
 
-/// Disambiguates directories created within the same process.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+use common::{GIT_ENV, Machine, code, stderr, stdout};
 
-/// The environment every git process gets on top of a cleared one.
-const GIT_ENV: [(&str, &str); 6] = [
-    ("GIT_AUTHOR_EMAIL", "machine@example.com"),
-    ("GIT_AUTHOR_NAME", "machine"),
-    ("GIT_COMMITTER_EMAIL", "machine@example.com"),
-    ("GIT_COMMITTER_NAME", "machine"),
-    ("GIT_CONFIG_GLOBAL", "/dev/null"),
-    ("GIT_CONFIG_NOSYSTEM", "1"),
-];
-
-/// A fabricated machine: `$HOME` holding `.sandman` and `.grove`.
-struct Machine {
-    home: PathBuf,
-}
-
+/// `$HOME` holding `.sandman` and `.grove`.
 impl Machine {
-    fn new(label: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let home = env::temp_dir().join(format!(
-            "sandman-trail-{label}-{}-{serial}-{nanos}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&home).expect("create the fabricated home");
-        Self { home }
-    }
-
-    fn root(&self) -> PathBuf {
-        self.home.join(".sandman")
-    }
-
-    fn grove_code(&self) -> PathBuf {
-        self.home.join(".grove").join("code")
-    }
-
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            .env_clear()
-            .env("HOME", &self.home)
-            .env("PATH", env::var("PATH").unwrap_or_default())
+        self.sandman(args)
             .env("SANDMAN_GROVE_CODE", self.grove_code())
-            // keeps the binary's coverage when `cargo llvm-cov` drives the suite
-            .envs(env::var_os("LLVM_PROFILE_FILE").map(|file| ("LLVM_PROFILE_FILE", file)))
             .env("SANDMAN_RECONCILE_EXTRA", "")
             .env("SANDMAN_ROOT", self.root())
-            // reconcile's scratch worktree lives under temp_dir(); scrubbed, that is /tmp, which a sandbox denies
-            .env("TMPDIR", env::temp_dir())
             .envs(GIT_ENV)
             .output()
             .expect("run sandman")
@@ -84,65 +38,11 @@ impl Machine {
         full.extend_from_slice(args);
         self.ok(&full).trim().to_owned()
     }
-
-    /// Every trail file's bytes, concatenated in path order.
-    fn trail_bytes(&self) -> String {
-        let mut files = Vec::new();
-        let mut stack = vec![self.root().join("trail")];
-        while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        files
-            .into_iter()
-            .map(|path| fs::read_to_string(path).expect("trail file"))
-            .collect()
-    }
-}
-
-impl Drop for Machine {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.home);
-    }
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn code(output: &Output) -> i32 {
-    output.status.code().expect("an exit code")
 }
 
 /// Run git in `dir` with a scrubbed environment; stdout, asserting success.
 fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env_clear()
-        .env("PATH", env::var("PATH").unwrap_or_default())
-        .env("HOME", dir)
-        .envs(GIT_ENV)
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    stdout(&output)
+    common::git(dir, args).unwrap_or_else(|error| panic!("git {args:?}: {error}"))
 }
 
 /// A fixture repo at `<code>/o/fixture/main` holding a base commit and one
@@ -534,12 +434,9 @@ fn a_failing_commit_hook_never_blocks_a_revert_or_strands_the_scratch_tree() {
     let machine = Machine::new("hooks");
     let first = machine.append(&["--kind", "change"]);
     let (checkout, shas) = fixture(&machine, &[("one", &first)]);
-    let hooks = checkout.join(".git").join("hooks");
-    fs::create_dir_all(&hooks).expect("hooks");
     for hook in ["commit-msg", "post-checkout", "pre-commit"] {
-        let path = hooks.join(hook);
-        fs::write(&path, "#!/bin/sh\necho refused by the suite >&2\nexit 1\n").expect("hook");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let path = checkout.join(".git").join("hooks").join(hook);
+        machine.script(path, "echo refused by the suite >&2\nexit 1\n");
     }
 
     let report = machine.ok(&["reconcile", &first]);

@@ -2,30 +2,21 @@
 //! shifts with their `report.md`, proposal threads and the read cursor.
 //! Nothing here runs a model, the network or git.
 
-use std::env;
+mod common;
+
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write as _};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use std::process::{Child, Command, Output, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::process::{Child, Command, Stdio};
 
-/// Disambiguates directories created within the same process.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+use common::{Machine, feed, stderr, stdout};
 
-/// A fabricated home, removed on drop.
-struct Home(PathBuf);
-
-impl Home {
+impl Machine {
     /// Three reported shifts — one in 2026-W41, two in W42 — an open one
     /// without a report, and four untitled threads of which one proposal
     /// awaits the owner. `pad` lengthens every report's Landed section.
-    fn new(pad: usize) -> Self {
-        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let home =
-            Self(env::temp_dir().join(format!("sandman-report-{}-{serial}", std::process::id())));
-        let _ = fs::remove_dir_all(&home.0);
+    fn reported(pad: usize) -> Self {
+        let home = Self::new("report");
         for (shift, started, eye) in [
             ("s-20261009T1400Z", "2026-10-09T14:00:00Z", "- a1"),
             ("s-20261013T1400Z", "2026-10-13T14:00:00Z", "none."),
@@ -33,12 +24,12 @@ impl Home {
             ("s-20261015T1400Z", "2026-10-15T14:00:00Z", ""),
         ] {
             home.write(
-                &format!(".sandman/shifts/{shift}/meta.json"),
+                format!(".sandman/shifts/{shift}/meta.json"),
                 &format!(r#"{{"shift":"{shift}","started":"{started}"}}"#),
             );
             if !eye.is_empty() {
                 home.write(
-                    &format!(".sandman/shifts/{shift}/report.md"),
+                    format!(".sandman/shifts/{shift}/report.md"),
                     &format!(
                         "# {shift}\n## Worth your eye\n{eye}\n## Landed\n{}\n## Numbers\nnone.\n",
                         "x".repeat(pad)
@@ -50,7 +41,7 @@ impl Home {
             ".sandman/shifts/current.json",
             &format!(
                 r#"{{"path":"{}/trunk","session_id":"own","shift":"s-20261015T1400Z"}}"#,
-                home.0.display()
+                home.home.display()
             ),
         );
         for (id, front) in [
@@ -69,87 +60,56 @@ impl Home {
             ("t1", "state: open\nwaiting: user"),
         ] {
             home.write(
-                &format!(".threads/{id}.md"),
+                format!(".threads/{id}.md"),
                 &format!("---\n{front}\nopened: 2026-10-12T10:00:00Z\n---\n"),
             );
         }
         home
     }
 
-    fn write(&self, relative: &str, text: &str) {
-        let path = self.0.join(relative);
-        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
-        fs::write(&path, text).expect("write");
-    }
-
     fn report(&self, shift: &str) -> String {
-        fs::read_to_string(self.0.join(format!(".sandman/shifts/{shift}/report.md")))
+        fs::read_to_string(self.home.join(format!(".sandman/shifts/{shift}/report.md")))
             .expect("report")
     }
 
     fn cursor(&self) -> String {
-        fs::read_to_string(self.0.join(".sandman/.reports-read")).unwrap_or_default()
+        fs::read_to_string(self.home.join(".sandman/.reports-read")).unwrap_or_default()
     }
 
-    /// `sandman <args>` under this home, every stream piped.
-    fn spawn(&self, args: &[&str]) -> Child {
-        Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            .env_clear()
-            .env("HOME", &self.0)
-            .env("SANDMAN_ROOT", self.0.join(".sandman"))
-            .env("SANDMAN_THREAD_BIN", self.0.join("thread"))
-            // keeps the binary's coverage when `cargo llvm-cov` drives the suite
-            .envs(env::var_os("LLVM_PROFILE_FILE").map(|file| ("LLVM_PROFILE_FILE", file)))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("run sandman")
-    }
-
-    fn run(&self, args: &[&str], stdin: &str) -> Output {
-        let mut child = self.spawn(&[&["report"], args].concat());
-        child
-            .stdin
-            .take()
-            .expect("stdin")
-            .write_all(stdin.as_bytes())
-            .expect("payload");
-        child.wait_with_output().expect("output")
+    /// `sandman <args>` under this home.
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = self.sandman(args);
+        command
+            .env("SANDMAN_ROOT", self.root())
+            .env("SANDMAN_THREAD_BIN", self.home.join("thread"));
+        command
     }
 
     /// `report <args>`'s stdout, asserting `code`.
     fn out(&self, args: &[&str], stdin: &str, code: i32) -> String {
-        let output = self.run(args, stdin);
-        assert_eq!(
-            output.status.code(),
-            Some(code),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).into_owned()
-    }
-}
-
-impl Drop for Home {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let output = feed(&mut self.command(&[&["report"], args].concat()), stdin);
+        assert_eq!(common::code(&output), code, "{args:?}: {}", stderr(&output));
+        stdout(&output)
     }
 }
 
 /// `report serve` on a free port, answering `requests` before it exits — and
 /// a client for it: `ask(request line, extra headers, body)` sends one
 /// request with this server's `Host`, and hands back the whole response.
-fn serve(home: &Home, requests: usize) -> (Child, impl Fn(&str, &str, &str) -> String) {
-    let mut child = home.spawn(&[
-        "report",
-        "serve",
-        "--bind",
-        "127.0.0.1:0",
-        "--requests",
-        &requests.to_string(),
-    ]);
+fn serve(home: &Machine, requests: usize) -> (Child, impl Fn(&str, &str, &str) -> String) {
+    let mut child = home
+        .command(&[
+            "report",
+            "serve",
+            "--bind",
+            "127.0.0.1:0",
+            "--requests",
+            &requests.to_string(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run sandman");
     let mut line = String::new();
     BufReader::new(child.stdout.as_mut().expect("stdout"))
         .read_line(&mut line)
@@ -179,13 +139,13 @@ const AWAITING: &str = "## Proposals awaiting you\n- proposal:jgeschwendt/alpha:
 
 #[test]
 fn the_digest_reads_unread_reports_newest_first_and_marks_them_read() {
-    let empty = Home(env::temp_dir().join(format!("sandman-report-empty-{}", std::process::id())));
+    let empty = Machine::new("report-empty");
     assert_eq!(
         empty.out(&[], "", 0),
         "# Reports since the beginning\n\nnothing new.\n"
     );
 
-    let home = Home::new(0);
+    let home = Machine::reported(0);
     let [a, b, c] = ["s-20261009T1400Z", "s-20261013T1400Z", "s-20261014T1400Z"]
         .map(|shift| format!("\n---\n\n{}", home.report(shift)));
     let all = format!(
@@ -226,7 +186,7 @@ fn the_digest_reads_unread_reports_newest_first_and_marks_them_read() {
         home.out(args, "", 2);
     }
     // An unwritable cursor fails the run once the digest is out.
-    let cursor = home.0.join(".sandman/.reports-read");
+    let cursor = home.home.join(".sandman/.reports-read");
     fs::remove_file(&cursor).expect("cursor");
     fs::create_dir(&cursor).expect("a directory in its place");
     assert_eq!(home.out(&["--all", "--mark-read"], "", 1), all);
@@ -234,18 +194,18 @@ fn the_digest_reads_unread_reports_newest_first_and_marks_them_read() {
 
 #[test]
 fn the_hook_shows_the_owner_unread_reports_within_the_cap_and_never_marks_them() {
-    let home = Home::new(3_500);
-    let root = home.0.join(".sandman").display().to_string();
+    let home = Machine::reported(3_500);
+    let root = home.home.join(".sandman").display().to_string();
     // The machine's own sessions: any under the data root, and the open
     // shift's — by session_id, or by its path before `attach` writes one.
-    fs::create_dir(home.0.join("trunk")).expect("trunk");
-    std::os::unix::fs::symlink(home.0.join("trunk"), home.0.join("link")).expect("link");
+    fs::create_dir(home.home.join("trunk")).expect("trunk");
+    std::os::unix::fs::symlink(home.home.join("trunk"), home.home.join("link")).expect("link");
     for payload in [
         r#"{"session_id":"own","cwd":"/tmp"}"#.to_owned(),
         format!(r#"{{"session_id":"breath","cwd":"{root}/breath"}}"#),
         format!(
             r#"{{"session_id":"early","cwd":"{}/link"}}"#,
-            home.0.display()
+            home.home.display()
         ),
     ] {
         assert_eq!(home.out(&["--hook"], &payload, 0), "");
@@ -275,7 +235,7 @@ fn the_hook_shows_the_owner_unread_reports_within_the_cap_and_never_marks_them()
 
 #[test]
 fn serve_shows_a_night_and_answers_proposals_through_thread() {
-    let home = Home::new(0);
+    let home = Machine::reported(0);
     // Friday's night: 22:00 and, past midnight, 03:00 in New York.
     for (shift, cost, eye, landed) in [
         (
@@ -288,13 +248,13 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
     ] {
         let started = format!("2026-10-17T{}:00:00Z", &shift[11..13]);
         home.write(
-            &format!(".sandman/shifts/{shift}/meta.json"),
+            format!(".sandman/shifts/{shift}/meta.json"),
             &format!(
                 r#"{{"cost_usd":{cost},"repo":"jgeschwendt/alpha","shift":"{shift}","started":"{started}","theme":"Ship"}}"#
             ),
         );
         home.write(
-            &format!(".sandman/shifts/{shift}/report.md"),
+            format!(".sandman/shifts/{shift}/report.md"),
             &format!("# {shift} · Ship\n## Worth your eye\n{eye}\n## Landed\n| sha | what |\n| --- | --- |\n{landed}\n## Numbers\nnone.\n"),
         );
     }
@@ -302,12 +262,10 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
         ".threads/p1.md",
         "---\nstate: open\nwaiting: user\nkey: proposal:jgeschwendt/alpha:cache\nopened: 2026-10-12T10:00:00Z\n---\n\n# Cache the parser\n\n## agent · 2026-10-12T10:00:00Z\n\n| option | shifts |\n| --- | --- |\n| **cache** | 2 |\n",
     );
-    let thread = home.0.join("thread");
-    home.write(
+    let thread = home.script(
         "thread",
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/argv\"\n[ \"$6\" != revise ] || { echo 'thread: <refused>' >&2; exit 1; }\n",
+        "printf '%s\\n' \"$*\" >> \"$HOME/argv\"\n[ \"$6\" != revise ] || { echo 'thread: <refused>' >&2; exit 1; }\n",
     );
-    fs::set_permissions(&thread, fs::Permissions::from_mode(0o755)).expect("chmod");
 
     // a shift that never started belongs to no night
     home.write(".sandman/shifts/s-20261016T0000Z/meta.json", "{}");
@@ -366,14 +324,13 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
     assert!(answer("key=proposal%3Anone&answer=approve").starts_with("404"));
     assert!(answer(&format!("{key}&answer=maybe")).starts_with("400"));
     assert_eq!(
-        fs::read_to_string(home.0.join("argv")).expect("argv"),
+        fs::read_to_string(home.home.join("argv")).expect("argv"),
         "reply p1 --as user --answer approve --body ship it!%zz\nreply p1 --as user --answer decline\nreply p1 --as user --answer revise\n"
     );
-    let decisions = home
-        .spawn(&["trail", "log", "--kind", "decision", "--json"])
-        .wait_with_output()
-        .expect("trail");
-    let decisions = String::from_utf8_lossy(&decisions.stdout);
+    let decisions = stdout(&feed(
+        &mut home.command(&["trail", "log", "--kind", "decision", "--json"]),
+        "",
+    ));
     assert_eq!(decisions.lines().count(), 2, "{decisions}");
     for said in ["approved", "declined"] {
         assert!(
@@ -382,7 +339,7 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
         );
     }
     // A trail that cannot be appended to, then a thread binary that is gone.
-    let trail = home.0.join(".sandman/trail");
+    let trail = home.home.join(".sandman/trail");
     fs::remove_dir_all(&trail).expect("trail");
     fs::write(&trail, "").expect("a file in its place");
     assert!(answer(&format!("{key}&answer=approve")).starts_with("500"));
@@ -410,7 +367,7 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
 
 #[test]
 fn serve_binds_only_loopback_and_shows_an_empty_machine() {
-    let empty = Home(env::temp_dir().join(format!("sandman-report-serve-{}", std::process::id())));
+    let empty = Machine::new("report-serve");
     let (mut server, ask) = serve(&empty, 1);
     let page = ask("GET /", "", "");
     assert!(

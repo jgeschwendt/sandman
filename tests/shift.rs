@@ -7,17 +7,14 @@
 //! cloud test runs git, against a bare remote for the state clone: the other
 //! fixture checkouts carry a `.git` directory and no `.stele/`.
 
-use std::env;
+mod common;
+
 use std::fmt::Write as _;
 use std::fs;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::Output;
 
-/// Disambiguates directories created within the same process.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+use common::{GIT_ENV, Machine, bank_key, code, git, stderr, stdout};
 
 /// The template the brief fills — the real one, so its slot contract is what
 /// the suite holds the composer to.
@@ -28,33 +25,13 @@ const SABBATH: &str = include_str!("../prompts/sabbath.md");
 /// A report carrying every heading, so its shift's handoff goes through.
 const REPORT: &str = "# s · Ship · jgeschwendt/alpha · 16:00–20:45Z · $2.50\n## Worth your eye\nnone.\n## Landed\nnone.\n## Proposals · need your word\nnone.\n## Decisions I made\nnone.\n## Numbers\nnone.\n";
 
-/// A fabricated machine: `$HOME` holding `.sandman`, `.grove`, `.threads`.
-struct Machine {
-    home: PathBuf,
-}
-
+/// `$HOME` holding `.sandman`, `.grove`, `.threads`.
 impl Machine {
-    fn new(label: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let home = env::temp_dir().join(format!(
-            "sandman-shift-{label}-{}-{serial}-{nanos}",
-            std::process::id()
-        ));
-        fs::create_dir_all(home.join("prompts")).expect("create the fabricated home");
-        fs::write(home.join("prompts").join("shift.md"), TEMPLATE).expect("template");
-        fs::write(home.join("prompts").join("sabbath.md"), SABBATH).expect("template");
-        Self { home }
-    }
-
-    fn root(&self) -> PathBuf {
-        self.home.join(".sandman")
-    }
-
-    fn grove_code(&self) -> PathBuf {
-        self.home.join(".grove").join("code")
+    fn prompted(label: &str) -> Self {
+        let machine = Self::new(&format!("shift-{label}"));
+        machine.write("prompts/shift.md", TEMPLATE);
+        machine.write("prompts/sabbath.md", SABBATH);
+        machine
     }
 
     fn window(&self) -> PathBuf {
@@ -87,20 +64,14 @@ impl Machine {
     }
 
     fn run(&self, now: &str, args: &[&str], extra: &[(&str, &str)]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            .env_clear()
+        self.sandman(args)
             .env("CLAUDE_WINDOW_FILE", self.window())
-            .env("HOME", &self.home)
-            .env("PATH", env::var("PATH").unwrap_or_default())
             .env("SANDMAN_CLAUDE_JSON", self.home.join("claude.json"))
             .env("SANDMAN_GROVE_CODE", self.grove_code())
             .env("SANDMAN_NOW", now)
             .env("SANDMAN_PROMPTS", self.home.join("prompts"))
             .env("SANDMAN_RECONCILE_EXTRA", "")
             .env("SANDMAN_ROOT", self.root())
-            // keeps the binary's coverage when `cargo llvm-cov` drives the suite
-            .envs(env::var_os("LLVM_PROFILE_FILE").map(|file| ("LLVM_PROFILE_FILE", file)))
             .envs(extra.iter().copied())
             .output()
             .expect("run sandman")
@@ -111,44 +82,6 @@ impl Machine {
         let output = self.run(now, args, &[]);
         assert_eq!(code(&output), 0, "{args:?}: {}", stderr(&output));
         stdout(&output)
-    }
-
-    fn write(&self, relative: &str, text: &str) -> PathBuf {
-        let path = self.home.join(relative);
-        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
-        fs::write(&path, text).expect("write");
-        path
-    }
-
-    fn read(&self, relative: &str) -> String {
-        fs::read_to_string(self.home.join(relative)).unwrap_or_default()
-    }
-
-    /// Every trail line, in file order.
-    fn trail(&self) -> Vec<String> {
-        let mut files = Vec::new();
-        let mut stack = vec![self.root().join("trail")];
-        while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        files
-            .into_iter()
-            .flat_map(|path| {
-                fs::read_to_string(path)
-                    .expect("trail file")
-                    .lines()
-                    .map(ToOwned::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .collect()
     }
 
     /// Trail events at chosen instants, written straight into their day file:
@@ -170,56 +103,23 @@ impl Machine {
     /// A shift's `meta.json`, written by hand for the rotation to read.
     fn meta(&self, shift: &str, repo: &str, started: &str) {
         self.write(
-            &format!(".sandman/shifts/{shift}/meta.json"),
+            format!(".sandman/shifts/{shift}/meta.json"),
             &format!(r#"{{"repo":"{repo}","shift":"{shift}","started":"{started}"}}"#),
         );
     }
 
     /// `shift`'s report, written as the session would.
     fn report(&self, shift: &str, text: &str) {
-        self.write(&format!(".sandman/shifts/{shift}/report.md"), text);
+        self.write(format!(".sandman/shifts/{shift}/report.md"), text);
     }
 
     /// An open thread whose body names `text`.
     fn thread(&self, id: &str, title: &str, text: &str) {
         self.write(
-            &format!(".threads/{id}.md"),
+            format!(".threads/{id}.md"),
             &format!("---\nstate: open\nwaiting: user\n---\n\n# {title}\n\n{text}\n"),
         );
     }
-}
-
-impl Drop for Machine {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.home);
-    }
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn code(output: &Output) -> i32 {
-    output.status.code().expect("an exit code")
-}
-
-/// The bank key recall derives for `dir` — every non-alphanumeric byte a dash.
-fn bank_key(dir: &Path) -> String {
-    dir.as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() {
-                char::from(*byte)
-            } else {
-                '-'
-            }
-        })
-        .collect()
 }
 
 /// Friday 2026-10-16, noon in New York (EDT).
@@ -227,7 +127,7 @@ const FRIDAY: &str = "2026-10-16T16:00:00Z";
 
 #[test]
 fn profile_prints_the_session_settings_for_either_kind() {
-    let machine = Machine::new("profile");
+    let machine = Machine::prompted("profile");
     let now = "2026-10-09T23:00:00Z";
     let shift = machine.ok(now, &["shift", "profile"]);
     assert_eq!(shift, include_str!("../profiles/session.json"));
@@ -266,7 +166,7 @@ fn profile_prints_the_session_settings_for_either_kind() {
 
 #[test]
 fn clock_check_gates_on_the_night_the_window_and_usage() {
-    let machine = Machine::new("clock");
+    let machine = Machine::prompted("clock");
     // Friday 23:00 in New York, 1791601200.
     let now = "2026-10-10T03:00:00Z";
     let window = |left: i64, used: &str| {
@@ -364,7 +264,7 @@ fn clock_check_gates_on_the_night_the_window_and_usage() {
 
 #[test]
 fn pick_rotates_to_the_least_recently_shifted_trunk() {
-    let machine = Machine::new("pick");
+    let machine = Machine::prompted("pick");
     let alpha = machine.repo("jgeschwendt/alpha");
     machine.repo("jgeschwendt/beta");
     // Not a trunk, and not an owner the rotation covers.
@@ -458,14 +358,14 @@ fn pick_rotates_to_the_least_recently_shifted_trunk() {
 
 #[test]
 fn brief_fills_every_slot_and_records_the_start() {
-    let machine = Machine::new("brief");
+    let machine = Machine::prompted("brief");
     let alpha = machine.repo("jgeschwendt/alpha");
     machine.write(
         ".grove/code/jgeschwendt/alpha/main/docs/plan.md",
         "# Alpha\n\nStatus: building.\n\n## What comes next\n\nShip the parser rewrite behind a flag.\nThen delete the old one.\n\n## Later\n\nNothing.\n",
     );
     machine.write(
-        &format!(".sandman/memories/{}/feedback_parsers.md", bank_key(&alpha)),
+        format!(".sandman/memories/{}/feedback_parsers.md", bank_key(&alpha)),
         "---\nname: parsers\ndescription: parsers want fuzzing\ntype: feedback\n---\n\nFuzz every parser before merging.\n",
     );
     machine.thread(
@@ -488,7 +388,7 @@ fn brief_fills_every_slot_and_records_the_start() {
         ("p4", "jgeschwendt/beta:other", "waiting: user"),
     ] {
         machine.write(
-            &format!(".threads/{id}.md"),
+            format!(".threads/{id}.md"),
             &format!("---\nstate: open\nkey: proposal:{key}\nopened: 2026-10-14T10:00:00Z\n{answer}\n---\n\n# Proposal {id}\n"),
         );
     }
@@ -646,7 +546,7 @@ fn brief_fills_every_slot_and_records_the_start() {
 
 #[test]
 fn the_theme_follows_the_new_york_weekday() {
-    let machine = Machine::new("themes");
+    let machine = Machine::prompted("themes");
     machine.repo("jgeschwendt/alpha");
     for (now, weekday, theme, instrument) in [
         (
@@ -719,7 +619,7 @@ fn the_theme_follows_the_new_york_weekday() {
 
 #[test]
 fn the_brief_is_capped_and_the_cut_is_recorded() {
-    let machine = Machine::new("cap");
+    let machine = Machine::prompted("cap");
     machine.repo("jgeschwendt/alpha");
     let events: Vec<(String, &str, String)> = (0..45)
         .map(|index| {
@@ -813,7 +713,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
 
 #[test]
 fn handoff_finalizes_once_and_releases_the_open_shift() {
-    let machine = Machine::new("handoff");
+    let machine = Machine::prompted("handoff");
     machine.repo("jgeschwendt/alpha");
     machine.repo("jgeschwendt/beta");
 
@@ -1003,7 +903,7 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
 
 #[test]
 fn a_missing_template_fails_with_its_path() {
-    let machine = Machine::new("template");
+    let machine = Machine::prompted("template");
     machine.repo("jgeschwendt/alpha");
     let output = machine.run(FRIDAY, &["shift", "brief"], &[("SANDMAN_PROMPTS", "")]);
     assert_eq!(code(&output), 1);
@@ -1018,7 +918,7 @@ fn a_missing_template_fails_with_its_path() {
 
 #[test]
 fn pick_never_returns_a_home_repo_even_when_it_rested_longest() {
-    let machine = Machine::new("home");
+    let machine = Machine::prompted("home");
     let alpha = machine.repo("jgeschwendt/alpha");
     let routines = machine.home.join(".routines");
     for home_repo in [&machine.home, &routines, &machine.root()] {
@@ -1068,7 +968,7 @@ fn previous_handoff(machine: &Machine, text: &str) {
 
 #[test]
 fn a_long_handoff_never_cuts_the_template_tail() {
-    let machine = Machine::new("long-handoff");
+    let machine = Machine::prompted("long-handoff");
     machine.repo("jgeschwendt/alpha");
     let line = "a handoff line that goes on and on about what the shift did. ";
     let mut handoff = String::new();
@@ -1124,7 +1024,7 @@ fn a_long_handoff_never_cuts_the_template_tail() {
 
 #[test]
 fn a_slot_arrives_fenced_and_unexpanded() {
-    let machine = Machine::new("fenced");
+    let machine = Machine::prompted("fenced");
     machine.repo("jgeschwendt/alpha");
     previous_handoff(
         &machine,
@@ -1171,13 +1071,13 @@ fn a_slot_arrives_fenced_and_unexpanded() {
 
 #[test]
 fn handoff_refuses_an_oversized_file_unless_truncated() {
-    let machine = Machine::new("handoff-cap");
+    let machine = Machine::prompted("handoff-cap");
     machine.repo("jgeschwendt/alpha");
     let shift = "s-20261016T1600Z";
     machine.ok(FRIDAY, &["shift", "brief"]);
     let long = format!("# Landed it\n\n{}\n", "word ".repeat(500));
     let length = long.chars().count();
-    machine.write(&format!(".sandman/shifts/{shift}/handoff.md"), &long);
+    machine.write(format!(".sandman/shifts/{shift}/handoff.md"), &long);
     machine.report(shift, REPORT);
 
     let output = machine.run(
@@ -1248,7 +1148,7 @@ fn handoff_refuses_an_oversized_file_unless_truncated() {
 
 #[test]
 fn the_clock_exits_3_when_the_window_file_is_unreadable() {
-    let machine = Machine::new("clock-fault");
+    let machine = Machine::prompted("clock-fault");
     let now = "2026-10-09T23:00:00Z";
     fs::write(machine.window(), "{ not json").expect("window");
     for args in [&["shift", "clock", "--check"][..], &["shift", "clock"]] {
@@ -1279,7 +1179,7 @@ fn the_clock_exits_3_when_the_window_file_is_unreadable() {
 
 #[test]
 fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
-    let machine = Machine::new("clock-shape");
+    let machine = Machine::prompted("clock-shape");
     let now = "2026-10-09T23:00:00Z";
     // 1791586800 is the instant `now` names.
     for (shape, why) in [
@@ -1385,7 +1285,7 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
 
 #[test]
 fn an_abandoned_handoff_says_why_when_the_runner_does() {
-    let machine = Machine::new("abandon-reason");
+    let machine = Machine::prompted("abandon-reason");
     machine.repo("jgeschwendt/alpha");
     machine.repo("jgeschwendt/beta");
     let rationale = |machine: &Machine| {
@@ -1415,7 +1315,7 @@ fn an_abandoned_handoff_says_why_when_the_runner_does() {
     let now = "2026-10-16T17:00:00Z";
     machine.ok(now, &["shift", "brief"]);
     machine.write(
-        &format!(".sandman/shifts/{second}/handoff.md"),
+        format!(".sandman/shifts/{second}/handoff.md"),
         "# Half done\n\nThe parser fix is on shift/x.\n",
     );
     let reason = "stopped at 2026-10-16T21:57:00Z: still working 12 min past handoff_by";
@@ -1465,7 +1365,7 @@ fn an_abandoned_handoff_says_why_when_the_runner_does() {
 
 #[test]
 fn concurrent_briefs_open_one_shift() {
-    let machine = Machine::new("brief-race");
+    let machine = Machine::prompted("brief-race");
     machine.repo("jgeschwendt/alpha");
     let opened = std::thread::scope(|scope| {
         let runs: Vec<_> = (0..8)
@@ -1493,7 +1393,7 @@ fn concurrent_briefs_open_one_shift() {
 
 #[test]
 fn pick_passes_over_untrusted_trunks_and_brief_faults_when_none_is_trusted() {
-    let machine = Machine::new("trust");
+    let machine = Machine::prompted("trust");
     let alpha = machine.repo("jgeschwendt/alpha");
     let beta = machine.checkout("jgeschwendt/beta");
     let gamma = machine.checkout("jgeschwendt/gamma");
@@ -1545,7 +1445,7 @@ fn pick_passes_over_untrusted_trunks_and_brief_faults_when_none_is_trusted() {
 
 #[test]
 fn a_missing_or_unparsable_claude_json_trusts_nothing() {
-    let machine = Machine::new("no-trust");
+    let machine = Machine::prompted("no-trust");
     machine.repo("jgeschwendt/alpha");
     let missing = machine.home.join("absent.json");
     let missing = [("SANDMAN_CLAUDE_JSON", missing.to_str().expect("utf-8"))];
@@ -1582,7 +1482,7 @@ const SATURDAY: &str = "2026-10-10T16:00:00Z";
 
 #[test]
 fn the_sabbath_brief_fills_its_own_template_and_works_sandman() {
-    let machine = Machine::new("sabbath");
+    let machine = Machine::prompted("sabbath");
     machine.repo("jgeschwendt/alpha");
     let sandman = machine.repo("jgeschwendt/sandman");
     let score = (1..=30)
@@ -1708,11 +1608,11 @@ fn the_sabbath_brief_fills_its_own_template_and_works_sandman() {
 
 #[test]
 fn one_sabbath_a_day() {
-    let machine = Machine::new("one-sabbath");
+    let machine = Machine::prompted("one-sabbath");
     machine.repo("jgeschwendt/sandman");
     let kept = "s-20261010T1600Z";
     assert_eq!(machine.ok(SATURDAY, &["shift", "brief"]).trim(), kept);
-    machine.write(&format!(".sandman/shifts/{kept}/handoff.md"), "Rested.\n");
+    machine.write(format!(".sandman/shifts/{kept}/handoff.md"), "Rested.\n");
     machine.report(kept, REPORT);
     machine.ok(
         "2026-10-10T17:00:00Z",
@@ -1735,7 +1635,7 @@ fn one_sabbath_a_day() {
 
 #[test]
 fn a_weekday_brief_falls_back_to_the_sabbaths_targets() {
-    let machine = Machine::new("targets");
+    let machine = Machine::prompted("targets");
     machine.repo("jgeschwendt/alpha");
     // Saturday's Sabbath (W41) plans W42; Sunday is the first day it governs.
     machine.write(
@@ -1766,7 +1666,7 @@ fn a_weekday_brief_falls_back_to_the_sabbaths_targets() {
 
 #[test]
 fn sabbath_shifts_do_not_count_toward_last_shifted() {
-    let machine = Machine::new("sabbath-rest");
+    let machine = Machine::prompted("sabbath-rest");
     machine.repo("jgeschwendt/alpha");
     machine.repo("jgeschwendt/beta");
     machine.meta(
@@ -1791,33 +1691,9 @@ fn sabbath_shifts_do_not_count_toward_last_shifted() {
     );
 }
 
-/// Identity and isolation for every git the cloud test runs, sandman's too.
-const GIT_ENV: [(&str, &str); 6] = [
-    ("GIT_AUTHOR_EMAIL", "machine@example.com"),
-    ("GIT_AUTHOR_NAME", "machine"),
-    ("GIT_COMMITTER_EMAIL", "machine@example.com"),
-    ("GIT_COMMITTER_NAME", "machine"),
-    ("GIT_CONFIG_GLOBAL", "/dev/null"),
-    ("GIT_CONFIG_NOSYSTEM", "1"),
-];
-
-/// Run git in `dir`, scrubbed; its stdout, or `None` when it fails.
-fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env_clear()
-        .env("PATH", env::var("PATH").unwrap_or_default())
-        .envs(GIT_ENV)
-        .output()
-        .expect("run git");
-    output.status.success().then(|| stdout(&output))
-}
-
 #[test]
 fn cloud_shifts_lock_through_the_state_remote() {
-    let machine = Machine::new("cloud");
+    let machine = Machine::prompted("cloud");
     let home = &machine.home;
     let remote = home.join("state.git");
     git(
@@ -1839,9 +1715,9 @@ fn cloud_shifts_lock_through_the_state_remote() {
         for repo in ["-", "alpha", "beta", "sandman"] {
             fs::create_dir_all(home.join(name).join(repo).join(".git")).expect("clone");
         }
-        machine.write(&format!("{name}/sandman/prompts/shift.md"), TEMPLATE);
+        machine.write(format!("{name}/sandman/prompts/shift.md"), TEMPLATE);
         machine.write(
-            &format!("{name}/-/p1.md"),
+            format!("{name}/-/p1.md"),
             "---\nstate: open\nkey: proposal:jgeschwendt/beta:split\nanswer: approve\ndecided: 2026-10-15T09:00:00Z\n---\n\n# Split beta\n",
         );
         home.join(name)
@@ -1872,7 +1748,7 @@ fn cloud_shifts_lock_through_the_state_remote() {
         "{brief}"
     );
     assert_eq!(
-        git(&remote, &["log", "-1", "--format=%s"]).as_deref(),
+        git(&remote, &["log", "-1", "--format=%s"]).ok().as_deref(),
         Some("shift(s-20261016T1600Z): open jgeschwendt/beta\n")
     );
     for (file, key) in [
@@ -1931,12 +1807,10 @@ fn cloud_shifts_lock_through_the_state_remote() {
     );
     assert!(!vm.join(".sandman/.git/rebase-merge").exists());
     // a push the remote turns away once goes through after one pull --rebase
-    machine.write(
+    machine.script(
         "state.git/hooks/pre-receive",
-        "#!/bin/sh\n[ -e once ] || { touch once; exit 1; }\n",
+        "[ -e once ] || { touch once; exit 1; }\n",
     );
-    let hook = remote.join("hooks").join("pre-receive");
-    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod");
     assert_eq!(handoff(&other, "s-20261016T1715Z").0, 0);
     assert!(remote.join("once").exists());
     assert_eq!(

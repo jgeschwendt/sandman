@@ -11,6 +11,10 @@ purpose: integration tests — `breathe` `cli` `mcp` `report` `score` `shift` `t
   `$HOME` and `$SANDMAN_ROOT` at it, and pass roots explicitly.
 - Never run the real `claude` — point `$SANDMAN_CLAUDE_BIN` at a stub script
   under the fabricated home. The binary is env-configurable for exactly this.
+- Spawn the binary only through `common::Machine::sandman` and git through
+  `common::git`: their cleared environment keeps `$TMPDIR` (scrubbed, it is
+  the sandbox-denied /tmp) and `$LLVM_PROFILE_FILE` (without it `cargo
+  llvm-cov` loses the binary's coverage and litters the cwd with profraw).
 - Fixture git runs with the environment cleared, `GIT_CONFIG_GLOBAL=/dev/null` and a
   fixed identity — for the fixture's own git calls and for the binary's.
 - Unit tests live beside their module in `src/`; only cross-process and

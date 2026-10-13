@@ -11,16 +11,13 @@
 //! the commit path is the format authority, and a test that hand-rolled a bank
 //! would be checking its own fabrication.
 
-use std::env;
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+mod common;
 
-/// Disambiguates directories created within the same process.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+use std::fs;
+use std::path::Path;
+use std::process::Output;
+
+use common::{Machine, bank_key, code, feed, stderr, stdout};
 
 /// The bank the scripted `remember` call writes into — a directory that does
 /// not exist on this machine, so the run cannot depend on one that does.
@@ -42,30 +39,7 @@ const SEED_BODY: &str = "the archive is append-only and the pointer is the queue
 /// payload is what the log is forbidden to quote.
 const SEED_FRAGMENT: &str = "append-only";
 
-/// A fabricated machine: `$HOME` with `.sandman` inside it.
-struct Machine {
-    /// The temp directory standing in for the operator's home.
-    home: PathBuf,
-}
-
 impl Machine {
-    fn new(label: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let home = env::temp_dir().join(format!(
-            "sandman-mcp-{label}-{}-{serial}-{nanos}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&home).expect("create the fabricated home");
-        Self { home }
-    }
-
-    fn root(&self) -> PathBuf {
-        self.home.join(".sandman")
-    }
-
     /// Seed the home bank through the binary's own `remember`.
     fn seed(&self) {
         let home = self.home.display().to_string();
@@ -74,84 +48,8 @@ impl Machine {
     }
 
     fn run_with_stdin(&self, args: &[&str], stdin: &str) -> Output {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            .env_clear()
-            .env("HOME", &self.home)
-            .env("SANDMAN_ROOT", self.root())
-            .env("PATH", env::var("PATH").unwrap_or_default())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn sandman");
-        child
-            .stdin
-            .as_mut()
-            .expect("stdin")
-            .write_all(stdin.as_bytes())
-            .expect("write stdin");
-        child.wait_with_output().expect("wait for sandman")
+        feed(self.sandman(args).env("SANDMAN_ROOT", self.root()), stdin)
     }
-
-    /// Today's `mcp` journal, or empty when the verb wrote none.
-    fn journal(&self) -> String {
-        let dir = self.root().join(".trace");
-        let Ok(entries) = fs::read_dir(&dir) else {
-            return String::new();
-        };
-        let mut logs: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("mcp-"))
-                    && path.extension().is_some_and(|kind| kind == "log")
-            })
-            .collect();
-        logs.sort();
-        logs.into_iter()
-            .filter_map(|path| fs::read_to_string(path).ok())
-            .collect()
-    }
-}
-
-impl Drop for Machine {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.home);
-    }
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn code(output: &Output) -> i32 {
-    output.status.code().expect("an exit code")
-}
-
-/// A directory's bank key: every non-alphanumeric byte becomes `-`.
-///
-/// Written out rather than borrowed from the crate. An integration test drives
-/// the binary from outside, and a key derived from the same function the binary
-/// uses would agree with it however wrong both were.
-fn bank_key(path: &Path) -> String {
-    path.to_str()
-        .expect("a utf-8 temp path")
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() {
-                char::from(byte)
-            } else {
-                '-'
-            }
-        })
-        .collect()
 }
 
 /// The whole conversation, in the order a client holds it: the handshake, the
@@ -328,7 +226,7 @@ fn the_journal_carries_one_line_per_message_and_never_a_body() {
         0
     );
 
-    let journal = machine.journal();
+    let journal = machine.journal("mcp");
     let lines: Vec<&str> = journal.lines().collect();
     // The start, the eleven messages, the notification, and the ending.
     assert_eq!(lines.len(), 14, "{journal}");

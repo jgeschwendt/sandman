@@ -7,18 +7,15 @@
 //! the test's to choose. Trail events still carry the real clock. Nothing here
 //! runs a model or touches the network: `breathe` never does.
 
-use std::env;
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::Output;
 
+use common::{Machine, code, stderr, stdout};
 use sandman::toml;
 use sandman::verbs::breathe::Sources;
-
-/// Disambiguates directories created within the same process.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// The pass template — the real one, so its slot contract is what the suite
 /// holds the composer to.
@@ -31,41 +28,19 @@ const SEED: &str = include_str!("../breath/sources.toml");
 /// Friday 2026-10-16, noon in New York.
 const NOW: &str = "2026-10-16T16:00:00Z";
 
-/// A fabricated machine: `$HOME` holding `.sandman`, `.grove`, `prompts`.
-struct Machine {
-    home: PathBuf,
-}
-
+/// `$HOME` holding `.sandman`, `.grove`, `prompts`.
 impl Machine {
-    fn new(label: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let home = env::temp_dir().join(format!(
-            "sandman-breathe-{label}-{}-{serial}-{nanos}",
-            std::process::id()
-        ));
-        fs::create_dir_all(home.join("prompts")).expect("create the fabricated home");
-        fs::write(home.join("prompts").join("breathe.md"), TEMPLATE).expect("template");
-        fs::write(home.join("prompts").join("shift.md"), SHIFT_TEMPLATE).expect("template");
-        Self { home }
-    }
-
-    fn root(&self) -> PathBuf {
-        self.home.join(".sandman")
+    fn prompted(label: &str) -> Self {
+        let machine = Self::new(&format!("breathe-{label}"));
+        machine.write("prompts/breathe.md", TEMPLATE);
+        machine.write("prompts/shift.md", SHIFT_TEMPLATE);
+        machine
     }
 
     fn run(&self, now: &str, args: &[&str], extra: &[(&str, &str)]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            .env_clear()
+        self.sandman(args)
             .env("CLAUDE_WINDOW_FILE", self.home.join("window.json"))
-            .env("HOME", &self.home)
-            .env("PATH", env::var("PATH").unwrap_or_default())
-            .env("SANDMAN_GROVE_CODE", self.home.join(".grove").join("code"))
-            // keeps the binary's coverage when `cargo llvm-cov` drives the suite
-            .envs(env::var_os("LLVM_PROFILE_FILE").map(|file| ("LLVM_PROFILE_FILE", file)))
+            .env("SANDMAN_GROVE_CODE", self.grove_code())
             .env("SANDMAN_NOW", now)
             .env("SANDMAN_PROMPTS", self.home.join("prompts"))
             .env("SANDMAN_RECONCILE_EXTRA", "")
@@ -82,45 +57,8 @@ impl Machine {
         stdout(&output)
     }
 
-    fn write(&self, relative: &str, text: &str) {
-        let path = self.home.join(relative);
-        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
-        fs::write(&path, text).expect("write");
-    }
-
-    fn read(&self, relative: &str) -> String {
-        fs::read_to_string(self.home.join(relative)).unwrap_or_default()
-    }
-
     fn sources(&self) -> Sources {
         Sources::parse(&self.read(".sandman/breath/sources.toml")).expect("sources.toml")
-    }
-
-    /// Every trail line, in file order.
-    fn trail(&self) -> Vec<String> {
-        let mut files = Vec::new();
-        let mut stack = vec![self.root().join("trail")];
-        while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        files
-            .into_iter()
-            .flat_map(|path| {
-                fs::read_to_string(path)
-                    .expect("trail file")
-                    .lines()
-                    .map(ToOwned::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .collect()
     }
 
     /// `breathe file` with the four required texts and `extra` flags.
@@ -147,24 +85,6 @@ impl Machine {
         args.extend_from_slice(extra);
         self.run(now, &args, &[])
     }
-}
-
-impl Drop for Machine {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.home);
-    }
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn code(output: &Output) -> i32 {
-    output.status.code().expect("an exit code")
 }
 
 /// The file name a `file` run printed.
@@ -198,7 +118,7 @@ fn the_toml_reader_round_trips_the_seed_and_refuses_a_nested_table() {
     assert_eq!(nested.line, 3);
     assert!(nested.message.contains("nested table"), "{nested}");
 
-    let machine = Machine::new("toml");
+    let machine = Machine::prompted("toml");
     machine.write(
         ".sandman/breath/sources.toml",
         "[feeds.hn]\nkind = \"json\"\n",
@@ -225,7 +145,7 @@ fn the_toml_reader_round_trips_the_seed_and_refuses_a_nested_table() {
 
 #[test]
 fn init_creates_the_store_and_seeds_sources_only_once() {
-    let machine = Machine::new("init");
+    let machine = Machine::prompted("init");
     let made = machine.ok(NOW, &["breathe", "init"]);
     for part in ["breath\n", "ledger\n", "passes\n", "sources.toml\n"] {
         assert!(made.contains(part), "{made}");
@@ -245,7 +165,7 @@ fn init_creates_the_store_and_seeds_sources_only_once() {
 
 #[test]
 fn file_dedupes_by_url_and_by_title_jaccard_and_counts_seen_again() {
-    let machine = Machine::new("dedupe");
+    let machine = Machine::prompted("dedupe");
     machine.ok(NOW, &["breathe", "init"]);
     let first = filed_name(&machine.file(
         NOW,
@@ -345,7 +265,7 @@ fn file_dedupes_by_url_and_by_title_jaccard_and_counts_seen_again() {
 
 #[test]
 fn dedupe_normalizes_urls_and_keeps_titles_and_drops_to_their_repo() {
-    let machine = Machine::new("dedupe-rules");
+    let machine = Machine::prompted("dedupe-rules");
     machine.ok(NOW, &["breathe", "init"]);
     let (alpha, beta) = ("jgeschwendt/alpha", "jgeschwendt/beta");
     let seen = |output: &Output, file: &str| {
@@ -444,7 +364,7 @@ fn dedupe_normalizes_urls_and_keeps_titles_and_drops_to_their_repo() {
 
 #[test]
 fn file_appends_a_breath_event_with_the_url_and_breath_refs() {
-    let machine = Machine::new("event");
+    let machine = Machine::prompted("event");
     let name = filed_name(&machine.run(
         NOW,
         &[
@@ -487,7 +407,7 @@ fn file_appends_a_breath_event_with_the_url_and_breath_refs() {
 
 #[test]
 fn transitions_need_a_reason_to_drop_and_adopt_only_new_or_spiked() {
-    let machine = Machine::new("transitions");
+    let machine = Machine::prompted("transitions");
     machine.ok(NOW, &["breathe", "init"]);
     let name = filed_name(&machine.file(
         NOW,
@@ -570,7 +490,7 @@ fn transitions_need_a_reason_to_drop_and_adopt_only_new_or_spiked() {
 
 #[test]
 fn pass_fills_every_slot_and_close_advances_last_read() {
-    let machine = Machine::new("pass");
+    let machine = Machine::prompted("pass");
     machine.ok(NOW, &["breathe", "init"]);
     machine.write(
         ".sandman/breath/problems.md",
@@ -749,7 +669,7 @@ fn pass_fills_every_slot_and_close_advances_last_read() {
 
 #[test]
 fn sources_due_respects_the_hourly_cadence() {
-    let machine = Machine::new("due");
+    let machine = Machine::prompted("due");
     machine.write(
         ".sandman/breath/sources.toml",
         "[fresh]\nkind = \"rss\"\nurl = \"https://a\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\nlast_read = \"2026-10-16T15:01:00Z\"\n\n[never]\nkind = \"rss\"\nurl = \"https://b\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\n\n[stale]\nkind = \"rss\"\nurl = \"https://c\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\nlast_read = \"2026-10-16T15:00:00Z\"\n",
@@ -783,7 +703,7 @@ fn sources_due_respects_the_hourly_cadence() {
 
 #[test]
 fn reweight_raises_to_the_cap_and_lowers_to_the_floor() {
-    let machine = Machine::new("reweight");
+    let machine = Machine::prompted("reweight");
     let table = |name: &str, weight: &str, extra: &str| {
         format!(
             "[{name}]\nkind = \"atom\"\nurl = \"https://{name}\"\nweight = {weight}\nbudget = 10\nbears_on = [\"*\"]\n{extra}\n"
@@ -801,7 +721,7 @@ fn reweight_raises_to_the_cap_and_lowers_to_the_floor() {
     );
     for (file, source) in [("2026-10-10-a.md", "hot"), ("2026-10-11-b.md", "hot")] {
         machine.write(
-            &format!(".sandman/breath/{file}"),
+            format!(".sandman/breath/{file}"),
             &format!("---\ntitle: {file}\nurl: https://x/{file}\nsource: {source}\nrepo: *\nproblem: p\nstate: adopted\nfiled: 2026-10-10T00:00:00Z\nupdated: 2026-10-12T00:00:00Z\nadopted: 2026-10-12T00:00:00Z\nseen_again: 0\n---\n\nsummary\n"),
         );
     }
@@ -865,7 +785,7 @@ fn reweight_raises_to_the_cap_and_lowers_to_the_floor() {
 
 #[test]
 fn a_filed_breath_reaches_the_shift_brief_for_its_repo() {
-    let machine = Machine::new("reaches");
+    let machine = Machine::prompted("reaches");
     let alpha = machine.home.join(".grove/code/jgeschwendt/alpha/main");
     fs::create_dir_all(alpha.join(".git")).expect("checkout");
     machine.write(
@@ -885,7 +805,7 @@ fn a_filed_breath_reaches_the_shift_brief_for_its_repo() {
 
 #[test]
 fn an_adoption_counts_once_however_often_the_breath_is_seen_again() {
-    let machine = Machine::new("reweight-once");
+    let machine = Machine::prompted("reweight-once");
     machine.ok(NOW, &["breathe", "init"]);
     let weight = || {
         machine
@@ -931,7 +851,7 @@ fn an_adoption_counts_once_however_often_the_breath_is_seen_again() {
 
 #[test]
 fn pass_tells_a_wait_from_a_fault_and_close_needs_a_cost() {
-    let machine = Machine::new("pass-outcomes");
+    let machine = Machine::prompted("pass-outcomes");
     machine.ok(NOW, &["breathe", "init"]);
     let skim = ["breathe", "pass", "--kind", "skim"];
 
@@ -1015,7 +935,7 @@ fn pass_tells_a_wait_from_a_fault_and_close_needs_a_cost() {
 
 #[test]
 fn a_pass_in_flight_refuses_its_kind_and_a_dead_one_is_charged() {
-    let machine = Machine::new("pass-dead");
+    let machine = Machine::prompted("pass-dead");
     machine.ok(NOW, &["breathe", "init"]);
     let skim = ["breathe", "pass", "--kind", "skim"];
     let open = machine.ok(NOW, &skim);
@@ -1082,7 +1002,7 @@ fn a_pass_in_flight_refuses_its_kind_and_a_dead_one_is_charged() {
 
 #[test]
 fn problems_and_sources_arrive_fenced_and_unexpanded() {
-    let machine = Machine::new("pass-fence");
+    let machine = Machine::prompted("pass-fence");
     machine.ok(NOW, &["breathe", "init"]);
     machine.write(
         ".sandman/breath/problems.md",

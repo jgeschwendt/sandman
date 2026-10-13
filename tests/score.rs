@@ -2,59 +2,26 @@
 //! holding a fixture trail, shifts, breath store, threads and routine state,
 //! with `$SANDMAN_NOW` pinning the week. Nothing here runs a model or git.
 
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+mod common;
 
-/// Disambiguates directories created within the same process.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+use std::fs;
+use std::process::Output;
+
+use common::Machine;
 
 /// Friday 2026-10-16, noon in New York — ISO week 2026-W42.
 const FRIDAY: &str = "2026-10-16T16:00:00Z";
 
-/// A fabricated home, removed on drop.
-struct Home(PathBuf);
-
-impl Home {
-    fn new() -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
-        Self(env::temp_dir().join(format!(
-            "sandman-score-{}-{serial}-{nanos}",
-            std::process::id()
-        )))
-    }
-
-    fn write(&self, relative: &str, text: &str) {
-        let path = self.0.join(relative);
-        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
-        fs::write(&path, text).expect("write");
-    }
-
+impl Machine {
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            .env_clear()
-            .env("HOME", &self.0)
-            .env("PATH", env::var("PATH").unwrap_or_default())
-            .env("SANDMAN_GROVE_CODE", self.0.join(".grove/code"))
+        self.sandman(args)
+            .env("SANDMAN_GROVE_CODE", self.grove_code())
             .env("SANDMAN_NOW", FRIDAY)
-            .env("SANDMAN_ROOT", self.0.join(".sandman"))
-            .env("SANDMAN_ROUTINES_STATE", self.0.join("state"))
-            .env("SANDMAN_THREADS", self.0.join("threads"))
+            .env("SANDMAN_ROOT", self.root())
+            .env("SANDMAN_ROUTINES_STATE", self.home.join("state"))
+            .env("SANDMAN_THREADS", self.home.join("threads"))
             .output()
             .expect("run sandman")
-    }
-}
-
-impl Drop for Home {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
     }
 }
 
@@ -64,11 +31,11 @@ fn event(n: usize, at: &str, kind: &str, extra: &str) -> String {
 }
 
 /// The week 2026-W42 as the machine would have left it.
-fn fixture() -> Home {
-    let home = Home::new();
+fn fixture() -> Machine {
+    let home = Machine::new("score");
     for slug in ["alpha", "beta", "gamma"] {
         fs::create_dir_all(
-            home.0
+            home.home
                 .join(format!(".grove/code/jgeschwendt/{slug}/main/.git")),
         )
         .expect("checkout");
@@ -80,7 +47,7 @@ fn fixture() -> Home {
         ("s-20261017T1400Z", "beta", "2026-10-17T14:00:00Z"),
     ] {
         home.write(
-            &format!(".sandman/shifts/{shift}/meta.json"),
+            format!(".sandman/shifts/{shift}/meta.json"),
             &format!(r#"{{"repo":"jgeschwendt/{repo}","shift":"{shift}","started":"{started}"}}"#),
         );
     }
@@ -189,7 +156,7 @@ fn fixture() -> Home {
     ];
     for (day, lines) in days {
         home.write(
-            &format!(".sandman/trail/2026/10/{day}.jsonl"),
+            format!(".sandman/trail/2026/10/{day}.jsonl"),
             &(lines.join("\n") + "\n"),
         );
     }
@@ -212,7 +179,7 @@ fn fixture() -> Home {
         ),
     ] {
         home.write(
-            &format!(".sandman/breath/{file}"),
+            format!(".sandman/breath/{file}"),
             &format!("---\ntitle: {file}\nurl: https://example.com/{file}\nsource: arxiv\nrepo: jgeschwendt/alpha\nproblem: p\n{front}\n---\n\nSummary.\n"),
         );
     }
@@ -230,7 +197,7 @@ fn fixture() -> Home {
         ),
     ] {
         home.write(
-            &format!("threads/{id}.md"),
+            format!("threads/{id}.md"),
             &format!("---\nstate: {state}\n{rest}\n---\n\n# {id}\n"),
         );
     }
@@ -272,7 +239,7 @@ fn score_writes_the_weeks_page_worst_three_first() {
     let path = ok(&home.run(&["score"]));
     assert_eq!(
         path.trim(),
-        home.0
+        home.home
             .join(".sandman/score/2026-W42.md")
             .display()
             .to_string()
@@ -327,7 +294,7 @@ fn score_json_prints_the_metrics_and_week_names_a_week() {
     ] {
         assert!(json.contains(expected), "missing {expected} in {json}");
     }
-    assert!(home.0.join(".sandman/score/2026-W42.md").is_file());
+    assert!(home.home.join(".sandman/score/2026-W42.md").is_file());
 
     // Last week holds one correction and one change; nothing recurs before it.
     let json = ok(&home.run(&["score", "--week", "2026-W41", "--json"]));
@@ -339,7 +306,7 @@ fn score_json_prints_the_metrics_and_week_names_a_week() {
     // A costless change is no edge; no handoff, no cost per shift.
     assert!(json.contains(r#""cost_per_shift":null"#), "{json}");
     assert!(json.contains(r#""cost_unrecorded":0,"#), "{json}");
-    assert!(home.0.join(".sandman/score/2026-W41.md").is_file());
+    assert!(home.home.join(".sandman/score/2026-W41.md").is_file());
 
     for bad in ["2026-W54", "W42", "2027-W53"] {
         let output = home.run(&["score", "--week", bad]);
