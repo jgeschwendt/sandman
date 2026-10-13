@@ -750,6 +750,7 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
         &["shift", "handoff", "--shift", first, "--from-session"],
         &[],
     );
+    assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains("wrote no handoff"),
         "{}",

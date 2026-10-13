@@ -825,5 +825,9 @@ mod tests {
         std::fs::create_dir_all(keep.into.join("s.jsonl").join("full")).expect("dir");
         super::relocate(&keep, "s");
         assert!(source.is_file());
+        // Unblocked, the same call moves it: the stays above were the blocks'.
+        std::fs::remove_dir_all(keep.into.join("s.jsonl")).expect("unblock");
+        super::relocate(&keep, "s");
+        assert!(!source.exists() && keep.into.join("s.jsonl").is_file());
     }
 }
