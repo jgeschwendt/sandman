@@ -2318,6 +2318,7 @@ fn the_landing_sweep_opens_merges_and_reports_pull_requests() {
             .output()
             .expect("bash");
         assert_eq!(code(&output), 0, "{}", stderr(&output));
+        stderr(&output)
     };
     let rev = |dir: &Path, name: &str| {
         git(dir, &["rev-parse", "-q", "--verify", name]).unwrap_or_default()
@@ -2386,6 +2387,24 @@ fn the_landing_sweep_opens_merges_and_reports_pull_requests() {
     assert_eq!(tries(&trunks[3].1), 1);
     run();
     assert_eq!(events("correction").len(), 2, "red is told once per head");
+    let trail = machine.trail().len();
+    // beta behind main is rebased by GitHub, merged by no one, told to no trail
+    view(2, "OPEN", "BEHIND", GREEN);
+    let said = run();
+    assert!(
+        said.contains("updated PR https://github.com/jgeschwendt/beta/pull/2 onto main"),
+        "{said}"
+    );
+    let log = gh_log();
+    assert!(
+        log.contains("pr update-branch 2 --repo jgeschwendt/beta --rebase\n"),
+        "{log}"
+    );
+    assert!(
+        !log.contains("pr merge 2 --repo jgeschwendt/beta --rebase"),
+        "{log}"
+    );
+    assert_eq!(machine.trail().len(), trail);
 
     // a later shift carries gamma's work on, superseding it; delta's gate passes now
     let gamma = &trunks[2].0;
@@ -2414,7 +2433,7 @@ fn the_landing_sweep_opens_merges_and_reports_pull_requests() {
             .expect("touch")
             .success()
     );
-    // the queue merged alpha; beta is green with nothing to merge it
+    // auto-merge merged alpha; beta is green with nothing to merge it
     let alpha = &trunks[0].0;
     git(
         &trunks[0].1,

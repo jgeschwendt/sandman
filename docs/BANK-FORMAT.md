@@ -530,11 +530,16 @@ reaches, are reported `off trunk`.
    - red — a check concluded other than `SUCCESS`, `SKIPPED` or `NEUTRAL`, or
      `mergeStateStatus: DIRTY`: a `correction` `CI red on PR <url>: <failing checks>` and
      `shift pr --red <head>`, once per head.
+   - `BEHIND` (green or pending): `gh pr update-branch --rebase`, once a tick, a
+     stderr line `updated PR <url> onto main` and no event. A personal account gets no merge queue, so strict required
+     checks hold auto-merge until the branch is current, and GitHub rebases it server-side;
+     the next tick reads the new head and its checks. The local `landing.head` is then
+     stale, which is fine: the landing pass runs only for shifts with no `pr` yet.
    - otherwise the first look whose merge state is known sets `pr.auto`. A branch nothing
      blocks (`CLEAN`, `HAS_HOOKS`, `UNSTABLE`) is `false`: `gh pr merge --auto` would merge
      it at once, CI or not (gh's `isImmediatelyMergeable`, `pkg/cmd/pr/merge/merge.go`,
      read 2026-10-13). Any other tries `gh pr merge --auto --rebase --delete-branch`: a
-     public repo's ruleset — required checks, a merge queue — takes it, `true`; a refusal
+     public repo's ruleset — required checks, strict — takes it, `true`; a refusal
      is `false`. An `auto: false` pull request whose checks all concluded green, none
      pending, is merged here, `gh pr merge --rebase --delete-branch`; the next tick reads
      it merged.
