@@ -360,6 +360,10 @@ pub fn main() -> ExitCode {
             eprintln!("sandman: {error}");
             ExitCode::from(EXIT_FAULT)
         }
+        Err(Failure::Help) => {
+            println!("{USAGE}");
+            ExitCode::SUCCESS
+        }
         Err(Failure::Usage(message)) => {
             eprintln!("sandman: {message}\n\n{USAGE}");
             ExitCode::from(EXIT_USAGE)
@@ -367,13 +371,15 @@ pub fn main() -> ExitCode {
     }
 }
 
-/// Why the process is not exiting 0.
+/// Why a verb stopped short of running.
 enum Failure {
     /// The verb ran and failed.
     Error(Error),
     /// A runner's fault: the clock's window file, the pass's template or
     /// sources.
     Fault(Error),
+    /// `-h`/`--help`: the usage on stdout, exit 0.
+    Help,
     /// The command line itself is wrong.
     Usage(String),
 }
@@ -391,10 +397,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
     };
     let rest = &args[1..];
     match verb.as_str() {
-        "-h" | "--help" | "help" => {
-            println!("{USAGE}");
-            Ok(())
-        }
+        "-h" | "--help" | "help" => Err(Failure::Help),
         "breathe" => breathe_verb(rest),
         "dream" => dream_verb(rest),
         "forget" => forget_verb(rest),
@@ -415,37 +418,28 @@ fn run(args: &[String]) -> Result<(), Failure> {
 
 /// `remember "<body>" [flags]`.
 fn remember_verb(args: &[String]) -> Result<(), Failure> {
-    let mut request = remember::Remember::default();
-    let mut body: Option<String> = None;
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--bank" => request.bank = Some(cursor.value("--bank")?),
-            "--cwd" => request.cwd = Some(PathBuf::from(cursor.value("--cwd")?)),
-            "--description" => request.description = Some(cursor.value("--description")?),
-            "--name" => request.name = Some(cursor.value("--name")?),
-            "--type" => {
-                let value = cursor.value("--type")?;
-                request.kind = Some(
-                    MemoryType::from_str(&value)
-                        .map_err(|_| Failure::Usage(format!("unknown --type `{value}`")))?,
-                );
-            }
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                if body.is_some() {
-                    return Err(Failure::Usage("remember takes one body".to_owned()));
-                }
-                body = Some(positional.to_owned());
-            }
-        }
-    }
-    let Some(body) = body else {
-        return Err(Failure::Usage("remember needs a body".to_owned()));
+    let parsed = Args::parse(
+        args,
+        "remember",
+        &["--bank", "--cwd", "--description", "--name", "--type"],
+        &[],
+        1,
+    )?;
+    let request = remember::Remember {
+        bank: parsed.flag("--bank"),
+        body: parsed.positional("a body")?,
+        cwd: parsed.flag("--cwd").map(PathBuf::from),
+        description: parsed.flag("--description"),
+        kind: parsed
+            .flag("--type")
+            .map(|value| {
+                MemoryType::from_str(&value)
+                    .map_err(|_| Failure::Usage(format!("unknown --type `{value}`")))
+            })
+            .transpose()?,
+        name: parsed.flag("--name"),
+        session_id: env::var(SESSION_ENV).ok(),
     };
-    request.body = body;
-    request.session_id = env::var(SESSION_ENV).ok();
 
     let data_root = paths::data_root()?;
     let outcome = remember::remember(&data_root, request)?;
@@ -470,27 +464,15 @@ fn remember_verb(args: &[String]) -> Result<(), Failure> {
 
 /// `take <session-id> [--force] | --hook` (hook mode implies force).
 fn take_verb(args: &[String]) -> Result<(), Failure> {
-    let mut force = false;
-    let mut from_hook = false;
-    let mut session_id: Option<String> = None;
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--force" => force = true,
-            "--hook" => from_hook = true,
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                if session_id.is_some() {
-                    return Err(Failure::Usage("take takes one session id".to_owned()));
-                }
-                session_id = Some(positional.to_owned());
-            }
-        }
-    }
-
+    let parsed = Args::parse(args, "take", &[], &["--force", "--hook"], 1)?;
+    let from_hook = parsed.set("--hook");
     let journal = paths::data_root().ok();
-    let result = take_run(journal.as_deref(), from_hook, force, session_id);
+    let result = take_run(
+        journal.as_deref(),
+        from_hook,
+        parsed.set("--force"),
+        parsed.positionals.first().cloned(),
+    );
     // A hook has no terminal to fail into: without this line the only trace of
     // a broken take is the exit code Claude Code discards.
     if from_hook && let Err(Failure::Error(error)) = &result {
@@ -830,20 +812,8 @@ fn spawn_dream(data_root: &Path) -> Result<PathBuf, Error> {
 
 /// `dream [--now]`.
 fn dream_verb(args: &[String]) -> Result<(), Failure> {
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            // The flag is documentation: dream always routes what is queued.
-            "--now" => {}
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                return Err(Failure::Usage(format!(
-                    "dream takes no arguments, got `{positional}`"
-                )));
-            }
-        }
-    }
+    // The flag is documentation: dream always routes what is queued.
+    Args::parse(args, "dream", &[], &["--now"], 0)?;
     let data_root = paths::data_root()?;
     let options = dream::Options::from_env(&data_root, &paths::claude_root()?);
     let outcome = dream::dream(&data_root, &paths::home()?, &options)?;
@@ -863,27 +833,11 @@ fn dream_verb(args: &[String]) -> Result<(), Failure> {
 
 /// `reflect [--day <yyyy-mm-dd>]`.
 fn reflect_verb(args: &[String]) -> Result<(), Failure> {
-    let mut day: Option<reflect::Day> = None;
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--day" => {
-                let value = cursor.value("--day")?;
-                day = Some(calendar_day(&value).ok_or_else(|| {
-                    Failure::Usage(format!("--day wants yyyy-mm-dd, got `{value}`"))
-                })?);
-            }
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                return Err(Failure::Usage(format!(
-                    "reflect takes no arguments, got `{positional}`"
-                )));
-            }
-        }
-    }
-    match day {
-        Some(day) => reflect_one_day(day),
+    match Args::parse(args, "reflect", &["--day"], &[], 0)?.flag("--day") {
+        Some(value) => reflect_one_day(
+            calendar_day(&value)
+                .ok_or_else(|| Failure::Usage(format!("--day wants yyyy-mm-dd, got `{value}`")))?,
+        ),
         None => reflect_pass(),
     }
 }
@@ -999,24 +953,14 @@ fn entry_line(entry: Option<&Path>, status: &str) -> String {
 
 /// `recall [--cwd PATH] | --hook`.
 fn recall_verb(args: &[String]) -> Result<(), Failure> {
-    let mut from_hook = false;
-    let mut cwd: Option<PathBuf> = None;
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--cwd" => cwd = Some(PathBuf::from(cursor.value("--cwd")?)),
-            "--hook" => from_hook = true,
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                return Err(Failure::Usage(format!(
-                    "recall takes no arguments, got `{positional}`"
-                )));
-            }
-        }
-    }
+    let parsed = Args::parse(args, "recall", &["--cwd"], &["--hook"], 0)?;
+    let from_hook = parsed.set("--hook");
     let journal = paths::data_root().ok();
-    let result = recall_run(journal.as_deref(), from_hook, cwd);
+    let result = recall_run(
+        journal.as_deref(),
+        from_hook,
+        parsed.flag("--cwd").map(PathBuf::from),
+    );
     if from_hook && let Err(Failure::Error(error)) = &result {
         note(journal.as_deref(), "recall", &format!("error: {error}"));
     }
@@ -1164,15 +1108,7 @@ fn bank_memories(files: &[String]) -> String {
 /// with none, and an argument here is a registration to fix rather than
 /// something to guess at.
 fn mcp_verb(args: &[String]) -> Result<(), Failure> {
-    if let Some(arg) = args.first() {
-        return match arg.as_str() {
-            "-h" | "--help" => help(),
-            option if option.starts_with("--") => Err(unknown_option(option)),
-            positional => Err(Failure::Usage(format!(
-                "mcp takes no arguments, got `{positional}`"
-            ))),
-        };
-    }
+    Args::parse(args, "mcp", &[], &[], 0)?;
     // The roots resolve here, as they do for every verb: the handlers below
     // take them as arguments and read the environment for nothing.
     let ctx = mcp::Context {
@@ -1193,17 +1129,13 @@ fn trail_verb(args: &[String]) -> Result<(), Failure> {
     };
     let rest = &args[1..];
     match sub.as_str() {
-        "-h" | "--help" => help(),
+        "-h" | "--help" => Err(Failure::Help),
         "append" => trail_append(rest),
         "log" => trail_log(rest),
         "revoke" => trail_revoke(rest),
         "show" => trail_show(rest),
         "today" => {
-            if let Some(extra) = rest.first() {
-                return Err(Failure::Usage(format!(
-                    "trail today takes no arguments, got `{extra}`"
-                )));
-            }
+            Args::parse(rest, "trail today", &[], &[], 0)?;
             println!("{}", trail::today(&paths::data_root()?)?.display());
             Ok(())
         }
@@ -1216,30 +1148,33 @@ fn trail_verb(args: &[String]) -> Result<(), Failure> {
 
 /// `trail append --kind K [flags] | --json '<object>'`.
 fn trail_append(args: &[String]) -> Result<(), Failure> {
-    let mut draft = trail::Draft::default();
-    let mut flags: Vec<(&str, String)> = Vec::new();
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--json" => {
-                let value = cursor.value("--json")?;
-                draft = trail::Draft::from_json(&value)
-                    .map_err(|error| Failure::Usage(format!("--json: {error}")))?;
-            }
-            "--branch" | "--cost" | "--kind" | "--model" | "--parent" | "--rationale" | "--ref"
-            | "--repo" | "--sha" | "--shift" => flags.push((arg, cursor.value(arg)?)),
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                return Err(Failure::Usage(format!(
-                    "trail append takes no positional arguments, got `{positional}`"
-                )));
-            }
-        }
-    }
+    let parsed = Args::parse(
+        args,
+        "trail append",
+        &[
+            "--branch",
+            "--cost",
+            "--json",
+            "--kind",
+            "--model",
+            "--parent",
+            "--rationale",
+            "--ref",
+            "--repo",
+            "--sha",
+            "--shift",
+        ],
+        &[],
+        0,
+    )?;
+    let mut draft = match parsed.flag("--json") {
+        Some(json) => trail::Draft::from_json(&json)
+            .map_err(|error| Failure::Usage(format!("--json: {error}")))?,
+        None => trail::Draft::default(),
+    };
     // Flags land after `--json`, so a flag overrides the object's key.
-    for (flag, value) in flags {
-        match flag {
+    for (flag, value) in parsed.values {
+        match flag.as_str() {
             "--branch" => draft.branch = Some(value),
             "--cost" => {
                 draft.cost_usd = Some(
@@ -1259,7 +1194,8 @@ fn trail_append(args: &[String]) -> Result<(), Failure> {
             "--ref" => draft.refs.push(value),
             "--repo" => draft.repo = Some(value),
             "--sha" => draft.sha = Some(value),
-            _ => draft.shift = Some(value),
+            "--shift" => draft.shift = Some(value),
+            _ => {}
         }
     }
     if draft.kind.is_empty() {
@@ -1287,45 +1223,37 @@ fn trail_append(args: &[String]) -> Result<(), Failure> {
 
 /// `trail log [--since D] [--kind K] [--shift S] [--repo R] [--json]`.
 fn trail_log(args: &[String]) -> Result<(), Failure> {
-    let (mut since, mut kind, mut shift, mut repo, mut raw) = (None, None, None, None, false);
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--json" => raw = true,
-            "--kind" => kind = Some(cursor.value("--kind")?),
-            "--repo" => repo = Some(cursor.value("--repo")?),
-            "--shift" => shift = Some(cursor.value("--shift")?),
-            "--since" => {
-                let value = cursor.value("--since")?;
-                if calendar_day(&value).is_none() {
-                    return Err(Failure::Usage(format!(
-                        "--since wants yyyy-mm-dd, got `{value}`"
-                    )));
-                }
-                since = Some(value);
-            }
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                return Err(Failure::Usage(format!(
-                    "trail log takes no positional arguments, got `{positional}`"
-                )));
-            }
-        }
+    let parsed = Args::parse(
+        args,
+        "trail log",
+        &["--kind", "--repo", "--shift", "--since"],
+        &["--json"],
+        0,
+    )?;
+    let since = parsed.flag("--since");
+    if let Some(value) = since
+        .as_deref()
+        .filter(|value| calendar_day(value).is_none())
+    {
+        return Err(Failure::Usage(format!(
+            "--since wants yyyy-mm-dd, got `{value}`"
+        )));
     }
     let entries = trail::read(&paths::data_root()?, since.as_deref())?;
-    let matches = |wanted: &Option<String>, have: Option<&str>| {
-        wanted.as_deref().is_none_or(|wanted| have == Some(wanted))
+    let matches = |wanted: &str, have: Option<&str>| {
+        parsed
+            .flag(wanted)
+            .is_none_or(|wanted| have == Some(&wanted))
     };
     for entry in &entries {
         let draft = &entry.event.draft;
-        if !matches(&kind, Some(&draft.kind))
-            || !matches(&shift, draft.shift.as_deref())
-            || !matches(&repo, draft.repo.as_deref())
+        if !matches("--kind", Some(&draft.kind))
+            || !matches("--shift", draft.shift.as_deref())
+            || !matches("--repo", draft.repo.as_deref())
         {
             continue;
         }
-        if raw {
+        if parsed.set("--json") {
             println!("{}", entry.raw);
         } else {
             println!("{}", entry.event.summary());
@@ -1336,10 +1264,7 @@ fn trail_log(args: &[String]) -> Result<(), Failure> {
 
 /// `trail show <id>`.
 fn trail_show(args: &[String]) -> Result<(), Failure> {
-    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
-        return help();
-    }
-    let id = one_id(args, "trail show")?;
+    let id = Args::parse(args, "trail show", &[], &[], 1)?.positional("an id")?;
     let entries = trail::read(&paths::data_root()?, None)?;
     let event = trail::find(&entries, &id).ok_or_else(|| Error::not_found("event", id.clone()))?;
     println!("{}", event.pretty());
@@ -1376,24 +1301,10 @@ fn trail_show(args: &[String]) -> Result<(), Failure> {
 
 /// `trail revoke <id> --reason TEXT`.
 fn trail_revoke(args: &[String]) -> Result<(), Failure> {
-    let mut id: Option<String> = None;
-    let mut reason: Option<String> = None;
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--reason" => reason = Some(cursor.value("--reason")?),
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                if id.is_some() {
-                    return Err(Failure::Usage("trail revoke takes one id".to_owned()));
-                }
-                id = Some(positional.to_owned());
-            }
-        }
-    }
-    let id = id.ok_or_else(|| Failure::Usage("trail revoke needs an id".to_owned()))?;
-    let reason = reason
+    let parsed = Args::parse(args, "trail revoke", &["--reason"], &[], 1)?;
+    let id = parsed.positional("an id")?;
+    let reason = parsed
+        .flag("--reason")
         .filter(|reason| !reason.trim().is_empty())
         .ok_or_else(|| Failure::Usage("trail revoke needs --reason".to_owned()))?;
     let data_root = paths::data_root()?;
@@ -1416,37 +1327,14 @@ fn trail_revoke(args: &[String]) -> Result<(), Failure> {
 
 /// `trail trailers --shift S --event E`.
 fn trail_trailers(args: &[String]) -> Result<(), Failure> {
-    let (mut shift, mut event) = (None, None);
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--event" => event = Some(cursor.value("--event")?),
-            "--shift" => shift = Some(cursor.value("--shift")?),
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                return Err(Failure::Usage(format!(
-                    "trail trailers takes no positional arguments, got `{positional}`"
-                )));
-            }
-        }
-    }
-    let (Some(shift), Some(event)) = (shift, event) else {
+    let parsed = Args::parse(args, "trail trailers", &["--event", "--shift"], &[], 0)?;
+    let (Some(shift), Some(event)) = (parsed.flag("--shift"), parsed.flag("--event")) else {
         return Err(Failure::Usage(
             "trail trailers needs --shift and --event".to_owned(),
         ));
     };
     println!("{}", trail::trailers(&shift, &event));
     Ok(())
-}
-
-/// The single id a subcommand takes.
-fn one_id(args: &[String], what: &str) -> Result<String, Failure> {
-    match args {
-        [id] if !id.starts_with("--") => Ok(id.clone()),
-        [option, ..] if option.starts_with("--") => Err(unknown_option(option)),
-        _ => Err(Failure::Usage(format!("{what} takes one id"))),
-    }
 }
 
 /// The repos `reconcile` and `trail show` reach, resolved from `crate::paths`.
@@ -1462,23 +1350,11 @@ fn grove_roots() -> Result<grove::Roots, Failure> {
 
 /// `reconcile <event-id> [--dry-run]`.
 fn reconcile_verb(args: &[String]) -> Result<(), Failure> {
-    let mut dry_run = false;
-    let mut id: Option<String> = None;
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            "--dry-run" => dry_run = true,
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                if id.is_some() {
-                    return Err(Failure::Usage("reconcile takes one id".to_owned()));
-                }
-                id = Some(positional.to_owned());
-            }
-        }
-    }
-    let id = id.ok_or_else(|| Failure::Usage("reconcile needs an event or shift id".to_owned()))?;
+    let parsed = Args::parse(args, "reconcile", &[], &["--dry-run"], 1)?;
+    let (id, dry_run) = (
+        parsed.positional("an event or shift id")?,
+        parsed.set("--dry-run"),
+    );
     let data_root = paths::data_root()?;
     let home = paths::home()?;
     let report = reconcile::reconcile(&data_root, &grove_roots()?, &id, dry_run)?;
@@ -1578,26 +1454,28 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
     if args.first().is_some_and(|arg| arg == "serve") {
         return report_serve(&args[1..]);
     }
-    let (values, set) = shift_flags(
+    let parsed = Args::parse(
         args,
         "report",
         &["--since", "--week"],
         &["--all", "--hook", "--mark-read"],
+        0,
     )?;
-    let switch = |name: &str| set.iter().any(|switch| switch == name);
-    let since = flag(&values, "--since")
+    let since = parsed
+        .flag("--since")
         .map(|text| {
             Timestamp::parse_iso8601(&text)
                 .ok_or_else(|| Failure::Usage(format!("--since wants RFC 3339, got `{text}`")))
         })
         .transpose()?;
-    let week = flag(&values, "--week")
+    let week = parsed
+        .flag("--week")
         .map(|text| {
             score::Week::parse(&text)
                 .ok_or_else(|| Failure::Usage(format!("--week wants yyyy-Www, got `{text}`")))
         })
         .transpose()?;
-    let select = match (since, week, switch("--all")) {
+    let select = match (since, week, parsed.set("--all")) {
         (None, None, false) => report::Select::Unread,
         (Some(at), None, false) => report::Select::Since(at),
         (None, Some(week), false) => report::Select::Week(week),
@@ -1608,8 +1486,8 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
             ));
         }
     };
-    let hook = switch("--hook");
-    if hook && (select != report::Select::Unread || switch("--mark-read")) {
+    let hook = parsed.set("--hook");
+    if hook && (select != report::Select::Unread || parsed.set("--mark-read")) {
         return Err(Failure::Usage(
             "report --hook takes no other flag".to_owned(),
         ));
@@ -1636,7 +1514,7 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
     }
     let digest = report::digest(&data_root, &threads, select, usize::MAX);
     print!("{}", digest.text);
-    if switch("--mark-read")
+    if parsed.set("--mark-read")
         && let Some(newest) = digest.newest
     {
         report::mark_read(&data_root, newest)?;
@@ -1646,14 +1524,17 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
 
 /// `report serve [--bind ADDR] [--requests N]`.
 fn report_serve(args: &[String]) -> Result<(), Failure> {
-    let (values, _) = shift_flags(args, "report serve", &["--bind", "--requests"], &[])?;
-    let bind = flag(&values, "--bind").unwrap_or_else(|| report::serve::BIND.to_owned());
+    let parsed = Args::parse(args, "report serve", &["--bind", "--requests"], &[], 0)?;
+    let bind = parsed
+        .flag("--bind")
+        .unwrap_or_else(|| report::serve::BIND.to_owned());
     let address = bind
         .parse::<SocketAddr>()
         .ok()
         .filter(|address| address.ip().is_loopback())
         .ok_or_else(|| Failure::Usage(format!("--bind wants a loopback address, got `{bind}`")))?;
-    let requests = flag(&values, "--requests")
+    let requests = parsed
+        .flag("--requests")
         .map(|text| {
             text.parse()
                 .map_err(|_| Failure::Usage(format!("--requests wants a count, got `{text}`")))
@@ -1676,9 +1557,9 @@ fn report_serve(args: &[String]) -> Result<(), Failure> {
 
 /// `score [--week YYYY-Www] [--json]`.
 fn score_verb(args: &[String]) -> Result<(), Failure> {
-    let (values, set) = shift_flags(args, "score", &["--week"], &["--json"])?;
+    let parsed = Args::parse(args, "score", &["--week"], &["--json"], 0)?;
     let ctx = shift_context()?;
-    let week = match flag(&values, "--week") {
+    let week = match parsed.flag("--week") {
         None => score::Week::of(ctx.now),
         Some(text) => score::Week::parse(&text)
             .ok_or_else(|| Failure::Usage(format!("--week wants yyyy-Www, got `{text}`")))?,
@@ -1690,7 +1571,7 @@ fn score_verb(args: &[String]) -> Result<(), Failure> {
         "score",
         &format!("scored week={} path={}", week.name(), path.display()),
     );
-    if set.iter().any(|switch| switch == "--json") {
+    if parsed.set("--json") {
         println!("{}", scored.json());
     } else {
         println!("{}", path.display());
@@ -1705,10 +1586,10 @@ fn shift_verb(args: &[String]) -> Result<(), Failure> {
     };
     let rest = &args[1..];
     if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
-        return help();
+        return Err(Failure::Help);
     }
     match sub.as_str() {
-        "-h" | "--help" => help(),
+        "-h" | "--help" => Err(Failure::Help),
         "attach" => shift_attach(rest),
         "brief" => shift_brief(rest),
         "clock" => shift_clock(rest),
@@ -1791,45 +1672,6 @@ fn knob<T>(
     }
 }
 
-/// A shift subcommand's parsed command line: `(flag, value)` pairs and the
-/// switches that were set.
-type ShiftArgs = (Vec<(String, String)>, Vec<String>);
-
-/// A shift subcommand's flags: each named flag takes a value, each switch
-/// none; positionals are refused.
-fn shift_flags(
-    args: &[String],
-    what: &str,
-    flags: &[&str],
-    switches: &[&str],
-) -> Result<ShiftArgs, Failure> {
-    let (mut values, mut set) = (Vec::new(), Vec::new());
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        if flags.contains(&arg) {
-            values.push((arg.to_owned(), cursor.value(arg)?));
-        } else if switches.contains(&arg) {
-            set.push(arg.to_owned());
-        } else if arg.starts_with("--") {
-            return Err(unknown_option(arg));
-        } else {
-            return Err(Failure::Usage(format!(
-                "{what} takes no positional arguments, got `{arg}`"
-            )));
-        }
-    }
-    Ok((values, set))
-}
-
-/// The last value given for `flag`.
-fn flag(values: &[(String, String)], flag: &str) -> Option<String> {
-    values
-        .iter()
-        .rev()
-        .find(|(name, _)| name == flag)
-        .map(|(_, value)| value.clone())
-}
-
 /// `breathe <init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight> …`.
 fn breathe_verb(args: &[String]) -> Result<(), Failure> {
     let Some(sub) = args.first() else {
@@ -1837,10 +1679,10 @@ fn breathe_verb(args: &[String]) -> Result<(), Failure> {
     };
     let rest = &args[1..];
     if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
-        return help();
+        return Err(Failure::Help);
     }
     match sub.as_str() {
-        "-h" | "--help" => help(),
+        "-h" | "--help" => Err(Failure::Help),
         "adopt" => breathe_transition(rest, breathe::Transition::Adopt),
         "attach" => breathe_attach(rest),
         "close" => breathe_close(rest),
@@ -1880,17 +1722,19 @@ fn pinned_now() -> Result<Timestamp, Failure> {
     }
 }
 
-/// A breathe subcommand's parsed command line: `(flag, value)` pairs in
-/// order (a flag may repeat), the switches set, and the positionals.
-struct BreatheArgs {
+/// A verb's parsed command line: `(flag, value)` pairs in order (a flag may
+/// repeat), the switches set, and the positionals.
+struct Args {
     positionals: Vec<String>,
     switches: Vec<String>,
     values: Vec<(String, String)>,
+    /// The verb, for the refusals that name it.
+    what: String,
 }
 
-impl BreatheArgs {
-    /// Parse `args`: each named flag takes a value, each switch none, and at
-    /// most `positionals` bare arguments are accepted.
+impl Args {
+    /// Parse `args`: each named flag takes a value, each switch none, at most
+    /// `positionals` bare arguments are accepted, and `-h` stops at the usage.
     fn parse(
         args: &[String],
         what: &str,
@@ -1902,35 +1746,58 @@ impl BreatheArgs {
             positionals: Vec::new(),
             switches: Vec::new(),
             values: Vec::new(),
+            what: what.to_owned(),
         };
-        let mut cursor = Cursor::new(args);
-        while let Some(arg) = cursor.next() {
-            if flags.contains(&arg) {
-                parsed.values.push((arg.to_owned(), cursor.value(arg)?));
-            } else if switches.contains(&arg) {
-                parsed.switches.push(arg.to_owned());
+        let mut args = args.iter();
+        while let Some(arg) = args.next() {
+            if flags.contains(&arg.as_str()) {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Failure::Usage(format!("{arg} needs a value")))?;
+                parsed.values.push((arg.clone(), value.clone()));
+            } else if switches.contains(&arg.as_str()) {
+                parsed.switches.push(arg.clone());
+            } else if arg == "-h" || arg == "--help" {
+                return Err(Failure::Help);
             } else if arg.starts_with("--") {
-                return Err(unknown_option(arg));
+                return Err(Failure::Usage(format!("unknown option `{arg}`")));
             } else if parsed.positionals.len() < positionals {
-                parsed.positionals.push(arg.to_owned());
+                parsed.positionals.push(arg.clone());
             } else {
-                return Err(Failure::Usage(format!(
-                    "{what} takes {positionals} positional argument(s), got `{arg}`"
-                )));
+                return Err(Failure::Usage(match positionals {
+                    0 => format!("{what} takes no arguments, got `{arg}`"),
+                    _ => format!("{what} takes at most {positionals} argument(s), got `{arg}`"),
+                }));
             }
         }
         Ok(parsed)
     }
 
+    /// Every value given for `flag`, in order.
+    fn all<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> {
+        self.values
+            .iter()
+            .filter(move |(flag, _)| flag == name)
+            .map(|(_, value)| value.as_str())
+    }
+
     /// The last value given for `flag`.
     fn flag(&self, name: &str) -> Option<String> {
-        flag(&self.values, name)
+        self.all(name).last().map(ToOwned::to_owned)
+    }
+
+    /// The first positional, `noun`, which must be there.
+    fn positional(&self, noun: &str) -> Result<String, Failure> {
+        self.positionals
+            .first()
+            .cloned()
+            .ok_or_else(|| Failure::Usage(format!("{} needs {noun}", self.what)))
     }
 
     /// The value for `flag`, which must be there.
-    fn required(&self, name: &str, what: &str) -> Result<String, Failure> {
+    fn required(&self, name: &str) -> Result<String, Failure> {
         self.flag(name)
-            .ok_or_else(|| Failure::Usage(format!("{what} needs {name}")))
+            .ok_or_else(|| Failure::Usage(format!("{} needs {name}", self.what)))
     }
 
     /// Whether `switch` was set.
@@ -1951,8 +1818,8 @@ impl BreatheArgs {
     }
 
     /// `flag` as a count, which must be there.
-    fn count(&self, name: &str, what: &str) -> Result<u64, Failure> {
-        let text = self.required(name, what)?;
+    fn count(&self, name: &str) -> Result<u64, Failure> {
+        let text = self.required(name)?;
         text.parse::<u64>()
             .map_err(|_| Failure::Usage(format!("{name} wants a count, got `{text}`")))
     }
@@ -1976,7 +1843,7 @@ fn breathe_journal<T>(
 
 /// `breathe init`.
 fn breathe_init(args: &[String]) -> Result<(), Failure> {
-    BreatheArgs::parse(args, "breathe init", &[], &[], 0)?;
+    Args::parse(args, "breathe init", &[], &[], 0)?;
     let ctx = breathe_context()?;
     let made = breathe_journal(&ctx, "init", breathe::init(&ctx.data_root))?;
     note(
@@ -1992,7 +1859,7 @@ fn breathe_init(args: &[String]) -> Result<(), Failure> {
 
 /// `breathe sources [--due] [--kind skim|deep] [--json]`.
 fn breathe_sources(args: &[String]) -> Result<(), Failure> {
-    let parsed = BreatheArgs::parse(
+    let parsed = Args::parse(
         args,
         "breathe sources",
         &["--kind"],
@@ -2020,7 +1887,7 @@ fn breathe_sources(args: &[String]) -> Result<(), Failure> {
 /// NAME] [--bearing F] [--novelty F] [--spike]`.
 fn breathe_file(args: &[String]) -> Result<(), Failure> {
     let what = "breathe file";
-    let parsed = BreatheArgs::parse(
+    let parsed = Args::parse(
         args,
         what,
         &[
@@ -2039,13 +1906,13 @@ fn breathe_file(args: &[String]) -> Result<(), Failure> {
     let filing = breathe::Filing {
         bearing: parsed.number("--bearing")?,
         novelty: parsed.number("--novelty")?,
-        problem: parsed.required("--problem", what)?,
-        repo: parsed.required("--repo", what)?,
+        problem: parsed.required("--problem")?,
+        repo: parsed.required("--repo")?,
         source: parsed.flag("--source"),
         spike: parsed.set("--spike"),
-        summary: parsed.required("--summary", what)?,
-        title: parsed.required("--title", what)?,
-        url: parsed.required("--url", what)?,
+        summary: parsed.required("--summary")?,
+        title: parsed.required("--title")?,
+        url: parsed.required("--url")?,
     };
     if !breathe::valid_repo(&filing.repo) {
         return Err(Failure::Usage(format!(
@@ -2082,7 +1949,7 @@ fn breathe_file(args: &[String]) -> Result<(), Failure> {
 
 /// `breathe list [--repo R] [--state S] [--json]`.
 fn breathe_list(args: &[String]) -> Result<(), Failure> {
-    let parsed = BreatheArgs::parse(args, "breathe list", &["--repo", "--state"], &["--json"], 0)?;
+    let parsed = Args::parse(args, "breathe list", &["--repo", "--state"], &["--json"], 0)?;
     let ctx = breathe_context()?;
     let breaths = breathe::list(
         &ctx.data_root,
@@ -2102,12 +1969,8 @@ fn breathe_list(args: &[String]) -> Result<(), Failure> {
 /// `breathe spike|adopt|drop <file> [--reason TEXT]`.
 fn breathe_transition(args: &[String], to: breathe::Transition) -> Result<(), Failure> {
     let what = format!("breathe {}", to.verb());
-    let parsed = BreatheArgs::parse(args, &what, &["--reason"], &[], 1)?;
-    let file = parsed
-        .positionals
-        .first()
-        .cloned()
-        .ok_or_else(|| Failure::Usage(format!("{what} needs a breath file")))?;
+    let parsed = Args::parse(args, &what, &["--reason"], &[], 1)?;
+    let file = parsed.positional("a breath file")?;
     let reason = parsed.flag("--reason");
     if to == breathe::Transition::Drop
         && reason.as_deref().is_none_or(|text| text.trim().is_empty())
@@ -2136,8 +1999,8 @@ fn breathe_transition(args: &[String], to: breathe::Transition) -> Result<(), Fa
 
 /// `breathe pass --kind skim|deep [--dry-run]`.
 fn breathe_pass(args: &[String]) -> Result<(), Failure> {
-    let parsed = BreatheArgs::parse(args, "breathe pass", &["--kind"], &["--dry-run"], 0)?;
-    let kind = breathe::PassKind::parse(&parsed.required("--kind", "breathe pass")?)?;
+    let parsed = Args::parse(args, "breathe pass", &["--kind"], &["--dry-run"], 0)?;
+    let kind = breathe::PassKind::parse(&parsed.required("--kind")?)?;
     let budget_usd = usd_env("SANDMAN_BREATH_BUDGET_USD", breathe::DEFAULT_BUDGET_USD)?;
     let dead_usd = usd_env(
         "SANDMAN_BREATH_DEAD_COST_USD",
@@ -2191,22 +2054,22 @@ fn usd_env(name: &str, default: f64) -> Result<f64, Failure> {
 
 /// `breathe reaped --id ID`.
 fn breathe_reaped(args: &[String]) -> Result<(), Failure> {
-    let parsed = BreatheArgs::parse(args, "breathe reaped", &["--id"], &[], 0)?;
-    let id = parsed.required("--id", "breathe reaped")?;
+    let parsed = Args::parse(args, "breathe reaped", &["--id"], &[], 0)?;
+    let id = parsed.required("--id")?;
     let ctx = breathe_context()?;
     breathe_journal(&ctx, "reaped", breathe::reaped(&ctx, &id))
 }
 
 /// `breathe attach --id ID [--bg-id X] [--session-id S]`.
 fn breathe_attach(args: &[String]) -> Result<(), Failure> {
-    let parsed = BreatheArgs::parse(
+    let parsed = Args::parse(
         args,
         "breathe attach",
         &["--bg-id", "--id", "--session-id"],
         &[],
         0,
     )?;
-    let id = parsed.required("--id", "breathe attach")?;
+    let id = parsed.required("--id")?;
     let (bg_id, session_id) = (parsed.flag("--bg-id"), parsed.flag("--session-id"));
     let ctx = breathe_context()?;
     breathe_journal(
@@ -2230,7 +2093,7 @@ fn breathe_attach(args: &[String]) -> Result<(), Failure> {
 /// [--cursor NAME=VALUE]…`.
 fn breathe_close(args: &[String]) -> Result<(), Failure> {
     let what = "breathe close";
-    let parsed = BreatheArgs::parse(
+    let parsed = Args::parse(
         args,
         what,
         &[
@@ -2244,12 +2107,10 @@ fn breathe_close(args: &[String]) -> Result<(), Failure> {
         &[],
         0,
     )?;
-    let id = parsed.required("--id", what)?;
+    let id = parsed.required("--id")?;
     let cursors = parsed
-        .values
-        .iter()
-        .filter(|(name, _)| name == "--cursor")
-        .map(|(_, value)| {
+        .all("--cursor")
+        .map(|value| {
             value
                 .split_once('=')
                 .filter(|(name, _)| !name.is_empty())
@@ -2265,9 +2126,9 @@ fn breathe_close(args: &[String]) -> Result<(), Failure> {
             )
         })?,
         cursors,
-        dropped: parsed.count("--dropped", what)?,
-        filed: parsed.count("--filed", what)?,
-        read: parsed.count("--read", what)?,
+        dropped: parsed.count("--dropped")?,
+        filed: parsed.count("--filed")?,
+        read: parsed.count("--read")?,
     };
     let ctx = breathe_context()?;
     let event = breathe_journal(&ctx, "close", breathe::close(&ctx, &id, &closing))?;
@@ -2292,7 +2153,7 @@ fn breathe_close(args: &[String]) -> Result<(), Failure> {
 
 /// `breathe reweight [--dry-run]`.
 fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
-    let parsed = BreatheArgs::parse(args, "breathe reweight", &[], &["--dry-run"], 0)?;
+    let parsed = Args::parse(args, "breathe reweight", &[], &["--dry-run"], 0)?;
     let ctx = breathe_context()?;
     let (changes, event) = breathe_journal(
         &ctx,
@@ -2317,24 +2178,23 @@ fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
 
 /// `shift reaped --shift ID`.
 fn shift_reaped(args: &[String]) -> Result<(), Failure> {
-    let (values, _) = shift_flags(args, "shift reaped", &["--shift"], &[])?;
-    let id = flag(&values, "--shift")
-        .ok_or_else(|| Failure::Usage("shift reaped needs --shift".to_owned()))?;
+    let parsed = Args::parse(args, "shift reaped", &["--shift"], &[], 0)?;
+    let id = parsed.required("--shift")?;
     Ok(shift::reaped(&shift_context()?, &id)?)
 }
 
 /// `shift attach --shift ID [--bg-id X] [--session-id S]`.
 fn shift_attach(args: &[String]) -> Result<(), Failure> {
-    let (values, _) = shift_flags(
+    let parsed = Args::parse(
         args,
         "shift attach",
         &["--bg-id", "--session-id", "--shift"],
         &[],
+        0,
     )?;
-    let id = flag(&values, "--shift")
-        .ok_or_else(|| Failure::Usage("shift attach needs --shift".to_owned()))?;
+    let id = parsed.required("--shift")?;
     let ctx = shift_context()?;
-    let (bg_id, session_id) = (flag(&values, "--bg-id"), flag(&values, "--session-id"));
+    let (bg_id, session_id) = (parsed.flag("--bg-id"), parsed.flag("--session-id"));
     shift::attach(&ctx, &id, bg_id.as_deref(), session_id.as_deref())?;
     note(
         Some(&ctx.data_root),
@@ -2350,10 +2210,7 @@ fn shift_attach(args: &[String]) -> Result<(), Failure> {
 
 /// What a brief is composed for: `--mind`, else `$SANDMAN_SHIFT_MIND`, else
 /// opus, and `$SANDMAN_SHIFT_BUDGET_USD`, else 15.
-fn brief_options(
-    values: &[(String, String)],
-    dry_run: bool,
-) -> Result<shift::BriefOptions, Failure> {
+fn brief_options(parsed: &Args, dry_run: bool) -> Result<shift::BriefOptions, Failure> {
     let budget = env::var("SANDMAN_SHIFT_BUDGET_USD")
         .ok()
         .filter(|budget| !budget.is_empty());
@@ -2367,7 +2224,8 @@ fn brief_options(
                 Failure::Usage(format!("$SANDMAN_SHIFT_BUDGET_USD wants USD, got `{text}`"))
             })?,
     };
-    let mind = flag(values, "--mind")
+    let mind = parsed
+        .flag("--mind")
         .or_else(|| {
             env::var("SANDMAN_SHIFT_MIND")
                 .ok()
@@ -2383,9 +2241,9 @@ fn brief_options(
 
 /// `shift brief [--mind M] [--dry-run]`.
 fn shift_brief(args: &[String]) -> Result<(), Failure> {
-    let (values, set) = shift_flags(args, "shift brief", &["--mind"], &["--dry-run"])?;
+    let parsed = Args::parse(args, "shift brief", &["--mind"], &["--dry-run"], 0)?;
     let ctx = shift_context()?;
-    let options = brief_options(&values, set.iter().any(|switch| switch == "--dry-run"))?;
+    let options = brief_options(&parsed, parsed.set("--dry-run"))?;
     let briefed = shift::brief(&ctx, &options);
     let briefed = match briefed {
         Ok(briefed) => briefed,
@@ -2430,8 +2288,8 @@ fn shift_brief(args: &[String]) -> Result<(), Failure> {
 
 /// `shift open --cloud [--mind M]`.
 fn shift_open(args: &[String]) -> Result<(), Failure> {
-    let (values, set) = shift_flags(args, "shift open", &["--mind"], &["--cloud"])?;
-    let clones = paths::cloud_clones().filter(|_| set.iter().any(|switch| switch == "--cloud"));
+    let parsed = Args::parse(args, "shift open", &["--mind"], &["--cloud"], 0)?;
+    let clones = paths::cloud_clones().filter(|_| parsed.set("--cloud"));
     let Some(clones) = clones else {
         return Err(Failure::Usage(
             "shift open runs in the cloud: --cloud, with $SANDMAN_GROVE naming the clones"
@@ -2448,7 +2306,7 @@ fn shift_open(args: &[String]) -> Result<(), Failure> {
         }),
         ..shift_context()?
     };
-    let briefed = shift::open(&ctx, &brief_options(&values, false)?).inspect_err(|error| {
+    let briefed = shift::open(&ctx, &brief_options(&parsed, false)?).inspect_err(|error| {
         note(
             Some(&ctx.data_root),
             "shift",
@@ -2469,11 +2327,11 @@ fn shift_open(args: &[String]) -> Result<(), Failure> {
 
 /// `shift clock [--check]`.
 fn shift_clock(args: &[String]) -> Result<(), Failure> {
-    let (_, set) = shift_flags(args, "shift clock", &[], &["--check"])?;
+    let parsed = Args::parse(args, "shift clock", &[], &["--check"], 0)?;
     let ctx = shift_context()?;
     let clock = shift::read_clock(&ctx).map_err(Failure::Fault)?;
     println!("{}", clock.line());
-    if set.iter().any(|switch| switch == "--check")
+    if parsed.set("--check")
         && let Some(refusal) = clock.refusal(ctx.min_window_seconds)
     {
         return Err(Error::refused(refusal).into());
@@ -2484,13 +2342,15 @@ fn shift_clock(args: &[String]) -> Result<(), Failure> {
 /// `shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] | --file PATH)
 /// [--cost USD] [--truncate]`.
 fn shift_handoff(args: &[String]) -> Result<(), Failure> {
-    let (values, set) = shift_flags(
+    let parsed = Args::parse(
         args,
         "shift handoff",
         &["--cost", "--file", "--reason", "--shift"],
         &["--abandoned", "--cloud", "--from-session", "--truncate"],
+        0,
     )?;
-    let cost = flag(&values, "--cost")
+    let cost = parsed
+        .flag("--cost")
         .map(|value| {
             value
                 .parse::<f64>()
@@ -2499,21 +2359,16 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
                 .ok_or_else(|| Failure::Usage(format!("--cost wants USD, got `{value}`")))
         })
         .transpose()?;
-    let reason = flag(&values, "--reason");
-    let id = flag(&values, "--shift")
-        .ok_or_else(|| Failure::Usage("shift handoff needs --shift".to_owned()))?;
-    let file = flag(&values, "--file");
-    let abandoned = set.iter().any(|switch| switch == "--abandoned");
+    let reason = parsed.flag("--reason");
+    let id = parsed.required("--shift")?;
+    let file = parsed.flag("--file");
+    let abandoned = parsed.set("--abandoned");
     if reason.is_some() && !abandoned {
         return Err(Failure::Usage(
             "shift handoff takes --reason only with --abandoned".to_owned(),
         ));
     }
-    let source = match (
-        abandoned,
-        set.iter().any(|switch| switch == "--from-session"),
-        file,
-    ) {
+    let source = match (abandoned, parsed.set("--from-session"), file) {
         (true, false, None) => {
             shift::Source::Abandoned(reason.filter(|reason| !reason.trim().is_empty()))
         }
@@ -2526,7 +2381,7 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
         }
     };
     let ctx = shift_context()?;
-    let truncate = set.iter().any(|switch| switch == "--truncate");
+    let truncate = parsed.set("--truncate");
     match shift::handoff(&ctx, &id, &source, truncate, cost) {
         Ok(event) => {
             if cost.is_some_and(|cost| cost <= 0.0) {
@@ -2541,7 +2396,7 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
                 "shift",
                 &format!("handed off shift={id} event={}", event.id),
             );
-            if set.iter().any(|switch| switch == "--cloud") {
+            if parsed.set("--cloud") {
                 shift::sync(&ctx.data_root, &format!("shift({id}): handoff"))?;
             }
             println!("{}", event.id);
@@ -2560,10 +2415,16 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
 
 /// `shift pick [--path] [--shift ID | --untrusted]`.
 fn shift_pick(args: &[String]) -> Result<(), Failure> {
-    let (values, set) = shift_flags(args, "shift pick", &["--shift"], &["--path", "--untrusted"])?;
+    let parsed = Args::parse(
+        args,
+        "shift pick",
+        &["--shift"],
+        &["--path", "--untrusted"],
+        0,
+    )?;
     let ctx = shift_context()?;
-    let targets = match flag(&values, "--shift") {
-        _ if set.iter().any(|switch| switch == "--untrusted") => shift::untrusted(&ctx),
+    let targets = match parsed.flag("--shift") {
+        _ if parsed.set("--untrusted") => shift::untrusted(&ctx),
         Some(id) => {
             let target = shift::picked(&ctx, &id)?;
             vec![(target.label, target.path)]
@@ -2575,7 +2436,7 @@ fn shift_pick(args: &[String]) -> Result<(), Failure> {
         }
     };
     for (label, path) in targets {
-        if set.iter().any(|switch| switch == "--path") {
+        if parsed.set("--path") {
             println!("{}", path.display());
         } else {
             println!("{label}");
@@ -2586,8 +2447,8 @@ fn shift_pick(args: &[String]) -> Result<(), Failure> {
 
 /// `shift profile [--kind shift|breath]`.
 fn shift_profile(args: &[String]) -> Result<(), Failure> {
-    let (values, _) = shift_flags(args, "shift profile", &["--kind"], &[])?;
-    let kind = flag(&values, "--kind").unwrap_or_else(|| "shift".to_owned());
+    let parsed = Args::parse(args, "shift profile", &["--kind"], &[], 0)?;
+    let kind = parsed.flag("--kind").unwrap_or_else(|| "shift".to_owned());
     let profile = shift::profile(&kind).ok_or_else(|| {
         Failure::Usage(format!(
             "shift profile --kind wants one of {}, got `{kind}`",
@@ -2600,7 +2461,7 @@ fn shift_profile(args: &[String]) -> Result<(), Failure> {
 
 /// `shift status`.
 fn shift_status(args: &[String]) -> Result<(), Failure> {
-    shift_flags(args, "shift status", &[], &[])?;
+    Args::parse(args, "shift status", &[], &[], 0)?;
     let ctx = shift_context()?;
     match shift::status(&ctx)? {
         Some(current) => println!("{current}"),
@@ -2612,37 +2473,14 @@ fn shift_status(args: &[String]) -> Result<(), Failure> {
 
 /// `version`.
 fn version_verb(args: &[String]) -> Result<(), Failure> {
-    if let Some(arg) = args.first() {
-        return match arg.as_str() {
-            "-h" | "--help" => help(),
-            option if option.starts_with("--") => Err(unknown_option(option)),
-            positional => Err(Failure::Usage(format!(
-                "version takes no arguments, got `{positional}`"
-            ))),
-        };
-    }
+    Args::parse(args, "version", &[], &[], 0)?;
     println!("{VERSION}");
     Ok(())
 }
 
 /// `forget <session-id>`.
 fn forget_verb(args: &[String]) -> Result<(), Failure> {
-    let mut session_id: Option<String> = None;
-    let mut cursor = Cursor::new(args);
-    while let Some(arg) = cursor.next() {
-        match arg {
-            "-h" | "--help" => return help(),
-            option if option.starts_with("--") => return Err(unknown_option(option)),
-            positional => {
-                if session_id.is_some() {
-                    return Err(Failure::Usage("forget takes one session id".to_owned()));
-                }
-                session_id = Some(positional.to_owned());
-            }
-        }
-    }
-    let session_id =
-        session_id.ok_or_else(|| Failure::Usage("forget needs a session id".to_owned()))?;
+    let session_id = Args::parse(args, "forget", &[], &[], 1)?.positional("a session id")?;
 
     // Deliberately unjournaled, and it must stay that way. Every other verb
     // writes what it decided to <root>/.trace; this one destroys every copy of a
@@ -2654,17 +2492,6 @@ fn forget_verb(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Print the usage as a successful answer to `--help`.
-fn help() -> Result<(), Failure> {
-    println!("{USAGE}");
-    Ok(())
-}
-
-/// The refusal for a flag no verb has.
-fn unknown_option(option: &str) -> Failure {
-    Failure::Usage(format!("unknown option `{option}`"))
-}
-
 /// The whole of stdin — a hook payload.
 fn stdin() -> Result<String, Failure> {
     let mut payload = String::new();
@@ -2672,37 +2499,4 @@ fn stdin() -> Result<String, Failure> {
         .read_to_string(&mut payload)
         .map_err(|source| Error::io("<stdin>", source))?;
     Ok(payload)
-}
-
-/// A cursor over the arguments of one verb.
-struct Cursor<'a> {
-    /// The verb's arguments.
-    args: &'a [String],
-    /// How far parsing has read.
-    index: usize,
-}
-
-impl<'a> Cursor<'a> {
-    /// Start at the first argument.
-    fn new(args: &'a [String]) -> Self {
-        Self { args, index: 0 }
-    }
-
-    /// The next argument.
-    #[allow(
-        clippy::should_implement_trait,
-        reason = "an inherent `next` reads better here than an Iterator impl on a one-use cursor"
-    )]
-    fn next(&mut self) -> Option<&'a str> {
-        let arg = self.args.get(self.index)?;
-        self.index += 1;
-        Some(arg)
-    }
-
-    /// The value belonging to `flag`.
-    fn value(&mut self, flag: &str) -> Result<String, Failure> {
-        self.next()
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| Failure::Usage(format!("{flag} needs a value")))
-    }
 }
