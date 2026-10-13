@@ -4,6 +4,8 @@ Status: **live since 2026-10-10 14:19Z.** Phases 0–5 and a minimal 7 built (tr
 
 The plate is `docs/plates/perpetual-shift/` (Claude Design source); `mise run plates` renders it to `perpetual-shift.png` beside it, with the docs page's six.
 
+**Hooks (since 2026-10-13):** the pre-push gate is `hk.pkl` (hk pinned in `mise.toml`); the bare repo's hooks dir still holds lefthook's shim, which passes silently without `lefthook.toml`, until `hk install --mise --force` replaces it — not run by a shift, because every worktree shares that dir and the other branches carry no `hk.pkl`.
+
 ## Premise, pressure-tested
 
 A prompt that rewrites itself has no free energy. Without an external fitness signal it converges on bloat or noise. The machine therefore has three non-negotiable parts: an **energy source** (session transcripts, the owner's corrections, outcomes such as green CI and resolved threads, and ideas published outside), a **sink** (hard token budgets per context tier, a cost cap per shift and per day of research), and a **trail** (every autonomous decision is an event the owner can revoke and the machine can reconcile). Everything else is plumbing around those three.

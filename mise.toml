@@ -2,8 +2,8 @@
 # against the pedantic set, and a newer clippy carries lints the pinned one
 # doesn't — an unpinned toolchain turns every rust release into lint breakage.
 [tools]
-# lefthook runs the pre-push gate (lefthook.toml); `lefthook install` wires it.
-lefthook = "2.1.10"
+# hk runs the pre-push gate (hk.pkl); `hk install --mise` wires it.
+hk = "2.5.0"
 rust = "1.94.0"
 
 [tasks.plates]
