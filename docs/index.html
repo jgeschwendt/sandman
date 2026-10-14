@@ -36,11 +36,6 @@
   </div>
 </header>
 
-<div class="strip strip-accent">
-  <span class="strip-tag">design</span>
-  <span class="strip-msg">this page mirrors <code class="code">docs/DESIGN.md</code>; the on-disk format is <code class="code">docs/BANK-FORMAT.md</code>.</span>
-</div>
-
 <main class="docs-shell" data-container>
 
 <header class="stack">
@@ -48,13 +43,15 @@
   <p class="lead docs-lead">A zero-dependency Rust CLI that plugs into Claude Code's hooks. A
     session is archived whole the moment it ends, three models distill it into
     per-directory memory banks, and every new session starts with what the last ones
-    knew.</p>
+    knew. The on-disk format is <code class="code">docs/BANK-FORMAT.md</code>.</p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#verbs">verbs</a>
     <a class="pill" href="#data-root">data root</a>
     <a class="pill" href="#cadence">cadence</a>
     <a class="pill" href="#flow">flow</a>
+    <a class="pill" href="#observability">observability</a>
     <a class="pill" href="#voyage">voyage log</a>
+    <a class="pill" href="#perpetual-shift">perpetual shift</a>
     <a class="pill" href="#invariants">invariants</a>
     <a class="pill" href="#non-goals">non-goals</a>
   </nav>
@@ -63,34 +60,49 @@
 <section class="docs-section" id="verbs" data-component="verbs">
   <header>
     <h2 class="h2">Verbs</h2>
-    <p class="docs-note">Thirteen verbs, one dispatcher. The memory verbs read transcripts —
-      sandman never sees a hook event; the machine verbs read the trail.</p>
+    <p class="docs-note">Thirteen verbs, one dispatcher. Six are memory verbs: sandman never sees a hook
+      event; it reads transcripts. Six machine verbs sit beside them, for the machine that commits on the
+      operator's behalf and the owner who reads what it did; they read the trail.</p>
   </header>
-  <figure class="plate">
-    <img class="plate-img" src="plates/verbs.png" alt="Fourteen boxes in two rows of seven: the thirteen verbs in alphabetical order — breathe, dream, forget, mcp, recall, reconcile, reflect, remember, report, score, shift, take, trail — each with its family (memory, machine, ruach, owner) and one-line duty, and a dashed fourteenth box naming how they fire: hooks, routines, shifts, by hand." />
-    <figcaption>The CLI surface — one box per verb, in the order the table reads. Source: <code class="code">docs/plates/sandman/</code>, artboard
-      <code class="code">verbs</code> (Claude Design).</figcaption>
-  </figure>
+  <figure class="figure"><img src="figures/verbs.png" alt="Fourteen boxes in two rows of seven: the thirteen verbs in alphabetical order — breathe, dream, forget, mcp, recall, reconcile, reflect, remember, report, score, shift, take, trail — each with its family (memory, machine, ruach, owner) and one-line duty, and a dashed fourteenth box naming how they fire: hooks, routines, shifts, by hand." /><figcaption>The CLI surface — one box per verb, in the order the table reads. Source: Claude Design canvas <a href="https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL">sandman figures</a>, board verbs.</figcaption></figure>
   <div class="table-wrap">
     <table data-table>
       <thead><tr><th>verb</th><th>duty</th></tr></thead>
       <tbody>
-        <tr data-verb="breathe"><td class="table-mono">breathe init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight</td><td>the ruach's store — feeds, breaths, the pass prompt, reweight; no model, no network</td></tr>
+        <tr data-verb="breathe"><td class="table-mono">breathe init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight</td><td>the ruach — the research engine's store of feeds and breaths, the pass prompt it composes for a reading session, and the weights adoption and silence move; no model, no network</td></tr>
         <tr data-verb="dream"><td class="table-mono">dream [--now]</td><td>route short-term → banks: 3 parallel dreams → 2-of-3 consensus → commit</td></tr>
         <tr data-verb="forget"><td class="table-mono">forget &lt;session&gt;</td><td>the privacy ending — destroy every copy; no archive, no pointer, no routing</td></tr>
         <tr data-verb="mcp"><td class="table-mono">mcp</td><td>the stdio tool server: recall, remember and banks over the same code paths</td></tr>
         <tr data-verb="recall"><td class="table-mono">recall</td><td>the recall surface: ancestor-directional banks + <code class="code">.recent</code> pointers + the voyage log tail + the tool index</td></tr>
-        <tr data-verb="reconcile"><td class="table-mono">reconcile &lt;event|shift&gt;</td><td>revert a revoked event's commits — or a whole shift's — on <code class="code">reconcile/&lt;id&gt;</code>, cut from trunk</td></tr>
+        <tr data-verb="reconcile"><td class="table-mono">reconcile &lt;event|shift&gt;</td><td>revert every commit carrying a revoked event or its descendants — or every event of a revoked shift — that the repo's trunk reaches, on <code class="code">reconcile/&lt;id&gt;</code> per repo cut from trunk</td></tr>
         <tr data-verb="reflect"><td class="table-mono">reflect</td><td>the 24 h pass: the voyage entry, the log index, bank upkeep</td></tr>
         <tr data-verb="remember"><td class="table-mono">remember "&lt;body&gt;"</td><td>commit one memory now — the in-session path</td></tr>
-        <tr data-verb="report"><td class="table-mono">report [--hook | serve]</td><td>the owner's digest of the shifts' reports; <code class="code">serve</code> is the page on 127.0.0.1:1705</td></tr>
+        <tr data-verb="report"><td class="table-mono">report [--hook | serve]</td><td>the owner's digest of the shifts' reports, once per session start; <code class="code">serve</code> is the page on 127.0.0.1:1705</td></tr>
         <tr data-verb="score"><td class="table-mono">score [--week yyyy-Www]</td><td>the week's numbers from the trail, shifts, breaths and threads — worst three first</td></tr>
-        <tr data-verb="shift"><td class="table-mono">shift attach|brief|clock|handoff|pick|profile|status</td><td>one five-hour shift by night: the rotation's target, the brief, the clock, the handoff</td></tr>
+        <tr data-verb="shift"><td class="table-mono">shift attach|brief|clock|handoff|pick|profile|status</td><td>one five-hour shift by night: the rotation's target, the dynamic prompt composed from the trail, banks and calendar, the window clock, the handoff</td></tr>
         <tr data-verb="take"><td class="table-mono">take &lt;session&gt;</td><td>archive the session by move + drop a pointer; queue ≥ 10 fires dream</td></tr>
-        <tr data-verb="trail"><td class="table-mono">trail append|log|show|revoke|today|trailers</td><td>the append-only event log; every machine commit names its event</td></tr>
+        <tr data-verb="trail"><td class="table-mono">trail append|log|show|revoke|today|trailers</td><td>the append-only event log; every machine commit names its event by <code class="code">Event:</code> trailer</td></tr>
       </tbody>
     </table>
   </div>
+  <p class="docs-note">The machine verbs' contract is <code class="code">docs/BANK-FORMAT.md</code> § trail, § shifts, § breath,
+    § score and § report.</p>
+  <p class="docs-note"><code class="code">recall</code> composes four surfaces into one 9,000-character budget — the cwd's bank and its
+    ancestors', <code class="code">.recent</code> pointers, the voyage log tail, the tool index. The voyage log has a
+    <strong>reserved floor</strong>: it is costed before anything else, and the graph and the other optional
+    surfaces divide the remainder. Everything else trims cheapest-first — the tool index, then
+    the pointers — and only then do banks fall back to one index line per memory, oldest
+    ancestor first; a graph that reaches its floor gives back what it saved, so the trimmed
+    surfaces return in reverse order if they fit. A graph still over budget at its floor loses
+    index lines, the most distant ancestor's tail first and the cwd's own bank last — the cut
+    falls on the graph and never on the end of the payload, because a blunt tail cut would
+    take the one surface the floor exists to protect. The log leaves the payload for two
+    reasons only: the log is empty, or the tail alone is wider than the whole budget, and both
+    are reported as a trim.</p>
+  <p class="docs-note"><code class="code">mcp</code> is the thirteenth verb and not a memory verb: it serves recall, remember and a bank
+    listing to MCP clients over stdio — the desktop app, Cowork through the bridge, Claude
+    Code — through the same code paths, so no consumer re-implements the format. The
+    contract is <code class="code">docs/MCP.md</code>.</p>
 </section>
 
 <section class="docs-section" id="data-root" data-component="data-root">
@@ -102,13 +114,9 @@
       visible ones hold the content it versions. Mixing them cost a commit of 60 run journals that shared
       <code class="code">log/</code> with the log's own entries (2026-09-05). <code class="code">log/</code> is memory's
       derivative, not a second copy of it: reflect rewrites a day's entry only when the memories it was written from
-      change.</p>
+      change. The format is <code class="code">docs/BANK-FORMAT.md</code> § log.</p>
   </header>
-  <figure class="plate">
-    <img class="plate-img" src="plates/data-root.png" alt="The ~/.sandman tree as nested boxes split by a dashed line: on the left the raw, dotted, gitignored tier — .archive/claude, .dream, .trace, and the runtime state .commit.lock, .reports-read and shifts/current.json; on the right the visible, versioned tier — memories (filled, pipeline-owned) wrapping .recent pointers and one bank, then log, trail, shifts, breath, score and pending-takes. Beneath: what is append-only, what is pipeline-owned, and the one lock." />
-    <figcaption>The data root as nested boxes — the tree below, split at the leading dot, with its ownership shown. Source: <code class="code">docs/plates/sandman/</code>, artboard
-      <code class="code">data root</code> (Claude Design).</figcaption>
-  </figure>
+  <figure class="figure"><img src="figures/data-root.png" alt="The ~/.sandman tree as nested boxes split by a dashed line: on the left the raw, dotted, gitignored tier — .archive/claude, .dream, .trace, and the runtime state .commit.lock, .reports-read and shifts/current.json; on the right the visible, versioned tier — memories (filled, pipeline-owned) wrapping .recent pointers and one bank, then log, trail, shifts, breath, score and pending-takes. Beneath: what is append-only, what is pipeline-owned, and the one lock." /><figcaption>The data root as nested boxes — the tree below, split at the leading dot, with its ownership shown. Source: Claude Design canvas <a href="https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL">sandman figures</a>, board data-root.</figcaption></figure>
   <pre class="tree" data-live>
 ~/.sandman/
 ├── .archive/
@@ -139,11 +147,7 @@
       (recall, take, report). The dream trigger lives in take — the only writer that grows the
       queue — so no verb needs hook-event visibility.</p>
   </header>
-  <figure class="plate">
-    <img class="plate-img" src="plates/cadence.png" alt="One lane per trigger, each a trigger box arrowed into the verbs it runs: SessionStart into recall --hook, thread --hook and report --hook; SessionEnd into take --hook; take's own queue of ten into dream; the four routines — shift, breathe-skim, breathe-deep, sandman-reflect — into shift, breathe pass and reflect; a shift session into trail append, score, shift handoff and the Sabbath's reflect, remember and breathe reweight; a breath pass into breathe file and close; the owner into remember, forget, take, dream --now, report and trail revoke → reconcile; launchd into report serve; an MCP client into mcp." />
-    <figcaption>What fires each verb — one lane per trigger; every arrow is one exec and no verb polls. Source: <code class="code">docs/plates/sandman/</code>, artboard
-      <code class="code">cadence</code> (Claude Design).</figcaption>
-  </figure>
+  <figure class="figure"><img src="figures/cadence.png" alt="One lane per trigger, each a trigger box arrowed into the verbs it runs: SessionStart into recall --hook, thread --hook and report --hook; SessionEnd into take --hook; take's own queue of ten into dream; the four routines — shift, breathe-skim, breathe-deep, sandman-reflect — into shift, breathe pass and reflect; a shift session into trail append, score, shift handoff and the Sabbath's reflect, remember and breathe reweight; a breath pass into breathe file and close; the owner into remember, forget, take, dream --now, report and trail revoke → reconcile; launchd into report serve; an MCP client into mcp." /><figcaption>What fires each verb — one lane per trigger; every arrow is one exec and no verb polls. Source: Claude Design canvas <a href="https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL">sandman figures</a>, board cadence.</figcaption></figure>
   <div class="table-wrap">
     <table data-table>
       <thead><tr><th>trigger</th><th>verb</th></tr></thead>
@@ -157,7 +161,7 @@
         <tr data-trigger="routines"><td>routines <code class="code">shift</code> · */5 · <code class="code">breathe-skim</code> · hourly · <code class="code">breathe-deep</code> · daily</td><td class="table-mono">shift · breathe pass</td></tr>
         <tr data-trigger="shifts"><td>a shift session, as its prompt says</td><td class="table-mono">trail append · score · shift handoff</td></tr>
         <tr data-trigger="launchd"><td>launchd — <code class="code">io.jlg.sandman-report</code></td><td class="table-mono">report serve</td></tr>
-        <tr data-trigger="mcp"><td>MCP client — the desktop app, Claude Code</td><td class="table-mono">mcp</td></tr>
+        <tr data-trigger="mcp"><td>MCP client — the desktop app, Cowork via the bridge, <code class="code">claude mcp</code></td><td class="table-mono">mcp (a served process, not a hook)</td></tr>
         <tr data-trigger="shell"><td>shell — the owner</td><td class="table-mono">any verb by hand</td></tr>
       </tbody>
     </table>
@@ -168,24 +172,21 @@
   <header>
     <h2 class="h2">Flow — a conversation's afterlife</h2>
   </header>
-  <figure class="plate">
-    <img class="plate-img" src="plates/flow.png" alt="Five stations left to right — take, archive, pointer, dream (filled), reflect — each with what it does; below, the three places the conversation comes back: the .recent pointers, the bank, and the voyage log, all feeding recall --hook in the next session." />
-    <figcaption>A conversation's afterlife — the five stations below, in the order a conversation passes them, and where what it left surfaces again. Source: <code class="code">docs/plates/sandman/</code>, artboard
-      <code class="code">flow</code> (Claude Design).</figcaption>
-  </figure>
+  <figure class="figure"><img src="figures/flow.png" alt="Five stations left to right — take, archive, pointer, dream (filled), reflect — each with what it does; below, the three places the conversation comes back: the .recent pointers, the bank, and the voyage log, all feeding recall --hook in the next session." /><figcaption>A conversation's afterlife — the five stations below, in the order a conversation passes them, and where what it left surfaces again. Source: Claude Design canvas <a href="https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL">sandman figures</a>, board flow.</figcaption></figure>
   <div class="stations stations-detail">
     <div class="panel" data-station="take">
       <div class="panel-head">① take &lt;session&gt;</div>
       <div class="panel-body">
         <ul role="list">
           <li>callers: <code class="code">SessionEnd</code> hook · <code class="code">/dissolve</code> · by hand</li>
-          <li>refuse live — a transcript touched in the last 120 s is refused; <code class="code">--force</code> overrides; <code class="code">--hook</code> implies force, because SessionEnd itself is the proof the session is over</li>
-          <li>decline a resume — SessionEnd carries <code class="code">reason</code> ∈ {<code class="code">clear</code>, <code class="code">logout</code>, <code class="code">other</code>, <code class="code">prompt_input_exit</code>, <code class="code">resume</code>}, and <code class="code">resume</code> is not an ending: Claude Code fires it on the session it is <em>adopting</em>. Forcing there moves the transcript out from under the turn about to append to it; the file is recreated, the next ending takes that live fragment too, and the pointer names a stub while the whole conversation sits orphaned in the archive</li>
-          <li>decline on request — <code class="code">$SANDMAN_NO_TAKE</code> makes <code class="code">--hook</code> exit quietly before it reads anything, so a caller driving <code class="code">claude -p --resume</code> turns keeps its transcript live; a session named by hand is taken regardless</li>
-          <li>decline for a live job — a job under <code class="code">~/.claude/jobs</code> still naming the session says it will be resumed: the ending belongs to the retiring worker, not the conversation. <code class="code">reason: clear</code> reaches past it. The decline writes <code class="code">pending-takes/&lt;sid&gt;.json</code>, and every later take that reaches an ending — and every reflect — drains it: job live → keep, job gone → take unforced, transcript gone → drop</li>
+          <li>refuse live — a transcript touched in the last 120 s is refused; <code class="code">--force</code> overrides. The heuristic guards by-hand takes; <code class="code">--hook</code> implies force, because <code class="code">SessionEnd</code> itself is the proof the session is over</li>
+          <li>decline a resume — SessionEnd carries <code class="code">reason</code> ∈ {<code class="code">clear</code>, <code class="code">logout</code>, <code class="code">other</code>, <code class="code">prompt_input_exit</code>, <code class="code">resume</code>}, and <code class="code">resume</code> is not an ending: Claude Code fires it on the session it is <em>adopting</em>, at the moment of adoption. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and the pointer ends up naming a stub while the whole conversation sits orphaned in the archive. <code class="code">--hook</code> exits quietly on <code class="code">resume</code>; every other reason, and a payload with no reason at all, is an ending</li>
+          <li>decline on request — <code class="code">$SANDMAN_NO_TAKE</code> makes <code class="code">--hook</code> exit quietly before it reads anything, so a caller driving <code class="code">claude -p --resume</code> turns keeps its transcript live (those turns end with <code class="code">reason: "other"</code> — the process really does exit, so the reason cannot carry the decision); a session named by hand is taken regardless</li>
+          <li>decline for a live job — a job directory under <code class="code">~/.claude/jobs</code> still naming the session says the conversation is resumable and will be resumed: the daemon retires an idle background worker and the retired process's exit fires <code class="code">SessionEnd</code>, but that ending belongs to the worker, not the conversation. A job speaks for the session it would resume next (<code class="code">resumeSessionId</code>, else the <code class="code">sessionId</code> it ran under), the guard is <code class="code">--hook</code>'s alone, and <code class="code">reason: "clear"</code> reaches past it. Every uncertainty — no jobs directory, an unreadable <code class="code">state.json</code>, a field of the wrong type — reads as "no job"</li>
+          <li><strong>pending-take ledger</strong> — a live-job decline is a debt, not a dead end. Nothing fires a second <code class="code">SessionEnd</code> when the operator deletes the job, so the decline writes <code class="code">pending-takes/&lt;sid&gt;.json</code> <code class="code">{declined, job, session}</code>, and every take that reaches an ending — plus every reflect, for the stretches with no endings at all — drains the ledger: entries whose job still lives are left alone, one whose job is gone is taken <em>unforced</em> (the 120 s live window is the guard for a session resumed by hand in the meantime), one whose transcript is gone is dropped, and anything else keeps its entry for the next drain. <code class="code">$SANDMAN_NO_TAKE</code>, the pipeline and <code class="code">reason: "resume"</code> skip the drain: those three must not archive bystanders. A drain never fails the verb it rode in on, and a reclaimed take never spawns a dream of its own</li>
           <li>resolve the transcript; <code class="code">mv</code> it to the archive path — same-volume rename, atomic, no copy ever exists; a cross-device destination is an error, never a fallback copy</li>
           <li>drop the pointer to <code class="code">memories/.recent/&lt;sid&gt;.json</code></li>
-          <li>check queue depth — <em>unrouted</em> pointers only, asked of dream rather than counted off disk, so the trigger and the run cannot disagree about what is queued; ≥ 10 → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, logged to <code class="code">.trace/dream-&lt;date&gt;.log</code>; take never waits on it</li>
+          <li>check queue depth — <em>unrouted</em> pointers only, asked of dream rather than counted off disk, so the trigger and the run cannot disagree about what is queued; ≥ 10 → spawn <code class="code">&lt;self&gt; dream</code>, fully detached, stdout+stderr appended to <code class="code">.trace/dream-&lt;date&gt;.log</code>; take never waits on it</li>
           <li>exit state: the conversation has left the live/resumable set — that is the feature, not a side effect; un-take = <code class="code">mv</code> back</li>
         </ul>
       </div>
@@ -194,7 +195,7 @@
       <div class="panel-head">② archive</div>
       <div class="panel-body">
         <ul role="list">
-          <li><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;orig relpath&gt;</code> — the day is the directory and the time is the prefix: names stay unique, sort chronologically, and a day's takes are a listing rather than a prefix match over every take ever made</li>
+          <li><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;orig relpath&gt;</code> — the day is the directory and the time is the prefix: names stay unique, sort chronologically, and a day's takes are a listing rather than a prefix match over every take ever made. The tree is never swept, so a flat one only grows</li>
           <li>plain jsonl, byte-identical — no re-encoding, no compression; <code class="code">mv</code> back restores the session whole</li>
           <li>append-only tree: the pipeline never deletes here. <code class="code">forget</code> destroys every copy before take could see it, so an archived session was by definition wanted</li>
         </ul>
@@ -205,9 +206,9 @@
       <div class="panel-body">
         <ul role="list">
           <li>shape: <code class="code">{archived · cwd · ended · title · highlights}</code> — enough to recall by without opening the transcript</li>
-          <li>IS the short-term recall surface: <code class="code">recall</code> folds pointers younger than 72 h into session start; expiry is that read-side filter</li>
+          <li>IS the short-term recall surface: <code class="code">recall</code> folds pointers younger than 72 h into session start; expiry is that read-side filter, nothing retires an unrouted pointer</li>
           <li><code class="code">highlights</code> carries the bodies the session explicitly asked to remember, so dream starts from signal, not a cold transcript</li>
-          <li>retirement: dream stamps <code class="code">"dreamed"</code> once it has routed a pointer; reflect's sweep deletes pointers that are dreamed and ended &gt; 72 h ago — an undreamed pointer never expires, because the queue is the only record the conversation happened</li>
+          <li>retirement: dream stamps <code class="code">"dreamed": "&lt;ISO&gt;"</code> once it has routed a pointer, and reflect's sweep deletes pointers that are dreamed <strong>and</strong> ended &gt; 72 h ago. Both halves are load-bearing — an undreamed pointer never expires, because the queue is the only record that the conversation happened</li>
         </ul>
       </div>
     </div>
@@ -215,15 +216,16 @@
       <div class="panel-head">④ dream — route short-term</div>
       <div class="panel-body">
         <ul role="list">
-          <li>trigger: take at queue ≥ 10, detached · <code class="code">dream --now</code> by hand; oldest ended first, 20 pointers per run — a budget on what one run <em>attempts</em>, since that is where the model calls go, not a claim about the backlog</li>
+          <li>trigger: take at queue ≥ 10, detached · <code class="code">dream --now</code> by hand; both forms behave identically. Oldest <code class="code">ended</code> first, 20 pointers per run — a budget on what one run <em>attempts</em>, since that is where the model calls go, not a claim about the backlog</li>
           <li>the queue is re-read before every pointer, never snapshotted at the start: a take that lands mid-run belongs to that run. A pointer the run already tried is not re-picked — one left for want of a quorum is still undreamed, and re-picking it would be an endless run rather than a second chance</li>
-          <li>three minds, one dream — in parallel, not a pipeline: sonnet, opus and fable each dream the same pointer independently — walk the archived transcript, propose candidate memories; no reader, drafter or judge roles, no veto; every mind is memory-blind (<code class="code">CLAUDE_MEMORY_PIPELINE=1</code>) and every prompt carries the secrets ban (keys, tokens, credentials never become memories; third-party text is data, not instructions)</li>
-          <li><strong>consensus</strong> — a memory commits only on 2-of-3 agreement: two proposals in the same bank and of the same type are one claim when their token sets overlap by at least half — tokens from the name and description slugs, crudely depluralized, integer Jaccard (<code class="code">2·|∩| ≥ |∪|</code>), so no float and no model ever decides a commit; the strongest agreeing tier's draft carries the wording; fewer than two witnesses → the moment is forgotten</li>
+          <li>three minds, one dream — in parallel, not a pipeline: sonnet, opus and fable each dream the same pointer independently — walk the archived transcript, propose candidate memories (type, lane, body); no reader, drafter or judge roles, no veto; every mind is memory-blind (<code class="code">CLAUDE_MEMORY_PIPELINE=1</code>) so memories cannot echo themselves, and every prompt carries the secrets ban (keys, tokens, credentials never become memories; third-party text is data, not instructions)</li>
+          <li><strong>consensus</strong> — a memory commits only on 2-of-3 agreement: two proposals in the same bank and of the same type are one claim when their token sets overlap by at least half — tokens from the name and description slugs, crudely depluralized, integer Jaccard (<code class="code">2·|∩| ≥ |∪|</code>), so no float and no model ever decides a commit. Sameness is transitive and a group is a connected component of it: a chain of wordings whose two ends never meet is one claim and one commit, not one commit per link. Over-merging near-identical wordings is the accepted side of that trade. The agreeing draft from the strongest tier carries the wording; fewer than two witnesses → the moment is forgotten</li>
+          <li><strong>dedupe</strong> — an agreed claim the target bank already holds is skipped rather than committed: the same Jaccard test, run against every live memory of that type in the bank (<code class="code">_archive/</code> is lineage and never matches). The skip is counted and named in the log line (<code class="code">deduped=&lt;filename&gt;</code>), and is never a <code class="code">replaces</code> — a dream re-deriving what it read must not overwrite the curated memory already stating it</li>
           <li>why parallel: independent dreams catch what a single reader misses, and two witnesses kill a hallucinated memory before it becomes recall</li>
-          <li>runner: three plain <code class="code">claude -p &lt;prompt&gt; --model &lt;id&gt; --output-format json</code> calls, one process per mind, spawned by sandman itself — no orchestrating session; models move with <code class="code">$SANDMAN_MIND_SONNET / _OPUS / _FABLE</code>, the binary with <code class="code">$SANDMAN_CLAUDE_BIN</code>; each mind is killed at 300 s and counted as abstaining; fewer than two answering leaves the pointer for the next run</li>
-          <li><strong>kept transcripts</strong> — each mind runs in <code class="code">&lt;root&gt;/.dream</code> under a generated <code class="code">--session-id</code>, and the transcript Claude Code writes is moved to <code class="code">&lt;root&gt;/.dream/&lt;claude project&gt;/&lt;session-id&gt;.jsonl</code> — the claude project read back out of the dreamt session's archive name (<code class="code">orphans</code> when the pointer names none); the move runs on every outcome (answer, failure, timeout kill), is best effort, and never changes what a mind is counted as; reflect's upkeep call is not persisted (<code class="code">--no-session-persistence</code>)</li>
+          <li>runner: three plain <code class="code">claude -p &lt;prompt&gt; --model &lt;id&gt; --output-format json</code> calls, one process per mind, spawned by sandman itself — no orchestrating session. Independence is load-bearing, consensus is Rust, and a failed mind still leaves 2-of-3 possible; models move with <code class="code">$SANDMAN_MIND_SONNET / _OPUS / _FABLE</code>, the binary with <code class="code">$SANDMAN_CLAUDE_BIN</code>; each mind is killed at 300 s and counted as abstaining; fewer than two answering leaves the pointer for the next run</li>
+          <li><strong>kept transcripts</strong> — each mind runs in <code class="code">&lt;root&gt;/.dream</code> under a generated <code class="code">--session-id</code>, and the transcript Claude Code writes is moved to <code class="code">&lt;root&gt;/.dream/&lt;claude project&gt;/&lt;session-id&gt;.jsonl</code> — the claude project being the one the dreamt session ran in, read back out of its archive name (<code class="code">orphans</code> when the pointer names none). The move runs on every outcome, answer, failure or timeout kill, because all three leave a transcript; it is best effort and never changes what a mind is counted as. What a mind read and how it reasoned is then evaluable on its own, which is the whole reason to keep it. Reflect's upkeep calls are not persisted (<code class="code">--no-session-persistence</code>): they read a bank listing, not a session</li>
           <li><strong>commit</strong> — <code class="code">commit_memory</code> under <code class="code">.commit.lock</code>, the single format authority: slugs, <code class="code">replaces</code> archiving into <code class="code">_archive/</code>, collision suffixes, index regen</li>
-          <li>dream is idempotent over the queue: a failed pointer stays queued, a routed one is stamped and never dreamt again</li>
+          <li>dream is idempotent over the queue: a failed pointer stays queued, a routed one is stamped <code class="code">dreamed</code> and never dreamt again</li>
         </ul>
       </div>
     </div>
@@ -233,19 +235,65 @@
         <ul role="list">
           <li>trigger: the <code class="code">sandman-reflect</code> routine at 03:30 UTC (≈ 23:30 local) — launchd, cron, or any scheduler; reflect is idempotent, so a double-fire or an early run is harmless</li>
           <li>pending-take drain first, before anything is written: a take reclaimed by the pass belongs to the day being written, not tomorrow's</li>
-          <li><strong>the voyage entry</strong> <code class="code">log/&lt;yyyy-mm-dd&gt;.md</code> — the UTC day that <em>ended</em>, never the day the 03:30 pass runs in; the day's sources are the memories whose <code class="code">created:</code> or <code class="code">updated:</code> fall in it, their names and bodies hash to the entry's <code class="code">fingerprint</code>, and an entry already carrying it is left alone — same sources, same entry, no model call. Otherwise ONE mind (<code class="code">$SANDMAN_MIND_LOG</code>, default <code class="code">claude-opus-5</code> — the log's own variable) writes it, seeing the last five entries whole; an abstention leaves whatever is on disk and the next pass asks again. A day with no sources gets no entry and no file. <code class="code">INDEX.md</code> is regenerated behind every write — ascending, <code class="code">began:</code> fixed once. <code class="code">reflect --day &lt;date&gt;</code> renders that one day and nothing else</li>
+          <li><strong>the voyage entry</strong> <code class="code">log/&lt;yyyy-mm-dd&gt;.md</code> — the UTC day that <em>ended</em>, never the day the 03:30 pass runs in: an entry covers a whole day, and no entry ever claims hours that have not happened yet. The day's sources are the memories whose <code class="code">created:</code> or <code class="code">updated:</code> fall in it; their names and bodies hash to the entry's <code class="code">fingerprint</code>, and an entry on disk already carrying it is left alone — same sources, same entry, no model call. When it does not match, ONE mind (<code class="code">$SANDMAN_MIND_LOG</code>, default <code class="code">claude-opus-5</code> — the log's own variable, so its model moves independently of upkeep's) is asked for <code class="code">{kind, title, body, next}</code> against the log's brief with the last five entries whole behind it, and the reply is stamped with <code class="code">day</code>, <code class="code">position</code> and the day's sources and written. An abstention — a timeout, an unusable reply, a body over 1 000 characters or a title over 60 — leaves whatever is on disk and journals it; the next pass asks again, because the fingerprint still does not match. A day with no sources gets no entry and no file: a filler entry would be prose about nothing, and every reader of the log pays for it in context. <code class="code">INDEX.md</code> is regenerated behind every write — ascending, <code class="code">began:</code> fixed on the first entry ever written and preserved by every regeneration after it. <code class="code">reflect --day &lt;date&gt;</code> renders that one day and nothing else: no sweep, no upkeep</li>
           <li>pointer sweep: delete <code class="code">.recent</code> pointers that are dreamed and ended &gt; 72 h ago</li>
-          <li>bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last, OR the previous pass spent every operation it was allowed: ONE opus call (<code class="code">$SANDMAN_MIND_UPKEEP</code>) proposing at most 6 net-non-increasing ops (prune, merge, retitle), validated whole — an invalid reply is rejected entire, never partially applied; upkeep never grows a bank</li>
+          <li>bank upkeep, gated — bank grown +5 files AND ≥ 20 h since last, OR the previous pass spent every operation it was allowed (a backlog is old inventory already judged worth reworking, so it is due on sight): ONE opus planning call (<code class="code">$SANDMAN_MIND_UPKEEP</code>) proposing at most 6 net-non-increasing ops (prune, merge, retitle), validated whole — an invalid reply is rejected entire, never partially applied; upkeep never grows a bank</li>
+          <li><strong>conflict guard</strong> — every listed file is fingerprinted as the listing is read, and each operation is re-checked against those fingerprints immediately before it runs. A file that was edited, is gone, or was never listed skips its operation, and the log line carries <code class="code">conflicts=&lt;n&gt;</code> and the files: a plan is only ever applied to the bank it was drawn against. Ops are file-disjoint, so a skip never invalidates its siblings</li>
+          <li><strong>merges are written twice</strong> — the planning mind sees three lines of each body, so a merge's <code class="code">body</code> is a draft and is never committed. Each merge gets a second call of its own carrying the sources whole, and that body is the one that reaches disk; an abstention or an unusable reply skips the merge and leaves its memories alone. The merged memory is committed with <code class="code">replaces</code> naming the member with the earliest <code class="code">created:</code> — the claim keeps the day it was first made — and every other member is archived</li>
           <li><code class="code">_reflect.json</code> <code class="code">{at, count, last_ops}</code> — the due-baseline, seeded on first sight of a bank</li>
         </ul>
       </div>
     </div>
   </div>
-  <figure class="plate">
-    <img class="plate-img" src="plates/ending.png" alt="One SessionEnd fanning into three lanes. A, no job names the session: take now (filled), archive and pointer, dream at ten, drain. B, a job under ~/.claude/jobs names it: decline, write the debt to pending-takes, and the drain — job live keep, job gone take unforced, transcript gone drop — hands a reclaimed take back to A. C, reason resume: declined as a beginning, beside the resume-is-not-an-ending hazard. A dashed box names the two quiet declines checked first." />
-    <figcaption>Station ① alone, zoomed: one <code class="code">SessionEnd</code> and its three paths — a resume declined as a beginning, a session a live job under <code class="code">~/.claude/jobs</code> would resume declined into the debt ledger, and every other ending taken now. Source: <code class="code">docs/plates/sandman/</code>, artboard
-      <code class="code">ending</code> (Claude Design).</figcaption>
-  </figure>
+  <figure class="figure"><img src="figures/ending.png" alt="One SessionEnd fanning into three lanes. A, no job names the session: take now (filled), archive and pointer, dream at ten, drain. B, a job under ~/.claude/jobs names it: decline, write the debt to pending-takes, and the drain — job live keep, job gone take unforced, transcript gone drop — hands a reclaimed take back to A. C, reason resume: declined as a beginning, beside the resume-is-not-an-ending hazard. A dashed box names the two quiet declines checked first." /><figcaption>Station ① alone, zoomed: one <code class="code">SessionEnd</code> and its three paths — a resume declined as a beginning, a session a live job under <code class="code">~/.claude/jobs</code> would resume declined into the debt ledger, and every other ending taken now. Source: Claude Design canvas <a href="https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL">sandman figures</a>, board ending.</figcaption></figure>
+</section>
+
+<section class="docs-section" id="observability" data-component="observability">
+  <header>
+    <h2 class="h2">Observability — the journal</h2>
+    <p class="docs-note">Every verb but one writes what it <em>decided</em> to <code class="code">.trace/&lt;verb&gt;-&lt;date&gt;.log</code>: one line per
+      decision, never a transcript of the run. Hook-driven verbs decide and exit, and until
+      the journal existed a <code class="code">take --hook</code> that declined said nothing at all — the 2026-08-26
+      mid-conversation archive had to be reconstructed out of Claude Code's own <code class="code">daemon.log</code>.</p>
+  </header>
+  <ul class="stack" role="list">
+    <li data-journal="line-shape"><strong>Line shape</strong> — <code class="code">&lt;ISO&gt; pid=&lt;n&gt; v=&lt;version&gt;-&lt;commit&gt; &lt;verdict&gt; &lt;key&gt;=&lt;value&gt;…</code>. <code class="code">pid=</code> is
+      what ties a decision to the same process in <code class="code">daemon.log</code>; <code class="code">v=</code> names the build that
+      wrote it, since the installed binary is routinely a commit behind the tree and
+      <code class="code">-dirty</code> means the commit alone does not describe it (<code class="code">sandman version</code> prints the
+      same stamp). Newlines in a payload fold to spaces: one entry is always one greppable
+      line.</li>
+    <li data-journal="shape-not-content"><strong>Shape, never content</strong> — <code class="code">recall</code> reports how many banks answered, which memory files
+      each put in front of the session (<code class="code">recalled-bank</code>), what the budget trimmed and how
+      long composing took. It never logs a body: a log that quoted the memories back would
+      be a second copy of the banks.</li>
+    <li data-journal="honest-units"><strong>Honest units</strong> — <code class="code">chars=</code> is reported against <code class="code">budget=</code> in the characters the budget is
+      actually spent in, and <code class="code">trimmed=</code>/<code class="code">banks_degraded=</code>/<code class="code">cut_lines=</code> say what it cost to
+      fit, which a size alone cannot; each <code class="code">recalled-bank</code> line carries <code class="code">rendering=</code> — <code class="code">full</code>
+      or <code class="code">index</code> — naming the form its memories arrived in. <code class="code">cut_lines=</code> counts graph index
+      lines the last-resort cut took, never characters off the payload's tail. <code class="code">trimmed=</code>
+      names surfaces the budget dropped, so <code class="code">chronological</code> appears there only when the log
+      itself outgrew the budget — its floor is reserved, and a payload without it is a fact
+      worth a line.</li>
+    <li data-journal="mcp"><code class="code">mcp</code> journals one line per request — method, tool, bank, outcome and recall's
+      counts — never a body or payload.</li>
+    <li data-journal="best-effort"><strong>Best effort by construction</strong> — every error is swallowed, there is no result to ignore,
+      and a verb behaves identically whether its line landed or not. A journal that could
+      fail would be a new way for a session edge to break.</li>
+    <li data-journal="two-records">The voyage log is the <em>narrative</em> record — what this engine lived through; the journal
+      is the <em>decision</em> record — why a verb did or did not act. <code class="code">reflect</code> writes both, to their
+      own tiers: the entry to <code class="code">log/</code>, and to <code class="code">.trace/</code> the entry's own line (<code class="code">reflect entry
+      date=… day=… kind=… mind=… ms=…</code> on a write, <code class="code">reflect entry-kept date=…</code> when the
+      fingerprint matched and no mind was asked, <code class="code">reflect entry-skipped date=…
+      reason=quiet|abstained</code> when the day had no sources or the mind abstained), one line per
+      bank, and one run line (<code class="code">reflect done banks=… due=… swept=… ms=…</code>). Shape, never
+      content: no line carries an entry's prose. <code class="code">dream</code> appends its detached run's stdout and
+      stderr to <code class="code">.trace/dream-&lt;date&gt;.log</code>.</li>
+  </ul>
+  <p class="docs-note"><strong><code class="code">forget</code> is deliberately unjournaled — an accepted forensic hole.</strong> It is sandman's
+    privacy ending, and a line naming the session it destroyed would be exactly the trace
+    the verb promises not to leave. The cost is real and is the point: a forget cannot be
+    reconstructed afterwards, by anyone, including its operator.</p>
 </section>
 
 <section class="docs-section" id="voyage" data-component="voyage">
@@ -256,11 +304,170 @@
       re-derivable from them, in sandman's own voice and its own running vocabulary. The on-disk format is
       <code class="code">docs/BANK-FORMAT.md</code> § <code class="code">log/</code>.</p>
   </header>
-  <figure class="plate">
-    <img class="plate-img" src="plates/voyage.png" alt="Left to right: the banks, reflect at 03:30 UTC taking the day that ended, the day's sources, their fingerprint, one mind (filled), the entry log/&lt;yyyy-mm-dd&gt;.md with INDEX.md, and recall in every new session. Below, the dashed outcomes where nothing is written — a quiet day, a kept entry, an abstention — all journaled to .trace; beside them, one entry's keys and kinds and the one-day backfill." />
-    <figcaption>One day, one entry, derived from the banks — the whole path from the memories that landed to the entry every new session opens on. Source: <code class="code">docs/plates/sandman/</code>, artboard
-      <code class="code">voyage</code> (Claude Design).</figcaption>
-  </figure>
+  <figure class="figure"><img src="figures/voyage.png" alt="Left to right: the banks, reflect at 03:30 UTC taking the day that ended, the day's sources, their fingerprint, one mind (filled), the entry log/&lt;yyyy-mm-dd&gt;.md with INDEX.md, and recall in every new session. Below, the dashed outcomes where nothing is written — a quiet day, a kept entry, an abstention — all journaled to .trace; beside them, one entry's keys and kinds and the one-day backfill." /><figcaption>One day, one entry, derived from the banks — the whole path from the memories that landed to the entry every new session opens on. Source: Claude Design canvas <a href="https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL">sandman figures</a>, board voyage.</figcaption></figure>
+</section>
+
+<section class="docs-section" id="perpetual-shift" data-component="perpetual-shift">
+  <header>
+    <h2 class="h2">The perpetual shift</h2>
+    <p class="docs-note">Status: <strong>live since 2026-10-10 14:19Z.</strong> Phases 0–5 and a minimal 7 built (trail, reconcile, shift, breathe, score, the Sabbath brief), trunk c1aecb3 installed, the runner and both breath runners installed, sessions in <code class="code">dontAsk</code> inside the strict sandbox. First live tick (02:25Z) failed on workspace trust; first Sabbath s-20261010T1345Z (13:45–14:08Z) handed off cleanly — dream-pass 263→245 memories, W42 targets for 20 repos — and its four findings (sandbox must cover <code class="code">~/.grove</code>, api.anthropic.com egress, tools through mise, one Sabbath a day) landed the same day. Deferred to the machine: phase 6 (dowse ranking, titer promote/decay), the mod's tool-call guards, the ruach's own Sabbath, the ablation prompt. Sunday opens the first Hunt. Every shift now ends with a <code class="code">report.md</code> for the owner (<code class="code">sandman report</code>, and a SessionStart hook that shows each once) and turns work larger than itself into a <code class="code">proposal:</code> thread Monday executes once approved.</p>
+    <p class="docs-note"><strong>Hooks (since 2026-10-13):</strong> the pre-push gate is <code class="code">hk.pkl</code> (hk pinned in <code class="code">mise.toml</code>); the bare repo's hooks dir still holds lefthook's shim, which passes silently without <code class="code">lefthook.toml</code>, until <code class="code">hk install --mise --force</code> replaces it — not run by a shift, because every worktree shares that dir and the other branches carry no <code class="code">hk.pkl</code>.</p>
+  </header>
+  <figure class="figure"><img src="figures/perpetual-shift.png" alt="Four bands and a footer. The ruach — Sources, Read, Judge, File, Spike, Reweight — loops on itself, trading breaths filed against a repo for the open problems the shift engine keeps. The spine: the creation week, Sun Hunt, Mon Redesign, Tue Refactor, Wed Measure, Thu Harden, Fri Ship, Sat Rest, each with its creation note and instrument, the Sabbath's self-pass and every seventh week the Shemitah ablation. The shift engine by night: shift (brief, work, handoff), trail (the core, events by shift, revoked and reconciled across every repo), score, compile, closing on the next brief — never stops, the Sabbath changes the mode, not the motion. The owner's loop: the night's report.md, a proposal thread for work larger than a shift, sandman report in the morning on 127.0.0.1:1705, approved work first the next night. Beneath, the mod inside every session — guards, corrections, the band — and a line of the standing rails." /><figcaption>The perpetual shift — two engines that never stop, the ruach and the shifts, with the creation week as their spine; the machine works the night and the owner gives the word in the morning. Source: Claude Design canvas <a href="https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL">sandman figures</a>, board perpetual-shift.</figcaption></figure>
+
+  <h3 class="h3">Premise, pressure-tested</h3>
+  <p class="docs-note">A prompt that rewrites itself has no free energy. Without an external fitness signal it converges on bloat or noise. The machine therefore has three non-negotiable parts: an <strong>energy source</strong> (session transcripts, the owner's corrections, outcomes such as green CI and resolved threads, and ideas published outside), a <strong>sink</strong> (hard token budgets per context tier, a cost cap per shift and per day of research), and a <strong>trail</strong> (every autonomous decision is an event the owner can revoke and the machine can reconcile). Everything else is plumbing around those three.</p>
+  <p class="docs-note">Sandman grows into the machine. It already owned the loop's skeleton — take, dream, recall, reflect — and <code class="code">~/.sandman</code> is the git-synced home the trail lives in. Stele stays the per-repo knowledge store; routines stay the clock; threads stay the human valve; spawn stays the session launcher.</p>
+
+  <h3 class="h3">Vocabulary</h3>
+  <ul class="stack" role="list">
+    <li data-term="shift"><strong>Shift</strong> — one autonomous session bounded by the five-hour usage window. Shifts run back to back; the machine never stops. A shift opens with a <em>brief</em>, closes with a <em>handoff</em>.</li>
+    <li data-term="trail"><strong>Trail</strong> — the append-only event log at <code class="code">~/.sandman/trail/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code>. Every machine commit in every repo carries <code class="code">Shift:</code> and <code class="code">Event:</code> trailers, so <code class="code">git log</code> anywhere joins back to the trail. Contract: <code class="code">docs/BANK-FORMAT.md</code> § trail.</li>
+    <li data-term="reconcile"><strong>Reconcile</strong> — the owner revokes an event; the machine reverts every commit carrying it or its descendants, in a scratch worktree on a <code class="code">reconcile/&lt;id&gt;</code> branch per repo (new commits, never history rewrites), and lists the memories whose <code class="code">source:</code> names a revoked event for reflect to retire.</li>
+    <li data-term="ruach"><strong>Ruach</strong> — the research engine: the breath over the waters, continuous, outside the days. It files <strong>breaths</strong> (ideas with provenance, a repo they bear on, a state: new, spiked, adopted, dropped) under <code class="code">~/.sandman/breath/</code>.</li>
+    <li data-term="titer"><strong>Titer</strong> — the evidence count behind a lesson. Probation needs two sessions of evidence to become active; an active lesson that is heeded decays toward an index line; one that keeps being violated escalates to a mechanical guard.</li>
+    <li data-term="sabbath"><strong>Sabbath</strong> — the seventh day. The machine does not stop; it changes mode from making to remembering. <strong>Shemitah</strong> — every seventh week the Sabbath runs the ablation pass (rewrite the memory corpus from scratch) instead of the ordinary self-pass.</li>
+  </ul>
+
+  <h3 class="h3">The spine — the creation week</h3>
+  <p class="docs-note">Hebrew reckoning: Sunday is Day 1, Saturday the Sabbath. Local time, America/New_York. The owner works by day and the machine by night: a night of weekday D runs D 21:00 → D+1 07:00 (<code class="code">$SANDMAN_SHIFT_NIGHT</code>), and carries D's theme in every shift it holds. The day's theme is the shift's instrument, the repo rotation its target. The order is the point: find, restructure, polish, measure, multiply, finish, rest.</p>
+  <div class="table-wrap">
+    <table data-table>
+      <thead><tr><th>day</th><th>creation</th><th>theme</th><th>instrument</th><th>what a shift does</th></tr></thead>
+      <tbody>
+        <tr data-day="sun"><td>Sun</td><td>Day 1 · Light divided from darkness</td><td><strong>Hunt</strong></td><td class="table-mono">/gigasweep → /gigadebug</td><td>sweep a repo for real defects, root-cause the confirmed ones, ship the repro as a regression test</td></tr>
+        <tr data-day="mon"><td>Mon</td><td>Day 2 · Firmament; waters divided</td><td><strong>Redesign</strong></td><td class="table-mono">/gigaredesign → /execute-plan</td><td>execute the approved proposals first, then rebuild the structure Sunday's findings and standing proposals indict, always-green staged migration</td></tr>
+        <tr data-day="tue"><td>Tue</td><td>Day 3 · Land and seed</td><td><strong>Refactor</strong></td><td class="table-mono">/gigarefine</td><td>drive a repo's worst-scored module — tests as much as source — to its best form, behaviour preserved: the fewest statements, functions, branches and lines that still fulfil the feature set</td></tr>
+        <tr data-day="wed"><td>Wed</td><td>Day 4 · Lights to mark seasons</td><td><strong>Measure</strong></td><td><code class="code">sandman score</code>, benchmarks</td><td>compute the score, run the perf and coverage passes, count statements, functions, branches and lines in source and tests, write the numbers where the Sabbath will read them</td></tr>
+        <tr data-day="thu"><td>Thu</td><td>Day 5 · Swarms; be fruitful and multiply</td><td><strong>Harden</strong></td><td><code class="code">/security-review</code>, coverage, dependencies</td><td>bring the repo to 100 % coverage first (table stakes, end-to-end style), then close security findings and land dependency updates with their tests</td></tr>
+        <tr data-day="fri"><td>Fri</td><td>Day 6 · Image; the work finished, very good</td><td><strong>Ship</strong></td><td class="table-mono">/gigareview</td><td>GO/NO-GO on the week's branches, merge the GOs, patch releases, <code class="code">stele check</code> across the grove, CI green before sundown</td></tr>
+        <tr data-day="sat"><td>Sat</td><td>Day 7 · Sabbath</td><td><strong>Rest</strong></td><td>the self-pass</td><td>no code commits: score the week from the trail, dream-pass, <code class="code">/tighten</code> the machine's own prompts, rubrics and tests to their fewest lines, plan next week's targets, write the voyage entry; every seventh week, the ablation</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="h3">The ruach — research as its own engine</h3>
+  <p class="docs-note">Not a block inside shifts: a second loop with its own trail kinds, score and Sabbath, coupled to the shift engine through the breath store.</p>
+  <pre class="tree">
+Sources ──▶ Read ──▶ Judge ──▶ File ──▶ Spike ──▶ Reweight ─┐
+   ▲ (weighted)  (opus,     (Kev:    (breath,  (a shift   (adoption │
+   │              budget)   bearing, provenance tries one)  raises a │
+   │                        novelty)  state)                source)  │
+   └────────────────────────────────────────────────────────────────┘
+        ▲ open problems: plan next, findings, threads   │ breaths, filed against a repo
+        └──────────────── the shift engine ◀────────────┘</pre>
+  <ul class="stack" role="list">
+    <li data-ruach="sources"><strong>Sources</strong> — <code class="code">~/.sandman/breath/sources.toml</code>: arXiv cs.SE and cs.AI listings, Hacker News, GitHub trending for Rust, Elixir and TypeScript, and the release feeds of the authors the owner trusts (jdx, oxc, bun, Vercel, Elixir core, Anthropic). Each carries a weight and a budget.</li>
+    <li data-ruach="read"><strong>Read</strong> — opus, under <code class="code">SANDMAN_BREATH_BUDGET_USD</code> per day, against the <strong>problems file</strong> <code class="code">~/.sandman/breath/problems.md</code> that the shift engine keeps current from every repo's <code class="code">docs/plan.md</code> "next", open findings and open threads.</li>
+    <li data-ruach="judge"><strong>Judge</strong> — Kev (free, local, <code class="code">io.jlg.kev</code> on 1703): per candidate a Noul "does it bear on a repo?" and "is it new to us?" (against existing breaths and memories). TypeSafe when a key is present; same fallback rules as dowse.</li>
+    <li data-ruach="file"><strong>File</strong> — <code class="code">sandman breathe file --url … --repo … --title …</code> writes <code class="code">breath/&lt;date&gt;-&lt;slug&gt;.md</code> with provenance, the judge's scores and state <code class="code">new</code>; a <code class="code">breath</code> trail event.</li>
+    <li data-ruach="spike"><strong>Spike</strong> — the shift brief carries the breaths filed against its target; a shift spikes at most one and marks it <code class="code">adopted</code> or <code class="code">dropped</code> with the reason.</li>
+    <li data-ruach="reweight"><strong>Reweight</strong> — adoption raises the source and the query that found it; a month of silence lowers them. The ruach's Sabbath rewrites <code class="code">sources.toml</code> and its own prompt from its score.</li>
+    <li data-ruach="runners"><strong>Runners</strong> — <code class="code">~/.routines/breathe-skim.md</code> (hourly at :17, a cheap read-and-judge pass over the due feeds) and <code class="code">~/.routines/breathe-deep.md</code> (daily at 10:00 UTC, <code class="code">/gigaresearch</code> over every feed), both <code class="code">--bg</code> sessions with cwd <code class="code">~/.sandman/breath</code>, both exiting on PAUSE and when <code class="code">breathe pass</code> says nothing is due or the budget is spent. Their text lives in <code class="code">docs/routines/</code> until installed.</li>
+  </ul>
+
+  <h3 class="h3">Repo rotation</h3>
+  <p class="docs-note">Scope is every root under <code class="code">~/.grove/code/jgeschwendt/</code>. The three home repos (<code class="code">~</code>, <code class="code">~/.routines</code>, <code class="code">~/.sandman</code>) are out of the rotation: home-sync commits them without trailers every fifteen minutes, and a shift there could edit the trail or the live runner; reconcile still scans them. <code class="code">sandman shift pick</code> orders repos by least-recently-shifted, then weights by live signals: CI red, stale <code class="code">graph.lock</code>, open findings, open threads, breaths filed against it. Only trunks Claude Code trusts are picked — <code class="code">claude --bg</code> refuses any other cwd — and <code class="code">sandman shift pick --untrusted</code> lists the rest for the owner (BANK-FORMAT § shifts, Trust). Invariant: every repo is shifted at least once a week; Wednesday's score reports coverage and a miss is a finding.</p>
+
+  <h3 class="h3">Standing rails</h3>
+  <ul class="stack" role="list">
+    <li data-rail="worktrees">A shift works in <code class="code">shift/&lt;id&gt;</code> worktrees created through <code class="code">grove tree add</code>; trunk never carries in-flight work.</li>
+    <li data-rail="landing">Trunk is never pushed; every landing is a pull request; merge by rebase. A shift rebases its <code class="code">shift/&lt;id&gt;</code> onto the local <code class="code">origin/main</code> and records it with <code class="code">sandman shift land</code>; the runner pushes the branch and opens the pull request, and auto-merge or the runner (a queue needs an organization-owned repo) merges it by rebase once CI is green — never a merge commit, so reconcile reverts every landed commit on its own and refuses a trailered merge. A trunk checkout is never ahead of <code class="code">origin</code> (owner 2026-10-13: "i want all prs to use a pr to run ci checks so we stay green, automerge and merge queues please"; BANK-FORMAT § shifts, Landing).</li>
+    <li data-rail="green">Land only when the repo's test, lint and <code class="code">stele check &amp;&amp; stele emit --check</code> are green, coverage has not dropped — 100 % is table stakes, end-to-end style like jlg.io, and test code is source code (owner 2026-10-09: "code golf should be in the spirit of the refactor/tighten phases") — and a <code class="code">/gigareview</code> says GO. Patch releases ship on their own; a minor or major opens a decision thread (release policy, unchanged).</li>
+    <li data-rail="history">History is never rewritten and nothing is force-pushed; the trail reconciles by revert.</li>
+    <li data-rail="sandbox">Shift and breath sessions run <code class="code">dontAsk</code> inside Claude Code's strict Bash sandbox under <code class="code">sandman shift profile</code> (BANK-FORMAT § shifts, The sandbox) — not <code class="code">bypassPermissions</code>, which auto-approves the sandbox's ask for an unlisted domain (probed 2026-10-09): git's network commands run outside it with the host's auth, nothing writes <code class="code">~/.local/bin</code>, and the deny rules and the mod's guards hold in every mode.</li>
+    <li data-rail="models">The orchestrator model is a knob, <code class="code">SANDMAN_SHIFT_MIND</code>, default <code class="code">opus</code>. Fable takes the Sabbath self-pass and Friday's verdicts while quota allows; when the weekly limit is exhausted every spawned agent pins opus or below. Workers are always opus or below.</li>
+    <li data-rail="cost">Cost: every headless call logs its cost to the trail; a shift stops at <code class="code">SANDMAN_SHIFT_BUDGET_USD</code> and hands off early; the ruach stops at <code class="code">SANDMAN_BREATH_BUDGET_USD</code> per day. <code class="code">claude-breaker</code> keeps its cap of twenty.</li>
+    <li data-rail="threads">The Sabbath commits no code. Three consecutive failed blocks end a shift and open a problem thread. Threads are for what the trail cannot undo: publishing, deleting data, spending money, touching other people.</li>
+    <li data-rail="proposals">Work larger than one shift — an architecture change, a redesign, a refactor spanning modules — is a <code class="code">proposal:&lt;owner/repo&gt;:&lt;slug&gt;</code> decision thread with a comparison matrix, never started unapproved; Monday's Redesign executes the approved ones first (BANK-FORMAT § report).</li>
+    <li data-rail="report">Every shift, the Sabbath too, writes <code class="code">report.md</code> for the owner before its handoff — Worth your eye, Landed, Proposals, Decisions (every choice with two live options and the one rejected), Numbers — and <code class="code">shift handoff</code> refuses without it; <code class="code">sandman report</code>, its SessionStart hook and <code class="code">sandman report serve</code> — a loopback page of each night, its proposals answered by form into their threads — are how he reads them.</li>
+  </ul>
+
+  <h3 class="h3">Phases</h3>
+  <p class="docs-note">Chiastic: the trail is the core and was built first; each outer layer is rebuilt against what the core required. Opus agents implement; the session model decomposes, gates and reviews.</p>
+  <div class="stations stations-detail">
+    <div class="panel" data-phase="0">
+      <div class="panel-head">0 · Housekeeping — done</div>
+      <div class="panel-body">
+        <p>Retired drawing tools stripped (<code class="code">design/*.tldr</code>, <code class="code">docs/arch.tldr</code>, the <code class="code">plan</code> task, the lefthook <code class="code">tldraft check</code> gate); <code class="code">docs/PLAN.md</code> became <code class="code">docs/plan.md</code>, since folded into this page; lock rebuilt.</p>
+      </div>
+    </div>
+    <div class="panel" data-phase="1">
+      <div class="panel-head">1 · Trail — done (d33d0aa, e9e906b, e604573)</div>
+      <div class="panel-body">
+        <p><code class="code">sandman trail append|log|show|revoke|today|trailers</code>, <code class="code">sandman reconcile &lt;event-id&gt; [--dry-run]</code>, <code class="code">src/grove.rs</code> (checkout discovery, trailer reading, env-scrubbed git), BANK-FORMAT § trail. 16 integration tests in <code class="code">tests/trail.rs</code> including the plan's acceptance case. Reconcile has run only against fixtures; its first live run is a Sunday finding to watch. An adversarial review hardened it the same day: the reconcile branch starts from the repo's trunk and hits trunk does not reach are reported <code class="code">off trunk</code>, merges are never reverted — the machine merges by rebase only, so a trailered merge refuses its repo for the operator (a third review broke two merge-side heuristics) — a repo with no trunk to name, or a manifest <code class="code">trunk</code> that does not resolve, fails rather than falling back, reverts skip the repo's commit hooks, the scratch worktree is force-removed on every path, and a conflict or failure in any repo exits 1 after all are reported. <code class="code">revoke</code> and <code class="code">reconcile</code> take a shift id too — every event of the shift and its descendants, every commit whose <code class="code">Shift:</code> names it — and the brief names its own <code class="code">shift.start</code> as <code class="code">{{shift.start_event}}</code>, the <code class="code">--parent</code> of every append the shift makes.</p>
+      </div>
+    </div>
+    <div class="panel" data-phase="2">
+      <div class="panel-head">2 · Shift — built</div>
+      <div class="panel-body">
+        <p><code class="code">sandman shift attach|brief|clock|handoff|pick|profile|status</code>; the contract is BANK-FORMAT § shifts. The rotation covers <code class="code">$SANDMAN_SHIFT_OWNERS</code> (default <code class="code">jgeschwendt</code>) rather than every grove owner — the grove also holds client repos, and touching other people is a thread, not a shift — never the home repos (§ Repo rotation), and weights ties by the cheap signals only (a failing <code class="code">stele check</code>, open threads, breaths); CI red and open findings join when <code class="code">score</code> (phase 5) records them. <code class="code">attach</code> exists because <code class="code">spawn</code> mints the session id only after <code class="code">brief</code> has written <code class="code">current.json</code>. The adversarial review's brief fixes: every Context slot is fenced as data under a source label and the template is filled in one pass, so nothing a handoff or thread says is read as an instruction or a slot; over the cap the slots give in a fixed order down to their floors (the previous handoff to 1,500 characters) and the template's own text is never cut — a brief that still will not fit is refused; <code class="code">shift handoff</code> caps a handoff at 2,000 characters (<code class="code">--truncate</code> to cut); <code class="code">shift clock</code> exits 3 on an unreadable window file; an open thread counts for a repo only when it names the slug as a whole token. The runner stays paused until the operator removes <code class="code">PAUSE</code> and installs a binary carrying <code class="code">shift</code>.</p>
+        <ul role="list">
+          <li><code class="code">sandman shift brief</code> composes the shift prompt — the dynamic prompt itself — from <code class="code">prompts/shift.md</code> (a stele node the Sabbath edits): the charter, the day's theme and creation note, the previous handoff, the trail's last day, <code class="code">shift pick</code>'s target, the bearing memories for that repo, its <code class="code">docs/plan.md</code> "next", open threads, breaths filed against it, this week's score. Budgeted; every included item's fingerprint is logged in the <code class="code">shift.start</code> event so Wednesday can attribute.</li>
+          <li><code class="code">sandman shift handoff</code> writes <code class="code">~/.sandman/shifts/&lt;id&gt;/handoff.md</code> and the <code class="code">shift.handoff</code> event; <code class="code">--abandoned</code> records a shift the runner found dead.</li>
+          <li><code class="code">sandman shift clock</code> reads <code class="code">~/.local/state/claude/window.json</code> — <code class="code">resets_at</code> and <code class="code">used_percentage</code> persisted by the harness statusline (claude 5a52667) and by the runner when a limit error names the reset — and answers how long the window has left; <code class="code">--check</code> exits 1 when under <code class="code">SANDMAN_SHIFT_MIN_WINDOW_MIN</code> (default 60) minutes remain — handoff is fifteen before the reset, so a shift always has 45 minutes of work — and 3 when the file is not a readable window.</li>
+          <li><code class="code">sandman shift pick [--path]</code> applies the rotation.</li>
+          <li><code class="code">~/.routines/shift.md</code> is the runner: every five minutes, close a finished shift (handoff, release the lock) and, if the window has room and <code class="code">~/.sandman/shifts/PAUSE</code> is absent, open one through <code class="code">spawn run</code> (<code class="code">{"verb":"claude","action":"start",…,"model":$SANDMAN_SHIFT_MIND,"permission_mode":"dontAsk","settings":&lt;shift profile&gt;}</code>) with cwd at the picked worktree. The spine table is the routine's prose.</li>
+          <li>The problems file for the ruach is written here, by <code class="code">shift brief</code>, from what it already gathers.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel" data-phase="3">
+      <div class="panel-head">3 · Mod</div>
+      <div class="panel-body">
+        <ul role="list">
+          <li>A Claude Code mod — a plugin whose hooks run inside Claude Code (docs: code.claude.com/docs/en/plugins/mods; terminal 2.1.287+; hooks also run under <code class="code">claude -p</code>, so every shift carries it, though only interactive sessions draw) — ships in the harness repo as <code class="code">plugins/perpetual/</code>.</li>
+          <li>Hooks: <code class="code">tool.call</code> guards the rules with mechanical form (<code class="code">pkill -f</code>; <code class="code">git checkout --</code>, <code class="code">reset</code>, <code class="code">stash</code>, <code class="code">clean</code> as diagnostics; force pushes; <code class="code">.yml</code>; an Agent or Workflow call with no <code class="code">model</code> pin) by denying the call with the rule quoted, failing closed, and appends a <code class="code">guard</code> event; <code class="code">prompt.submit</code> captures live corrections ("no,", "don't", "never", "stop", "i said", a repeated instruction) as <code class="code">correction</code> events — the energy source recorded at the moment instead of mined from the archive later.</li>
+          <li>Band above the prompt: shift id, day and theme, target repo, window clock, last trail event, read from <code class="code">~/.sandman/shifts/current.json</code> and today's trail file on a timer. Commands <code class="code">/shift</code> and <code class="code">/trail</code>, answered at once without a Claude turn, output to the display log only.</li>
+          <li>Guards generated from promoted lessons (phase 6) land here: a lesson violated after two injections proposes its guard; the guard replaces the prose and frees budget.</li>
+          <li>The permission classifier refused to delegate this phase twice (the guard half reads as an agent that overrides tool permissions). It is built by the operator's hand or with his permission rule; recorded here so the Sabbath does not retry blindly.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel" data-phase="4">
+      <div class="panel-head">4 · Ruach — verbs built</div>
+      <div class="panel-body">
+        <p><code class="code">sandman breathe init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight</code> and <code class="code">prompts/breathe.md</code>; the contract is BANK-FORMAT § breath, the seed feed list <code class="code">breath/sources.toml</code>. The verb is a store and a prompt composer — the reading, judging and filing happen in the session the runner starts, which calls <code class="code">breathe file</code> with the judge's scores. A pass record is <code class="code">passes/&lt;id&gt;/{pass.json,prompt.md}</code>, beside its prompt as a shift's brief sits beside its meta; <code class="code">pass</code> refuses when no source is due or the day's budget is spent, so a runner tick starts nothing then. <code class="code">reweight</code> remembers its last run as the root key <code class="code">reweighted</code> and counts adoptions after it; silence is measured from the first read or the last adoption and restarts after each penalty, so a source loses 0.1 per silent month. The shift brief carries <code class="code">spiked</code> breaths beside <code class="code">new</code> ones. The runners and the ruach's score lines and Sabbath are next.</p>
+        <p>As described above: <code class="code">sources.toml</code>, <code class="code">problems.md</code>, <code class="code">sandman breathe file|list|spike|adopt|drop|reweight</code>, the hourly and daily runner, the ruach's own score lines (breaths per source, adoption rate, idea-to-merge latency) and its Sabbath. <code class="code">/gigaresearch</code> keeps its claim ledger in <code class="code">~/.sandman/breath/ledger/</code>.</p>
+      </div>
+    </div>
+    <div class="panel" data-phase="5">
+      <div class="panel-head">5 · Score — built, minimal</div>
+      <div class="panel-body">
+        <p><code class="code">sandman score [--week yyyy-Www] [--json]</code>; the contract is BANK-FORMAT § score. It reads only what exists — the trail, <code class="code">shifts/*/meta.json</code>, the breath store, <code class="code">~/.threads</code>, the <code class="code">shift</code> and <code class="code">breathe-*</code> <code class="code">runs.jsonl</code> — and writes <code class="code">~/.sandman/score/&lt;week&gt;.md</code>, the worst three first so a weekday brief's 20-line <code class="code">score.week</code> carries them; the Sabbath brief reads the whole page. Built: repo coverage against the spine's every-repo-once-a-week, shift outcomes and mean length, events by kind, repo and model, cost summed and the events carrying none, correction recurrence (title-token Jaccard against earlier corrections this week or last), context freshness (a Context slot's fingerprint seen in an earlier shift this week is stale context), breath movement and per-source counts, open threads and those shifts opened, routine ticks and failures.</p>
+        <p>Deferred: promotion precision (nothing emits <code class="code">promote</code> or <code class="code">decay</code> yet), recurrence per lesson rather than per correction (needs recall's attribution, phase 6), bearing measured by outcome rather than by repetition, cost per merged change and anything else from git, CI red and open findings as rotation signals, and a Wednesday runner calling <code class="code">score</code> — today a Measure shift or the Sabbath runs it by hand.</p>
+      </div>
+    </div>
+    <div class="panel" data-phase="6">
+      <div class="panel-head">6 · Compile</div>
+      <div class="panel-body">
+        <ul role="list">
+          <li><code class="code">recall</code> becomes the compiler: candidates from the bank chain <em>and</em> the whole grove, ranked by bearing (dowse, merged in from <code class="code">typesafe-integration</code>; Kev when no TypeSafe key), tiered budget, attribution logged to the trail.</li>
+          <li>Reflect gains titer math: probation → active on two confirming sessions; active → index on thirty unused days; index → <code class="code">_archive</code> on ninety; contradiction opens a thread.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel" data-phase="7">
+      <div class="panel-head">7 · Recurse — the Sabbath built, minimal</div>
+      <div class="panel-body">
+        <p>Built: on a New York Saturday <code class="code">shift brief</code> fills <code class="code">prompts/sabbath.md</code> instead of <code class="code">shift.md</code>, and <code class="code">shift pick</code> returns sandman's trunk — the machine's own repo, where <code class="code">sabbath/&lt;week&gt;</code> lives — rotation aside, while the rotation's last-shifted bookkeeping and the score's coverage ignore Saturday shifts. The Sabbath brief carries the week whole: the score page, the week's trail and corrections, breath movement, every shift's outcome, and the targets last Sabbath set (<code class="code">sabbath.previous</code>); on the Shemitah (ISO week divisible by seven) it says to run <code class="code">~/.sandman/ablation.prompt.md</code> instead of the self-pass. Its <code class="code">shift.start</code> carries <code class="code">theme:Rest</code> (every start carries its theme). The session writes <code class="code">score/&lt;next week&gt;-targets.md</code>, a <code class="code">## &lt;owner/repo&gt;</code> line each, and a weekday brief falls back to the target's line when its own <code class="code">docs/plan.md</code> says nothing, the fence label naming which source it used. The contract is BANK-FORMAT § shifts.</p>
+        <p>Deferred: <code class="code">promote</code> and <code class="code">decay</code> are trail kinds nothing emits yet — the Sabbath prompt proposes them by hand; the prompts are not yet stele nodes with claims the Sabbath scores; the ablation prompt itself; the ruach's own Sabbath (rewriting <code class="code">sources.toml</code> and <code class="code">breathe.md</code> from its score); a runner that lands <code class="code">sabbath/&lt;week&gt;</code> on green without a session's judgement.</p>
+      </div>
+    </div>
+    <div class="panel" data-phase="8">
+      <div class="panel-head">8 · Cloud — built, parked; the machine's home is a Mac mini</div>
+      <div class="panel-body">
+        <p>Nightly shifts move from <code class="code">claude --bg</code> on the Mac to the Claude Code routine <code class="code">perpetual-shift</code> (<code class="code">cloud/README.md</code>): an hourly fire, 21:07–06:07 New York, on a fresh VM holding the twenty rotation repos, the state repo and the threads repo as clones. <code class="code">sandman shift open --cloud</code> pulls the state clone, takes its committed <code class="code">current.json</code> as the lock (busy under seventy minutes, abandoned after), picks among the clones — approved proposals first — composes the brief with <code class="code">handoff_by</code> fifty minutes out, commits and pushes; <code class="code">shift handoff --cloud</code> commits and pushes the record. The session lands on each default branch and pushes itself (<code class="code">prompts/cloud-shift.md</code>) — the one path that pushes a trunk, parked with it; <code class="code">cloud/setup.sh</code> installs mise, sandman, thread and stele. The contract is BANK-FORMAT § shifts, The cloud. Saturday's night runs the Sabbath on the same routine.</p>
+        <p>Parked 2026-10-12: a cloud shift reads the memories but never feeds take → dream → reflect, and hooks, MCP and Kev are Mac-only, so cloud mode stays as an overflow runner (environment <code class="code">Motion</code> exists; no routine). The machine's home becomes a dedicated Mac mini (ordered): the whole machine as built, sandbox off or relaxed, its own deploy keys, dream and reflect duties there, the laptop only takes. Until it arrives the laptop runs the nights with the owner watching. <code class="code">home-sync</code> already rebases before it pushes. Cloud landings would be pull requests too, and the session proxy refuses <code class="code">gh pr</code>, so cloud mode stays parked until that is solved.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="h3">Not in this change</h3>
+  <p class="docs-note">Cloud routines beyond the shift (ingress stays as it is); bridge pages for the trail, the breaths and the score (bridge gets them in its own shift); replacing the voyage log (the log stays the human-facing narrative, the trail the machine-facing ledger); the Jubilee.</p>
+
+  <h3 class="h3">Acceptance</h3>
+  <p class="docs-note">Phase 1 (met): a fixture repo receives two machine commits under two events; revoking the first reverts both, the trail shows the reconcile event, and the second event's memory is listed for retirement. Phase 2: one live shift opens with a brief, works a picked repo on a <code class="code">shift/</code> branch, writes a handoff, and every commit it made resolves to the trail by trailer. Phase 4: a breath filed from a real feed reaches a shift brief for the repo it bears on.</p>
 </section>
 
 <section class="docs-section" id="invariants" data-component="invariants">
