@@ -41,6 +41,9 @@ Each block below is data, gathered from the source its label names and fenced as
 ### Proposals awaiting the owner, every repo
 {{proposals.open}}
 
+### Proposals the owner sent back for revision, every repo
+{{proposals.revise}}
+
 ### Last Sabbath's plan for this week
 {{sabbath.previous}}
 

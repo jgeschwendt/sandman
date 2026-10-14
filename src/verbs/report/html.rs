@@ -44,6 +44,7 @@ border-radius:12px;margin:0 0 .75rem;padding:1rem}
 article h2,details h1,details h2{font-size:1rem;margin:1rem 0 .5rem}
 article h3{font-size:1rem;margin:0}
 summary{cursor:pointer;font-weight:550}
+blockquote{border-left:3px solid var(--accent);margin:.75rem 0;padding:0 0 0 .75rem}
 .meta{color:var(--muted);font-size:.75rem;margin:.25rem 0}
 a{color:var(--accent)}
 code{background:var(--sunken);border-radius:4px;font:.8125rem var(--mono);padding:0 4px}
@@ -322,18 +323,22 @@ pub(crate) fn page(
     let forms = awaiting
         .iter()
         .map(|p| {
-            let body: Vec<&str> = p.body.lines().filter(|line| !line.starts_with("# ")).collect();
+            // a re-asked proposal shows what was revised: his note, the reply
+            let exchange = Some(p.exchange.concat())
+                .filter(|exchange| !exchange.is_empty())
+                .map(|exchange| format!("<blockquote>{}</blockquote>", markdown(&exchange)))
+                .unwrap_or_default();
             let buttons = ANSWERS
                 .iter()
                 .map(|answer| format!("<button name=\"answer\" value=\"{answer}\">{answer}</button>"))
                 .collect::<Vec<_>>()
             .concat();
             format!(
-                "<article><h3>{}</h3><p class=\"meta\">{} · opened {}</p>{}<form method=\"post\" action=\"/answer\"><input type=\"hidden\" name=\"key\" value=\"{}\"><input name=\"note\" placeholder=\"note\" aria-label=\"note\">{buttons}</form></article>",
+                "<article><h3>{}</h3><p class=\"meta\">{} · opened {}</p>{}{exchange}<form method=\"post\" action=\"/answer\"><input type=\"hidden\" name=\"key\" value=\"{}\"><input name=\"note\" placeholder=\"note\" aria-label=\"note\">{buttons}</form></article>",
                 escape(&p.title),
                 escape(p.key.split(':').nth(1).unwrap_or("-")),
                 escape(&p.opened),
-                markdown(&body.join("\n")),
+                markdown(&p.opening),
                 escape(&p.key)
             )
         })
