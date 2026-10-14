@@ -4,9 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>sandman — design</title>
-<!-- ui.css is vendored from jgeschwendt/ui (ui.css @ 4f1d9db); one comment edited (line 1209), so
-     NOT byte-identical — a re-sync must re-apply that edit. Otherwise: sync, never edit here. -->
-<link rel="stylesheet" href="ui.css" />
+<link rel="stylesheet" href="https://gigantic.dev/ui/ui.css" />
+<link rel="stylesheet" href="https://gigantic.dev/ui/docs.css" />
 <link rel="stylesheet" href="plan.css" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23476349'/%3E%3Cpath d='M11.5 9.5A5 5 0 0 1 6.5 4.5 5 5 0 1 0 11.5 9.5Z' fill='white'/%3E%3C/svg%3E" />
 </head>
@@ -42,15 +41,15 @@
   <span class="strip-msg">this page mirrors <code class="code">docs/DESIGN.md</code>; the on-disk format is <code class="code">docs/BANK-FORMAT.md</code>.</span>
 </div>
 
-<main class="plan-shell" data-container>
+<main class="docs-shell" data-container>
 
 <header class="stack">
   <p class="eyebrow">memory engine for Claude sessions</p>
-  <p class="lead">A zero-dependency Rust CLI that plugs into Claude Code's hooks. A
+  <p class="lead docs-lead">A zero-dependency Rust CLI that plugs into Claude Code's hooks. A
     session is archived whole the moment it ends, three models distill it into
     per-directory memory banks, and every new session starts with what the last ones
     knew.</p>
-  <nav class="row plan-toc" aria-label="sections">
+  <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#verbs">verbs</a>
     <a class="pill" href="#data-root">data root</a>
     <a class="pill" href="#cadence">cadence</a>
@@ -61,10 +60,10 @@
   </nav>
 </header>
 
-<section class="plan-section" id="verbs" data-component="verbs">
+<section class="docs-section" id="verbs" data-component="verbs">
   <header>
     <h2 class="h2">Verbs</h2>
-    <p class="plan-note">Thirteen verbs, one dispatcher. The memory verbs read transcripts —
+    <p class="docs-note">Thirteen verbs, one dispatcher. The memory verbs read transcripts —
       sandman never sees a hook event; the machine verbs read the trail.</p>
   </header>
   <figure class="plate">
@@ -94,10 +93,10 @@
   </div>
 </section>
 
-<section class="plan-section" id="data-root" data-component="data-root">
+<section class="docs-section" id="data-root" data-component="data-root">
   <header>
     <h2 class="h2">Data root — <code class="code">~/.sandman</code></h2>
-    <p class="plan-note">One config point: <code class="code">$SANDMAN_ROOT</code>, else
+    <p class="docs-note">One config point: <code class="code">$SANDMAN_ROOT</code>, else
       <code class="code">~/.sandman</code> — nothing else hardcodes the root. The leading dot is the tier
       boundary: hidden directories hold raw bytes the operator's <code class="code">~/.sandman</code> repo gitignores,
       visible ones hold the content it versions. Mixing them cost a commit of 60 run journals that shared
@@ -133,10 +132,10 @@
         └── _reflect.json                             {at, count, last_ops} due-baseline</pre>
 </section>
 
-<section class="plan-section" id="cadence" data-component="cadence">
+<section class="docs-section" id="cadence" data-component="cadence">
   <header>
     <h2 class="h2">Cadence</h2>
-    <p class="plan-note">One dispatcher: a calling hook's stdin hands over intact
+    <p class="docs-note">One dispatcher: a calling hook's stdin hands over intact
       (recall, take, report). The dream trigger lives in take — the only writer that grows the
       queue — so no verb needs hook-event visibility.</p>
   </header>
@@ -165,7 +164,7 @@
   </div>
 </section>
 
-<section class="plan-section" id="flow" data-component="flow">
+<section class="docs-section" id="flow" data-component="flow">
   <header>
     <h2 class="h2">Flow — a conversation's afterlife</h2>
   </header>
@@ -249,10 +248,10 @@
   </figure>
 </section>
 
-<section class="plan-section" id="voyage" data-component="voyage">
+<section class="docs-section" id="voyage" data-component="voyage">
   <header>
     <h2 class="h2">The voyage log</h2>
-    <p class="plan-note">A changelog says <em>that</em> something happened, to nobody. The log says what this
+    <p class="docs-note">A changelog says <em>that</em> something happened, to nobody. The log says what this
       memory engine lived through: one entry per day, written by reflect from the memories that landed and
       re-derivable from them, in sandman's own voice and its own running vocabulary. The on-disk format is
       <code class="code">docs/BANK-FORMAT.md</code> § <code class="code">log/</code>.</p>
@@ -264,7 +263,7 @@
   </figure>
 </section>
 
-<section class="plan-section" id="invariants" data-component="invariants">
+<section class="docs-section" id="invariants" data-component="invariants">
   <header>
     <h2 class="h2">Invariants</h2>
   </header>
@@ -277,7 +276,7 @@
   </ul>
 </section>
 
-<section class="plan-section" id="non-goals" data-component="non-goals">
+<section class="docs-section" id="non-goals" data-component="non-goals">
   <header>
     <h2 class="h2">Non-goals</h2>
   </header>
