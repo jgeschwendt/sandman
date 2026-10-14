@@ -17,6 +17,7 @@ use crate::atomic;
 use crate::error::Result;
 use crate::hook::SessionStart;
 use crate::paths;
+use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 use crate::verbs::score::Week;
 use crate::verbs::shift;
@@ -31,6 +32,8 @@ pub const HEADINGS: [&str; 5] = [
 ];
 /// A report's ceiling, and the hook digest's.
 pub const REPORT_CHARS: usize = 6_000;
+/// How much of the owner's `revise` note the brief carries.
+const REVISE_CHARS: usize = 200;
 
 /// Why `text` is not a report, if it is not: over the cap, or a heading
 /// missing or out of order.
@@ -54,16 +57,22 @@ pub fn refusal(text: &str) -> Option<String> {
 pub(crate) struct Proposal {
     /// When the owner approved it, if he has.
     pub(crate) approved: Option<String>,
-    /// Whether it still waits on him: `waiting: user` and undecided.
+    /// Whether it waits on him: `waiting: user`, whatever he answered before.
     pub(crate) awaiting: bool,
-    /// Everything below its frontmatter.
-    pub(crate) body: String,
+    /// The latest answering message and those after it — the last exchange;
+    /// empty before any answer.
+    pub(crate) exchange: Vec<String>,
     /// The thread's id, its file stem.
     pub(crate) id: String,
     /// `proposal:<owner/repo>:<slug>`.
     pub(crate) key: String,
     /// When it was opened.
     pub(crate) opened: String,
+    /// Everything before the last exchange, the title aside.
+    pub(crate) opening: String,
+    /// His note, on one line, when his latest answer is `revise` and the
+    /// thread waits on the agent.
+    pub(crate) revise: Option<String>,
     /// Its `# ` title.
     pub(crate) title: String,
 }
@@ -79,18 +88,57 @@ pub(crate) fn proposals(threads: &Path, repo: Option<&str>) -> Vec<Proposal> {
         .filter_map(|(id, fields, body)| {
             let field = |key: &str| fields.get(key).map(String::as_str);
             let key = field("key").filter(|key| key.starts_with(&prefix))?;
+            let said = |word: &str| {
+                field("answer").is_some_and(|said| said.trim().eq_ignore_ascii_case(word))
+            };
+            let awaiting = field("waiting") == Some("user");
+            // the text before the first `## <side> · ` header, then one per message
+            let mut messages = body
+                .lines()
+                .fold(vec![String::new()], |mut messages, line| {
+                    if line.starts_with("## user · ") || line.starts_with("## agent · ") {
+                        messages.push(String::new());
+                    }
+                    if let Some(message) = messages.last_mut() {
+                        let _ = writeln!(message, "{line}");
+                    }
+                    messages
+                });
+            let exchange = messages
+                .iter()
+                .rposition(|message| {
+                    message
+                        .lines()
+                        .next()
+                        .is_some_and(|head| head.contains(" · answer: "))
+                })
+                .map_or_else(Vec::new, |at| messages.split_off(at));
+            let note = exchange
+                .iter()
+                .take(1)
+                .flat_map(|message| message.lines().skip(1))
+                .flat_map(str::split_whitespace)
+                .collect::<Vec<_>>()
+                .join(" ");
             (field("state") == Some("open")).then(|| Proposal {
                 approved: field("decided")
-                    .filter(|_| {
-                        field("answer")
-                            .is_some_and(|said| said.trim().eq_ignore_ascii_case("approve"))
-                    })
+                    .filter(|_| said("approve"))
                     .map(ToOwned::to_owned),
-                awaiting: field("waiting") == Some("user") && field("decided").is_none(),
+                awaiting,
+                exchange,
                 key: key.to_owned(),
                 opened: field("opened").unwrap_or("-").to_owned(),
+                opening: messages
+                    .iter()
+                    .flat_map(|message| message.lines())
+                    .filter(|line| !line.starts_with("# "))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                revise: (said("revise") && !awaiting).then(|| {
+                    truncate_chars(if note.is_empty() { "-" } else { &note }, REVISE_CHARS)
+                        .to_owned()
+                }),
                 title: shift::title(&body).unwrap_or_else(|| "untitled".to_owned()),
-                body,
                 id,
             })
         })

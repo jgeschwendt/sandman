@@ -58,13 +58,14 @@ const MAX_SKEW_SECONDS: i64 = 300;
 const CHECK_USED_PERCENT: f64 = 90.0;
 /// The brief's Context slots, each fenced as data under a label naming
 /// where it came from.
-const CONTEXT_SOURCES: [(&str, &str); 15] = [
+const CONTEXT_SOURCES: [(&str, &str); 16] = [
     ("breath.pending", "the breath store"),
     ("breath.week", "the breath store"),
     ("handoff.previous", "the previous shift's handoff.md"),
     ("memories.bearing", "the target's bank chain"),
     ("proposals.approved", "~/.docket"),
     ("proposals.open", "~/.docket"),
+    ("proposals.revise", "~/.docket"),
     ("prs.open", "gh"),
     ("sabbath.previous", "last Sabbath's targets file"),
     ("score.week", "this week's score page"),
@@ -103,10 +104,11 @@ pub fn profile(kind: &str) -> Option<&'static str> {
 /// What the cap leaves of the previous handoff, at the least.
 const HANDOFF_FLOOR: usize = 1_500;
 /// The order the cap cuts slots in, and how each gives.
-const TRIM_ORDER: [(&str, Cut); 15] = [
+const TRIM_ORDER: [(&str, Cut); 16] = [
     ("trail.week", Cut::OldestLines),
     ("proposals.open", Cut::TailLines),
     ("proposals.approved", Cut::TailLines),
+    ("proposals.revise", Cut::TailLines),
     ("prs.open", Cut::TailLines),
     ("trail.recent", Cut::OldestLines),
     ("memories.bearing", Cut::TailLines),
@@ -1485,6 +1487,23 @@ fn open_proposals(proposals: &[report::Proposal]) -> String {
     )
 }
 
+/// The proposals the owner sent back for revision, one line each, else `none.`.
+fn revised_proposals(proposals: &[report::Proposal]) -> String {
+    report::listed(
+        &proposals
+            .iter()
+            .filter_map(|p| {
+                Some(format!(
+                    "- {} · {} · revise: {}",
+                    p.key,
+                    p.id,
+                    p.revise.as_ref()?
+                ))
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
 /// One line per shift started in `week`: id, repo, theme, outcome.
 fn shifts_week(data_root: &Path, week: Week) -> Vec<String> {
     metas(data_root)
@@ -1563,10 +1582,9 @@ fn sabbath_slots(
         String::new()
     };
     slots.insert("breath.week", breath_lines.join("\n"));
-    slots.insert(
-        "proposals.open",
-        open_proposals(&report::proposals(&ctx.docket, None)),
-    );
+    let proposals = report::proposals(&ctx.docket, None);
+    slots.insert("proposals.open", open_proposals(&proposals));
+    slots.insert("proposals.revise", revised_proposals(&proposals));
     slots.insert(
         "sabbath.previous",
         fs::read_to_string(targets)
@@ -1807,6 +1825,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
         ),
     );
     slots.insert("proposals.open", open_proposals(&proposals));
+    slots.insert("proposals.revise", revised_proposals(&proposals));
     slots.insert("prs.open", open_prs(&ctx.data_root, &target.label));
     slots.insert("score.week", score.unwrap_or_else(|| "none yet".to_owned()));
     slots.insert("shift.creation", day.creation.to_owned());

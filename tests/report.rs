@@ -263,6 +263,26 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
         ".docket/p1.md",
         "---\nstate: open\nwaiting: user\nkey: proposal:jgeschwendt/alpha:cache\nopened: 2026-10-12T10:00:00Z\n---\n\n# Cache the parser\n\n## agent · 2026-10-12T10:00:00Z\n\n| option | shifts |\n| --- | --- |\n| **cache** | 2 |\n",
     );
+    // revised and re-asked, it is back on the page with the exchange; revised
+    // and not yet re-asked, it waits on the agent and is not
+    let revised = "---\nstate: open\nwaiting: {waiting}\nkey: proposal:jgeschwendt/alpha:{slug}\nopened: 2026-10-12T10:00:00Z\nanswer: revise\ndecided: 2026-10-13T10:00:00Z\n---\n\n# Split {slug}\n\n## agent · 2026-10-12T10:00:00Z\n\nfirst matrix\n\n## user · 2026-10-13T10:00:00Z · answer: revise\n\nsmaller, please\n";
+    for (id, waiting, slug, reply) in [
+        (
+            "p2",
+            "user",
+            "arena",
+            "\n## agent · 2026-10-14T10:00:00Z\n\nsecond matrix\n",
+        ),
+        ("p3", "agent", "pool", ""),
+    ] {
+        home.write(
+            format!(".docket/{id}.md"),
+            &(revised
+                .replace("{waiting}", waiting)
+                .replace("{slug}", slug)
+                + reply),
+        );
+    }
     let thread = home.script(
         "thread",
         "printf '%s\\n' \"$*\" >> \"$HOME/argv\"\n[ \"$6\" != revise ] || { echo 'thread: <refused>' >&2; exit 1; }\n",
@@ -270,7 +290,7 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
 
     // a shift that never started belongs to no night
     home.write(".sandman/shifts/s-20261016T0000Z/meta.json", "{}");
-    let (mut server, ask) = serve(&home, 17);
+    let (mut server, ask) = serve(&home, 18);
     let tuesday = ask("GET /?night=2026-10-13", "", "");
     assert_eq!(home.cursor(), "", "an older night's page leaves the cursor");
     let page = ask("GET /", "", "");
@@ -281,7 +301,8 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
     );
     for expected in [
         "HTTP/1.1 200 OK\r\n",
-        "<p>Friday→Saturday night · 2 shifts · $3.50 · 2 landed · 1 proposals</p>",
+        "<p>Friday→Saturday night · 2 shifts · $3.50 · 2 landed · 2 proposals</p>",
+        "<h3>Split arena</h3><p class=\"meta\">jgeschwendt/alpha · opened 2026-10-12T10:00:00Z</p><h2>agent · 2026-10-12T10:00:00Z</h2><p>first matrix</p><blockquote><h2>user · 2026-10-13T10:00:00Z · answer: revise</h2><p>smaller, please</p><h2>agent · 2026-10-14T10:00:00Z</h2><p>second matrix</p></blockquote><form",
         "<h3>Cache the parser</h3><p class=\"meta\">jgeschwendt/alpha · opened 2026-10-12T10:00:00Z</p><h2>agent · 2026-10-12T10:00:00Z</h2><table><thead><tr><th>option</th><th>shifts</th></tr></thead><tbody><tr><td><strong>cache</strong></td><td>2</td></tr></tbody></table>",
         "<input type=\"hidden\" name=\"key\" value=\"proposal:jgeschwendt/alpha:cache\">",
         "<button name=\"answer\" value=\"approve\">approve</button><button name=\"answer\" value=\"revise\">revise</button><button name=\"answer\" value=\"decline\">decline</button>",
@@ -292,10 +313,13 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
     ] {
         assert!(page.contains(expected), "{expected} missing: {page}");
     }
-    assert!(!page.contains("<script"), "{page}");
+    assert!(
+        !page.contains("<script") && !page.contains("Split pool"),
+        "{page}"
+    );
     assert!(
         tuesday
-            .contains("<p>Tuesday→Wednesday night · 1 shifts · $0.00 · 0 landed · 1 proposals</p>")
+            .contains("<p>Tuesday→Wednesday night · 1 shifts · $0.00 · 0 landed · 2 proposals</p>")
             && tuesday.contains(
                 "<h2>Worth your eye</h2><p>none.</p></section><section><h2>Landed</h2><p>none.</p>"
             ),
@@ -322,17 +346,22 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
     assert!(
         answer(&format!("{key}&answer=revise")).ends_with("<pre>thread: &lt;refused&gt;\n</pre>\n")
     );
+    assert_eq!(
+        answer("key=proposal%3Ajgeschwendt%2Falpha%3Aarena&answer=approve"),
+        "303\r\n\r\n",
+        "a re-asked proposal takes a second answer"
+    );
     assert!(answer("key=proposal%3Anone&answer=approve").starts_with("404"));
     assert!(answer(&format!("{key}&answer=maybe")).starts_with("400"));
     assert_eq!(
         fs::read_to_string(home.home.join("argv")).expect("argv"),
-        "reply p1 --as user --answer approve --body ship it!%zz\nreply p1 --as user --answer decline\nreply p1 --as user --answer revise\n"
+        "reply p1 --as user --answer approve --body ship it!%zz\nreply p1 --as user --answer decline\nreply p1 --as user --answer revise\nreply p2 --as user --answer approve\n"
     );
     let decisions = stdout(&feed(
         &mut home.command(&["trail", "log", "--kind", "decision", "--json"]),
         "",
     ));
-    assert_eq!(decisions.lines().count(), 2, "{decisions}");
+    assert_eq!(decisions.lines().count(), 3, "{decisions}");
     for said in ["approved", "declined"] {
         assert!(
             decisions.contains(&format!(r#""kind":"decision","parent":null,"rationale":"owner {said} proposal proposal:jgeschwendt/alpha:cache","refs":["thread:p1"],"repo":"jgeschwendt/alpha""#)),

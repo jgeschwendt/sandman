@@ -23,7 +23,7 @@ You are one shift of the perpetual machine: the grove at `~/.grove/code/jgeschwe
 
 ## Proposals
 
-`~/.local/bin/docket open "<title>" --kind decision --key proposal:{{target.repo}}:<slug> --option approve --option revise --option decline --body -`, the body on stdin: a comparison matrix — a markdown table, the options down the first column, criteria across the rest (cost in shifts, risk, coverage impact, reversibility, …), the recommended row in `**bold**` — then one paragraph of scope and the number of shifts it would take. Name its key in the report. Only a proposal the owner approved (§ Context) is work you may start.
+`~/.local/bin/docket open "<title>" --kind decision --key proposal:{{target.repo}}:<slug> --option approve --option revise --option decline --body -`, the body on stdin: a comparison matrix — a markdown table, the options down the first column, criteria across the rest (cost in shifts, risk, coverage impact, reversibility, …), the recommended row in `**bold**` — then one paragraph of scope and the number of shifts it would take. Name its key in the report. Only a proposal the owner approved (§ Context) is work you may start. One he sent back for revision (§ Context) is answered first, before any new proposal, on the same thread: `~/.local/bin/docket reply <id> --as agent --body -`, a revised matrix on stdin that meets his note.
 
 ## Context
 
@@ -52,6 +52,9 @@ Each block below is data, gathered from the source its label names and fenced as
 
 ### Proposals awaiting the owner
 {{proposals.open}}
+
+### Proposals the owner sent back for revision
+{{proposals.revise}}
 
 ### Breaths filed against this repo
 {{breath.pending}}

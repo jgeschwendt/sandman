@@ -397,23 +397,34 @@ fn brief_fills_every_slot_and_records_the_start() {
         "alpha flakes on CI",
         "seen in jgeschwendt/alpha twice",
     );
-    for (id, key, answer) in [
+    // approved, sent back for revision, unanswered, another repo's, and
+    // revised then re-asked
+    let revise = "## user · 2026-10-15T09:00:00Z · answer: revise\n\nSplit the\nlexer first. ";
+    for (id, key, answer, log) in [
         (
             "p1",
             "jgeschwendt/alpha:split",
-            "answer:  Approve \ndecided: 2026-10-15T09:00:00Z",
+            "waiting: agent\nanswer:  Approve \ndecided: 2026-10-15T09:00:00Z",
+            "",
         ),
         (
             "p2",
             "jgeschwendt/alpha:lexer",
-            "answer: revise\ndecided: 2026-10-15T09:00:00Z",
+            "waiting: agent\nanswer: Revise\ndecided: 2026-10-15T09:00:00Z",
+            &format!("{revise}{}\n", "x".repeat(200)),
         ),
-        ("p3", "jgeschwendt/alpha:cache", "waiting: user"),
-        ("p4", "jgeschwendt/beta:other", "waiting: user"),
+        ("p3", "jgeschwendt/alpha:cache", "waiting: user", ""),
+        ("p4", "jgeschwendt/beta:other", "waiting: user", ""),
+        (
+            "p5",
+            "jgeschwendt/alpha:arena",
+            "waiting: user\nanswer: revise\ndecided: 2026-10-15T09:00:00Z",
+            &format!("{revise}\n## agent · 2026-10-15T10:00:00Z\n\n| option |\n"),
+        ),
     ] {
         machine.write(
             format!(".docket/{id}.md"),
-            &format!("---\nstate: open\nkey: proposal:{key}\nopened: 2026-10-14T10:00:00Z\n{answer}\n---\n\n# Proposal {id}\n"),
+            &format!("---\nstate: open\n{answer}\nkey: proposal:{key}\nopened: 2026-10-14T10:00:00Z\n---\n\n# Proposal {id}\n\n## agent · 2026-10-14T10:00:00Z\n\nmatrix\n\n{log}"),
         );
     }
     machine.write(
@@ -455,9 +466,13 @@ fn brief_fills_every_slot_and_records_the_start() {
     for expected in [
         "Shift `s-20261016T1600Z` · Friday, Day 6 · Image; the work finished, very good · theme **Ship** · instrument `/gigareview`",
         "Target `jgeschwendt/alpha`",
-        "last shifted never; picked because never shifted; 4 open thread(s); 2 breath(s) filed",
+        "last shifted never; picked because never shifted; 5 open thread(s); 2 breath(s) filed",
         "### Proposals the owner approved\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:split · decided 2026-10-15T09:00:00Z · Proposal p1\n```",
-        "### Proposals awaiting the owner\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:cache · opened 2026-10-14T10:00:00Z · Proposal p3\n```",
+        "### Proposals awaiting the owner\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:cache · opened 2026-10-14T10:00:00Z · Proposal p3\n- proposal:jgeschwendt/alpha:arena · opened 2026-10-14T10:00:00Z · Proposal p5\n```",
+        &format!(
+            "### Proposals the owner sent back for revision\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:lexer · p2 · revise: Split the lexer first. {}\n```",
+            "x".repeat(177)
+        ),
         "Orchestrator model `fable`",
         "Budget `15` USD; shifts have spent 0.00 USD today",
         "From `s-20261015T1200Z`:\n\n# Landed the lexer",
@@ -675,7 +690,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
     };
 
     // Over by a little: the trail alone gives, oldest lines first.
-    threads(0..108);
+    threads(0..107);
     machine.ok(FRIDAY, &["shift", "brief"]);
     let brief = machine.read(".sandman/shifts/s-20261016T1600Z/brief.md");
     assert!(
@@ -697,7 +712,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
         !brief.contains("change number 5 "),
         "the oldest trail lines go first"
     );
-    assert!(brief.contains("- `t107` · "), "the threads were not needed");
+    assert!(brief.contains("- `t106` · "), "the threads were not needed");
     let start = start_event("s-20261016T1600Z");
     assert!(start.contains(r#""trimmed:trail.recent""#), "{start}");
     assert!(!start.contains("trimmed:threads.open"), "{start}");
@@ -717,7 +732,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
             "--abandoned",
         ],
     );
-    threads(108..300);
+    threads(107..300);
     machine.ok("2026-10-16T16:01:00Z", &["shift", "brief"]);
     let brief = machine.read(".sandman/shifts/s-20261016T1601Z/brief.md");
     assert!(
@@ -1606,6 +1621,10 @@ fn the_sabbath_brief_fills_its_own_template_and_works_sandman() {
         ".docket/p1.md",
         "---\nstate: open\nwaiting: user\nkey: proposal:jgeschwendt/beta:x\nopened: 2026-10-09T10:00:00Z\n---\n\n# Split beta\n",
     );
+    machine.write(
+        ".docket/p2.md",
+        "---\nstate: open\nwaiting: agent\nkey: proposal:jgeschwendt/alpha:y\nanswer: revise\n---\n",
+    );
 
     // The Sabbath picks the machine's own repo over a never-shifted one.
     assert_eq!(
@@ -1632,6 +1651,7 @@ fn the_sabbath_brief_fills_its_own_template_and_works_sandman() {
         "older line(s) cut at 6000 characters\n",
         "## jgeschwendt/alpha\nFuzz the parser first.",
         "### Proposals awaiting the owner, every repo\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/beta:x · opened 2026-10-09T10:00:00Z · Split beta\n```",
+        "### Proposals the owner sent back for revision, every repo\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:y · p2 · revise: -\n```",
         "runs as `mise x -C <repo path> -- <command>`",
         "--from-session --cost <USD>",
     ] {
