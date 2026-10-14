@@ -583,7 +583,7 @@ no shift commits to it, and after a merge the sweep, else `grove-sync`, fast-for
   — with `~/.local/bin` and mise's shims on `PATH` for `gh` and git; the branch push is
   `--no-verify`, since the trunk checkout's pre-push hook would test main, not the branch,
   and the pull request's CI is the gate (§ Landing).
-- **A session that never started is abandoned in ten minutes.** When spawn lists the
+- **A session that never started is abandoned in ten minutes.** When dispatch lists the
   shift's session `working` with no transcript (no `last_activity`) more than ten minutes
   after `started`, it is waiting on a start-up prompt a `dontAsk` session cannot answer
   (§ The sandbox, project MCP servers): the close block stops it, hands off `--abandoned
@@ -591,11 +591,11 @@ no shift commits to it, and after a merge the sweep, else `grove-sync`, fast-for
 - **The sweep reaps.** The owner keeps no machine session in his history — not in
   `claude agents`, not in the desktop app's list. In the same sweep, for every
   `shifts/s-*/meta.json` and `breath/passes/*/pass.json` with `ended` and no `reaped`:
-  when it names a `bg_id` and `spawn`'s `claude list` shows that session `done`,
+  when it names a `bg_id` and `dispatch`'s `claude list` shows that session `done`,
   `failed` or `stopped`, `claude rm` it (a failure ignored); absent from the listing, go
   on; `working`, `blocked` or no answer, leave it for the next tick — a live transcript
   is never taken. Then `sandman take <session_id> --force` moves the transcript out of
-  `~/.claude/projects` into the archive (spawn's state, not the file's mtime, is the
+  `~/.claude/projects` into the archive (dispatch's state, not the file's mtime, is the
   proof it is over; "no transcript" means already taken), and `shift reaped` /
   `breathe reaped` stamps `reaped`, so each is reaped once. A shift ended before its
   `meta.json` carried the ids is stamped with nothing removed. The close block itself

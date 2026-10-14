@@ -6,7 +6,7 @@ on_error: claude
 
 # Shift
 
-The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `spawn run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it opens and closes shifts and carries what they landed to GitHub — the session cannot reach it, this host can, `gh` authenticated as the owner. Trunk is never pushed: every tick opens with the landing sweep, which opens each handed-off shift's `landing` (`sandman shift land`) as a pull request, reads every open one back, and merges by rebase the green ones auto-merge will not (a queue needs an organization-owned repo), asking GitHub to rebase any branch behind main; red CI, a refused push and a pull request closed unmerged are corrections on the trail, once each; a merge is a `change` event and fast-forwards the local trunk when it is clean (sandman's `docs/BANK-FORMAT.md` § shifts, Landing). The block runs with mise's shims and `~/.local/bin` on `PATH`, so the repos' pre-push gates find their tools under launchd's bare one. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once spawn lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/index.html` § The perpetual shift.
+The perpetual machine's clock. Every five minutes: if the open shift's session has ended, or has run past its handoff time, record its handoff and release the lock; then, if no shift is open, the machine is not paused, it is night and the five-hour window has room, open the next one. A shift is a Claude Code `--bg` session started through `dispatch run`, supervised by Claude Code's own daemon, so it outlives this runner, the terminal and the desktop app. This routine never does the work; it opens and closes shifts and carries what they landed to GitHub — the session cannot reach it, this host can, `gh` authenticated as the owner. Trunk is never pushed: every tick opens with the landing sweep, which opens each handed-off shift's `landing` (`sandman shift land`) as a pull request, reads every open one back, and merges by rebase the green ones auto-merge will not (a queue needs an organization-owned repo), asking GitHub to rebase any branch behind main; red CI, a refused push and a pull request closed unmerged are corrections on the trail, once each; a merge is a `change` event and fast-forwards the local trunk when it is clean (sandman's `docs/BANK-FORMAT.md` § shifts, Landing). The block runs with mise's shims and `~/.local/bin` on `PATH`, so the repos' pre-push gates find their tools under launchd's bare one. The sweep runs before the close block's "no open shift" exit, because a shift that hands itself off (`--from-session`) has already removed `current.json` by the time the tick looks. The same sweep reaps: every ended shift and breath pass not yet `reaped` has its session `claude rm`ed once dispatch lists it finished, its transcript taken into sandman's archive (`take --force`), and `reaped` stamped — the owner keeps no machine session in `claude agents` or the desktop app. Closing records the handoff. The verbs are `sandman shift …`; their contract is sandman's `docs/BANK-FORMAT.md` § shifts, the plan is sandman's `docs/index.html` § The perpetual shift.
 
 ## The creation week
 
@@ -44,22 +44,22 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 
 A shift runs in `dontAsk` — no prompts, no classifier, anything that would have asked is denied — inside Claude Code's strict Bash sandbox, with the profile `sandman shift profile` prints: writes only under `~/.grove`, `~/.sandman`, `~/.routines`, `~/.threads`, `~/.local/state/claude`, mise's state and the toolchain caches (`~/.bun`, `~/.cache`, `~/.cargo`, `~/.hex`, `~/.mix`, `~/Library/Caches`; never their `bin/` or config), never `.claude/` config or `~/.claude`; no project `.mcp.json` server; network only to the allowlisted hosts; credential files unreadable; force-pushes and the mutate-to-inspect git commands denied by rule. Tests run as `~/.local/bin/shift-test [--log <file>] <command>` — the whole Bash call, or it stays sandboxed and exits 71 — the one other exclusion, inside its own narrower Seatbelt profile (`profiles/shift-test.sb`: credentials unreadable, writes to checkouts, caches and temp, loopback only). `git fetch`, `git pull`, `git push` and `grove sync` are `excludedCommands`, yet `git push` from a session still fails at the sandbox proxy ("This proxy requires authentication", exit 128; observed 2026-10-11), so a shift records its landing with `sandman shift land` and the landing sweep pushes the branch and opens the pull request. The contract is sandman's `docs/BANK-FORMAT.md` § shifts, "The sandbox".
 
-## Spawn's answers
+## Dispatch's answers
 
-`spawn run` reads one JSON request per line and answers one JSON line: the result object or `{"error": …}`. `claude start` answers `{"id": <8-char bg id>, "session_id": <uuid>, …}`; `claude list` (with or without `ids`) answers `{"sessions": [row…]}`, each row carrying `id`, `name`, `state`, `status`; a session that has left the listing is simply absent. A row's `state` (`working` · `blocked` · `done` · `failed` · `stopped`) says whether the session is working; its `status` (`busy` · `idle`) does not — a finished session reports `status: busy`. `claude stop` with `id` ends a session and keeps its conversation; `claude rm` with `id` deletes a finished one, which otherwise stays in the owner's `claude agents` view forever. A stopped session's SessionEnd hook races the removal of its job dir, so `rm` waits three seconds after a `stop`; one that ended on its own is removed at once. Every request is built with `python3 -I` `json.dumps`, never by hand — the brief is thousands of characters of markdown, quotes and backticks.
+`dispatch run` reads one JSON request per line and answers one JSON line: the result object or `{"error": …}`. `claude start` answers `{"id": <8-char bg id>, "session_id": <uuid>, …}`; `claude list` (with or without `ids`) answers `{"sessions": [row…]}`, each row carrying `id`, `name`, `state`, `status`; a session that has left the listing is simply absent. A row's `state` (`working` · `blocked` · `done` · `failed` · `stopped`) says whether the session is working; its `status` (`busy` · `idle`) does not — a finished session reports `status: busy`. `claude stop` with `id` ends a session and keeps its conversation; `claude rm` with `id` deletes a finished one, which otherwise stays in the owner's `claude agents` view forever. A stopped session's SessionEnd hook races the removal of its job dir, so `rm` waits three seconds after a `stop`; one that ended on its own is removed at once. Every request is built with `python3 -I` `json.dumps`, never by hand — the brief is thousands of characters of markdown, quotes and backticks.
 
 ## Repair
 
 - `unknown verb` from `sandman shift` (exit 2): the installed `~/.local/bin/sandman` predates the shift verbs. Install a binary built from sandman's trunk at a clean commit, as `sandman-reflect.md` describes; never build from a live checkout.
-- `spawn` missing or answering `{"error": …}` in the close block: leave `current.json` alone and exit non-zero; the next tick retries. A session cannot be judged finished from an error.
+- `dispatch` missing or answering `{"error": …}` in the close block: leave `current.json` alone and exit non-zero; the next tick retries. A session cannot be judged finished from an error.
 - A wedged lock — `current.json` naming a `bg_id` the listing no longer shows — is exactly what the close block releases; run it by hand (`routine run shift`) rather than editing state.
 - A shift stopped for running past `handoff_by` is abandoned with that reason on the trail; its branch and worktree stay for the next shift on that repo, whose brief carries the abandonment in the trail slot.
 - `brief` refusing with `shift … is open`: `current.json` exists, so the open block should not have reached it; a concurrent hand run is the cause. Wait for the next tick.
 - `brief` refusing on a template slot: `prompts/shift.md` in sandman's trunk names a slot the binary does not fill — a template ahead of the installed binary. Install the newer binary; do not edit the template here.
-- `spawn start` answering `Workspace not trusted`: the picked trunk has never had Claude Code's trust prompt accepted, and `--bg` will not start there (`-p` would; `--bg` will not). Accepting trust is the owner's call, so never set `hasTrustDialogAccepted` yourself. `sandman shift pick` skips untrusted trunks and `shift pick --untrusted` lists them; abandon the shift with the cause as its `--reason`, then open a thread keyed `shift:trust:<repo>` asking the owner to run `claude` once in that path or add the repo to `SANDMAN_SHIFT_SKIP`. (observed 2026-10-10 · s-20261010T0225Z, jlg.io/main)
+- `dispatch start` answering `Workspace not trusted`: the picked trunk has never had Claude Code's trust prompt accepted, and `--bg` will not start there (`-p` would; `--bg` will not). Accepting trust is the owner's call, so never set `hasTrustDialogAccepted` yourself. `sandman shift pick` skips untrusted trunks and `shift pick --untrusted` lists them; abandon the shift with the cause as its `--reason`, then open a thread keyed `shift:trust:<repo>` asking the owner to run `claude` once in that path or add the repo to `SANDMAN_SHIFT_SKIP`. (observed 2026-10-10 · s-20261010T0225Z, jlg.io/main)
 - A branch push the sweep finds rejected (a red pre-push gate, a ruleset) is a `correction` event on the trail naming the repo, the branch and the shift, never a fault: the tick goes on, and the landing waits. It is recorded once per (shift, head): `$ROUTINE_STATE_DIR/rejected/<shift>` holds the refused sha (written before the push, so a gate the watchdog kills mid-push counts), the landing is skipped until its head moves or six hours pass, and a retry refused again adds nothing to the trail. Every push runs the repo's pre-push gate, minutes of tests; three red trunks retried each tick ran the block past `timeout` and logged 150–267 identical corrections a night (observed 2026-10-12/13).
 - A `CI red on PR` correction is the next shift's on that repo: its brief lists the pull request under `prs.open` marked `CI red`, and it branches from it, fixes, and lands on its own `shift/<id>`; `shift land` stamps the red one `superseded_by`, and the merge pass closes it. A `gh` that fails (network, auth) skips that pull request for the tick.
-- A session spawn lists `working` with no transcript (its row has no `last_activity`) ten minutes after `started` never took its first turn: a `--bg` `dontAsk` session cannot answer a start-up prompt such as a project `.mcp.json` server's approval. The close block stops it, abandons the shift with `session never started (a project MCP prompt?)` and appends a `correction`; the fix is the server's name in the profile's `disabledMcpjsonServers` (sandman's `docs/BANK-FORMAT.md` § The sandbox). (observed 2026-10-12/13 · stele, s-20261012T0855Z and s-20261013T0816Z, each stalled until handoff_by)
+- A session dispatch lists `working` with no transcript (its row has no `last_activity`) ten minutes after `started` never took its first turn: a `--bg` `dontAsk` session cannot answer a start-up prompt such as a project `.mcp.json` server's approval. The close block stops it, abandons the shift with `session never started (a project MCP prompt?)` and appends a `correction`; the fix is the server's name in the profile's `disabledMcpjsonServers` (sandman's `docs/BANK-FORMAT.md` § The sandbox). (observed 2026-10-12/13 · stele, s-20261012T0855Z and s-20261013T0816Z, each stalled until handoff_by)
 - Exit 124 is the routine watchdog and fires no catch. A start that timed out may still have started a session: the close block finds `current.json` without `bg_id`, stops any session named `shift <id>`, and abandons it.
 
 ```sh
@@ -167,7 +167,7 @@ done 3<<LANDINGS
 $landings
 LANDINGS
 # reap: every ended shift or breath pass not yet reaped — its session leaves Claude Code's listing, its transcript goes to the archive
-sp="$HOME/.local/bin/spawn"
+sp="$HOME/.local/bin/dispatch"
 python3 -I -c '
 import glob, json, os, sys
 for path in sorted(glob.glob(sys.argv[1] + "/shifts/s-*/meta.json") + glob.glob(sys.argv[1] + "/breath/passes/*/pass.json")):
@@ -192,10 +192,10 @@ print(rows[0].get("state", "") if rows else "gone")
       done|failed|stopped) req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"rm","id":sys.argv[1]}))' "$bg")
         printf '%s\n' "$req" | "$sp" run >/dev/null 2>&1 ;;
       gone) ;;
-      *) continue ;;   # still working, or spawn could not say: never take a live transcript; next tick
+      *) continue ;;   # still working, or dispatch could not say: never take a live transcript; next tick
     esac
   fi
-  # --force: spawn's state, not the transcript's mtime, says the session is over; "no transcript" means already taken
+  # --force: dispatch's state, not the transcript's mtime, says the session is over; "no transcript" means already taken
   [ "$sid" = "-" ] || "$sm" take "$sid" --force >/dev/null 2>&1 || :
   case $name in
     s-*) "$sm" shift reaped --shift "$name" ;;
@@ -223,7 +223,7 @@ print(int((datetime.datetime.now(datetime.timezone.utc) - d).total_seconds() // 
 ' "$1"
 }
 [ "$id" != "-" ] || { echo "current.json names no shift: $(cat "$cur")" >&2; exit 1; }
-ask() {   # one spawn request; prints the answer; returns 1 when spawn fails, says nothing, or answers an error
+ask() {   # one dispatch request; prints the answer; returns 1 when dispatch fails, says nothing, or answers an error
   answer=$(printf '%s\n' "$1" | "$sp" run) || return 1
   [ -n "$answer" ] || return 1
   printf '%s\n' "$answer"
@@ -235,15 +235,15 @@ sys.exit(1 if "error" in a or not ("sessions" in a or "id" in a or a.get("ok")) 
 }
 stop_session() {   # stop one bg session; a failed stop is a fault — never release the lock over a running session
   req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"stop","id":sys.argv[1]}))' "$1")
-  ask "$req" >/dev/null || { echo "spawn could not stop $1; lock kept" >&2; exit 1; }
+  ask "$req" >/dev/null || { echo "dispatch could not stop $1; lock kept" >&2; exit 1; }
 }
 rm_session() {   # forget one stray bg session so it leaves the owner's `claude agents` view; a failed rm is only noise
   req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":"rm","id":sys.argv[1]}))' "$1")
-  ask "$req" >/dev/null || echo "spawn could not rm $1; left in the listing" >&2
+  ask "$req" >/dev/null || echo "dispatch could not rm $1; left in the listing" >&2
 }
-stop_named() {   # stop every working or blocked session spawn lists under the name "shift <id>"; leaves their ids in $strays
+stop_named() {   # stop every working or blocked session dispatch lists under the name "shift <id>"; leaves their ids in $strays
   req=$(python3 -I -c 'import json; print(json.dumps({"verb": "claude", "action": "list"}))')
-  answer=$(ask "$req") || { echo "spawn list failed: $answer" >&2; exit 1; }
+  answer=$(ask "$req") || { echo "dispatch list failed: $answer" >&2; exit 1; }
   strays=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys
 answer = json.loads(sys.stdin.readline() or "{}")
@@ -262,7 +262,7 @@ if [ "$bg" = "-" ]; then
   exit 0
 fi
 req=$(python3 -I -c 'import json,sys; print(json.dumps({"verb": "claude", "action": "list", "ids": [sys.argv[1]]}))' "$bg")
-answer=$(ask "$req") || { echo "spawn list for $bg answered: $answer" >&2; exit 1; }
+answer=$(ask "$req") || { echo "dispatch list for $bg answered: $answer" >&2; exit 1; }
 # a row without last_activity has no transcript: the session never took its first turn
 row=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys
@@ -289,7 +289,7 @@ case "$state" in
     fi
     ;;
   *)
-    echo "spawn list for $bg answered an unknown state: $answer" >&2
+    echo "dispatch list for $bg answered an unknown state: $answer" >&2
     exit 1
     ;;
 esac
@@ -301,7 +301,7 @@ root="${SANDMAN_ROOT:-$HOME/.sandman}"
 [ ! -f "$root/shifts/PAUSE" ] || exit 0
 [ ! -f "$root/shifts/current.json" ] || exit 0
 sm="$HOME/.local/bin/sandman"
-sp="$HOME/.local/bin/spawn"
+sp="$HOME/.local/bin/dispatch"
 rc=0
 "$sm" shift clock --check >/dev/null || rc=$?
 [ "$rc" -ne 1 ] || exit 0   # day, dawn near, or the window nearly spent: wait
@@ -337,7 +337,7 @@ sid=${ids#* }
 if [ -z "$bg" ]; then
   # the start may have succeeded without a parsable answer: keep the lock (current.json has no bg_id) and let
   # the close block's briefed-but-never-attached path stop any session named "shift <id>" and abandon it
-  echo "spawn start failed for $id: $answer" >&2
+  echo "dispatch start failed for $id: $answer" >&2
   exit 1
 fi
 "$sm" shift attach --shift "$id" --bg-id "$bg" --session-id "$sid" || { echo "attach failed for $id ($bg); the close block will stop and abandon it" >&2; exit 1; }

@@ -2490,7 +2490,7 @@ fn the_landing_sweep_opens_merges_and_reports_pull_requests() {
 }
 
 /// The tick's first block — sweep, reap, close — cut from the routine likewise
-/// and run on a grove with no trunks: a session spawn lists
+/// and run on a grove with no trunks: a session dispatch lists
 /// working with no transcript ten minutes after its start never began — a
 /// start-up prompt nobody can answer — and is abandoned then, not at
 /// `handoff_by`; one with a transcript is left to work.
@@ -2514,7 +2514,7 @@ fn the_close_block_abandons_a_session_that_never_started() {
             r#"{"bg_id":"b1","repo":"jgeschwendt/stele","shift":"s-9","started":"2026-01-01T00:00:00Z"}"#,
         );
         machine.script(
-            ".local/bin/spawn",
+            ".local/bin/dispatch",
             &format!("read -r req; case $req in *stop*) echo '{{\"ok\":true}}' ;; *) echo '{{\"sessions\":[{row}]}}' ;; esac\n"),
         );
         let _ = fs::remove_file(machine.home.join("calls"));

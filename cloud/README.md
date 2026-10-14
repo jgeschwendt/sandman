@@ -20,7 +20,7 @@ Created by hand at claude.ai/code (routines):
 name          perpetual-shift
 repositories  jgeschwendt/bifrost        jgeschwendt/routines
               jgeschwendt/bridge         jgeschwendt/sandman
-              jgeschwendt/claude         jgeschwendt/spawn
+              jgeschwendt/claude         jgeschwendt/dispatch
               jgeschwendt/gigantic.dev   jgeschwendt/stave
               jgeschwendt/grove          jgeschwendt/stele
               jgeschwendt/ingress        jgeschwendt/threads

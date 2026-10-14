@@ -11,7 +11,7 @@ kind = "atom"
 url = "https://github.com/anthropics/claude-code/releases.atom"
 weight = 1.3
 budget = 10
-bears_on = ["jgeschwendt/bridge", "jgeschwendt/claude", "jgeschwendt/sandman", "jgeschwendt/spawn"]
+bears_on = ["jgeschwendt/bridge", "jgeschwendt/claude", "jgeschwendt/sandman", "jgeschwendt/dispatch"]
 
 [anthropic-engineering]
 kind = "html"
@@ -46,7 +46,7 @@ kind = "html"
 url = "https://github.com/trending/rust?since=daily"
 weight = 0.7
 budget = 25
-bears_on = ["jgeschwendt/grove", "jgeschwendt/routines", "jgeschwendt/sandman", "jgeschwendt/spawn", "jgeschwendt/stele", "jgeschwendt/threads", "jgeschwendt/voice"]
+bears_on = ["jgeschwendt/grove", "jgeschwendt/routines", "jgeschwendt/sandman", "jgeschwendt/dispatch", "jgeschwendt/stele", "jgeschwendt/threads", "jgeschwendt/voice"]
 
 [github-trending-typescript]
 kind = "html"
