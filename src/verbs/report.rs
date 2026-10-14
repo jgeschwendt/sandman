@@ -1,8 +1,8 @@
 //! `report` — what the machine did, told to the owner: every shift's
 //! `report.md` beside its handoff, and the open `proposal:` threads that wait
-//! on his word. Pure over the data root and `~/.threads`: no model, no
+//! on his word. Pure over the data root and `~/.docket`: no model, no
 //! network, no git. `serve` makes it a loopback page whose forms answer the
-//! proposals through the `thread` binary.
+//! proposals through the `docket` binary.
 //!
 //! The contract is `docs/BANK-FORMAT.md` § report.
 

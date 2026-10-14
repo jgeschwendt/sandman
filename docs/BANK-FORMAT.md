@@ -429,7 +429,7 @@ computed); `$SANDMAN_NOW` pins the instant.
 | `target.plan_next` | the first paragraph under the first `docs/plan.md` heading that mentions "next", else its `Status:` line, else the target's section of this week's targets file (below); cut at 600 characters |
 | `target.reason` | why the rotation chose it |
 | `target.repo` | the target's slug |
-| `threads.open` | `~/.threads/*.md` with `state: open` whose text names the slug, one line each |
+| `threads.open` | `~/.docket/*.md` with `state: open` whose text names the slug, one line each |
 | `trail.corrections` | Sabbath: this week's `correction` events, one line each — instant, repo, the whole rationale |
 | `trail.recent` | the trail's summary lines from the 24 h before the instant, the newest 40 |
 | `trail.week` | Sabbath: this week's summary lines, oldest first, the oldest cut until the rest fit 6,000 characters |
@@ -633,8 +633,8 @@ retrying outside it. Writes reach only `~/.grove` (the checkouts, and the bare r
 <worktree>` failed EPERM, observed 2026-10-12), the toolchain caches `~/.bun`, `~/.cache`,
 `~/.cargo`, `~/.hex`, `~/.mix` and `~/Library/Caches` (mise's, and mr-boxington's under
 `~/Library/Caches/mbx`, which wraps mise's rust — `mbx[error]: Operation not permitted`
-without it, observed 2026-10-13), `~/.routines`, `~/.sandman` and `~/.threads` (the
-`thread` CLI writes `~/.threads/<id>.md`); `denyWrite` takes back the caches' `bin/`
+without it, observed 2026-10-13), `~/.routines`, `~/.sandman` and `~/.docket` (the
+`docket` CLI writes `~/.docket/<id>.md`); `denyWrite` takes back the caches' `bin/`
 directories and cargo's config, which the host runs later. These cache lists are
 `profiles/shift-test.sb`'s write allowances and denials: change one, change both; `~/.aws`, `~/.netrc`, `~/.npmrc`, `~/.ssh` and `~/Codes`
 cannot be read; the network reaches only the profile's `allowedDomains` — among them
@@ -642,7 +642,7 @@ cannot be read; the network reaches only the profile's `allowedDomains` — amon
 Bash, inside the sandbox (observed 2026-10-10: the first Sabbath's reflect was denied).
 
 `dontAsk` runs what `permissions.allow` names — the profile lists the tools a shift
-uses, bare, and the `sandman` and `threads` MCP tools — and denies everything else
+uses, bare, and the `docket` and `sandman` MCP tools — and denies everything else
 without asking; `permissions.additionalDirectories` puts `~/.grove/code`, `~/.routines`
 and `~/.sandman` among the working directories, so `Edit` and `Write` reach them from
 any cwd.
@@ -735,7 +735,7 @@ The same shift, run by a Claude Code cloud routine instead of the Mac's runner
 (`cloud/README.md` holds its configuration, `prompts/cloud-shift.md` its prompt).
 Each fire is a fresh VM: `$SANDMAN_ROOT` names the clone of the state repo
 (`jgeschwendt/.sandman`), `$SANDMAN_GROVE` the directory holding every attached repo as
-`<dir>/<repo>` on its default branch, `$SANDMAN_THREADS` the threads clone; templates
+`<dir>/<repo>` on its default branch, `$SANDMAN_DOCKET` the docket clone; templates
 default to `$SANDMAN_GROVE/sandman/prompts`.
 
 `shift open --cloud` is the cloud's `brief`:
@@ -746,7 +746,7 @@ default to `$SANDMAN_GROVE/sandman/prompts`.
    `busy: <id> open since <started>`; older, the shift is handed off `--abandoned` with
    the reason `cloud: stale lock` and the open goes on.
 3. **The rotation over the clones.** The candidates are `$SANDMAN_GROVE`'s clones,
-   labelled `<first $SANDMAN_SHIFT_OWNERS owner>/<dir name>`, the state and threads
+   labelled `<first $SANDMAN_SHIFT_OWNERS owner>/<dir name>`, the state and docket
    clones aside; trust is moot and every clone counts. Repos with an approved
    `proposal:<repo>:*` thread (open, `answer: approve`, `decided:`) come first on every
    cloud night — on the Mac, on a Redesign night — among them the least recently
@@ -952,7 +952,7 @@ year does not have exits 2. A rerun at the same instant writes the same bytes.
 | Corrections | `correction` events | this week's, and those recurring — rationale title-token Jaccard ≥ 0.6 (breath's dedupe measure) with an earlier correction this week or last |
 | Context | `shift.start` refs `fp:<slot>=<hash>` of Context slots | fingerprints, those not seen in an earlier shift this week (fresh), the fresh ratio |
 | Breath | `breath/*.md` stamps; `breath/sources.toml` | filed (`filed`), spiked and dropped (`state` with `updated`), adopted (`adopted`) this week; per source its weight and lifetime `filed`/`adopted` |
-| Threads | `~/.threads/*.md` (`$SANDMAN_THREADS`) | open threads by `kind`, and those a shift opened (`anchor` or `key` starting `shift:`) |
+| Threads | `~/.docket/*.md` (`$SANDMAN_DOCKET`) | open threads by `kind`, and those a shift opened (`anchor` or `key` starting `shift:`) |
 | Routines | `shift/` and `breathe-*/` `runs.jsonl` under `~/.routines/.state` (`$SANDMAN_ROUTINES_STATE`) | ticks this week (by `started`) and non-zero exits |
 
 The page is frontmatter — `week`, `written` (the instant), `from` and `to` (Monday and
@@ -994,15 +994,15 @@ live options. `shift handoff` checks only the cap and the headings; the rest is 
 prompts' (`prompts/shift.md` Procedure 5).
 
 **Proposals ride threads.** Work larger than one shift is never started unapproved: the
-shift opens `thread open "<title>" --kind decision --key proposal:<owner/repo>:<slug>
+shift opens `docket open "<title>" --kind decision --key proposal:<owner/repo>:<slug>
 --option approve --option revise --option decline --body -`, the body a comparison
 matrix — a markdown table, the options down the first column, criteria across the
 rest (cost in shifts, risk, coverage impact, reversibility, …), the recommended row in
 `**bold**` — then a paragraph of scope and the number of shifts it would take. The brief
 reads them back (`proposals.approved`, `proposals.open`, § shifts); the owner answers
-with `thread reply <id> --answer approve`.
+with `docket reply <id> --answer approve`.
 
-**`sandman report`** reads `shifts/*/report.md` and `~/.threads` (`$SANDMAN_THREADS`) —
+**`sandman report`** reads `shifts/*/report.md` and `~/.docket` (`$SANDMAN_DOCKET`) —
 no model, network or git — and prints, in order: `# Reports since <cursor or 'the
 beginning'>` (`# Reports in <week>` under `--week`), `## Worth your eye` (every selected
 report's bullets, each suffixed ` — <shift id>`), `## Proposals awaiting you` (`- <key> ·
@@ -1050,9 +1050,9 @@ bullet linking its shift), Landed (one table, a `shift` column first), every shi
 exactly what reports use — `#`/`##` headings, `-` bullets, pipe tables, paragraphs,
 `` `code` ``, `**bold**` — everything else and every datum HTML-escaped; no script, no
 external fetch, the style inline in `ui`'s green-and-gold palette. `POST /answer` (`key`,
-`answer`, `note`) finds the open `proposal:` thread with that key, runs `thread reply
+`answer`, `note`) finds the open `proposal:` thread with that key, runs `docket reply
 <id> --as user --answer <answer>` plus `--body <note>` when the note is non-empty
-(`$SANDMAN_THREAD_BIN`, else `~/.local/bin/thread`), appends a `decision` event (rationale
+(`$SANDMAN_DOCKET_BIN`, else `~/.local/bin/docket`), appends a `decision` event (rationale
 `owner <answer>d proposal <key>`, ref `thread:<id>`, the key's repo) and answers `303` to
 `/`: `400` for another answer, `404` for an unknown key, `502` with thread's stderr when
 it fails, `500` when the trail refuses. `POST /rotation` (`on=<repo>`, repeated — what

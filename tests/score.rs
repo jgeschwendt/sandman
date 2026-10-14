@@ -19,7 +19,7 @@ impl Machine {
             .env("SANDMAN_NOW", FRIDAY)
             .env("SANDMAN_ROOT", self.root())
             .env("SANDMAN_ROUTINES_STATE", self.home.join("state"))
-            .env("SANDMAN_THREADS", self.home.join("threads"))
+            .env("SANDMAN_DOCKET", self.home.join("threads"))
             .output()
             .expect("run sandman")
     }

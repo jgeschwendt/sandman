@@ -46,7 +46,7 @@ kind = "html"
 url = "https://github.com/trending/rust?since=daily"
 weight = 0.7
 budget = 25
-bears_on = ["jgeschwendt/grove", "jgeschwendt/routines", "jgeschwendt/sandman", "jgeschwendt/dispatch", "jgeschwendt/stele", "jgeschwendt/threads", "jgeschwendt/voice"]
+bears_on = ["jgeschwendt/dispatch", "jgeschwendt/docket", "jgeschwendt/grove", "jgeschwendt/routines", "jgeschwendt/sandman", "jgeschwendt/stele", "jgeschwendt/voice"]
 
 [github-trending-typescript]
 kind = "html"

@@ -1,6 +1,6 @@
 //! `report serve` — the report as a loopback page. HTTP/1.1 over a std
 //! listener, one request at a time, `Connection: close`: `GET /` is a night's
-//! page, `POST /answer` replies to a proposal thread through the `thread`
+//! page, `POST /answer` replies to a proposal thread through the `docket`
 //! binary and puts the owner's decision on the trail, `POST /rotation` sets
 //! which repos the rotation leaves off and puts that on the trail as a guard.
 //!
@@ -31,14 +31,14 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Clone, Debug)]
 pub struct Server {
     /// The shift engine's context: the data root, the night that keys the
-    /// pages, `~/.threads`, the rotation's roots.
+    /// pages, `~/.docket`, the rotation's roots.
     pub ctx: shift::Context,
+    /// The `docket` binary the answers go through.
+    pub docket: PathBuf,
     /// Whether `ctx.now` is `$SANDMAN_NOW`'s; else each request reads the clock.
     pub pinned: bool,
     /// How many requests to answer before returning; `None` serves on.
     pub requests: Option<usize>,
-    /// The `thread` binary the answers go through.
-    pub thread: PathBuf,
 }
 
 /// Method, target, headers (names lowercase), body.
@@ -175,7 +175,7 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
             };
             html::page(
                 &ctx.data_root,
-                &ctx.threads,
+                &ctx.docket,
                 ctx.night,
                 night.as_ref().map(|(_, night)| night.as_str()),
                 &rotation,
@@ -205,7 +205,7 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
 }
 
 /// Reply to the open proposal thread `key` names with `answer` (and `note`
-/// as its body) through the `thread` binary, then append the `decision`.
+/// as its body) through the `docket` binary, then append the `decision`.
 fn answer(server: &Server, ctx: &shift::Context, fields: &[(String, String)]) -> Response {
     let field = |name: &str| {
         fields
@@ -220,13 +220,13 @@ fn answer(server: &Server, ctx: &shift::Context, fields: &[(String, String)]) ->
             "<p>answer approve, revise or decline</p>",
         );
     }
-    let Some(thread) = proposals(&ctx.threads, None)
+    let Some(thread) = proposals(&ctx.docket, None)
         .into_iter()
         .find(|proposal| proposal.key == key)
     else {
         return status("404 Not Found", "<p>no open proposal has that key</p>");
     };
-    let mut reply = Command::new(&server.thread);
+    let mut reply = Command::new(&server.docket);
     reply
         .args(["reply", &thread.id, "--as", "user", "--answer", said])
         .stdin(Stdio::null());
