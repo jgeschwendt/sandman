@@ -219,8 +219,8 @@ usage: sandman <verb> [args]
       its header, the proposal: threads awaiting the owner each with an
       approve/revise/decline form, Worth your eye, Landed, every shift's
       report, and the last 14 nights. POST /answer (key, answer, note) runs
-      `thread reply <id> --as user --answer <answer> [--body <note>]`
-      ($SANDMAN_THREAD_BIN, else ~/.local/bin/thread), appends a decision
+      `docket reply <id> --as user --answer <answer> [--body <note>]`
+      ($SANDMAN_DOCKET_BIN, else ~/.local/bin/docket), appends a decision
       event and redirects to /; 404 for an unknown key, 502 when thread
       fails. The Rotation form checks every rotation trunk not off; POST
       /rotation (on, repeated) leaves off the rest, writes
@@ -229,7 +229,7 @@ usage: sandman <verb> [args]
 
   score [--week yyyy-Www] [--json]
       The week's numbers from the trail, shifts/*/meta.json, the breath
-      store, ~/.threads ($SANDMAN_THREADS) and the shift and breathe-*
+      store, ~/.docket ($SANDMAN_DOCKET) and the shift and breathe-*
       runs.jsonl under ~/.routines/.state ($SANDMAN_ROUTINES_STATE): repo
       coverage, shift outcomes, events by kind/repo/model, cost, recurring
       corrections, fresh context, breaths, open threads, routine ticks. The
@@ -328,7 +328,7 @@ usage: sandman <verb> [args]
       ($SANDMAN_ROOT) it pulls --rebase, takes the committed current.json as
       the lock (exit 1 `busy: <id> open since <ts>` under 70 min old, else
       abandoned `cloud: stale lock`), picks among the clones in $SANDMAN_GROVE
-      (<dir>/<repo>, the state and $SANDMAN_THREADS clones aside, every clone
+      (<dir>/<repo>, the state and $SANDMAN_DOCKET clones aside, every clone
       trusted, approved proposals first), composes as brief does with
       handoff_by now + 50 min and no night gate, adds cloud: true and
       session_url ($CLAUDE_CODE_REMOTE_SESSION_ID) to current.json and
@@ -1519,7 +1519,7 @@ fn report_verb(args: &[String]) -> Result<(), Failure> {
         ));
     }
     let data_root = paths::data_root()?;
-    let threads = paths::threads_dir(&paths::home()?);
+    let threads = paths::docket_dir(&paths::home()?);
     if hook {
         let start = hook::session_start(&stdin()?)?;
         if report::own(&data_root, &start) {
@@ -1568,11 +1568,11 @@ fn report_serve(args: &[String]) -> Result<(), Failure> {
         .transpose()?;
     let ctx = shift_context()?;
     let server = report::serve::Server {
+        docket: env::var_os("SANDMAN_DOCKET_BIN")
+            .filter(|bin| !bin.is_empty())
+            .map_or(ctx.home.join(".local/bin/docket"), PathBuf::from),
         pinned: env::var_os("SANDMAN_NOW").is_some_and(|now| !now.is_empty()),
         requests,
-        thread: env::var_os("SANDMAN_THREAD_BIN")
-            .filter(|bin| !bin.is_empty())
-            .map_or(ctx.home.join(".local/bin/thread"), PathBuf::from),
         ctx,
     };
     let listener = TcpListener::bind(address).map_err(|source| Error::io(&bind, source))?;
@@ -1653,6 +1653,7 @@ fn shift_context() -> Result<shift::Context, Failure> {
         claude_json: paths::claude_json()?,
         cloud: None,
         data_root: paths::data_root()?,
+        docket: paths::docket_dir(&home),
         now,
         min_window_seconds: knob(
             "SANDMAN_SHIFT_MIN_WINDOW_MIN",
@@ -1669,7 +1670,6 @@ fn shift_context() -> Result<shift::Context, Failure> {
         prompts: paths::prompts_dir()?,
         roots: grove_roots()?,
         skip: list("SANDMAN_SHIFT_SKIP", &[]),
-        threads: paths::threads_dir(&home),
         window: paths::claude_window_file()?,
         home,
     })

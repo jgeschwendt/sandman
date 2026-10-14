@@ -60,7 +60,7 @@ impl Machine {
             ("t1", "state: open\nwaiting: user"),
         ] {
             home.write(
-                format!(".threads/{id}.md"),
+                format!(".docket/{id}.md"),
                 &format!("---\n{front}\nopened: 2026-10-12T10:00:00Z\n---\n"),
             );
         }
@@ -82,7 +82,7 @@ impl Machine {
         command
             .env("SANDMAN_NOW", "2026-10-16T16:00:00Z")
             .env("SANDMAN_ROOT", self.root())
-            .env("SANDMAN_THREAD_BIN", self.home.join("thread"));
+            .env("SANDMAN_DOCKET_BIN", self.home.join("thread"));
         command
     }
 
@@ -260,7 +260,7 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
         );
     }
     home.write(
-        ".threads/p1.md",
+        ".docket/p1.md",
         "---\nstate: open\nwaiting: user\nkey: proposal:jgeschwendt/alpha:cache\nopened: 2026-10-12T10:00:00Z\n---\n\n# Cache the parser\n\n## agent · 2026-10-12T10:00:00Z\n\n| option | shifts |\n| --- | --- |\n| **cache** | 2 |\n",
     );
     let thread = home.script(

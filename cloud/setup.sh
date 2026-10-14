@@ -1,7 +1,7 @@
 #!/bin/bash
 # The `perpetual` cloud environment's setup script: runs as root on Ubuntu
 # before each session, its result cached about seven days. Installs mise, then
-# sandman, thread and stele into ~/.local/bin — the tools prompts/cloud-shift.md
+# sandman, docket and stele into ~/.local/bin — the tools prompts/cloud-shift.md
 # names. Budget: under five minutes (two zero-dependency cargo builds, one
 # prebuilt download).
 set -euo pipefail
@@ -32,9 +32,9 @@ build() {
   return $status
 }
 build sandman sandman
-# threads is private: an anonymous clone fails unless the proxy authenticates
+# docket is private: an anonymous clone fails unless the proxy authenticates
 # setup too — then the session builds it from its attached clone
-build threads thread || echo "setup: thread not built; the session builds it from ./threads" >&2
+build docket docket || echo "setup: docket not built; the session builds it from ./docket" >&2
 # stele ships a prebuilt binary per release; CI pins the same version
 curl -fsSL https://raw.githubusercontent.com/jgeschwendt/stele/main/scripts/install.sh | bash -s v0.3.0
 

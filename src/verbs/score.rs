@@ -1,5 +1,5 @@
 //! `score` — the week's numbers, derived from what the machine already keeps:
-//! the trail, `shifts/*/meta.json`, the breath store, `~/.threads` and the
+//! the trail, `shifts/*/meta.json`, the breath store, `~/.docket` and the
 //! routines' `runs.jsonl`. No model, no network, no git.
 //!
 //! The page is `score/<yyyy>-W<ww>.md`, rewritten whole under `.commit.lock`
@@ -337,7 +337,7 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
         Err(error) => return Err(error),
     };
 
-    for (_, fields, _) in shift::front_files(&ctx.threads) {
+    for (_, fields, _) in shift::front_files(&ctx.docket) {
         if fields.get("state").map(String::as_str) == Some("open") {
             tally(
                 &mut score.threads,

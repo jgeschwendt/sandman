@@ -63,14 +63,14 @@ const CONTEXT_SOURCES: [(&str, &str); 15] = [
     ("breath.week", "the breath store"),
     ("handoff.previous", "the previous shift's handoff.md"),
     ("memories.bearing", "the target's bank chain"),
-    ("proposals.approved", "~/.threads"),
-    ("proposals.open", "~/.threads"),
+    ("proposals.approved", "~/.docket"),
+    ("proposals.open", "~/.docket"),
     ("prs.open", "gh"),
     ("sabbath.previous", "last Sabbath's targets file"),
     ("score.week", "this week's score page"),
     ("shifts.week", "shifts/*/meta.json"),
     ("target.plan_next", "the target's docs/plan.md"),
-    ("threads.open", "~/.threads"),
+    ("threads.open", "~/.docket"),
     ("trail.corrections", "the trail"),
     ("trail.recent", "the trail"),
     ("trail.week", "the trail"),
@@ -237,6 +237,8 @@ pub struct Context {
     pub cloud: Option<Cloud>,
     /// The data root.
     pub data_root: PathBuf,
+    /// `~/.docket`.
+    pub docket: PathBuf,
     /// `$HOME`.
     pub home: PathBuf,
     /// The instant the verb acts at.
@@ -254,8 +256,6 @@ pub struct Context {
     pub roots: grove::Roots,
     /// Repo slugs never picked.
     pub skip: Vec<String>,
-    /// `~/.threads`.
-    pub threads: PathBuf,
     /// The five-hour window file.
     pub window: PathBuf,
 }
@@ -772,10 +772,10 @@ pub(crate) fn current(data_root: &Path, key: &str) -> Option<String> {
 /// the runner it answers to.
 ///
 /// In the cloud the trunks are the clones in [`Cloud::clones`], each labelled
-/// with the first owner, the data root and `~/.threads` clones aside.
+/// with the first owner, the data root and `~/.docket` clones aside.
 pub(crate) fn trunks(ctx: &Context) -> Vec<(String, PathBuf)> {
     if let Some(cloud) = &ctx.cloud {
-        let state = [&ctx.data_root, &ctx.threads].map(|dir| fs::canonicalize(dir).ok());
+        let state = [&ctx.data_root, &ctx.docket].map(|dir| fs::canonicalize(dir).ok());
         return ctx
             .owners
             .iter()
@@ -964,7 +964,7 @@ fn names(text: &str, slug: &str) -> bool {
 
 /// Open threads whose text names `slug`, one line each.
 fn open_threads(ctx: &Context, slug: &str) -> Vec<String> {
-    front_files(&ctx.threads)
+    front_files(&ctx.docket)
         .into_iter()
         .filter(|(_, fields, body)| {
             fields.get("state").map(String::as_str) == Some("open")
@@ -1020,7 +1020,7 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
 fn frozen(ctx: &Context) -> impl Fn(&str) -> bool {
     let targets = paths::score_dir(&ctx.data_root)
         .join(format!("{}-targets.md", Week::targets(ctx.now).name()));
-    let threads = front_files(&ctx.threads);
+    let threads = front_files(&ctx.docket);
     let says = |text: &str, words: &[&str]| {
         let text = text.to_lowercase();
         words.iter().any(|word| text.contains(word))
@@ -1163,7 +1163,7 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
         })
         .map(|(label, path)| {
             let approved = weighted
-                && report::proposals(&ctx.threads, Some(&label))
+                && report::proposals(&ctx.docket, Some(&label))
                     .iter()
                     .any(|proposal| proposal.approved.is_some());
             ((Reverse(approved), last.get(&label).copied()), label, path)
@@ -1565,7 +1565,7 @@ fn sabbath_slots(
     slots.insert("breath.week", breath_lines.join("\n"));
     slots.insert(
         "proposals.open",
-        open_proposals(&report::proposals(&ctx.threads, None)),
+        open_proposals(&report::proposals(&ctx.docket, None)),
     );
     slots.insert(
         "sabbath.previous",
@@ -1789,7 +1789,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
             memories
         },
     );
-    let proposals = report::proposals(&ctx.threads, Some(&target.label));
+    let proposals = report::proposals(&ctx.docket, Some(&target.label));
     slots.insert(
         "proposals.approved",
         report::listed(

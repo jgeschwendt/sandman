@@ -16,15 +16,15 @@
       "WebFetch",
       "WebSearch",
       "Write",
+      "mcp__docket__list",
+      "mcp__docket__open",
+      "mcp__docket__reply",
+      "mcp__docket__resolve",
+      "mcp__docket__show",
+      "mcp__docket__wait",
       "mcp__sandman__banks",
       "mcp__sandman__recall",
-      "mcp__sandman__remember",
-      "mcp__threads__list",
-      "mcp__threads__open",
-      "mcp__threads__reply",
-      "mcp__threads__resolve",
-      "mcp__threads__show",
-      "mcp__threads__wait"
+      "mcp__sandman__remember"
     ],
     "deny": [
       "Bash(git checkout -- *)",
@@ -53,6 +53,7 @@
         "~/.bun",
         "~/.cache",
         "~/.cargo",
+        "~/.docket",
         "~/.grove",
         "~/.hex",
         "~/.local/state/claude",
@@ -60,7 +61,6 @@
         "~/.mix",
         "~/.routines",
         "~/.sandman",
-        "~/.threads",
         "~/Library/Caches"
       ],
       "denyRead": ["~/.aws", "~/.netrc", "~/.npmrc", "~/.ssh", "~/Codes"],

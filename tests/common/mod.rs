@@ -78,7 +78,7 @@ impl Machine {
     }
 
     /// An executable `/bin/sh` script. This is how the tests stand in for
-    /// `claude`, `thread` and git hooks: no test ever runs the real one.
+    /// `claude`, `docket` and git hooks: no test ever runs the real one.
     pub fn script(&self, relative: impl AsRef<Path>, body: &str) -> PathBuf {
         let path = self.write(relative, &format!("#!/bin/sh\n{body}"));
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");

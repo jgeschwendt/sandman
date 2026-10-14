@@ -64,8 +64,8 @@ pub const ROUTINES_STATE_ENV: &str = "SANDMAN_ROUTINES_STATE";
 pub const SCORE_DIR_NAME: &str = "score";
 /// The environment variable naming the cloud routine's clones directory.
 pub const CLOUD_GROVE_ENV: &str = "SANDMAN_GROVE";
-/// The environment variable that moves `~/.threads`.
-pub const THREADS_ENV: &str = "SANDMAN_THREADS";
+/// The environment variable that moves `~/.docket`.
+pub const DOCKET_ENV: &str = "SANDMAN_DOCKET";
 /// One directory per shift, plus `current.json` while one is open.
 pub const SHIFTS_DIR_NAME: &str = "shifts";
 /// Takes a live background job deferred — one file per session, cleared when
@@ -350,13 +350,13 @@ pub fn prompts_dir() -> Result<PathBuf> {
         .join("prompts"))
 }
 
-/// The operator's out-of-session message store: `$SANDMAN_THREADS`, else
-/// `~/.threads`.
+/// The operator's out-of-session message store: `$SANDMAN_DOCKET`, else
+/// `~/.docket`.
 #[must_use]
-pub fn threads_dir(home: &Path) -> PathBuf {
-    env::var_os(THREADS_ENV)
+pub fn docket_dir(home: &Path) -> PathBuf {
+    env::var_os(DOCKET_ENV)
         .filter(|dir| !dir.is_empty())
-        .map_or_else(|| home.join(".threads"), PathBuf::from)
+        .map_or_else(|| home.join(".docket"), PathBuf::from)
 }
 
 /// The routines' run state, one directory per routine holding `runs.jsonl`:

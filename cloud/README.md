@@ -18,18 +18,18 @@ Created by hand at claude.ai/code (routines):
 
 ```text
 name          perpetual-shift
-repositories  jgeschwendt/bifrost        jgeschwendt/routines
-              jgeschwendt/bridge         jgeschwendt/sandman
-              jgeschwendt/claude         jgeschwendt/dispatch
-              jgeschwendt/gigantic.dev   jgeschwendt/stave
-              jgeschwendt/grove          jgeschwendt/stele
-              jgeschwendt/ingress        jgeschwendt/threads
-              jgeschwendt/jgeschwendt    jgeschwendt/typescript
-              jgeschwendt/jlg.io         jgeschwendt/ui
-              jgeschwendt/pty            jgeschwendt/visor
-              jgeschwendt/voice          jgeschwendt/voice-corpus
+repositories  jgeschwendt/bifrost        jgeschwendt/pty
+              jgeschwendt/bridge         jgeschwendt/routines
+              jgeschwendt/claude         jgeschwendt/sandman
+              jgeschwendt/dispatch       jgeschwendt/stave
+              jgeschwendt/docket         jgeschwendt/stele
+              jgeschwendt/gigantic.dev   jgeschwendt/typescript
+              jgeschwendt/grove          jgeschwendt/ui
+              jgeschwendt/ingress        jgeschwendt/visor
+              jgeschwendt/jgeschwendt    jgeschwendt/voice
+              jgeschwendt/jlg.io         jgeschwendt/voice-corpus
+              jgeschwendt/.docket        (the docket home)
               jgeschwendt/.sandman       (the state)
-              jgeschwendt/-              (the threads)
 environment   Motion
   network     Custom: the defaults (package registries, GitHub) + api.typesafe.ai
   setup       curl -fsSL https://raw.githubusercontent.com/jgeschwendt/sandman/main/cloud/setup.sh | bash
@@ -52,12 +52,12 @@ the night with `sabbath kept`.
 
 - `setup.sh` builds sandman from GitHub's `main`, so `shift open --cloud` must have
   landed there.
-- `jgeschwendt/threads` is private: an anonymous clone in `setup.sh` fails unless
-  the GitHub proxy also serves setup, and the session then builds `thread` from its
+- `jgeschwendt/docket` is private: an anonymous clone in `setup.sh` fails unless
+  the GitHub proxy also serves setup, and the session then builds `docket` from its
   attached clone.
 - The Mac's `~/.routines/shift.md` stays paused (`~/.sandman/shifts/PAUSE`): its
   `current.json` is gitignored there, so a cloud VM cannot see a Mac shift's lock.
-- The Mac's home-sync must pull `~/.sandman` and `~/.threads` before it pushes, or
+- The Mac's home-sync must pull `~/.sandman` and `~/.docket` before it pushes, or
   every night's cloud commits reject its pushes.
 - The off switch is the routine's toggle; `shifts/PAUSE` is gitignored and never
   reaches a VM.
