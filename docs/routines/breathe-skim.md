@@ -6,7 +6,7 @@ on_error: claude
 
 # Breathe · skim
 
-The ruach's hourly pass. Research is its own perpetual engine, outside the creation week: every hour at :17 it skims what the due feeds published since their cursors, against the open problems, and files what bears. This routine never reads a feed itself; it composes the pass prompt with `sandman breathe pass --kind skim` and starts a Claude Code `--bg` session through `spawn run`, exactly as `shift.md` does, with cwd at the breath store. The session reads the due sources, files breaths with provenance, and ends with `sandman breathe close`. Each tick first removes the sessions of closed passes from Claude Code's listing, where a finished session otherwise stays forever. The contract is sandman's `docs/BANK-FORMAT.md` § breath; the plan is sandman's `docs/index.html` § The perpetual shift, The ruach.
+The ruach's hourly pass. Research is its own perpetual engine, outside the creation week: every hour at :17 it skims what the due feeds published since their cursors, against the open problems, and files what bears. This routine never reads a feed itself; it composes the pass prompt with `sandman breathe pass --kind skim` and starts a Claude Code `--bg` session through `dispatch run`, exactly as `shift.md` does, with cwd at the breath store. The session reads the due sources, files breaths with provenance, and ends with `sandman breathe close`. Each tick first removes the sessions of closed passes from Claude Code's listing, where a finished session otherwise stays forever. The contract is sandman's `docs/BANK-FORMAT.md` § breath; the plan is sandman's `docs/index.html` § The perpetual shift, The ruach.
 
 ## State
 
@@ -27,14 +27,14 @@ A pass runs in `dontAsk` inside Claude Code's strict Bash sandbox with the profi
 ## Repair
 
 - `unknown verb` (exit 2): the installed `~/.local/bin/sandman` predates `breathe`; install a trunk build as `sandman-reflect.md` describes.
-- `spawn` answering `{"error": …}`: the pass record stays without session ids and without `ended`; nothing else to undo. The next tick starts a fresh pass.
+- `dispatch` answering `{"error": …}`: the pass record stays without session ids and without `ended`; nothing else to undo. The next tick starts a fresh pass.
 - A second pass of the same kind while one is in flight is refused by `breathe pass` (exit 1, `pass in flight`) until the first closes or outlives its timeout, at which point it is marked dead and charged `SANDMAN_BREATH_DEAD_COST_USD` (default 2) against the day; a skim and a deep pass may run together.
 
 ```sh
 # close: remove every "breath skim" session whose pass has ended — closed, or marked dead — stopping it first if it still runs
 root="${SANDMAN_ROOT:-$HOME/.sandman}"
-sp="$HOME/.local/bin/spawn"
-ask() {   # one spawn request; prints the answer; returns 1 when spawn fails, says nothing, or answers an error
+sp="$HOME/.local/bin/dispatch"
+ask() {   # one dispatch request; prints the answer; returns 1 when dispatch fails, says nothing, or answers an error
   answer=$(printf '%s\n' "$1" | "$sp" run) || return 1
   [ -n "$answer" ] || return 1
   printf '%s\n' "$answer"
@@ -48,7 +48,7 @@ request() {   # one claude request for one bg id
   python3 -I -c 'import json,sys; print(json.dumps({"verb":"claude","action":sys.argv[1],"id":sys.argv[2]}))' "$1" "$2"
 }
 req=$(python3 -I -c 'import json; print(json.dumps({"verb": "claude", "action": "list"}))')
-answer=$(ask "$req") || { echo "spawn list failed: $answer" >&2; exit 0; }
+answer=$(ask "$req") || { echo "dispatch list failed: $answer" >&2; exit 0; }
 ended=$(printf '%s' "$answer" | python3 -I -c '
 import json, os, sys
 for row in json.loads(sys.stdin.readline() or "{}").get("sessions", []):
@@ -63,10 +63,10 @@ for row in json.loads(sys.stdin.readline() or "{}").get("sessions", []):
         print(row["id"], "stop" if row.get("state") in ("working", "blocked") else "rm")
 ' "$root/breath/passes" skim)
 stopped=$(printf '%s\n' "$ended" | awk '$2 == "stop" { print $1 }')
-for bg in $stopped; do ask "$(request stop "$bg")" >/dev/null || echo "spawn could not stop $bg" >&2; done
+for bg in $stopped; do ask "$(request stop "$bg")" >/dev/null || echo "dispatch could not stop $bg" >&2; done
 [ -z "$stopped" ] || sleep 3   # a stopped session's SessionEnd hook races the removal of its job dir
 for bg in $(printf '%s\n' "$ended" | awk '{ print $1 }'); do
-  ask "$(request rm "$bg")" >/dev/null || echo "spawn could not rm $bg; left in the listing" >&2
+  ask "$(request rm "$bg")" >/dev/null || echo "dispatch could not rm $bg; left in the listing" >&2
 done
 ```
 
@@ -94,7 +94,7 @@ print(json.dumps({
     "name": "breath skim " + pid,
 }))
 ' "$root/breath/passes/$id/prompt.md" "$root/breath" "${SANDMAN_BREATH_MIND:-opus}" "$id" "$profile")
-answer=$(printf '%s\n' "$req" | "$HOME/.local/bin/spawn" run)
+answer=$(printf '%s\n' "$req" | "$HOME/.local/bin/dispatch" run)
 ids=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys
 answer = json.loads(sys.stdin.readline() or "{}")
@@ -102,6 +102,6 @@ print(answer.get("id", ""), answer.get("session_id", ""))
 ')
 bg=${ids% *}
 sid=${ids#* }
-[ -n "$bg" ] || { echo "spawn start failed for pass $id: $answer" >&2; exit 1; }
+[ -n "$bg" ] || { echo "dispatch start failed for pass $id: $answer" >&2; exit 1; }
 "$sm" breathe attach --id "$id" --bg-id "$bg" --session-id "$sid"
 ```
