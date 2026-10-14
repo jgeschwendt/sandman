@@ -19,13 +19,13 @@ invariants:
 | --- | --- |
 | breath/ | `sources.toml`, the seed feed list `sandman breathe init` copies into the data root — compiled into the binary; the schema is `docs/BANK-FORMAT.md` § breath |
 | cloud/ | the cloud routine `perpetual-shift` — `setup.sh`, the environment's setup script (mise, then sandman, thread and stele into `~/.local/bin`), and `README.md`, the routine's configuration; the contract is `docs/BANK-FORMAT.md` § shifts, The cloud |
-| docs/ | the design — `DESIGN.md` + a ui-styled page (GitHub Pages serves this directory) (stylesheets linked from https://gigantic.dev/ui/ — `ui.css` + the shared `docs.css` shell; `plan.css` holds only what is sandman's); `docs/serve.py` (:7875); `plates/` holds the page plates' PNG exports, `plates/sandman/` their Claude Design source and `plates/perpetual-shift/` the plan plate's; `plates/export.sh` (`mise run plates`) renders every artboard to its PNG |
+| docs/ | the design — `index.html`, a ui-styled page and the only design source, the perpetual-shift plan included (GitHub Pages serves this directory; stylesheets linked from https://gigantic.dev/ui/ — `ui.css` + the shared `docs.css` shell; `plan.css` holds only what is sandman's); `docs/serve.py` (:7875); `figures/` holds the page's figure PNGs and `figures/project/` the Claude Design canvas source (https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL, `sandman figures`); `figures/export.sh` (`mise run figures`) renders every board to its PNG; the contracts are `BANK-FORMAT.md`, `MCP.md` and `routines/` |
 | launchd/ | `io.jlg.sandman-report.plist`, the launchd agent that keeps `sandman report serve` up on 127.0.0.1:1705; installed by hand (`docs/BANK-FORMAT.md` § report) |
 | profiles/ | `session.json`, the Claude Code settings shift and breath sessions run under — the strict Bash sandbox and deny rules `sandman shift profile` prints, compiled into the binary; `shift-test` + `shift-test.sb`, the wrapper and Seatbelt profile a shift's tests run under, installed by hand; the contract is `docs/BANK-FORMAT.md` § shifts, The sandbox |
 | prompts/ | the machine's prompt templates — `shift.md` is the dynamic shift prompt `sandman shift brief` fills, `sabbath.md` the one it fills on Saturday, `breathe.md` the ruach's pass prompt `sandman breathe pass` fills, and `cloud-shift.md` the cloud routine's static prompt, no slots; their slot names are the contract in `docs/BANK-FORMAT.md` § shifts and § breath |
 | src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep, the MCP tool server (recall · remember · banks over stdio), the trail and reconcile, the shift engine (every landing a pull request), the ruach's store, the week's score |
 
-The design is `docs/DESIGN.md`; the on-disk format is `docs/BANK-FORMAT.md`.
+The design is `docs/index.html`; the on-disk format is `docs/BANK-FORMAT.md`.
 
 ## Working here
 

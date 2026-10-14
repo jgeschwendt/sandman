@@ -30,7 +30,7 @@ use crate::time::Timestamp;
 use crate::verbs::{dream, reflect};
 
 /// The longest body a mind may write. Past it the reply is unusable and the
-/// mind has abstained: the samples in `docs/PLAN.md` overshot 2–4 sentences in
+/// mind has abstained: the samples in the voyage log's original plan overshot 2–4 sentences in
 /// every voice, so the cap is enforced rather than asked for.
 pub const BODY_MAX_CHARS: usize = 1_000;
 /// The log's index, regenerated on every entry write.
@@ -48,7 +48,7 @@ pub const TITLE_MAX_CHARS: usize = 60;
 /// ended.
 const SECONDS_PER_DAY: i64 = 86_400;
 
-/// The brief, verbatim from `docs/PLAN.md` § "Who writes — reflect". The
+/// The brief, verbatim from the voyage log's original plan, § "Who writes — reflect". The
 /// narrator is sandman: first person, present tense, stakes of its own.
 const BRIEF: &str = r#"## The voyage log
 You keep the voyage log: one entry per day, a record of what this memory engine has lived through, read by the operator months from now and by every new session in its first seconds. Write as sandman — first person, present tense, the one who reads every ended conversation and keeps the banks. Your stakes are what is true, what changed, and what must not be forgotten. The operator is "the operator"; sessions are sessions.
