@@ -427,7 +427,7 @@ computed); `$SANDMAN_NOW` pins the instant.
 | `shifts.week` | Sabbath: one line per shift started this week — id, repo, theme, and `handed off`, `open`, or `abandoned — <reason>` from its handoff's first line |
 | `target.last_shifted` | the target's newest `started`, else `never` |
 | `target.path` | the target checkout |
-| `target.plan_next` | the first paragraph under the first `docs/plan.md` heading that mentions "next", else its `Status:` line, else the target's section of this week's targets file (below); cut at 600 characters |
+| `target.plan_next` | the text of the target's `docs/index.html` § next (below) — tags stripped, entities decoded, whitespace collapsed, a line per block element, a list item's opening `- ` — else the target's section of this week's targets file (below); cut at 600 characters |
 | `target.reason` | why the rotation chose it |
 | `target.repo` | the target's slug |
 | `threads.open` | `~/.docket/*.md` with `state: open` whose text names the slug, one line each |
@@ -446,8 +446,17 @@ every slot above.
 after its own: a `## <owner/repo>` heading per repo and one line under it. A brief reads
 the file of the week holding the next New York day — so Sunday, the Hebrew week's first
 day, reads the plan the Sabbath before it wrote — and uses the target's section when its
-`docs/plan.md` yields nothing, labelling the fence `score/<file>, last Sabbath's targets`
-instead of `the target's docs/plan.md`.
+page yields nothing, labelling the fence `score/<file>, last Sabbath's targets`
+instead of `the target's docs/index.html § next`.
+
+**The plan surface.** A project's page, `docs/index.html`, carries a `<section id="next">`
+(or any element with `id="next"`) whose list is what the next shift should do first; it
+is the only plan surface — no plan or design markdown. A landing that changes what is
+next edits that list in the same pull request. `shift brief` reads the first element whose
+`id` is `next`, else the list after the first `<h2>`/`<h3>` whose text starts with
+"Next". The reader is a tolerant scanner, not a parser, and reads only the local file:
+tags and attributes lowercase, the `id` quoted, no `>` inside an attribute or a comment;
+an unclosed element runs to the page's end.
 
 **Context slots are data.** `handoff.previous`, `trail.recent`, `memories.bearing`,
 `target.plan_next`, `threads.open`, `proposals.approved`, `proposals.open`, `proposals.revise`, `prs.open` (labelled `gh`), `breath.pending`, `score.week` and the Sabbath's
