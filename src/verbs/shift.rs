@@ -70,7 +70,7 @@ const CONTEXT_SOURCES: [(&str, &str); 16] = [
     ("sabbath.previous", "last Sabbath's targets file"),
     ("score.week", "this week's score page"),
     ("shifts.week", "shifts/*/meta.json"),
-    ("target.plan_next", "the target's docs/plan.md"),
+    ("target.plan_next", "the target's docs/index.html § next"),
     ("threads.open", "~/.docket"),
     ("trail.corrections", "the trail"),
     ("trail.recent", "the trail"),
@@ -1348,30 +1348,139 @@ fn capped(text: &str, cap: usize) -> String {
     }
 }
 
-/// The first paragraph under a heading that mentions "next", else the
-/// `Status:` line — the target's own word on what comes next.
+/// The tags that start a line in a page's text: block elements and `<br>`.
+const LINE_TAGS: [&str; 14] = [
+    "br", "dd", "div", "dt", "h1", "h2", "h3", "h4", "li", "ol", "p", "section", "tr", "ul",
+];
+
+/// The target's own word on what comes next: its `docs/index.html` `#next`
+/// element, else the list after its first `<h2>`/`<h3>` reading "Next…", as
+/// text. A tolerant scanner, not a parser: tags and attributes lowercase,
+/// `id` quoted, no `>` inside an attribute or a comment, no CDATA.
 fn plan_next(path: &Path) -> Option<String> {
-    let text = fs::read_to_string(path.join("docs").join("plan.md")).ok()?;
-    let lines: Vec<&str> = text.lines().collect();
-    let heading = lines
+    let html = fs::read_to_string(path.join("docs").join("index.html")).ok()?;
+    let by_id = ["id=\"next\"", "id='next'"]
         .iter()
-        .position(|line| line.starts_with('#') && line.to_lowercase().contains("next"));
-    let found = heading.and_then(|heading| {
-        let paragraph: Vec<&str> = lines[heading + 1..]
+        .filter_map(|attr| html.find(attr))
+        .min()
+        .and_then(|at| html[..at].rfind('<'));
+    let block = by_id.map(|open| inner(&html, open)).or_else(|| {
+        let open = html
+            .match_indices("<h")
+            .map(|(open, _)| open)
+            .find(|&open| {
+                matches!(html.as_bytes().get(open + 2), Some(b'2' | b'3'))
+                    && text(inner(&html, open)).starts_with("Next")
+            })?;
+        let list = ["<ol", "<ul"]
             .iter()
-            .skip_while(|line| line.trim().is_empty())
-            .take_while(|line| !line.trim().is_empty() && !line.starts_with('#'))
-            .copied()
-            .collect();
-        (!paragraph.is_empty()).then(|| paragraph.join("\n"))
-    });
-    let found = found.or_else(|| {
-        lines
-            .iter()
-            .find(|line| line.starts_with("Status:"))
-            .map(|line| (*line).to_owned())
+            .filter_map(|tag| html[open..].find(tag))
+            .min()?;
+        Some(inner(&html, open + list))
     })?;
-    Some(capped(&found, PLAN_NEXT_CHARS))
+    Some(capped(&text(block), PLAN_NEXT_CHARS)).filter(|text| !text.is_empty())
+}
+
+/// The content of the element whose opening tag starts at `open`, to its
+/// matching close — nested same-name elements counted — or the page's end.
+fn inner(html: &str, open: usize) -> &str {
+    let rest = &html[open + 1..];
+    let name = tag_name(rest);
+    let body = open + 2 + rest.find('>').unwrap_or(rest.len() - 1);
+    let mut depth = 0;
+    for (at, _) in html[body..].match_indices('<') {
+        let tag = &html[body + at + 1..];
+        let closing = tag.starts_with('/');
+        if tag[usize::from(closing)..]
+            .strip_prefix(name)
+            .is_some_and(|after| !after.starts_with(|c: char| c.is_ascii_alphanumeric()))
+        {
+            if closing && depth == 0 {
+                return &html[body..body + at];
+            }
+            depth += if closing { -1 } else { 1 };
+        }
+    }
+    &html[body..]
+}
+
+/// `html` as text: tags stripped, entities decoded, whitespace collapsed,
+/// a line per block element, a list item's line opening `- `.
+fn text(html: &str) -> String {
+    let html = html.replace('\n', " ");
+    let mut out = String::new();
+    let mut rest = html.as_str();
+    while let Some(lt) = rest.find('<') {
+        let tag = &rest[lt + 1..];
+        out.push_str(&rest[..lt]);
+        let name = tag_name(tag.trim_start_matches('/'));
+        if LINE_TAGS.contains(&name) {
+            out.push_str(if name == "li" && !tag.starts_with('/') {
+                "\n- "
+            } else {
+                "\n"
+            });
+        }
+        rest = &rest[tag.find('>').map_or(rest.len(), |gt| lt + gt + 2)..];
+    }
+    out.push_str(rest);
+    out.lines()
+        .map(|line| {
+            decoded(line)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The element name a tag's text opens with.
+fn tag_name(tag: &str) -> &str {
+    &tag[..tag
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(tag.len())]
+}
+
+/// `text` with its character references decoded: the five XML names,
+/// `&nbsp;`, and numeric ones; anything else stays as written.
+fn decoded(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        rest = &rest[amp..];
+        let decoded = rest.find(';').filter(|&semi| semi < 10).and_then(|semi| {
+            let name = &rest[1..semi];
+            let named = [
+                ("amp", '&'),
+                ("apos", '\''),
+                ("gt", '>'),
+                ("lt", '<'),
+                ("nbsp", ' '),
+                ("quot", '"'),
+            ]
+            .iter()
+            .find(|(entity, _)| *entity == name)
+            .map(|(_, c)| *c);
+            let numeric = || {
+                let digits = name.strip_prefix('#')?;
+                digits
+                    .strip_prefix('x')
+                    .map_or_else(
+                        || digits.parse().ok(),
+                        |hex| u32::from_str_radix(hex, 16).ok(),
+                    )
+                    .and_then(char::from_u32)
+            };
+            Some((named.or_else(numeric)?, semi))
+        });
+        let (c, len) = decoded.map_or(('&', 1), |(c, semi)| (c, semi + 1));
+        out.push(c);
+        rest = &rest[len..];
+    }
+    out + rest
 }
 
 /// `repo`'s section of a Sabbath's targets file — the lines under

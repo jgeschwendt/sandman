@@ -266,7 +266,7 @@ usage: sandman <verb> [args]
       the Sabbath, which fills
       prompts/sabbath.md instead and works jgeschwendt/sandman's trunk, once
       (exit 1, `sabbath kept: <id> handed off at <time>`, after the night's); a
-      repo whose docs/plan.md names nothing next takes its line from the
+      repo whose docs/index.html #next names nothing takes its line from the
       Sabbath's score/<week>-targets.md. pick is the rotation — the least
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
       (default jgeschwendt), Saturday shifts aside — never ~, ~/.routines or

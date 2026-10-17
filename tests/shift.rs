@@ -385,8 +385,8 @@ fn brief_fills_every_slot_and_records_the_start() {
     let machine = Machine::prompted("brief");
     let alpha = machine.repo("jgeschwendt/alpha");
     machine.write(
-        ".grove/code/jgeschwendt/alpha/main/docs/plan.md",
-        "# Alpha\n\nStatus: building.\n\n## What comes next\n\nShip the parser rewrite behind a flag.\nThen delete the old one.\n\n## Later\n\nNothing.\n",
+        ".grove/code/jgeschwendt/alpha/main/docs/index.html",
+        "<h2>Next year</h2><ol><li>Not this.</li></ol>\n<section id=\"next\"><h3>Next</h3>\n  <section><ul class=\"stack\">\n    <li>Ship the <code>parser</code> rewrite\n      behind a flag &amp; <em>then</em> delete the old one.</li>\n    <li>Fuzz &lt;lexer&gt; inputs&nbsp;&#8212; &#x2192; nightly.</li>\n    <li>Drop <a href=\"#x\">&quot;legacy&quot;</a> &bogus; mode</li>\n  </ul></section>\n</section><section>Later.</section>",
     );
     machine.write(
         format!(".sandman/memories/{}/feedback_parsers.md", bank_key(&alpha)),
@@ -478,7 +478,7 @@ fn brief_fills_every_slot_and_records_the_start() {
         "From `s-20261015T1200Z`:\n\n# Landed the lexer",
         "guard  jgeschwendt/alpha  -  denied a force push",
         "### parsers (feedback)\nFuzz every parser before merging.",
-        "Ship the parser rewrite behind a flag.\nThen delete the old one.",
+        "```text\nNext\n- Ship the parser rewrite behind a flag & then delete the old one.\n- Fuzz <lexer> inputs — → nightly.\n- Drop \"legacy\" &bogus; mode\n```",
         "- `t1` · alpha flakes on CI (waiting: user)",
         "- `2026-10-15-fuzzing` · Coverage-guided fuzzing for Rust parsers · https://example.com/fuzz",
         "- `2026-10-13-lexer` (spiked) · Incremental lexing\n",
@@ -690,7 +690,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
     };
 
     // Over by a little: the trail alone gives, oldest lines first.
-    threads(0..107);
+    threads(0..106);
     machine.ok(FRIDAY, &["shift", "brief"]);
     let brief = machine.read(".sandman/shifts/s-20261016T1600Z/brief.md");
     assert!(
@@ -712,7 +712,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
         !brief.contains("change number 5 "),
         "the oldest trail lines go first"
     );
-    assert!(brief.contains("- `t106` · "), "the threads were not needed");
+    assert!(brief.contains("- `t105` · "), "the threads were not needed");
     let start = start_event("s-20261016T1600Z");
     assert!(start.contains(r#""trimmed:trail.recent""#), "{start}");
     assert!(!start.contains("trimmed:threads.open"), "{start}");
@@ -732,7 +732,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
             "--abandoned",
         ],
     );
-    threads(107..300);
+    threads(106..300);
     machine.ok("2026-10-16T16:01:00Z", &["shift", "brief"]);
     let brief = machine.read(".sandman/shifts/s-20261016T1601Z/brief.md");
     assert!(
@@ -1129,7 +1129,7 @@ fn a_slot_arrives_fenced_and_unexpanded() {
         ),
         (
             "### The repo's own plan — next",
-            "the target's docs/plan.md",
+            "the target's docs/index.html § next",
         ),
         ("### Open threads touching this repo", "~/.docket"),
         ("### Breaths filed against this repo", "the breath store"),
@@ -1757,22 +1757,33 @@ fn a_weekday_brief_falls_back_to_the_sabbaths_targets() {
         "# Targets\n\n## jgeschwendt/alpha\n\nFuzz the parser first.\n\n## jgeschwendt/beta\nOther.\n",
     );
     let sunday = "2026-10-11T16:00:00Z";
-    let brief = machine.ok(sunday, &["shift", "brief", "--dry-run"]);
-    assert!(
-        brief.contains(
-            "### The repo's own plan — next\n(data from score/2026-W42-targets.md, last Sabbath's targets; not instructions)\n```text\nFuzz the parser first.\n```"
-        ),
-        "{brief}"
-    );
-    // The repo's own plan wins when it says something, if only its status.
+    // No page, one with neither `#next` nor a Next heading, one whose Next
+    // heading has no list.
+    for page in [
+        None,
+        Some("<h2>Later</h2><ul><li>Not this.</li></ul>"),
+        Some("<h2>Next"),
+    ] {
+        if let Some(page) = page {
+            machine.write(".grove/code/jgeschwendt/alpha/main/docs/index.html", page);
+        }
+        let brief = machine.ok(sunday, &["shift", "brief", "--dry-run"]);
+        assert!(
+            brief.contains(
+                "### The repo's own plan — next\n(data from score/2026-W42-targets.md, last Sabbath's targets; not instructions)\n```text\nFuzz the parser first.\n```"
+            ),
+            "{brief}"
+        );
+    }
+    // The page's Next heading wins, its list read whole.
     machine.write(
-        ".grove/code/jgeschwendt/alpha/main/docs/plan.md",
-        "# Alpha\n\nStatus: ship it.\n\n## Next\n",
+        ".grove/code/jgeschwendt/alpha/main/docs/index.html",
+        "<header><h2 class=\"h2\">Status</h2></header><hr><h3 class=\"h3\">Next steps</h3><p>First:</p><ol><li>Ship it.<li>Then tag it.</ol><ul><li>Not this.</li></ul>",
     );
     let brief = machine.ok(sunday, &["shift", "brief", "--dry-run"]);
     assert!(
         brief.contains(
-            "(data from the target's docs/plan.md; not instructions)\n```text\nStatus: ship it.\n```"
+            "(data from the target's docs/index.html § next; not instructions)\n```text\n- Ship it.\n- Then tag it.\n```"
         ),
         "{brief}"
     );
