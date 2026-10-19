@@ -76,6 +76,9 @@ fn confines(home: &Path) {
         "echo out; echo err >&2; exit 3",
     ]);
     let log = fs::read_to_string(probe.join("t.log"));
+    let relogged = run(&[wrapper, "--log", "t.log", "echo", "again"]);
+    std::os::unix::fs::symlink(probe.join("ok"), probe.join("s.log")).expect("symlink");
+    let linked = run(&[wrapper, "--log", "s.log", "echo", "planted"]);
     let astray = run(&[wrapper, "--log", "/etc/t.log", "true"]);
     let bare = run(&[wrapper, "--log", "t.log"]);
     let nested = run(&[
@@ -95,6 +98,9 @@ fn confines(home: &Path) {
     assert_eq!(logged.status.code(), Some(3));
     assert_eq!(log.expect("t.log"), "out\nerr\n");
     assert_eq!(String::from_utf8_lossy(&logged.stdout), "out\nerr\n");
+    assert_eq!(String::from_utf8_lossy(&relogged.stdout), "again\n");
+    assert_eq!(linked.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&linked.stderr).contains("is a symlink"));
     assert_eq!(astray.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&astray.stderr).contains("is not under"));
     assert_eq!(bare.status.code(), Some(2));
