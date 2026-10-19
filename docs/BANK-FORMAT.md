@@ -459,10 +459,11 @@ instead of `the target's docs/index.html § next`.
 
 **The plan surface.** A project's page, `docs/index.html`, carries a `<section id="next">`
 (or any element with `id="next"`) whose list is what the next shift should do first; it
-is the only plan surface — no plan or design markdown. A landing that changes what is
-next edits that list in the same pull request. `shift brief` reads the first element whose
-`id` is `next`, else the list after the first `<h2>`/`<h3>` whose text starts with
-"Next". The reader is a tolerant scanner, not a parser, and reads only the local file:
+is the only plan surface — no plan or design markdown (a repo not yet folded keeps
+`docs/plan.md`'s Next until the fold lands; the brief reads only the page, so the Sabbath's
+targets stand in there). A landing that changes what is next edits that list in the same
+pull request. `shift brief` reads the first element whose `id` is `next`, else the list
+after the first `<h2>`/`<h3>` whose text starts with "Next". The reader is a tolerant scanner, not a parser, and reads only the local file:
 tags and attributes lowercase, the `id` quoted, no `>` inside an attribute or a comment;
 an unclosed element runs to the page's end.
 
