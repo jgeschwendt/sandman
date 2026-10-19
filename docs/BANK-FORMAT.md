@@ -716,10 +716,10 @@ any cwd.
   `sandbox-exec` fails `sandbox_apply: Operation not permitted` (observed 2026-10-13: `…
   bun test 2>&1 | tail -15`); the wrapper probes for that first and exits 71 with
   `shift-test: still inside the session sandbox — make it the whole Bash call: …`. So a
-  shift `cd`s into its worktree in a call of its own and captures output with
-  `shift-test --log <file> <command…>`, which writes stdout and stderr to `<file>` — under
-  the working tree or `$TMPDIR`, else exit 2 — then prints it and exits with the command's
-  status (`prompts/shift.md` rule 7).
+  shift names its worktree with `-C <dir>` instead of a `cd` (a spawned Agent's cwd resets
+  each call) and captures output with `shift-test -C <dir> --log <file> <command…>`, which
+  writes stdout and stderr to `<file>` — under the working tree or `$TMPDIR`, else exit 2 —
+  then prints it and exits with the command's status (`prompts/shift.md` rule 7).
 - **Pushing is the runner's.** `git push` from a session fails at the sandbox proxy
   despite `excludedCommands` — "This proxy requires authentication", exit 128 (observed
   2026-10-11) — so a shift records its landing (`shift land`) and never pushes; the

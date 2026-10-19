@@ -54,19 +54,24 @@ fn confines(home: &Path) {
         status.expect("shift-test").success() != *passes
     })
     .collect();
-    let outside = Command::new(&wrapper)
-        .arg("true")
-        .current_dir(env::temp_dir())
-        .output()
-        .expect("shift-test");
-    let run = |args: &[&str]| {
+    let run_in = |dir: &Path, args: &[&str]| {
         Command::new(args[0])
             .args(&args[1..])
-            .current_dir(&probe)
+            .current_dir(dir)
             .output()
             .expect("shift-test")
     };
-    let wrapper = wrapper.to_str().expect("utf-8 path");
+    let run = |args: &[&str]| run_in(&probe, args);
+    let (wrapper, there) = (
+        wrapper.to_str().expect("utf-8 path"),
+        probe.to_str().expect("utf-8 path"),
+    );
+    let away = run(&[wrapper, "-C", "/tmp", "true"]);
+    let missing = run(&[wrapper, "-C", "none", "true"]);
+    let moved = run_in(
+        &env::temp_dir(),
+        &[wrapper, "-C", there, "--log", "c.log", "pwd"],
+    );
     let logged = run(&[
         wrapper,
         "--log",
@@ -101,8 +106,10 @@ fn confines(home: &Path) {
     assert!(wrong.is_empty(), "{wrong:?}");
     assert_eq!(ok.expect("./ok"), "x\n");
     assert!(!desktop.exists());
-    assert_eq!(outside.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&outside.stderr).contains("is not under ~/.grove/code"));
+    assert_eq!(away.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&away.stderr).contains("is not under ~/.grove/code"));
+    assert_eq!(missing.status.code(), Some(2));
+    assert_eq!(String::from_utf8_lossy(&moved.stdout), format!("{there}\n"));
     assert_eq!(logged.status.code(), Some(3));
     assert_eq!(log.expect("t.log"), "out\nerr\n");
     assert_eq!(String::from_utf8_lossy(&logged.stdout), "out\nerr\n");
