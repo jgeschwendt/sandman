@@ -31,7 +31,7 @@ Three tools. Names are the verbs; the surface is deliberately smaller than the C
 
 ```
 recall
-    input:  { cwd?: string }            default: $HOME
+    input:  { cwd?: string }            absolute; default: $HOME
     output: { text: string, banks: [{key, degraded, memories: [filename]}],
               memories: number, pointers: number, trimmed: {…} }
     Composes exactly what `sandman recall --cwd` composes: verbs::recall::compose.
@@ -44,7 +44,9 @@ remember
     output: { bank: string, file: string, outcome: "created"|"collided", index: string }
     Commits through verbs::remember::remember with the same defaults as the CLI.
     Exactly one of bank/cwd resolves the bank; both given is an invalid-params
-    error, and neither given is the home bank.
+    error, and neither given is the home bank. A cwd that is not absolute is an
+    invalid-params error for both tools; trailing separators and `.` are dropped
+    before keying.
     session_id comes from $CLAUDE_SESSION_ID when set, else absent, as today.
 
 banks

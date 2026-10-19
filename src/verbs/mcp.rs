@@ -514,7 +514,7 @@ pub(crate) fn call(ctx: &Context, name: &str, arguments: &Value) -> Result<Answe
 /// the budget cut without a second renderer growing downstream.
 pub(crate) fn recall(ctx: &Context, params: &Value) -> Result<Answer, McpError> {
     check_arguments(params)?;
-    let cwd = optional_str(params, "cwd")?.map_or_else(|| ctx.home.clone(), PathBuf::from);
+    let cwd = optional_cwd(params)?.unwrap_or_else(|| ctx.home.clone());
     let composed =
         crate::verbs::recall::compose(&ctx.data_root, &ctx.home, &cwd, Timestamp::now()?);
 
@@ -595,7 +595,7 @@ pub(crate) fn remember(ctx: &Context, params: &Value) -> Result<Answer, McpError
         ));
     };
     let bank = optional_str(params, "bank")?;
-    let cwd = optional_str(params, "cwd")?;
+    let cwd = optional_cwd(params)?;
     if bank.is_some() && cwd.is_some() {
         return Err(McpError::InvalidParams(
             "bank and cwd are exclusive".to_owned(),
@@ -609,11 +609,7 @@ pub(crate) fn remember(ctx: &Context, params: &Value) -> Result<Answer, McpError
     };
     // The server's process cwd is the launcher's and means nothing here, so
     // "neither given" is the home bank — the same bank recall defaults to.
-    let cwd = match (bank.is_some(), cwd) {
-        (_, Some(cwd)) => Some(PathBuf::from(cwd)),
-        (true, None) => None,
-        (false, None) => Some(ctx.home.clone()),
-    };
+    let cwd = cwd.or_else(|| bank.is_none().then(|| ctx.home.clone()));
 
     let outcome = crate::verbs::remember::remember(
         &ctx.data_root,
@@ -802,6 +798,19 @@ fn optional_str<'a>(params: &'a Value, key: &str) -> Result<Option<&'a str>, Mcp
     }
 }
 
+/// The optional `cwd`, absolute and in its component form. A bank is keyed by
+/// the path's bytes, so `~`, a relative path, a trailing `/` or a `.` would
+/// commit into — or recall from — a bank no session ever reads.
+fn optional_cwd(params: &Value) -> Result<Option<PathBuf>, McpError> {
+    match optional_str(params, "cwd")?.map(Path::new) {
+        Some(cwd) if !cwd.is_absolute() => Err(McpError::InvalidParams(format!(
+            "cwd must be an absolute path, got `{}`",
+            cwd.display()
+        ))),
+        cwd => Ok(cwd.map(|cwd| cwd.components().collect())),
+    }
+}
+
 /// One `{"type": …, "description": …}` schema property — the shape every
 /// string parameter takes.
 fn property(kind: &str, description: &str) -> Value {
@@ -830,7 +839,7 @@ fn recall_schema() -> Value {
                 property(
                     "string",
                     concat!(
-                        "The working directory to recall for; its bank and its ",
+                        "The absolute working directory to recall for; its bank and its ",
                         "ancestors' banks answer. Default: the home directory.",
                     ),
                 ),
@@ -866,7 +875,7 @@ fn remember_schema() -> Value {
                     property(
                         "string",
                         concat!(
-                            "The working directory whose bank receives the ",
+                            "The absolute working directory whose bank receives the ",
                             "memory. Exclusive with bank.",
                         ),
                     ),
@@ -1259,6 +1268,10 @@ mod tests {
         assert!(answer.note.contains(&format!("cwd={}", cwd.display())));
         assert!(answer.note.contains(" budget=9000 "), "{}", answer.note);
         assert!(!answer.note.contains(SEED_BODY), "{}", answer.note);
+        // A trailing separator or a `.` names the same directory, so the same bank.
+        let spelled = format!("{}/./", cwd.display());
+        let spelled = recall(&ctx, &Value::object([("cwd", Value::string(spelled))]));
+        assert_eq!(spelled.expect("recall").result, expected);
 
         // No cwd at all recalls for the home directory.
         let defaulted = recall(&ctx, &Value::Null).expect("recall");
@@ -1373,6 +1386,18 @@ mod tests {
             recall(&ctx, &Value::object([("cwd", Value::Number(5.0))])),
             Err(McpError::InvalidParams(message)) if message.contains("cwd")
         ));
+        // A cwd that is not absolute keys a bank no session recalls.
+        for cwd in ["~", "~/proj", ".", "proj"] {
+            let cwd = ("cwd", Value::string(cwd));
+            assert!(matches!(
+                recall(&ctx, &Value::object([cwd.clone()])),
+                Err(McpError::InvalidParams(message)) if message.contains("absolute")
+            ));
+            assert!(matches!(
+                remember(&ctx, &Value::object([body.clone(), cwd])),
+                Err(McpError::InvalidParams(message)) if message.contains("absolute")
+            ));
+        }
         // Arguments that are not an object at all.
         assert!(matches!(
             recall(&ctx, &Value::array([Value::string("cwd")])),
