@@ -31,7 +31,15 @@ dir=$(cd "$(dirname "$log")" 2>/dev/null && pwd -P)
 tmp=$(cd "${TMPDIR:-/tmp}" && pwd -P)
 case "$dir/" in "$cwd/"* | "$tmp/"*) ;; *) echo "shift-test: --log $log is not under $cwd or \$TMPDIR" >&2; exit 2 ;; esac
 log="$dir/$(basename "$log")"
-run "$@" >"$log" 2>&1
+# This sh opens the log outside both sandboxes: a link there would write wherever it points,
+# so a symlink or special file is refused, and the file is made afresh, never reopened.
+[ ! -L "$log" ] && { [ ! -e "$log" ] || { [ -f "$log" ] && rm "$log"; }; } || {
+  echo "shift-test: --log $log is a symlink or not a regular file" >&2
+  exit 2
+}
+set -C
+exec 3>"$log"
+run "$@" >&3 2>&1
 rc=$?
 cat "$log"
 exit $rc
