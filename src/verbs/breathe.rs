@@ -1159,8 +1159,7 @@ fn write_pass(path: &Path, mut entries: Vec<(String, Value)>) -> Result<()> {
 /// day, and the ids of the passes still in flight. An open pass younger than
 /// its kind's timeout is in flight, and refuses a second pass of `kind`
 /// (`pass in flight`); an older one is dead — it costs `dead_cost_usd` and,
-/// when `write` and of `kind`, is closed as `dead: true`: only its own kind's
-/// runner stops its session. The caller holds the lock to write.
+/// when `write`, is closed as `dead: true`. The caller holds the lock to write.
 fn ledger(
     data_root: &Path,
     now: Timestamp,
@@ -1200,7 +1199,7 @@ fn ledger(
                 continue;
             }
             cost = Some(dead_cost_usd);
-            if write && of == kind {
+            if write {
                 set(&mut entries, "cost_usd", Value::Number(dead_cost_usd));
                 set(&mut entries, "dead", Value::Bool(true));
                 set(&mut entries, "ended", Value::string(now.iso8601()));
@@ -1386,7 +1385,9 @@ pub struct Closing {
 }
 
 /// Close pass `id`: its counters and `ended`, `last_read` (and any cursor) on
-/// the sources it listed, and a `breath` event.
+/// the sources it listed, and a `breath` event. A pass marked dead still
+/// closes — an overrunning session's real cost and counters replace the
+/// dead charge — but a pass closed by its session closes once.
 pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event> {
     if !closing.cost_usd.is_finite() || closing.cost_usd < 0.0 {
         return Err(Error::invalid("cost", closing.cost_usd.to_string()));
@@ -1400,7 +1401,9 @@ pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event>
                 .find(|(name, _)| name == key)
                 .map(|(_, value)| value.clone())
         };
-        if let Some(ended) = field("ended").as_ref().and_then(Value::as_str) {
+        if let Some(ended) = field("ended").as_ref().and_then(Value::as_str)
+            && field("dead").as_ref().and_then(Value::as_bool) != Some(true)
+        {
             return Err(Error::refused(format!("pass {id} closed at {ended}")));
         }
         let kind = field("kind")
@@ -1443,6 +1446,7 @@ pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event>
                 }
             }
         }
+        entries.retain(|(name, _)| name != "dead");
         set(&mut entries, "cost_usd", Value::Number(closing.cost_usd));
         set(&mut entries, "dropped", count(closing.dropped));
         set(&mut entries, "ended", Value::string(ctx.now.iso8601()));

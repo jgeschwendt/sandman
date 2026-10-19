@@ -17,22 +17,34 @@ use std::path::{Path, PathBuf};
 /// A worktree nested in another checkout of the same repo (Claude Code's
 /// `.claude/worktrees/<name>`) folds into that checkout's project — the outer
 /// worktree's parent, or a primary checkout whose `.git` is `<common>`. A
-/// `cwd` that no longer exists, below a directory holding a linked worktree,
-/// was one of them and folds into that sibling's project. Otherwise a `.git`
-/// directory (a primary checkout), a `.git` file naming anything else (a
-/// submodule), or no `.git` at all leaves `cwd` as it is.
+/// `cwd` that no longer exists, below a directory whose linked worktrees all
+/// belong to one repo, was one of them and folds into that repo's project;
+/// beside worktrees of two repos it stays as it is. That leaves a deleted
+/// plain directory beside one repo's worktrees folded in, and a removed
+/// `.claude/worktrees/<name>` with no sibling keyed as itself: nothing on disk
+/// tells either from a vanished worktree. Otherwise a `.git` directory (a
+/// primary checkout), a `.git` file naming anything else (a submodule), or no
+/// `.git` at all leaves `cwd` as it is.
+///
+/// `cwd` is taken in its component form first — a trailing `/` or a `.`
+/// names the same directory, and a bank key is the path's bytes — so the CLI,
+/// the hooks and the MCP server key one directory as one bank.
 #[must_use]
 pub fn root(cwd: &Path) -> PathBuf {
+    let cwd = &cwd.components().collect::<PathBuf>();
     if !cwd.exists()
         && let Some(live) = cwd.ancestors().find(|dir| dir.exists())
-        && let Some(sibling) = fs::read_dir(live)
+    {
+        let mut worktrees = fs::read_dir(live)
             .into_iter()
             .flatten()
             .flatten()
-            .map(|entry| entry.path())
-            .find(|path| common(path).is_some())
-    {
-        return root(&sibling);
+            .filter_map(|entry| Some((common(&entry.path())?, entry.path())));
+        if let Some((repo, sibling)) = worktrees.next()
+            && worktrees.all(|(other, _)| other == repo)
+        {
+            return root(&sibling);
+        }
     }
     let mut project = None;
     for dir in cwd.ancestors() {
@@ -50,7 +62,7 @@ pub fn root(cwd: &Path) -> PathBuf {
             _ => {}
         }
     }
-    project.map_or_else(|| cwd.to_path_buf(), |(dir, _)| dir.to_path_buf())
+    project.map_or_else(|| cwd.clone(), |(dir, _)| dir.to_path_buf())
 }
 
 /// The common git dir of the linked worktree at `dir` — its `.git` a file
@@ -78,6 +90,10 @@ mod tests {
         let dir = temp.path().join("plain");
         fs::create_dir_all(&dir).expect("dir");
         assert_eq!(root(&dir), dir);
+        // A trailing separator or a `.` names the same directory, so the same bank.
+        // `PathBuf`'s `==` compares components; a bank key is the bytes.
+        let spelled = root(format!("{}/./", dir.display()).as_ref());
+        assert_eq!(spelled.as_os_str(), dir.as_os_str());
     }
 
     #[test]
@@ -154,6 +170,15 @@ mod tests {
         )
         .expect(".git file");
         assert_eq!(root(&parent.join("feat").join("src")), parent);
+        // Beside worktrees of two repos, a vanished plain directory was neither.
+        fs::create_dir_all(parent.join("other")).expect("other");
+        fs::write(
+            parent.join("other").join(".git"),
+            "gitdir: /elsewhere/repo/.git/worktrees/other\n",
+        )
+        .expect(".git file");
+        let scratch = parent.join("scratch");
+        assert_eq!(root(&scratch), scratch);
     }
 
     #[test]

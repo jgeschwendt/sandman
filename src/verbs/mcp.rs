@@ -798,16 +798,16 @@ fn optional_str<'a>(params: &'a Value, key: &str) -> Result<Option<&'a str>, Mcp
     }
 }
 
-/// The optional `cwd`, absolute and in its component form. A bank is keyed by
-/// the path's bytes, so `~`, a relative path, a trailing `/` or a `.` would
-/// commit into — or recall from — a bank no session ever reads.
+/// The optional `cwd`, absolute. A bank is keyed by the path's bytes, so `~`
+/// or a relative path would commit into — or recall from — a bank no session
+/// ever reads; a trailing `/` or a `.` is [`crate::project::root`]'s to drop.
 fn optional_cwd(params: &Value) -> Result<Option<PathBuf>, McpError> {
-    match optional_str(params, "cwd")?.map(Path::new) {
+    match optional_str(params, "cwd")?.map(PathBuf::from) {
         Some(cwd) if !cwd.is_absolute() => Err(McpError::InvalidParams(format!(
             "cwd must be an absolute path, got `{}`",
             cwd.display()
         ))),
-        cwd => Ok(cwd.map(|cwd| cwd.components().collect())),
+        cwd => Ok(cwd),
     }
 }
 
