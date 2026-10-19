@@ -261,7 +261,7 @@ fn rotation(ctx: &shift::Context, fields: &[(String, String)]) -> Response {
         .into_iter()
         .map(|(label, _)| label)
         .filter(|label| !on.iter().any(|(_, repo)| repo == label));
-    seen(shift::set_off(&ctx.data_root, off).and_then(|line| {
+    seen(shift::set_off(ctx, off).and_then(|line| {
         trail::append(
             &ctx.data_root,
             trail::Draft {

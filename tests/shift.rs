@@ -955,6 +955,69 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
 }
 
 #[test]
+fn overlapping_handoffs_finalize_once() {
+    let machine = Machine::prompted("handoff-race");
+    machine.repo("jgeschwendt/alpha");
+    let shift = "s-20261016T1600Z";
+    machine.ok(FRIDAY, &["shift", "brief"]);
+    let attach = ["shift", "attach", "--shift", shift, "--bg-id", "b1"];
+    machine.ok(FRIDAY, &attach);
+    machine.report(shift, REPORT);
+    machine.write(format!(".sandman/shifts/{shift}/handoff.md"), "# Done\n");
+    // both wait on a held lock, then race for it
+    let lock = machine.write(".sandman/.commit.lock", "");
+    let handed = std::thread::scope(|scope| {
+        let runs: Vec<_> = [&["--from-session"][..], &["--abandoned", "--reason", "x"]]
+            .map(|source| {
+                let machine = &machine;
+                scope.spawn(move || {
+                    let args = [&["shift", "handoff", "--shift", shift][..], source].concat();
+                    code(&machine.run(FRIDAY, &args, &[]))
+                })
+            })
+            .into_iter()
+            .collect();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        fs::remove_file(&lock).expect("release");
+        runs.into_iter()
+            .map(|run| run.join().expect("handoff"))
+            .filter(|code| *code == 0)
+            .count()
+    });
+    assert_eq!(handed, 1);
+    let events = machine.trail();
+    let handoffs = events.iter().filter(|line| line.contains("shift.handoff"));
+    assert_eq!(handoffs.count(), 1);
+    let meta = machine.read(&format!(".sandman/shifts/{shift}/meta.json"));
+    assert!(meta.contains(r#""bg_id":"b1""#), "{meta}");
+}
+
+#[test]
+fn a_handoff_that_died_before_the_release_is_released_by_the_next() {
+    let machine = Machine::prompted("handoff-crash");
+    machine.repo("jgeschwendt/alpha");
+    let shift = "s-20261016T1600Z";
+    machine.ok(FRIDAY, &["shift", "brief"]);
+    machine.report(shift, REPORT);
+    machine.write(
+        format!(".sandman/shifts/{shift}/meta.json"),
+        &format!(r#"{{"ended":"2026-10-16T16:30:00Z","shift":"{shift}"}}"#),
+    );
+    let args = ["shift", "handoff", "--shift", shift, "--abandoned"];
+    let output = machine.run(FRIDAY, &args, &[]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("released current.json"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "status"]).lines().next(),
+        Some("no shift open")
+    );
+}
+
+#[test]
 fn a_missing_template_fails_with_its_path() {
     let machine = Machine::prompted("template");
     machine.repo("jgeschwendt/alpha");
@@ -1951,6 +2014,50 @@ fn cloud_shifts_lock_through_the_state_remote() {
 }
 
 #[test]
+fn a_cloud_handoff_whose_push_failed_pushes_on_the_retry() {
+    let machine = Machine::prompted("cloud-retry");
+    let home = &machine.home;
+    git(
+        home,
+        &["init", "-q", "--bare", "--initial-branch=main", "state.git"],
+    )
+    .expect("bare");
+    git(home, &["clone", "-q", "state.git", ".sandman"]).expect("clone");
+    let shift = "s-20261016T1600Z";
+    machine.meta(shift, "jgeschwendt/alpha", FRIDAY);
+    machine.report(shift, REPORT);
+    machine.write(format!(".sandman/shifts/{shift}/handoff.md"), "# Done\n");
+    machine.write(
+        ".sandman/shifts/current.json",
+        &format!(r#"{{"shift":"{shift}"}}"#),
+    );
+    for args in [
+        &["add", "-A", "."][..],
+        &["commit", "-qm", "open"],
+        &["push", "-q", "origin", "HEAD"],
+    ] {
+        git(&machine.root(), args).expect("seed");
+    }
+    let hook = machine.script("state.git/hooks/pre-receive", "exit 1\n");
+    let args = [
+        "shift",
+        "handoff",
+        "--shift",
+        shift,
+        "--from-session",
+        "--cloud",
+    ];
+    let handoff = || code(&machine.run(FRIDAY, &args, &GIT_ENV));
+    assert_eq!(handoff(), 1, "the push is refused");
+    fs::remove_file(hook).expect("rm");
+    assert_eq!(handoff(), 0, "the retry pushes the handoff already made");
+    let show = |path: &str| git(&home.join("state.git"), &["show", &format!("HEAD:{path}")]);
+    assert!(show("shifts/current.json").is_err());
+    let meta = show(&format!("shifts/{shift}/meta.json")).expect("meta");
+    assert!(meta.contains(r#""ended":"#), "{meta}");
+}
+
+#[test]
 fn a_shift_file_that_cannot_be_read_is_an_error_and_odd_values_still_show() {
     let machine = Machine::prompted("unreadable");
     let current = ".sandman/shifts/current.json";
@@ -2084,6 +2191,21 @@ fn the_owner_switches_repos_off_the_rotation_and_pick_passes_them_over() {
     mode(0o755);
     fs::create_dir(machine.home.join(file)).expect("a directory in its place");
     assert_eq!(code(&machine.run(FRIDAY, &["shift", "rotation"], &[])), 1);
+}
+
+#[test]
+fn a_repo_switched_off_stays_off_while_its_trunk_is_missing() {
+    let machine = Machine::prompted("rotation-gone");
+    machine.repo("jgeschwendt/alpha");
+    let file = ".sandman/shifts/rotation.toml";
+    machine.write(file, "off = [\"jgeschwendt/gone\"]\n");
+    for (flag, off) in [
+        ("--off", "\"jgeschwendt/alpha\", \"jgeschwendt/gone\""),
+        ("--on", "\"jgeschwendt/gone\""),
+    ] {
+        machine.ok(FRIDAY, &["shift", "rotation", flag, "jgeschwendt/alpha"]);
+        assert_eq!(machine.read(file), format!("off = [{off}]\n"));
+    }
 }
 
 /// A trunk at `<code>/jgeschwendt/<name>/main` cloned from a bare remote
