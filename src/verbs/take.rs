@@ -89,7 +89,16 @@ pub fn take(
     let (year, month, day, ..) = now.parts();
     let archive_dir = paths::archive_day_dir(data_root, year, month, day);
     fs::create_dir_all(&archive_dir).map_err(|error| Error::io(&archive_dir, error))?;
-    let name = archive_name(claude_root, &source, now);
+    // Names resolve to the second and a rename replaces: a second take of the
+    // session within it takes `<HHMMSS>-<n>-…` instead of the first archive.
+    let first = archive_name(claude_root, &source, now);
+    let mut name = first.clone();
+    for n in 2.. {
+        if !archive_dir.join(&name).exists() {
+            break;
+        }
+        name = first.replacen('-', &format!("-{n}-"), 1);
+    }
     let archived = archive_dir.join(&name);
     rename(&source, &archived)?;
 
@@ -740,6 +749,29 @@ mod tests {
         let third = take(&fixture.root, &fixture.claude, SID, false).expect("third take");
         let pointer = fs::read_to_string(&third.pointer).expect("read pointer");
         assert!(pointer.contains(&format!(r#""archived":"{}""#, third.archived.display())));
+    }
+
+    #[test]
+    fn a_take_within_an_archives_second_never_replaces_it() {
+        let fixture = Fixture::new("take-same-second");
+        let source = fixture.seed(&transcript_lines());
+        let now = Timestamp::now().expect("now").unix_seconds();
+        let taken: Vec<PathBuf> = (now..now + 3)
+            .map(|second| {
+                let at = Timestamp::from_unix_seconds(second);
+                let (year, month, day, ..) = at.parts();
+                let day_dir = crate::paths::archive_day_dir(&fixture.root, year, month, day);
+                fs::create_dir_all(&day_dir).expect("day dir");
+                let path = day_dir.join(archive_name(&fixture.claude, &source, at));
+                fs::write(&path, "earlier\n").expect("earlier archive");
+                path
+            })
+            .collect();
+        let outcome = take(&fixture.root, &fixture.claude, SID, true).expect("take");
+        assert!(outcome.archived.is_file());
+        for path in taken {
+            assert_eq!(fs::read_to_string(path).expect("earlier"), "earlier\n");
+        }
     }
 
     #[test]
