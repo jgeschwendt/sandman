@@ -968,7 +968,9 @@ fn apply(data_root: &Path, key: &str, bank: &Bank, now: Timestamp, op: &Op) -> R
             // it dates from the earliest of them rather than from today. That
             // member is superseded rather than archived outright: `replaces`
             // is the one path that carries `created:` forward, and it archives
-            // the file it replaces in the same step.
+            // the file it replaces in the same step. The commit's index check
+            // runs first, so a sibling it would refuse archives nothing.
+            bank.render_index_without(None)?;
             let origin = origin(bank, files);
             for file in files.iter().filter(|file| *file != &origin) {
                 archive_memory(data_root, key, file)?;
@@ -1907,6 +1909,30 @@ is wrong on sight — retitle it."
             names.len()
         );
         assert!(index.contains("- [the one claim](project_the_one_claim.md) — one line\n"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_merge_into_a_bank_the_index_cannot_read_archives_nothing() {
+        let scratch = Scratch::new("reflect-merge-unindexable");
+        let files = make_due(&scratch);
+        fs::write(
+            scratch.bank().dir().join("user_hand.md"),
+            "---\nname: by hand\ntype: user\n---\n\nbody\n",
+        )
+        .expect("hand-written");
+        let reply = format!(
+            "{{\"ops\":[{{\"op\":\"merge\",\"files\":[\"{}\",\"{}\"],\"type\":\"reference\",\"name\":\"the merged claim\",\"description\":\"one line\",\"body\":\"draft\"}}]}}",
+            files[0], files[1]
+        );
+        let (options, _) = scratch.replies(&[&reply, r#"{"body":"both claims, kept"}"#], "");
+
+        assert!(reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).is_err());
+        let names = scratch.bank().memory_filenames().expect("list");
+        assert!(
+            names.contains(&files[0]) && names.contains(&files[1]),
+            "{names:?}"
+        );
     }
 
     #[cfg(unix)]
