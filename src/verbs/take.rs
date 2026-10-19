@@ -125,8 +125,12 @@ pub fn take(
         .filter(|path| path.is_file());
     let (named, whole) = match earlier {
         Some(earlier) => {
-            atomic::append_line(&earlier, text.trim_end_matches('\n'))?;
-            let whole = fs::read(&earlier).map_err(|error| Error::io(&earlier, error))?;
+            let mut whole = fs::read(&earlier).map_err(|error| Error::io(&earlier, error))?;
+            // An archive cut short of its final newline would fuse two lines.
+            let gap = if whole.ends_with(b"\n") { "" } else { "\n" };
+            let line = format!("{gap}{}", text.trim_end_matches('\n'));
+            atomic::append_line(&earlier, &line)?;
+            whole.extend_from_slice(format!("{line}\n").as_bytes());
             (earlier, String::from_utf8_lossy(&whole).into_owned())
         }
         None => (archived.clone(), text.into_owned()),
@@ -738,6 +742,16 @@ mod tests {
         assert!(second.archived.is_file());
         let joined = fs::read_to_string(&first).expect("first archive");
         assert!(joined.ends_with("\"stub\"}}\n"), "{joined}");
+        // An archive that lost its final newline is joined on a line of its own.
+        fs::write(&first, joined.trim_end()).expect("cut the newline");
+        fixture.seed(&[r#"{"type":"user","message":{"content":"again"}}"#]);
+        take(&fixture.root, &fixture.claude, SID, false).expect("retake again");
+        let joined = fs::read_to_string(&first).expect("first archive");
+        assert!(
+            joined
+                .ends_with("\"stub\"}}\n{\"type\":\"user\",\"message\":{\"content\":\"again\"}}\n"),
+            "{joined}"
+        );
         let pointer = fs::read_to_string(&second.pointer).expect("read pointer");
         assert!(pointer.contains(&format!(r#""archived":"{}""#, first.display())));
         assert!(pointer.contains(r#""title":"port the memory verbs""#));

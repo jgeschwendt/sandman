@@ -653,7 +653,7 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
 
     // Each mind's transcript was moved out of the projects tree and filed
     // under the claude project the dreamt session ran in.
-    let kept = machine.root().join(".dream").join(PROJECT);
+    let kept = machine.root().join(".dream").join(PROJECT).join(SID);
     let names: Vec<PathBuf> = fs::read_dir(&kept)
         .expect("kept transcripts")
         .map(|entry| entry.expect("entry").path())

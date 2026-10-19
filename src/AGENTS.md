@@ -47,7 +47,7 @@ and read the environment no more than any other verb does: the stdio loop resolv
 lists what changed and why.
 
 A dream mind's own transcript is kept at
-`<root>/.dream/<claude project>/<session-id>.jsonl` — the run is pinned to a
+`<root>/.dream/<claude project>/<session-id>/<mind session-id>.jsonl` — the run is pinned to a
 generated `--session-id` and to `<root>/.dream` as its working directory, and
 the file Claude Code wrote is moved there on every outcome, answer or failure
 or timeout kill. The claude project is the one the dreamt session ran in, read
