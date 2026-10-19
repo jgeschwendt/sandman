@@ -253,24 +253,30 @@ fn answer(server: &Server, ctx: &shift::Context, fields: &[(String, String)]) ->
     ))
 }
 
-/// Leave off every rotation repo the form does not check, then append the
-/// owner's `guard`; names outside the rotation are ignored.
+/// Leave off every rotation repo the form does not check — an off one whose
+/// trunk is not found included — then append the owner's `guard`; names
+/// outside the rotation are ignored.
 fn rotation(ctx: &shift::Context, fields: &[(String, String)]) -> Response {
     let on: Vec<&(String, String)> = fields.iter().filter(|(key, _)| key == "on").collect();
-    let off = shift::trunks(ctx)
-        .into_iter()
-        .map(|(label, _)| label)
-        .filter(|label| !on.iter().any(|(_, repo)| repo == label));
-    seen(shift::set_off(ctx, off).and_then(|line| {
-        trail::append(
-            &ctx.data_root,
-            trail::Draft {
-                kind: "guard".to_owned(),
-                rationale: Some(format!("owner set the rotation: {line}")),
-                ..trail::Draft::default()
-            },
-        )
-    }))
+    let off = |rows: Vec<shift::Rotating>| {
+        rows.into_iter()
+            .map(|row| row.label)
+            .filter(|label| !on.iter().any(|(_, repo)| repo == label))
+    };
+    seen(
+        shift::rotation(ctx)
+            .and_then(|rows| shift::set_off(ctx, off(rows)))
+            .and_then(|line| {
+                trail::append(
+                    &ctx.data_root,
+                    trail::Draft {
+                        kind: "guard".to_owned(),
+                        rationale: Some(format!("owner set the rotation: {line}")),
+                        ..trail::Draft::default()
+                    },
+                )
+            }),
+    )
 }
 
 /// `303` back to `/` once a write went through, `500` with why it did not.

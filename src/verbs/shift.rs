@@ -4,9 +4,9 @@
 //! The shift engine's state is files under the data root: `shifts/<id>/`
 //! holds a shift's `brief.md`, `handoff.md` and `meta.json`; `shifts/current.json`
 //! names the open shift and is absent between shifts. Every write holds
-//! `.commit.lock` and goes tmp → rename; the trail events (`shift.start`,
-//! `shift.handoff`) are appended after the lock is released, through the
-//! trail's own append.
+//! `.commit.lock` and goes tmp → rename; `shift.start` is appended after the
+//! lock is released, through the trail's own append, and `shift.handoff`
+//! under it, before `current.json` is released.
 //!
 //! Nothing here calls a model. `brief` composes the dynamic prompt from
 //! `prompts/shift.md` — `prompts/sabbath.md` on Saturday — by filling its
@@ -679,7 +679,7 @@ pub(crate) struct Meta {
 }
 
 /// Read a shift's `meta.json`.
-pub(crate) fn read_meta(data_root: &Path, shift: &str) -> Result<Meta> {
+fn read_meta(data_root: &Path, shift: &str) -> Result<Meta> {
     let path = paths::shift_dir(data_root, shift).join("meta.json");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
@@ -1067,6 +1067,8 @@ fn off(data_root: &Path) -> Result<Vec<String>> {
 /// One repo of the rotation, as the owner sees it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rotating {
+    /// Whether its trunk is found now — an off entry may outlive it.
+    pub found: bool,
     /// Whether the week's targets or his answer on a proposal froze it.
     pub frozen: bool,
     /// `owner/repo`.
@@ -1077,31 +1079,28 @@ pub struct Rotating {
     pub on: bool,
 }
 
-/// Every rotation trunk, by name.
+/// Every rotation trunk and every repo the off list names, by name.
 pub fn rotation(ctx: &Context) -> Result<Vec<Rotating>> {
     let (off, last, frozen) = (off(&ctx.data_root)?, last_shifted(ctx), frozen(ctx));
-    Ok(trunks(ctx)
+    let found: BTreeSet<String> = trunks(ctx).into_iter().map(|(label, _)| label).collect();
+    let labels: BTreeSet<&String> = found.iter().chain(&off).collect();
+    Ok(labels
         .into_iter()
-        .map(|(label, _)| Rotating {
-            frozen: frozen(&label),
-            last: last.get(&label).copied(),
-            on: !off.contains(&label),
-            label,
+        .map(|label| Rotating {
+            found: found.contains(label),
+            frozen: frozen(label),
+            last: last.get(label).copied(),
+            on: !off.contains(label),
+            label: label.clone(),
         })
         .collect())
 }
 
-/// Write `shifts/rotation.toml` with `off`, the rotation trunks to leave off,
-/// plus the entries already there for repos not found now — sorted and
-/// deduped — and hand back its line.
+/// Write `shifts/rotation.toml` with `off` sorted and deduped, and hand back
+/// its line.
 pub fn set_off(ctx: &Context, off: impl IntoIterator<Item = String>) -> Result<String> {
-    let found = trunks(ctx);
+    let off: BTreeSet<String> = off.into_iter().collect();
     let _lock = CommitLock::acquire(&ctx.data_root)?;
-    let off: BTreeSet<String> = self::off(&ctx.data_root)?
-        .into_iter()
-        .filter(|label| !found.iter().any(|(trunk, _)| trunk == label))
-        .chain(off)
-        .collect();
     let line = toml::Document {
         root: vec![(
             "off".to_owned(),
@@ -2191,7 +2190,10 @@ pub enum Source {
 
 /// Finalize `shift`: its `handoff.md`, `ended` in `meta.json`, `current.json`
 /// released when it names this shift, and a `shift.handoff` event carrying
-/// `cost_usd`, the session's own total when it read one.
+/// `cost_usd`, the session's own total when it read one — all under one
+/// hold of `.commit.lock`. An ended shift is refused; when `current.json`
+/// still names it, the handoff died first, so the event goes on the trail
+/// from `meta.json` unless one is there, and the lock is released.
 ///
 /// A handoff over [`HANDOFF_CHARS`] is refused unless `truncate`, which keeps
 /// the head and notes the cut. An abandoned shift is always truncated: the
@@ -2204,13 +2206,29 @@ pub fn handoff(
     cost_usd: Option<f64>,
 ) -> Result<trail::Event> {
     // held from the read on, so an overlapping handoff reads this one's `ended`
-    let lock = CommitLock::acquire(&ctx.data_root)?;
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
     let meta = read_meta(&ctx.data_root, shift)?;
     let current = read_current(&ctx.data_root)?
         .filter(|value| value.get("shift").and_then(Value::as_str) == Some(shift));
     let current_path = paths::shift_current(&ctx.data_root);
+    let dir = paths::shift_dir(&ctx.data_root, shift);
     if let Some(ended) = &meta.ended {
-        // a handoff that died between meta.json and the release left the lock
+        // a handoff that died between meta.json and the release left the lock,
+        // and maybe no event: append it from what meta.json kept
+        if current.is_some()
+            && !trail::read(&ctx.data_root, None)?.iter().any(|entry| {
+                let draft = &entry.event.draft;
+                draft.kind == "shift.handoff" && draft.shift.as_deref() == Some(shift)
+            })
+        {
+            handed(
+                &ctx.data_root,
+                &meta,
+                &fs::read_to_string(dir.join("handoff.md")).unwrap_or_default(),
+                meta.value.get("abandoned").and_then(Value::as_bool) == Some(true),
+                meta.value.get("cost_usd").and_then(Value::as_number),
+            )?;
+        }
         let released = (current.is_some() && fs::remove_file(&current_path).is_ok())
             .then_some("; released current.json");
         return Err(Error::refused(format!(
@@ -2218,7 +2236,6 @@ pub fn handoff(
             released.unwrap_or_default()
         )));
     }
-    let dir = paths::shift_dir(&ctx.data_root, shift);
     let abandoned = matches!(source, Source::Abandoned(_));
     let report = dir.join("report.md");
     if let Some(why) = fs::read_to_string(&report)
@@ -2311,31 +2328,44 @@ pub fn handoff(
         &dir.join("meta.json"),
         &format!("{}\n", Value::Object(entries).render()),
     )?;
+    // the event before the release, so a crash between them leaves the lock
+    // for the next handoff to finish
+    let event = handed(&ctx.data_root, &meta, &text, abandoned, cost_usd)?;
     if current.is_some() {
         fs::remove_file(&current_path).map_err(|source| Error::io(&current_path, source))?;
     }
-    drop(lock);
+    Ok(event)
+}
+
+/// Append `meta`'s `shift.handoff` — `text`'s first line, `cost_usd`, an
+/// `abandoned` ref — for a caller holding `.commit.lock`.
+fn handed(
+    data_root: &Path,
+    meta: &Meta,
+    text: &str,
+    abandoned: bool,
+    cost_usd: Option<f64>,
+) -> Result<trail::Event> {
     let first = text
         .lines()
         .map(|line| line.trim_start_matches('#').trim())
         .find(|line| !line.is_empty())
         .unwrap_or("handoff");
+    let path = paths::shift_dir(data_root, &meta.shift).join("handoff.md");
     let mut refs = vec![format!("handoff:{}", path.display())];
     if abandoned {
         refs.push("abandoned".to_owned());
     }
-    trail::append(
-        &ctx.data_root,
-        trail::Draft {
-            cost_usd,
-            kind: "shift.handoff".to_owned(),
-            rationale: Some(first.to_owned()),
-            refs,
-            repo: meta.repo,
-            shift: Some(shift.to_owned()),
-            ..trail::Draft::default()
-        },
-    )
+    let draft = trail::Draft {
+        cost_usd: cost_usd.filter(|cost| *cost >= 0.0),
+        kind: "shift.handoff".to_owned(),
+        rationale: Some(first.to_owned()),
+        refs,
+        repo: meta.repo.clone(),
+        shift: Some(meta.shift.clone()),
+        ..trail::Draft::default()
+    };
+    trail::append_locked(data_root, trail::Event::new(draft, Timestamp::now()?), true)
 }
 
 /// `text` cut to [`HANDOFF_CHARS`]: its head, then a note of what went.

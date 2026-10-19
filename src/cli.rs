@@ -150,7 +150,8 @@ usage: sandman <verb> [args]
       once the runner has removed it and taken its transcript; close requires --cost (0
       journals a cost zero note), records its counters,
       advances last_read (and each --cursor) on the sources it listed, and
-      appends a breath event.
+      appends a breath event; it lands on a pass marked dead, its --cost
+      replacing the charge, and refuses one already closed.
       reweight moves each weight +0.1 per breath whose adopted: stamp is
       after the last reweight (cap 2.0) and -0.1 after 30 days of silence (floor 0.2),
       rewrites sources.toml (every rewrite drops its comments) and appends a
@@ -163,7 +164,7 @@ usage: sandman <verb> [args]
       10; --now is documentation, both forms behave the same. Models move with
       $SANDMAN_MIND_SONNET / _OPUS / _FABLE, the binary with
       $SANDMAN_CLAUDE_BIN. Each mind's own transcript is kept at
-      <root>/.dream/<claude project>/<session-id>.jsonl.
+      <root>/.dream/<claude project>/<session-id>/<mind session-id>.jsonl.
 
   reflect [--day <yyyy-mm-dd>]
       The 24 h pass: the voyage entry for the day that ended (one
@@ -223,8 +224,8 @@ usage: sandman <verb> [args]
       ($SANDMAN_DOCKET_BIN, else ~/.local/bin/docket), appends a decision
       event and redirects to /; 404 for an unknown key, 502 when thread
       fails. The Rotation form checks every rotation trunk not off; POST
-      /rotation (on, repeated) leaves off the rest, keeping off a repo
-      whose trunk is not found now, writes
+      /rotation (on, repeated) leaves off the rest — an off repo whose
+      trunk is not found now is listed, unchecked — writes
       <root>/shifts/rotation.toml, appends a guard event and redirects to /. A Host other than the bound address, or a foreign Origin, is
       403. --requests answers N requests, then exits.
 
@@ -281,9 +282,9 @@ usage: sandman <verb> [args]
       ~/.claude.json) — exit 1 listing them when no other is left, and brief
       exits 3; --untrusted lists those trunks; --shift prints the target a
       shift was briefed on. rotation prints every trunk · on/off · last
-      shifted · frozen, after --off/--on (repeatable; a repo outside the
-      rotation exits 2) rewrite the off list, keeping off a repo not found
-      now. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
+      shifted · frozen, and each off repo whose trunk is not found as
+      <repo> · off · not found, after --off/--on (repeatable; a repo in
+      neither exits 2) rewrite the off list. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
       York hours HH-HH (default 21-07) — and a night carries the theme of the
       day it began on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
@@ -301,7 +302,8 @@ usage: sandman <verb> [args]
       shift.handoff (--cost, the session's own total, as its cost_usd; 0
       journals a cost zero note), copies current.json's bg_id and session_id
       into meta.json and releases current.json; a shift already handed off
-      exits 1 (releasing a current.json that still names it), and so does a
+      exits 1 (releasing a current.json that still names it, after appending
+      the shift.handoff it lacks from meta.json), and so does a
       handoff over 2,000 characters
       unless --truncate keeps its head and notes the cut (--abandoned always
       truncates); every handoff but --abandoned refuses (exit 1) without a
@@ -2490,9 +2492,8 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
                 &format!("handoff shift={id} error: {error}"),
             );
             // a handoff already made whose push failed: push it now
-            if parsed.set("--cloud")
-                && shift::read_meta(&ctx.data_root, &id).is_ok_and(|meta| meta.ended.is_some())
-            {
+            let made = format!("shift {id} was handed off at ");
+            if parsed.set("--cloud") && error.to_string().starts_with(&made) {
                 eprintln!("sandman: {error}; pushing it");
                 let message = format!("shift({id}): handoff");
                 return Ok(shift::sync(&ctx.data_root, &message)?);
@@ -2573,8 +2574,10 @@ fn shift_rotation(args: &[String]) -> Result<(), Failure> {
             "{} · {} · {}{}",
             row.label,
             if row.on { "on" } else { "off" },
-            row.last
-                .map_or_else(|| "never shifted".to_owned(), Timestamp::iso8601),
+            match row.last {
+                _ if !row.found => "not found".to_owned(),
+                last => last.map_or_else(|| "never shifted".to_owned(), Timestamp::iso8601),
+            },
             if row.frozen { " · frozen" } else { "" }
         );
     }
