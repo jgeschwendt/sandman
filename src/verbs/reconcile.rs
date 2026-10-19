@@ -96,7 +96,7 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
     let set: BTreeSet<String> = revoked.iter().cloned().collect();
     let shift = trail::is_shift_id(target).then_some(target);
 
-    let event = Event::new(
+    let mut event = Event::new(
         Draft {
             kind: "reconcile".to_owned(),
             parent: shift.is_none().then(|| target.to_owned()),
@@ -107,7 +107,16 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
     );
     let branch = format!("reconcile/{target}");
     let trunks = grove::manifest_trunks(&roots.manifest);
-    let repos: Vec<RepoReport> = grove::repos_with_hits(roots, &set, shift)
+    let hits = grove::repos_with_hits(roots, &set, shift);
+    // An earlier pass that committed reverts but died before the append left
+    // them naming an event the trail lacks: this pass is that event.
+    if let Some(id) = hits
+        .iter()
+        .find_map(|repo| orphaned(&repo.checkouts[0].path, &branch, &entries))
+    {
+        event.id = id;
+    }
+    let repos: Vec<RepoReport> = hits
         .iter()
         .map(|repo| reconcile_repo(repo, &trunks, &branch, &event.id, dry_run))
         .collect();
@@ -125,7 +134,6 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
             revoked,
         });
     }
-    let mut event = event;
     event.draft.refs = shift
         .map(trail::shift_ref)
         .into_iter()
@@ -143,6 +151,25 @@ pub fn reconcile(data_root: &Path, roots: &Roots, target: &str, dry_run: bool) -
         repos,
         revoked,
     })
+}
+
+/// The `Event:` id a revert only `branch` holds carries that the trail does not
+/// — never one off trunk, which an earlier reconcile merged.
+fn orphaned(dir: &Path, branch: &str, entries: &[trail::Entry]) -> Option<String> {
+    let format = "--format=%(trailers:key=Shift,valueonly,separator=)%x09%(trailers:key=Event,valueonly,separator=)";
+    let (only, exclude) = (
+        format!("refs/heads/{branch}"),
+        format!("--exclude={branch}"),
+    );
+    git(
+        dir,
+        &["log", format, &only, "--not", &exclude, "--branches"],
+    )
+    .ok()?
+    .lines()
+    .filter_map(|line| line.strip_prefix(SHIFT)?.strip_prefix('\t'))
+    .find(|id| trail::find(entries, id).is_none())
+    .map(ToOwned::to_owned)
 }
 
 /// One line for the trail: what was reverted, and what was not.
@@ -225,7 +252,7 @@ fn reconcile_repo(
             return report;
         }
     };
-    let already = reverted_by(dir, if reused { &branch_ref } else { &trunk });
+    let (already, ours) = reverted_by(dir, if reused { &branch_ref } else { &trunk }, event_id);
     let hits: BTreeSet<&str> = repo.hits.iter().map(|hit| hit.sha.as_str()).collect();
     report.off_trunk = hits
         .iter()
@@ -238,7 +265,12 @@ fn reconcile_repo(
             continue;
         };
         if undone(&already, &hits, sha) {
-            report.already.push(sha.to_owned());
+            // one of this event's own reverts, committed by a pass that died
+            if already[sha].iter().any(|reverter| ours.contains(reverter)) {
+                report.reverted.push(sha.to_owned());
+            } else {
+                report.already.push(sha.to_owned());
+            }
         } else if shas.nth(1).is_some() {
             report.planned.clear();
             report.conflicts.push(sha.to_owned());
@@ -290,8 +322,10 @@ fn reconcile_repo(
 
 /// The ref a repo's reconcile branch starts from: the manifest's `trunk` when
 /// it names one — a name that does not resolve is the repo's failure, never a
-/// fallthrough — else `main`, else what `origin/HEAD` names; never `HEAD`,
-/// which in a `shift/…` checkout is the very line being revoked.
+/// fallthrough — else `main`, else the local branch `origin/HEAD` names, never
+/// the remote-tracking ref itself: the pull request's `--base` names it and the
+/// behind-`origin` guard measures it. Never `HEAD`, which in a `shift/…`
+/// checkout is the very line being revoked.
 fn trunk_ref(
     dir: &Path,
     label: &str,
@@ -314,12 +348,12 @@ fn trunk_ref(
         &["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
     )
     .unwrap_or_default();
-    ["refs/heads/main", origin.trim()]
+    ["refs/heads/main", &origin.trim().replacen("refs/remotes/origin/", "refs/heads/", 1)]
         .into_iter()
         .find(|name| !name.is_empty() && verified(name))
         .map(ToOwned::to_owned)
         .ok_or_else(|| format!(
-            "no trunk: no manifest trunk, refs/heads/main or origin/HEAD resolves in {}; name it in ~/.grove/manifest.toml as `trunk = \"…\"` under [roots.\"{label}\"]",
+            "no trunk: no manifest trunk, refs/heads/main or local branch origin/HEAD names resolves in {}; name it in ~/.grove/manifest.toml as `trunk = \"…\"` under [roots.\"{label}\"]",
             dir.display()
         ))
 }
@@ -383,15 +417,24 @@ impl Drop for Scratch {
 
 /// Each sha `base`'s history reverts, mapped to the commits that revert it —
 /// read off the `This reverts commit <sha>.` line `git revert` writes and
-/// reconcile keeps.
-fn reverted_by(dir: &Path, base: &str) -> BTreeMap<String, Vec<String>> {
+/// reconcile keeps — and the commits whose trailer names `event_id`.
+fn reverted_by(
+    dir: &Path,
+    base: &str,
+    event_id: &str,
+) -> (BTreeMap<String, Vec<String>>, BTreeSet<String>) {
     let mut reverts: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut ours = BTreeSet::new();
+    let trailer = format!("Event: {event_id}");
     let log = git(dir, &["log", base, "--format=%x00%H%n%B"]).unwrap_or_default();
     for commit in log.split('\0') {
         let mut lines = commit.lines();
         let Some(reverter) = lines.next() else {
             continue;
         };
+        if commit.lines().any(|line| line == trailer) {
+            ours.insert(reverter.to_owned());
+        }
         for reverted in lines.filter_map(|line| {
             line.trim()
                 .strip_prefix("This reverts commit ")?
@@ -403,7 +446,7 @@ fn reverted_by(dir: &Path, base: &str) -> BTreeMap<String, Vec<String>> {
                 .push(reverter.to_owned());
         }
     }
-    reverts
+    (reverts, ours)
 }
 
 /// Whether `sha`'s change is already undone: some commit reverts it and that
