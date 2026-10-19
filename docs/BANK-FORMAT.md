@@ -13,6 +13,10 @@ by `-` (same encoding Claude Code uses for `~/.claude/projects/`).
 A linked git worktree (a `.git` file pointing into `worktrees/`) keys as its parent
 directory, so every branch of one repo shares one bank:
 `~/.grove/code/o/r/main` → `-Users-you--grove-code-o-r`.
+A worktree nested in another checkout of the same repo (Claude Code's
+`.claude/worktrees/<name>`) keys as that checkout's project; a submodule, even inside a
+worktree, is its own project; a cwd that no longer exists beside a linked worktree keys
+as that worktree's project.
 
 ## Memory file
 
@@ -229,7 +233,8 @@ to a message or for `git commit --trailer`.
   in the set (or, for a shift id, whose `Shift:` names it), one pass per repository
   however many worktrees it has.
 - The base is the repo's **trunk**: the manifest root's `trunk = "…"` when it names one,
-  else `main`, else the branch `refs/remotes/origin/HEAD` names — never `HEAD`, since a
+  else `main`, else the local branch `refs/remotes/origin/HEAD` names (never the
+  remote-tracking ref itself) — never `HEAD`, since a
   `shift/…` checkout would carry the shift's other commits onto the reconcile branch. A
   manifest `trunk` that does not resolve to a branch fails the repo (`failed`, exit 1)
   rather than falling through; so does a repo where none of the three resolves, and that

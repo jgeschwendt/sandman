@@ -5,54 +5,65 @@
 //! the worktrees sit in.
 
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The directory a working directory's memories belong to.
 ///
 /// A linked git worktree is a checkout, not a project: every branch of one
 /// repo shares one bank, keyed by the directory the worktrees sit in — the
 /// worktree's parent. Walking up from `cwd`, the first directory whose `.git`
-/// is a file pointing into a `worktrees/` directory marks a linked worktree,
-/// and its parent is the project; anything below the worktree root folds into
-/// it. A `.git` directory (a primary checkout), a `.git` file that points
-/// elsewhere (a submodule), or no `.git` at all leaves `cwd` as it is.
+/// is a file naming `<common>/worktrees/<name>` marks a linked worktree, and
+/// its parent is the project; anything below the worktree root folds into it.
+/// A worktree nested in another checkout of the same repo (Claude Code's
+/// `.claude/worktrees/<name>`) folds into that checkout's project — the outer
+/// worktree's parent, or a primary checkout whose `.git` is `<common>`. A
+/// `cwd` that no longer exists, below a directory holding a linked worktree,
+/// was one of them and folds into that sibling's project. Otherwise a `.git`
+/// directory (a primary checkout), a `.git` file naming anything else (a
+/// submodule), or no `.git` at all leaves `cwd` as it is.
 #[must_use]
 pub fn root(cwd: &Path) -> PathBuf {
+    if !cwd.exists()
+        && let Some(live) = cwd.ancestors().find(|dir| dir.exists())
+        && let Some(sibling) = fs::read_dir(live)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| common(path).is_some())
+    {
+        return root(&sibling);
+    }
+    let mut project = None;
     for dir in cwd.ancestors() {
         let dot_git = dir.join(".git");
-        let Ok(meta) = fs::metadata(&dot_git) else {
-            continue;
-        };
-        if meta.is_dir() {
-            // A primary checkout owns everything below it: nothing above it
-            // can reinterpret the cwd.
-            break;
-        }
-        if !meta.is_file() {
-            continue;
-        }
-        let Ok(contents) = fs::read_to_string(&dot_git) else {
-            continue;
-        };
-        if is_linked_worktree(&contents) {
-            return dir
-                .parent()
-                .map_or_else(|| cwd.to_path_buf(), Path::to_path_buf);
+        match (common(dir), &project) {
+            (Some(common), outer) if outer.as_ref().is_none_or(|(_, outer)| *outer == common) => {
+                project = Some((dir.parent().unwrap_or(dir), common));
+            }
+            (None, Some((_, outer))) if fs::canonicalize(&dot_git).is_ok_and(|g| g == *outer) => {
+                return dir.to_path_buf();
+            }
+            // A primary checkout, a submodule, or another repo's worktree owns
+            // everything below it: nothing above it can reinterpret the cwd.
+            _ if dot_git.exists() => break,
+            _ => {}
         }
     }
-    cwd.to_path_buf()
+    project.map_or_else(|| cwd.to_path_buf(), |(dir, _)| dir.to_path_buf())
 }
 
-/// Whether a `.git` file's contents point into a `worktrees/` directory — the
-/// shape `git worktree add` writes, and the one a submodule's `gitdir:` (into
-/// `modules/`) does not have.
-fn is_linked_worktree(contents: &str) -> bool {
-    let Some(gitdir) = contents.trim().strip_prefix("gitdir:") else {
-        return false;
-    };
-    Path::new(gitdir.trim())
-        .components()
-        .any(|component| component == Component::Normal("worktrees".as_ref()))
+/// The common git dir of the linked worktree at `dir` — its `.git` a file
+/// naming `<common>/worktrees/<name>`, the shape `git worktree add` writes and
+/// a submodule's `gitdir:` (into `modules/`) does not have.
+fn common(dir: &Path) -> Option<PathBuf> {
+    let contents = fs::read_to_string(dir.join(".git")).ok()?;
+    let gitdir = dir.join(contents.trim().strip_prefix("gitdir:")?.trim());
+    let common = gitdir.parent()?;
+    (common.file_name()? == "worktrees").then(|| {
+        let common = common.parent().unwrap_or(common);
+        fs::canonicalize(common).unwrap_or_else(|_| common.to_path_buf())
+    })
 }
 
 #[cfg(test)]
@@ -130,5 +141,63 @@ mod tests {
         )
         .expect(".git file");
         assert_eq!(root(&deep), parent);
+    }
+
+    #[test]
+    fn a_vanished_worktree_folds_into_its_siblings_project() {
+        let temp = TempDir::new("project-vanished");
+        let parent = temp.path().join("code").join("o").join("r");
+        fs::create_dir_all(parent.join("main")).expect("main");
+        fs::write(
+            parent.join("main").join(".git"),
+            "gitdir: /somewhere/bare/worktrees/main\n",
+        )
+        .expect(".git file");
+        assert_eq!(root(&parent.join("feat").join("src")), parent);
+    }
+
+    #[test]
+    fn a_submodule_inside_a_worktree_is_its_own_project() {
+        let temp = TempDir::new("project-worktree-submodule");
+        let worktree = temp.path().join("code").join("o").join("r").join("main");
+        let sub = worktree.join("vendor").join("lib");
+        fs::create_dir_all(&sub).expect("sub");
+        fs::write(
+            worktree.join(".git"),
+            "gitdir: /somewhere/bare/worktrees/main\n",
+        )
+        .expect(".git file");
+        fs::write(
+            sub.join(".git"),
+            "gitdir: /somewhere/bare/worktrees/main/modules/vendor/lib\n",
+        )
+        .expect("submodule .git file");
+        assert_eq!(root(&sub), sub);
+    }
+
+    #[test]
+    fn a_worktree_nested_in_a_checkout_of_its_repo_keys_as_the_repo() {
+        let temp = TempDir::new("project-worktree-nested");
+        let parent = temp.path().join("code").join("o").join("r");
+        let fix = parent
+            .join("main")
+            .join(".claude")
+            .join("worktrees")
+            .join("fix");
+        fs::create_dir_all(&fix).expect("fix");
+        fs::write(
+            parent.join("main").join(".git"),
+            "gitdir: /somewhere/bare/worktrees/main\n",
+        )
+        .expect(".git file");
+        fs::write(fix.join(".git"), "gitdir: /somewhere/bare/worktrees/fix\n").expect(".git file");
+        assert_eq!(root(&fix), parent);
+        let proj = temp.path().join("proj");
+        let fix = proj.join(".claude").join("worktrees").join("fix");
+        fs::create_dir_all(proj.join(".git").join("worktrees").join("fix")).expect(".git dir");
+        fs::create_dir_all(&fix).expect("fix");
+        let gitdir = proj.join(".git").join("worktrees").join("fix");
+        fs::write(fix.join(".git"), format!("gitdir: {}\n", gitdir.display())).expect(".git file");
+        assert_eq!(root(&fix), proj);
     }
 }
