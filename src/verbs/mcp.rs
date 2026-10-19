@@ -173,7 +173,7 @@ pub(crate) struct Answer {
 /// passes.
 ///
 /// Generic over the streams so a test drives the whole protocol with a
-/// `Cursor`; `cli.rs` hands it the locked stdin and stdout. EOF is a normal
+/// `Cursor`; `cli/rest.rs` hands it the locked stdin and stdout. EOF is a normal
 /// ending, and so is a `BrokenPipe`: the client hung up, and there is nobody
 /// left to read a failure about it.
 pub fn serve(ctx: &Context, input: impl BufRead, output: impl Write) -> io::Result<()> {

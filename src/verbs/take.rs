@@ -116,7 +116,7 @@ pub fn take(
 
     // An undreamt pointer already names this session's conversation, so this
     // take is the fragment Claude Code recreated behind it (the resume
-    // hazard, cli.rs): it joins that archive, never replaces the pointer and
+    // hazard, cli/take.rs): it joins that archive, never replaces the pointer and
     // orphans the whole conversation from the dream.
     let earlier = crate::verbs::dream::pending(data_root)?
         .into_iter()

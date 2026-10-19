@@ -2,7 +2,7 @@
 
 ```stele
 kind: container
-purpose: crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli.rs` dispatches `verbs/`; `mind.rs` is the only model call
+purpose: crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli/` dispatches `verbs/`; `mind.rs` is the only model call
 invariants:
   - claim: >-
       dream owns what "queued" means — every reader of the queue goes through `dream::depth`
@@ -27,7 +27,7 @@ hazards:
 | --- | --- |
 | `atomic.rs` `lock.rs` | tmp→rename writes, log appends; the data root's `.commit.lock` |
 | `bank.rs` `commit.rs` `memory.rs` `slug.rs` | the format authority — bank keys, index regen, frontmatter, naming |
-| `cli.rs` | the dispatcher: parsing, exit codes (0 ran · 1 failed · 2 command line · 3 a runner's fault: `shift clock`'s window file, `breathe pass`'s template or `sources.toml`), the usage screen, take's detached dream spawn |
+| `cli/` | the dispatcher: `mod.rs` holds parsing, exit codes (0 ran · 1 failed · 2 command line · 3 a runner's fault: `shift clock`'s window file, `breathe pass`'s template or `sources.toml`) and the usage screen; one file per verb family — `breathe.rs` `recall.rs` `report.rs` `rest.rs` `shift.rs` `take.rs` `trail.rs` — take's detached dream spawn in `take.rs` |
 | `consensus.rs` | 2-of-3 — deterministic claim grouping: connected components of a name-and-description-slug Jaccard; no model, no wording rewrite |
 | `error.rs` `time.rs` | typed errors; UTC timestamps, both directions |
 | `grove.rs` | the repos the machine commits into — grove checkouts (manifest roots plus the tree) and the extras; scrubbed-env git calls; `Event:` and `Shift:` trailer scans, one pass per repository |
