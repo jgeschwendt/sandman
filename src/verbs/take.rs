@@ -81,8 +81,10 @@ pub fn take(
         }
     }
 
-    let text = fs::read_to_string(&source).map_err(|error| Error::io(&source, error))?;
-    let digest = transcript::digest(&text);
+    // Bytes, not a string: a last line cut mid-character must not strand the
+    // session in the live set; only the digest reads it, and lossily.
+    let bytes = fs::read(&source).map_err(|error| Error::io(&source, error))?;
+    let text = String::from_utf8_lossy(&bytes);
 
     let (year, month, day, ..) = now.parts();
     let archive_dir = paths::archive_day_dir(data_root, year, month, day);
@@ -103,12 +105,30 @@ pub fn take(
         None => None,
     };
 
-    let pointer = write_pointer(data_root, session_id, &archived, ended, &digest)?;
+    // An undreamt pointer already names this session's conversation, so this
+    // take is the fragment Claude Code recreated behind it (the resume
+    // hazard, cli.rs): it joins that archive, never replaces the pointer and
+    // orphans the whole conversation from the dream.
+    let earlier = crate::verbs::dream::pending(data_root)?
+        .into_iter()
+        .find(|pointer| pointer.sid == session_id)
+        .and_then(|pointer| pointer.archived)
+        .filter(|path| path.is_file());
+    let (named, whole) = match earlier {
+        Some(earlier) => {
+            atomic::append_line(&earlier, text.trim_end_matches('\n'))?;
+            let whole = fs::read(&earlier).map_err(|error| Error::io(&earlier, error))?;
+            (earlier, String::from_utf8_lossy(&whole).into_owned())
+        }
+        None => (archived.clone(), text.into_owned()),
+    };
+    let digest = transcript::digest(&whole);
+    let pointer = write_pointer(data_root, session_id, &named, ended, &digest)?;
     let queue_depth = queue_depth(data_root)?;
 
     Ok(TakeOutcome {
         archived,
-        archived_bytes: text.len(),
+        archived_bytes: bytes.len(),
         archived_directory,
         queue_depth,
         pointer,
@@ -672,6 +692,54 @@ mod tests {
         let outcome = take(&fixture.root, &fixture.claude, SID, true).expect("forced take");
         assert!(!source.exists());
         assert!(outcome.archived.is_file());
+    }
+
+    #[test]
+    fn a_transcript_cut_mid_character_is_still_taken_byte_for_byte() {
+        let fixture = Fixture::new("take-utf8");
+        let source = fixture.seed(&transcript_lines());
+        let mut bytes = fs::read(&source).expect("read");
+        bytes.extend_from_slice(b"{\"type\":\"user\",\"message\":{\"content\":\"caf\xc3");
+        fs::write(&source, &bytes).expect("truncated line");
+        Fixture::age(&source, 3600);
+        let outcome = take(&fixture.root, &fixture.claude, SID, false).expect("take");
+        assert_eq!(fs::read(&outcome.archived).expect("archive"), bytes);
+        let pointer = fs::read_to_string(&outcome.pointer).expect("read pointer");
+        assert!(pointer.contains(r#""title":"port the memory verbs""#));
+    }
+
+    #[test]
+    fn a_second_take_before_the_dream_joins_the_first_archive() {
+        let fixture = Fixture::new("take-twice");
+        // An earlier take, not yet dreamt: the whole conversation.
+        let first = crate::paths::archive_day_dir(&fixture.root, 2026, 8, 11)
+            .join(format!("120000-projects-{PROJECT}-{SID}.jsonl"));
+        fs::create_dir_all(first.parent().expect("day dir")).expect("archive dir");
+        fs::write(&first, format!("{}\n", transcript_lines().join("\n"))).expect("archive");
+        let recent = fixture.root.join("memories").join(".recent");
+        fs::create_dir_all(&recent).expect("recent dir");
+        let earlier = format!(
+            r#"{{"archived":"{}","ended":"2026-08-11T12:00:00Z"}}"#,
+            first.display()
+        );
+        fs::write(recent.join(format!("{SID}.json")), earlier).expect("pointer");
+        // Claude Code recreates the transcript behind the take.
+        fixture.seed(&[r#"{"type":"user","message":{"content":"stub"}}"#]);
+        let second = take(&fixture.root, &fixture.claude, SID, false).expect("retake");
+        assert!(second.archived.is_file());
+        let joined = fs::read_to_string(&first).expect("first archive");
+        assert!(joined.ends_with("\"stub\"}}\n"), "{joined}");
+        let pointer = fs::read_to_string(&second.pointer).expect("read pointer");
+        assert!(pointer.contains(&format!(r#""archived":"{}""#, first.display())));
+        assert!(pointer.contains(r#""title":"port the memory verbs""#));
+        assert_eq!(second.queue_depth, 1);
+
+        // Once dreamt, the pointer is spent and the next take queues afresh.
+        fs::write(&second.pointer, "{\"dreamed\":\"2026-08-11T12:00:00Z\"}\n").expect("spend");
+        fixture.seed(&[r#"{"type":"user","message":{"content":"later"}}"#]);
+        let third = take(&fixture.root, &fixture.claude, SID, false).expect("third take");
+        let pointer = fs::read_to_string(&third.pointer).expect("read pointer");
+        assert!(pointer.contains(&format!(r#""archived":"{}""#, third.archived.display())));
     }
 
     #[test]
