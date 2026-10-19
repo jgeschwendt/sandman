@@ -1,15 +1,17 @@
 //! `forget` — the privacy ending: destroy every copy of one session.
 //!
 //! It reaches the live transcript, its subagent directory, anything `take`
-//! already archived, and the pointer. It never reaches a bank: a memory that
-//! was committed is a memory the operator asked for, and unpicking it is
-//! `remember`'s and the dream pass's business, not this verb's.
+//! already archived, the dream minds' kept transcripts of it, and the pointer.
+//! It never reaches a bank: a memory that was committed is a memory the
+//! operator asked for, and unpicking it is `remember`'s and the dream pass's
+//! business, not this verb's.
 
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+use crate::json::{self, Value};
 use crate::paths;
 use crate::transcript;
 
@@ -35,7 +37,9 @@ pub fn forget(data_root: &Path, claude_root: &Path, session_id: &str) -> Result<
     let mut targets: Vec<PathBuf> = Vec::new();
     targets.extend(found.transcripts);
     targets.extend(found.directories);
-    targets.extend(archived_copies(data_root, session_id)?);
+    let archived = archived_copies(data_root, session_id)?;
+    targets.extend(dreamt_copies(data_root, &archived)?);
+    targets.extend(archived);
     let pointer = paths::recent_dir(data_root).join(format!("{session_id}.json"));
     if pointer.exists() {
         targets.push(pointer);
@@ -67,6 +71,41 @@ fn archived_copies(data_root: &Path, session_id: &str) -> Result<Vec<PathBuf>> {
         true
     })?;
     Ok(out)
+}
+
+/// Every dream mind's kept transcript of an archived copy. The minds run
+/// under session ids of their own, so the only tie back is the prompt they
+/// were handed, which ends with the extracted conversation (`dream::prompt`).
+fn dreamt_copies(data_root: &Path, archived: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let tails: Vec<String> = archived
+        .iter()
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .map(|text| transcript::extract(&text).trim_end().to_owned())
+        .filter(|said| !said.is_empty())
+        .map(|said| format!("## The conversation\n{said}"))
+        .collect();
+    let mut out = Vec::new();
+    walk(&paths::dream_dir(data_root), &mut |path| {
+        let kept = fs::read_to_string(path).is_ok_and(|text| {
+            text.lines()
+                .any(|line| json::parse(line).is_ok_and(|value| ends_with(&value, &tails)))
+        });
+        if kept {
+            out.push(path.to_path_buf());
+        }
+        true
+    })?;
+    Ok(out)
+}
+
+/// Whether any string inside `value` ends with one of `tails`.
+fn ends_with(value: &Value, tails: &[String]) -> bool {
+    match value {
+        Value::String(text) => tails.iter().any(|tail| text.trim_end().ends_with(tail)),
+        Value::Array(items) => items.iter().any(|item| ends_with(item, tails)),
+        Value::Object(entries) => entries.iter().any(|(_, item)| ends_with(item, tails)),
+        _ => false,
+    }
 }
 
 /// Walk `dir` depth-first. `visit` returns whether to descend into a
@@ -106,7 +145,9 @@ fn destroy(path: &Path) -> Result<()> {
 mod tests {
     use super::forget;
     use crate::error::Error;
+    use crate::json::Value;
     use crate::testutil::TempDir;
+    use crate::verbs::dream;
     use std::fs;
     use std::path::PathBuf;
 
@@ -131,7 +172,8 @@ mod tests {
         fs::create_dir_all(&archive).expect("archive");
         let archived = archive.join(format!("121137-projects-{PROJECT}-{SID}.jsonl"));
         let archived_dir = archive.join(format!("121137-projects-{PROJECT}-{SID}-dir"));
-        fs::write(&archived, "{}\n").expect("archived");
+        let said = r#"{"type":"user","message":{"content":"a secret diary"}}"#;
+        fs::write(&archived, said).expect("archived");
         fs::create_dir_all(&archived_dir).expect("archived dir");
         fs::write(archived_dir.join("agent.jsonl"), "{}\n").expect("archived sidecar");
         let unrelated = archive.join("121137-projects-other.jsonl");
@@ -140,8 +182,34 @@ mod tests {
         let recent = root.join("memories").join(".recent");
         fs::create_dir_all(&recent).expect("recent");
         let pointer = recent.join(format!("{SID}.json"));
-        fs::write(&pointer, "{}\n").expect("pointer");
+        let body = format!(
+            r#"{{"archived":{}}}"#,
+            Value::string(archived.display().to_string()).render()
+        );
+        fs::write(&pointer, body).expect("pointer");
         fs::write(recent.join("other.json"), "{}\n").expect("other pointer");
+
+        // The dream minds' kept transcripts, named by their own session ids:
+        // one read this session, one read another.
+        let kept = crate::paths::dream_dir(&root).join(PROJECT);
+        fs::create_dir_all(&kept).expect("kept");
+        let mind = |name: &str, sid: &str, conversation: &str| {
+            let read = dream::pending(&root)
+                .expect("pending")
+                .into_iter()
+                .find(|pointer| pointer.sid == sid)
+                .expect("pointer");
+            let asked = Value::string(dream::prompt(&read, &[], conversation)).render();
+            let path = kept.join(name);
+            fs::write(
+                &path,
+                format!("{{\"type\":\"user\",\"message\":{{\"content\":{asked}}}}}\n"),
+            )
+            .expect("mind");
+            path
+        };
+        let dreamt = mind("m1.jsonl", SID, &crate::transcript::extract(said));
+        let undreamt = mind("m2.jsonl", "other", "[user] a secret diary, and more");
 
         // A bank whose files carry the session id in their name and source.
         let bank = root.join("memories").join(PROJECT);
@@ -156,6 +224,7 @@ mod tests {
                 project.join(SID),
                 archived.clone(),
                 archived_dir.clone(),
+                dreamt,
                 pointer.clone(),
             ];
             paths.sort();
@@ -168,7 +237,7 @@ mod tests {
 
         // Untouched: other sessions, and every bank memory.
         assert!(project.join("other.jsonl").is_file());
-        assert!(unrelated.is_file());
+        assert!(unrelated.is_file() && undreamt.is_file());
         assert!(recent.join("other.json").is_file());
         assert!(memory.is_file());
     }
