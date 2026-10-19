@@ -1012,6 +1012,40 @@ fn a_pass_in_flight_refuses_its_kind_and_a_dead_one_is_charged() {
 }
 
 #[test]
+fn a_pass_past_its_timeout_is_charged_but_left_open_by_another_kind() {
+    let machine = Machine::prompted("pass-overrun");
+    machine.ok(NOW, &["breathe", "init"]);
+    let deep = machine.ok(NOW, &["breathe", "pass", "--kind", "deep"]);
+    let deep = deep.trim();
+    machine.ok(
+        "2026-10-16T17:17:00Z",
+        &["breathe", "pass", "--kind", "skim"],
+    );
+    machine.ok(
+        "2026-10-16T17:30:00Z",
+        &[
+            "breathe",
+            "close",
+            "--id",
+            deep,
+            "--read",
+            "4",
+            "--filed",
+            "1",
+            "--dropped",
+            "0",
+            "--cost",
+            "7.5",
+        ],
+    );
+    let pass = machine.read(&format!(".sandman/breath/passes/{deep}/pass.json"));
+    assert!(
+        pass.contains(r#""cost_usd":7.5"#) && !pass.contains("dead"),
+        "{pass}"
+    );
+}
+
+#[test]
 fn problems_and_sources_arrive_fenced_and_unexpanded() {
     let machine = Machine::prompted("pass-fence");
     machine.ok(NOW, &["breathe", "init"]);

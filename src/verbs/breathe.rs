@@ -477,18 +477,27 @@ pub struct Breath {
 
 impl Breath {
     /// The file's text: frontmatter in the contract's order, then the summary.
+    /// A text that starts or ends with a quote is wrapped in one more pair, the
+    /// pair the reader strips.
     #[must_use]
     pub fn render(&self) -> String {
+        let quote = |text: &str| {
+            if text.starts_with(['"', '\'']) || text.ends_with(['"', '\'']) {
+                format!("\"{text}\"")
+            } else {
+                text.to_owned()
+            }
+        };
         let mut lines = vec![
             "---".to_owned(),
-            format!("title: {}", self.title),
-            format!("url: {}", self.url),
+            format!("title: {}", quote(&self.title)),
+            format!("url: {}", quote(&self.url)),
         ];
         if let Some(source) = &self.source {
             lines.push(format!("source: {source}"));
         }
         lines.push(format!("repo: {}", self.repo));
-        lines.push(format!("problem: {}", self.problem));
+        lines.push(format!("problem: {}", quote(&self.problem)));
         lines.push(format!("state: {}", self.state));
         if let Some(bearing) = self.bearing {
             lines.push(format!("bearing: {bearing}"));
@@ -503,7 +512,7 @@ impl Breath {
         }
         lines.push(format!("seen_again: {}", self.seen_again));
         if let Some(reason) = &self.reason {
-            lines.push(format!("reason: {reason}"));
+            lines.push(format!("reason: {}", quote(reason)));
         }
         lines.push("---".to_owned());
         format!("{}\n\n{}\n", lines.join("\n"), self.summary.trim_end())
@@ -1150,7 +1159,8 @@ fn write_pass(path: &Path, mut entries: Vec<(String, Value)>) -> Result<()> {
 /// day, and the ids of the passes still in flight. An open pass younger than
 /// its kind's timeout is in flight, and refuses a second pass of `kind`
 /// (`pass in flight`); an older one is dead — it costs `dead_cost_usd` and,
-/// when `write`, is closed as `dead: true`. The caller holds the lock to write.
+/// when `write` and of `kind`, is closed as `dead: true`: only its own kind's
+/// runner stops its session. The caller holds the lock to write.
 fn ledger(
     data_root: &Path,
     now: Timestamp,
@@ -1190,7 +1200,7 @@ fn ledger(
                 continue;
             }
             cost = Some(dead_cost_usd);
-            if write {
+            if write && of == kind {
                 set(&mut entries, "cost_usd", Value::Number(dead_cost_usd));
                 set(&mut entries, "dead", Value::Bool(true));
                 set(&mut entries, "ended", Value::string(now.iso8601()));
@@ -1706,14 +1716,14 @@ mod tests {
             file: "2026-10-09-a-thing.md".to_owned(),
             filed: "2026-10-09T12:00:00Z".to_owned(),
             novelty: None,
-            problem: "recall over budget".to_owned(),
-            reason: None,
+            problem: "'recall' over budget".to_owned(),
+            reason: Some("superseded by 'v2'".to_owned()),
             repo: "jgeschwendt/sandman".to_owned(),
             seen_again: 2,
             source: Some("releases-oxc".to_owned()),
             state: "new".to_owned(),
             summary: "one\ntwo\nthree\nfour".to_owned(),
-            title: "A thing: with a colon".to_owned(),
+            title: "A thing: \"with a colon\"".to_owned(),
             updated: "2026-10-09T13:00:00Z".to_owned(),
             url: "https://example.com/a?b=c".to_owned(),
         };

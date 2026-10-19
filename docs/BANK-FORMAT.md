@@ -889,10 +889,11 @@ stamps `adopted`.
 | `started` | when the prompt was composed |
 
 An open pass is **in flight** until its timeout — 15 minutes from `started` for a skim,
-60 for a deep pass — and **dead** after it: its session is gone or overran, and
-nothing will close it. `pass` marks every dead pass it finds (`ended` now, `dead: true`,
-`cost_usd` `$SANDMAN_BREATH_DEAD_COST_USD`, default 2), so a pass that never closes is
-charged rather than free. `pass` waits (exit 1) with `nothing due` when no source is
+60 for a deep pass — and **dead** after it: its session is gone or overran. `pass`
+marks every dead pass of its own kind (`ended` now, `dead: true`, `cost_usd`
+`$SANDMAN_BREATH_DEAD_COST_USD`, default 2), so a pass that never closes is charged
+rather than free; a dead pass of the other kind is charged in `spent` but left open,
+since only its own runner stops its session. `pass` waits (exit 1) with `nothing due` when no source is
 due, with `pass in flight` while a pass of the same kind is in flight, and with `budget
 spent` when the passes started on the UTC day — closed and dead — have spent
 `$SANDMAN_BREATH_BUDGET_USD` (default 10) or more; a pass in flight counts 0 and is
