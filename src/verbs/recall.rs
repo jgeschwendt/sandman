@@ -350,8 +350,14 @@ impl Sections {
             if *kept == body_lines(body) {
                 parts.push(Cow::Borrowed(body));
             } else if *kept > 0 {
+                // Marked on the last kept line, never silent: the cut can land
+                // inside a pinned body, which would otherwise read as whole.
                 let head: Vec<&str> = body.lines().take(kept + 1).collect();
-                parts.push(Cow::Owned(head.join("\n")));
+                let cut = body_lines(body) - kept;
+                parts.push(Cow::Owned(format!(
+                    "{} … {cut} more lines cut",
+                    head.join("\n")
+                )));
             }
         }
         for (enabled, section) in [
@@ -1594,11 +1600,30 @@ title: Two writers, one trunk\nwritten: 2026-08-04T03:30:12Z\n---\n\n{}\n",
         let text = &composed.text;
         assert!(text.chars().count() <= BUDGET_CHARS);
         // The last thing a session reads is a whole entry — a pointer it can
-        // follow — and never the front half of one.
+        // follow — and never the front half of one, then what the cut took.
         let last = text.lines().next_back().expect("a last line");
         assert!(last.starts_with("- "), "{last}");
-        assert!(last.ends_with(&"d".repeat(150)), "{last}");
+        assert!(last.contains(&format!("{} … ", "d".repeat(150))), "{last}");
         assert!(composed.trimmed.ceiling_lines > 0, "{composed:?}");
+    }
+
+    #[test]
+    fn a_pinned_body_cut_at_the_ceiling_says_so() {
+        let root = Root::new("recall-ceiling-pin");
+        root.memory(
+            &root.bank(),
+            "user_rule.md",
+            "name: rule\ntype: user\nrecall: pin\n",
+            &format!("{}except when Y\n", "pinned line lorem ipsum\n".repeat(399)),
+        );
+        let text = root.compose().text;
+        assert!(text.chars().count() <= BUDGET_CHARS);
+        assert!(!text.contains("except when Y"), "{text}");
+        let last = text.lines().next_back().expect("a last line");
+        assert!(
+            last.contains(" lorem ipsum … ") && last.ends_with(" more lines cut"),
+            "{last}"
+        );
     }
 
     #[test]
