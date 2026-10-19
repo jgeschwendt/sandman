@@ -885,6 +885,8 @@ fn a_trunk_behind_origin_fails_until_it_is_fast_forwarded() {
     let machine = Machine::new("stale-trunk");
     let event = machine.append(&["--kind", "change"]);
     let (checkout, _) = fixture(&machine, &[]);
+    // no local main: the trunk is the local branch origin/HEAD names
+    git(&checkout, &["branch", "--quiet", "-m", "master"]);
     let origin = machine.home.join("origin.git");
     let other = machine.home.join("other");
     let (origin_arg, other_arg) = (origin.display().to_string(), other.display().to_string());
@@ -896,15 +898,16 @@ fn a_trunk_behind_origin_fails_until_it_is_fast_forwarded() {
     );
     fs::write(other.join("file.txt"), "shipped\n").expect("work");
     let hit = commit(&other, "shipped", Some(&event));
-    git(&other, &["push", "--quiet", "origin", "main"]);
+    git(&other, &["push", "--quiet", "origin", "master"]);
     git(&checkout, &["fetch", "--quiet", "origin"]);
+    git(&checkout, &["remote", "set-head", "origin", "master"]);
 
     let output = machine.run(&["reconcile", &event]);
     let report = stdout(&output);
     assert_eq!(code(&output), 1, "{report}");
     assert!(
         report.contains(
-            "failed: trunk is behind origin/main: fast-forward it (grove sync) and rerun"
+            "failed: trunk is behind origin/master: fast-forward it (grove sync) and rerun"
         ),
         "{report}"
     );
@@ -915,7 +918,34 @@ fn a_trunk_behind_origin_fails_until_it_is_fast_forwarded() {
         ""
     );
 
-    git(&checkout, &["merge", "--quiet", "--ff-only", "origin/main"]);
+    git(
+        &checkout,
+        &["merge", "--quiet", "--ff-only", "origin/master"],
+    );
     let report = machine.ok(&["reconcile", &event]);
     assert!(report.contains(&format!("reverted: {hit}")), "{report}");
+    assert!(report.contains("gh pr create --base master "), "{report}");
+}
+
+#[test]
+fn reverts_whose_event_missed_the_trail_get_it_on_the_rerun() {
+    let machine = Machine::new("orphan-event");
+    let first = machine.append(&["--kind", "change"]);
+    let (checkout, shas) = fixture(&machine, &[("one", &first)]);
+    let lock = machine.write(".sandman/.commit.lock", "");
+    assert_eq!(code(&machine.run(&["reconcile", &first])), 1);
+    fs::remove_file(&lock).expect("release");
+
+    let report = machine.ok(&["reconcile", &first]);
+    let branch = format!("reconcile/{first}");
+    let format = "--format=%(trailers:key=Event,valueonly)";
+    let id = git(&checkout, &["log", "-1", format, &branch]);
+    assert!(
+        report.contains(&format!("event: {}", id.trim())),
+        "{report}"
+    );
+    assert!(
+        report.contains(&format!("reverted: {}", shas[0])),
+        "{report}"
+    );
 }
