@@ -812,6 +812,7 @@ fn note(data_root: Option<&Path>, verb: &str, line: &str) {
 /// already gone. Failing to start one is a note on stderr, never a failed
 /// take — the queue is still there for the next run.
 fn spawn_dream(data_root: &Path) -> Result<PathBuf, Error> {
+    use std::os::unix::process::CommandExt;
     let log = paths::run_log(data_root, "dream", Timestamp::now()?);
     crate::atomic::ensure_parent(&log)?;
     let out = OpenOptions::new()
@@ -821,7 +822,10 @@ fn spawn_dream(data_root: &Path) -> Result<PathBuf, Error> {
         .map_err(|source| Error::io(&log, source))?;
     let err = out.try_clone().map_err(|source| Error::io(&log, source))?;
     let exe = env::current_exe().map_err(|source| Error::io("<current exe>", source))?;
+    // Its own process group, so whoever signals the hook's group (a bg
+    // session's supervisor, a closing pty) no longer kills the dream with it.
     Command::new(exe)
+        .process_group(0)
         .arg("dream")
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))

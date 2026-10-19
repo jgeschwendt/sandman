@@ -1553,10 +1553,15 @@ fn a_full_queue_spawns_a_detached_dream() {
     machine.nine_queued();
     machine.transcript(&[r#"{"type":"user","message":{"content":"the tenth"}}"#]);
 
-    // The spawned dream reaches a stub, never the real binary.
+    // The spawned dream reaches a stub, never the real binary; the stub notes
+    // the dream's pid and process group.
+    let groups = machine.home.join("groups");
     let stub = machine.script(
         "claude",
-        "printf '%s' '{\"type\":\"result\",\"is_error\":false,\"result\":\"{\\\"proposals\\\":[]}\"}'\n",
+        &format!(
+            "ps -o pid= -o pgid= -p $PPID >> '{}'\nprintf '%s' '{{\"type\":\"result\",\"is_error\":false,\"result\":\"{{\\\"proposals\\\":[]}}\"}}'\n",
+            groups.display()
+        ),
     );
     let taken = machine.run_with(
         &["take", SID],
@@ -1598,6 +1603,16 @@ fn a_full_queue_spawns_a_detached_dream() {
     assert!(
         lines.contains("dreamt 10 pointer(s)"),
         "the child's own stderr is in the log: {lines}"
+    );
+    // It leads its own group, so a signal to the hook's group misses it.
+    let groups = fs::read_to_string(&groups).expect("groups");
+    assert!(
+        !groups.is_empty()
+            && groups.lines().all(|line| {
+                let ids: Vec<&str> = line.split_whitespace().collect();
+                ids.len() == 2 && ids[0] == ids[1]
+            }),
+        "{groups}"
     );
 }
 
@@ -1652,7 +1667,10 @@ fn bad_flags_are_usage_failures_and_write_nothing() {
 fn a_full_queue_under_a_held_dream_lock_spawns_nothing() {
     let machine = Machine::new("queue-held");
     machine.nine_queued();
-    fs::write(machine.root().join("dream.lock"), "").expect("a held lock");
+    let lock = machine.root().join("dream.lock");
+    fs::create_dir_all(machine.root()).expect("root");
+    let held = fs::File::create(&lock).expect("lock file");
+    held.try_lock().expect("a held lock");
     machine.transcript(&[r#"{"type":"user","message":{"content":"the tenth"}}"#]);
     fs::create_dir_all(machine.project().join(SID)).expect("a sidecar directory");
     let taken = machine.run(&["take", SID]);

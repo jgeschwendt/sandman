@@ -13,7 +13,7 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process;
@@ -43,59 +43,42 @@ pub const DREAMED_KEY: &str = "dreamed";
 /// Where a kept transcript files when its pointer names no Claude Code
 /// project to file it under.
 pub const ORPHANS_DIR_NAME: &str = "orphans";
-/// A lock older than this belongs to a run that died holding it. A live run
-/// routes at most [`POINTERS_PER_RUN`] pointers and finishes well inside the
-/// window.
-const LOCK_STALE: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// One dream at a time. Take fires on every session ending, so with a deep
 /// queue every ending would otherwise start another run over the same
 /// pointers — concurrent runs commit the same claims as collision-suffixed
 /// duplicates and multiply model calls without bound (2026-08-19).
+///
+/// The lock is a `flock` on `dream.lock`, which the kernel releases however
+/// the holder dies: a killed run never strands the queue, and no file age is
+/// judged or swept out from under a live holder. The file outlives every
+/// run, carrying the last holder's pid for post-mortems.
 struct Lock {
-    path: PathBuf,
+    _file: File,
 }
 
 impl Lock {
-    /// The lock, or `None` while another live run holds it. A stale holder is
-    /// swept and the acquire retried once.
+    /// The lock, or `None` while another run holds it.
     fn acquire(data_root: &Path) -> Result<Option<Self>> {
-        Self::acquire_with(data_root, LOCK_STALE)
-    }
-
-    /// [`Self::acquire`] with the staleness window as a seam for tests.
-    fn acquire_with(data_root: &Path, older_than: Duration) -> Result<Option<Self>> {
         // A root that does not exist yet is still an empty queue to drain.
         fs::create_dir_all(data_root).map_err(|source| Error::io(data_root, source))?;
         let path = lock_path(data_root);
-        for _ in 0..2 {
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(mut file) => {
-                    let _ = write!(file, "{}", process::id());
-                    return Ok(Some(Self { path }));
-                }
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                    if !stale(&path, older_than) {
-                        return Ok(None);
-                    }
-                    if let Err(source) = fs::remove_file(&path) {
-                        // Lost the sweep to a concurrent acquirer: theirs now.
-                        if source.kind() == ErrorKind::NotFound {
-                            continue;
-                        }
-                        return Err(Error::io(&path, source));
-                    }
-                }
-                Err(source) => return Err(Error::io(&path, source)),
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|source| Error::io(&path, source))?;
+        match file.try_lock() {
+            Ok(()) => {
+                let _ = file
+                    .set_len(0)
+                    .and_then(|()| write!(file, "{}", process::id()));
+                Ok(Some(Self { _file: file }))
             }
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(source)) => Err(Error::io(&path, source)),
         }
-        Ok(None)
-    }
-}
-
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -103,20 +86,12 @@ fn lock_path(data_root: &Path) -> PathBuf {
     data_root.join("dream.lock")
 }
 
-fn stale(path: &Path, older_than: Duration) -> bool {
-    fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|at| at.elapsed().ok())
-        .is_some_and(|age| age > older_than)
-}
-
 /// Whether a live run holds the lock — for spawn sites that would otherwise
 /// start a redundant process just to have it yield here.
 #[must_use]
 pub fn lock_held(data_root: &Path) -> bool {
-    let path = lock_path(data_root);
-    path.exists() && !stale(&path, LOCK_STALE)
+    File::open(lock_path(data_root))
+        .is_ok_and(|file| matches!(file.try_lock(), Err(TryLockError::WouldBlock)))
 }
 
 /// The two roots a kept mind transcript travels between: Claude Code writes
@@ -233,12 +208,23 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
             }
         }
 
-        if responders < RESPONDERS_MIN {
+        let skipped = if responders < RESPONDERS_MIN {
             outcome.skipped += 1;
+            Some("no-quorum")
+        } else {
+            // Forgotten or re-taken while the minds read it, the pointer is no
+            // longer the conversation they read: committing would outlive the
+            // forget, and stamping the snapshot would resurrect the pointer or
+            // mark a fresh ending dreamt.
+            read_pointer(&pointer.path)
+                .is_none_or(|fresh| fresh.value != pointer.value)
+                .then_some("changed")
+        };
+        if let Some(why) = skipped {
             atomic::append_line(
                 &log,
                 &format!(
-                    "{} dream sid={} minds={} responders={responders} skipped=no-quorum",
+                    "{} dream sid={} minds={} responders={responders} skipped={why}",
                     now.iso8601(),
                     pointer.sid,
                     notes.join(" ")
@@ -250,6 +236,7 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
         let groups = consensus::group(voices);
         let mut committed: Vec<String> = Vec::new();
         let mut deduped: Vec<String> = Vec::new();
+        let mut failed: Vec<String> = Vec::new();
         let mut votes: Vec<String> = Vec::new();
         for group in &groups {
             votes.push(format!("{}={}", group.draft.name, group.tiers.len()));
@@ -274,9 +261,16 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
                     group.minds()
                 ),
             };
-            let landed = commit_memory(data_root, &group.draft.bank, request)?;
-            committed.push(landed.filename.clone());
-            outcome.committed.push(landed.path);
+            match commit_memory(data_root, &group.draft.bank, request) {
+                Ok(landed) => {
+                    committed.push(landed.filename.clone());
+                    outcome.committed.push(landed.path);
+                }
+                // A bank the commit path refuses costs only this claim, as an
+                // unreadable memory does in `already_held`: aborting would
+                // strand this pointer and every one queued behind it.
+                Err(error) => failed.push(format!("{}: {error}", group.draft.name)),
+            }
         }
 
         mark_dreamed(&pointer, now)?;
@@ -284,14 +278,15 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
         atomic::append_line(
             &log,
             &format!(
-                "{} dream sid={} minds={} groups={} votes={} committed={} deduped={}",
+                "{} dream sid={} minds={} groups={} votes={} committed={} deduped={} failed={}",
                 now.iso8601(),
                 pointer.sid,
                 notes.join(" "),
                 groups.len(),
                 joined(&votes),
                 joined(&committed),
-                joined(&deduped)
+                joined(&deduped),
+                joined(&failed)
             ),
         )?;
     }
@@ -519,8 +514,10 @@ fn conversation(pointer: &Pointer) -> String {
     let Some(archived) = &pointer.archived else {
         return "(the pointer names no archived transcript)".to_owned();
     };
-    match fs::read_to_string(archived) {
-        Ok(text) => transcript::extract(&text),
+    // Take archives byte for byte, so a stray invalid byte is the reader's to
+    // tolerate.
+    match fs::read(archived) {
+        Ok(bytes) => transcript::extract(&String::from_utf8_lossy(&bytes)),
         Err(_) => format!(
             "(the archived transcript at {} could not be read)",
             archived.display()
@@ -1086,7 +1083,9 @@ mod tests {
     fn a_held_lock_makes_a_run_yield_untouched() {
         let scratch = Scratch::new("dream-lock-held");
         let pointer = scratch.queue(SID, "2026-08-11T12:00:00Z");
-        fs::write(lock_path(&scratch.root), "held").expect("lock");
+        let _held = Lock::acquire(&scratch.root)
+            .expect("acquire")
+            .expect("lock");
 
         let outcome = dream(&scratch.root, &scratch.home, &options_that_must_not_run())
             .expect("a held lock is a clean yield, not an error");
@@ -1104,21 +1103,92 @@ mod tests {
         let outcome = dream(&scratch.root, &scratch.home, &options_that_must_not_run())
             .expect("an empty queue is a clean run");
         assert_eq!(outcome, Outcome::default());
-        assert!(!lock_path(&scratch.root).exists());
+        assert!(!lock_held(&scratch.root));
     }
 
     #[test]
-    fn a_stale_lock_is_swept_and_taken_over() {
-        let scratch = Scratch::new("dream-lock-stale");
+    fn the_lock_is_the_holders_life_not_the_files_age() {
+        let scratch = Scratch::new("dream-lock-life");
         fs::create_dir_all(&scratch.root).expect("root");
-        fs::write(lock_path(&scratch.root), "dead").expect("stale lock");
-        std::thread::sleep(Duration::from_millis(10));
-
-        let lock = Lock::acquire_with(&scratch.root, Duration::ZERO)
+        // A run killed mid-pointer leaves its file behind, held by nobody.
+        fs::write(lock_path(&scratch.root), "72156").expect("a dead run's file");
+        assert!(!lock_held(&scratch.root));
+        let lock = Lock::acquire(&scratch.root)
             .expect("acquire")
-            .expect("a dead holder's lock is taken over");
+            .expect("taken over");
+        // A live holder past any age still holds: nothing sweeps its file.
+        fs::File::options()
+            .write(true)
+            .open(lock_path(&scratch.root))
+            .and_then(|file| file.set_modified(std::time::UNIX_EPOCH))
+            .expect("age the file");
+        assert!(lock_held(&scratch.root));
+        assert!(Lock::acquire(&scratch.root).expect("acquire").is_none());
         drop(lock);
-        assert!(!lock_path(&scratch.root).exists());
+        assert!(Lock::acquire(&scratch.root).expect("acquire").is_some());
+    }
+
+    #[test]
+    fn an_archive_with_invalid_utf8_still_reads() {
+        let scratch = Scratch::new("dream-lossy");
+        let pointer =
+            super::read_pointer(&scratch.queue(SID, "2026-08-11T12:00:00Z")).expect("pointer");
+        let archived = pointer.archived.as_deref().expect("archived");
+        let mut bytes = fs::read(archived).expect("archive");
+        bytes.splice(0..0, *b"\xff\n");
+        fs::write(archived, bytes).expect("a stray byte");
+        assert!(super::conversation(&pointer).contains("port the memory verbs"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pointer_forgotten_mid_run_is_neither_committed_from_nor_resurrected() {
+        let scratch = Scratch::new("dream-forgotten");
+        let pointer = scratch.queue(SID, "2026-08-11T12:00:00Z");
+        let bank = scratch.bank_key();
+        let agreed = reply(&bank, "the queue is the recall surface", "b");
+        let options = scratch.options_running(
+            &[("claude-sonnet-5", &agreed), ("claude-fable-5", &agreed)],
+            &format!("rm -f \"{}\"", pointer.display()),
+        );
+
+        let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
+        assert_eq!(outcome, Outcome::default());
+        assert!(!pointer.exists(), "the forget stands");
+        assert!(
+            !crate::bank::Bank::in_data_root(&scratch.root, &bank)
+                .dir()
+                .exists()
+        );
+        assert!(read_log(&scratch.root).contains("skipped=changed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bank_the_commit_path_refuses_costs_only_its_claim() {
+        let scratch = Scratch::new("dream-refused");
+        scratch.queue("sid-early", "2026-08-11T12:00:00Z");
+        scratch.queue("sid-late", "2026-08-12T12:00:00Z");
+        let bank = scratch.bank_key();
+        let dir = crate::bank::Bank::in_data_root(&scratch.root, &bank)
+            .dir()
+            .to_path_buf();
+        fs::create_dir_all(&dir).expect("bank dir");
+        fs::write(dir.join("user_scratch.md"), "no frontmatter\n").expect("a hand-written note");
+        let agreed = reply(&bank, "the queue is the recall surface", "b");
+        let options = scratch.options(&[("claude-sonnet-5", &agreed), ("claude-fable-5", &agreed)]);
+
+        let outcome = dream(&scratch.root, &scratch.home, &options).expect("no abort");
+        assert_eq!(outcome.dreamed, 2, "the queue behind it drains");
+        assert!(outcome.committed.is_empty());
+        assert_eq!(super::depth(&scratch.root).expect("depth"), 0);
+        let log = read_log(&scratch.root);
+        assert_eq!(
+            log.matches("failed=the queue is the recall surface: ")
+                .count(),
+            2,
+            "{log}"
+        );
     }
 
     #[cfg(unix)]
