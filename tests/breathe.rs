@@ -1012,37 +1012,45 @@ fn a_pass_in_flight_refuses_its_kind_and_a_dead_one_is_charged() {
 }
 
 #[test]
-fn a_pass_past_its_timeout_is_charged_but_left_open_by_another_kind() {
+fn a_pass_marked_dead_still_closes_with_its_real_cost_once() {
     let machine = Machine::prompted("pass-overrun");
     machine.ok(NOW, &["breathe", "init"]);
     let deep = machine.ok(NOW, &["breathe", "pass", "--kind", "deep"]);
     let deep = deep.trim();
+    // A skim marks the overrunning deep pass dead; its session closes it anyway.
     machine.ok(
         "2026-10-16T17:17:00Z",
         &["breathe", "pass", "--kind", "skim"],
     );
-    machine.ok(
-        "2026-10-16T17:30:00Z",
-        &[
-            "breathe",
-            "close",
-            "--id",
-            deep,
-            "--read",
-            "4",
-            "--filed",
-            "1",
-            "--dropped",
-            "0",
-            "--cost",
-            "7.5",
-        ],
-    );
-    let pass = machine.read(&format!(".sandman/breath/passes/{deep}/pass.json"));
+    let path = format!(".sandman/breath/passes/{deep}/pass.json");
+    assert!(machine.read(&path).contains(r#""dead":true"#));
+    let close = [
+        "breathe",
+        "close",
+        "--id",
+        deep,
+        "--read",
+        "4",
+        "--filed",
+        "1",
+        "--dropped",
+        "0",
+        "--cost",
+        "7.5",
+    ];
+    machine.ok("2026-10-16T17:30:00Z", &close);
+    let pass = machine.read(&path);
     assert!(
         pass.contains(r#""cost_usd":7.5"#) && !pass.contains("dead"),
         "{pass}"
     );
+    let output = machine.run("2026-10-16T17:31:00Z", &close, &[]);
+    assert!(stderr(&output).contains("closed at"), "{}", stderr(&output));
+    let dry = machine.ok(
+        "2026-10-16T17:31:00Z",
+        &["breathe", "pass", "--kind", "deep", "--dry-run"],
+    );
+    assert!(dry.contains("spent 7.50."), "{dry}");
 }
 
 #[test]

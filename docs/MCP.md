@@ -46,7 +46,8 @@ remember
     Exactly one of bank/cwd resolves the bank; both given is an invalid-params
     error, and neither given is the home bank. A cwd that is not absolute is an
     invalid-params error for both tools; trailing separators and `.` are dropped
-    before keying.
+    by project::root, the key path the CLI and the hooks share, so a cwd keys
+    the same bank on every surface.
     session_id comes from $CLAUDE_SESSION_ID when set, else absent, as today.
 
 banks
