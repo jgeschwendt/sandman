@@ -250,6 +250,7 @@ pub fn parse_reply(text: &str) -> Option<Reply> {
     let title = field("title")?;
     if body.is_empty()
         || title.is_empty()
+        || title.contains(['\n', '\r'])
         || body.chars().count() > BODY_MAX_CHARS
         || title.chars().count() > TITLE_MAX_CHARS
     {
@@ -394,13 +395,14 @@ pub fn earliest_archive_day(data_root: &Path) -> Option<String> {
 }
 
 /// Which day of the voyage `date` is, counting `began` as day 1. An unreadable
-/// pair is day 1 — the log never renders a day zero or a negative one.
+/// pair, or a date before `began`, is day 1 — the log never renders a day zero
+/// or a negative one.
 #[must_use]
 pub fn day_number(began: &str, date: &str) -> i64 {
     let (Some(from), Some(to)) = (midnight(began), midnight(date)) else {
         return 1;
     };
-    (to.unix_seconds() - from.unix_seconds()).div_euclid(SECONDS_PER_DAY) + 1
+    ((to.unix_seconds() - from.unix_seconds()).div_euclid(SECONDS_PER_DAY) + 1).max(1)
 }
 
 /// The stamped position line — what the day was, measured against the banks.
@@ -746,6 +748,13 @@ mod tests {
 
         let empty = r#"{"kind":"discovery","title":"","body":"Something happened.","next":null}"#;
         assert_eq!(parse_reply(empty), None, "an empty title is an abstention");
+
+        let broken = r#"{"kind":"milestone","title":"First light\nover the banks","body":"It shipped.","next":null}"#;
+        assert_eq!(
+            parse_reply(broken),
+            None,
+            "a two-line title is an abstention"
+        );
     }
 
     #[test]
@@ -1057,5 +1066,6 @@ mod tests {
         assert_eq!(day_number("2026-08-13", "2026-08-31"), 19);
         assert_eq!(day_number("2026-08-13", "2026-08-13"), 1);
         assert_eq!(day_number("not a date", "2026-08-31"), 1);
+        assert_eq!(day_number("2026-10-10", "2026-10-05"), 1);
     }
 }
