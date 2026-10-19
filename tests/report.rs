@@ -499,12 +499,25 @@ fn serve_keeps_off_a_repo_whose_trunk_is_missing() {
         ".sandman/shifts/rotation.toml",
         "off = [\"jgeschwendt/gone\"]\n",
     );
-    let (mut server, ask) = serve(&home, 1);
+    let (mut server, ask) = serve(&home, 3);
     let saved = ask("POST /rotation", "", "");
     assert!(saved.starts_with("HTTP/1.1 303 "), "{saved}");
     assert_eq!(
         fs::read_to_string(&file).expect("rotation"),
         "off = [\"jgeschwendt/alpha\", \"jgeschwendt/gone\"]\n"
+    );
+    // listed unchecked, so checking it turns it back on
+    home.write(
+        ".sandman/shifts/s-20261005T1200Z/meta.json",
+        r#"{"repo":"jgeschwendt/alpha","started":"2026-10-05T12:00:00Z"}"#,
+    );
+    let page = ask("GET /", "", "");
+    assert!(page.contains("value=\"jgeschwendt/gone\">"), "{page}");
+    let saved = ask("POST /rotation", "", "on=jgeschwendt%2Fgone");
+    assert!(saved.starts_with("HTTP/1.1 303 "), "{saved}");
+    assert_eq!(
+        fs::read_to_string(&file).expect("rotation"),
+        "off = [\"jgeschwendt/alpha\"]\n"
     );
     assert!(server.wait().expect("exit").success());
 }

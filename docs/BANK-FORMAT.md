@@ -16,7 +16,9 @@ directory, so every branch of one repo shares one bank:
 A worktree nested in another checkout of the same repo (Claude Code's
 `.claude/worktrees/<name>`) keys as that checkout's project; a submodule, even inside a
 worktree, is its own project; a cwd that no longer exists beside a linked worktree keys
-as that worktree's project.
+as that worktree's project when every linked worktree beside it is of one repo, and as
+itself beside worktrees of two. A trailing separator or a `.` is dropped before keying —
+`/x/./` keys as `/x` — so the CLI, the hooks and the MCP server agree.
 
 ## Memory file
 
@@ -365,10 +367,10 @@ says, and must not stand in for its turn.
 key, or `off` not an array of strings, fails `pick`, `brief` and `rotation` (exit 1)
 rather than turn an off repo back on. `sandman shift rotation [--off <repo>]… [--on
 <repo>]…` prints each rotation trunk as `<repo> · on|off · <last shifted, or never
-shifted>[ · frozen]` — the owner's week's word, as above — after the flags rewrite the
-list (`--on` applied last; a repo outside the rotation exits 2 and writes nothing);
-the page's Rotation form (§ report) writes the same file. Either keeps an off repo
-whose trunk is not found now off. Every write holds
+shifted>[ · frozen]` — the owner's week's word, as above — and each off repo whose
+trunk is not found now as `<repo> · off · not found`, after the flags rewrite the list
+(`--on` applied last, and clears such a repo; a repo in neither exits 2 and writes
+nothing); the page's Rotation form (§ report) writes the same file. Every write holds
 `.commit.lock`, tmp → rename. The Sabbath's pick ignores the list.
 
 **The Sabbath's pick.** In Saturday's night `shift pick` returns `jgeschwendt/sandman`'s
@@ -500,7 +502,9 @@ that fails to compose leaves nothing on the trail. Its `refs` are:
 - `trimmed:<slot>` — one per slot the cap cut, in the order it cut them.
 
 `shift handoff` appends one `shift.handoff` event — `rationale` the handoff's first line,
-`refs` `handoff:<path>` and `abandoned` when it was, `cost_usd` the `--cost` it was given.
+`refs` `handoff:<path>` and `abandoned` when it was, `cost_usd` the `--cost` it was given
+— under the same hold of `.commit.lock` as `meta.json`'s `ended`, before `current.json`
+is released.
 
 ### Landing
 
@@ -584,7 +588,9 @@ no shift commits to it, and after a merge the sweep, else `grove-sync`, fast-for
   characters (§ report). The runner recording a dead session has nobody to write one.
 - **A shift is handed off once.** A second `shift handoff` exits 1 `shift <id> was
   handed off at <ended>`; a `current.json` still naming it — a handoff that died before
-  the release — is released, and the refusal says so.
+  the release — is released, and the refusal says so, once the trail holds the shift's
+  `shift.handoff`: one is appended from `meta.json` (`cost_usd`, `abandoned`, the first
+  line of `handoff.md`) when it does not.
 - **A handoff is at most 2,000 characters.** `shift handoff` refuses a longer
   `handoff.md` (or `--file`) — exit 1 with the count, nothing written, the shift still
   open — unless `--truncate`, which keeps the head and appends a note of how many
@@ -785,7 +791,8 @@ default to `$SANDMAN_GROVE/sandman/prompts`.
 `shift handoff … --cloud` hands off as ever (the report gate included), then commits
 and pushes the state the same way, subject `shift(<id>): handoff`, the released
 `current.json` staged as a deletion. Rerun on a shift already handed off — its push
-rejected — it pushes what is committed instead of refusing.
+rejected — it pushes what is committed instead of refusing; any other failure exits 1
+and pushes nothing.
 
 ## breath/ — the ruach
 
@@ -894,11 +901,12 @@ stamps `adopted`.
 | `started` | when the prompt was composed |
 
 An open pass is **in flight** until its timeout — 15 minutes from `started` for a skim,
-60 for a deep pass — and **dead** after it: its session is gone or overran. `pass`
-marks every dead pass of its own kind (`ended` now, `dead: true`, `cost_usd`
-`$SANDMAN_BREATH_DEAD_COST_USD`, default 2), so a pass that never closes is charged
-rather than free; a dead pass of the other kind is charged in `spent` but left open,
-since only its own runner stops its session. `pass` waits (exit 1) with `nothing due` when no source is
+60 for a deep pass — and **dead** after it: its session is gone or overran, and
+nothing will close it. `pass` marks every dead pass it finds (`ended` now, `dead: true`,
+`cost_usd` `$SANDMAN_BREATH_DEAD_COST_USD`, default 2), so a pass that never closes is
+charged rather than free. An overrunning session's `close` still lands on its pass
+marked dead — its real `cost_usd` and counters replace the charge and `dead` goes —
+while a pass already closed refuses a second. `pass` waits (exit 1) with `nothing due` when no source is
 due, with `pass in flight` while a pass of the same kind is in flight, and with `budget
 spent` when the passes started on the UTC day — closed and dead — have spent
 `$SANDMAN_BREATH_BUDGET_USD` (default 10) or more; a pass in flight counts 0 and is
@@ -1084,7 +1092,8 @@ external fetch, the style inline in `ui`'s green-and-gold palette. `POST /answer
 `/`: `400` for another answer, `404` for an unknown key, `502` with thread's stderr when
 it fails, `500` when the trail refuses. `POST /rotation` (`on=<repo>`, repeated — what
 the checked boxes send) leaves off every rotation trunk the body does not name, ignoring
-names outside the rotation and keeping off a repo whose trunk is not found now, writes `shifts/rotation.toml`, appends a `guard` event
+names outside the rotation — an off repo whose trunk is not found now is a box too,
+unchecked — writes `shifts/rotation.toml`, appends a `guard` event
 (rationale `owner set the rotation: off = [...]`, the file's line) and answers `303` to
 `/`, `500` when the file or the trail refuses; a rotation file that will not read makes
 `GET /` a `500`. Both POSTs answer to the same Host and Origin checks. A request whose `Host` is not the bound address,

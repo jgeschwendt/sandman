@@ -1001,20 +1001,41 @@ fn a_handoff_that_died_before_the_release_is_released_by_the_next() {
     machine.report(shift, REPORT);
     machine.write(
         format!(".sandman/shifts/{shift}/meta.json"),
-        &format!(r#"{{"ended":"2026-10-16T16:30:00Z","shift":"{shift}"}}"#),
+        &format!(
+            r#"{{"abandoned":true,"cost_usd":1.5,"ended":"2026-10-16T16:30:00Z","shift":"{shift}"}}"#
+        ),
     );
+    machine.write(format!(".sandman/shifts/{shift}/handoff.md"), "# Gone\n");
     let args = ["shift", "handoff", "--shift", shift, "--abandoned"];
-    let output = machine.run(FRIDAY, &args, &[]);
-    assert_eq!(code(&output), 1);
-    assert!(
-        stderr(&output).contains("released current.json"),
-        "{}",
-        stderr(&output)
-    );
-    assert_eq!(
-        machine.ok(FRIDAY, &["shift", "status"]).lines().next(),
-        Some("no shift open")
-    );
+    // the event it never appended is appended from meta.json, once
+    for _ in 0..2 {
+        let output = machine.run(FRIDAY, &args, &[]);
+        assert_eq!(code(&output), 1);
+        assert!(
+            stderr(&output).contains("released current.json"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(
+            machine.ok(FRIDAY, &["shift", "status"]).lines().next(),
+            Some("no shift open")
+        );
+        let current = format!(r#"{{"shift":"{shift}"}}"#);
+        machine.write(".sandman/shifts/current.json", &current);
+    }
+    let events = machine.trail();
+    let handoffs: Vec<_> = events
+        .iter()
+        .filter(|line| line.contains(r#""kind":"shift.handoff""#))
+        .collect();
+    assert_eq!(handoffs.len(), 1, "{events:?}");
+    for part in [
+        r#""cost_usd":1.5"#,
+        r#""abandoned""#,
+        r#""rationale":"Gone""#,
+    ] {
+        assert!(handoffs[0].contains(part), "{part}: {}", handoffs[0]);
+    }
 }
 
 #[test]
@@ -2038,7 +2059,6 @@ fn a_cloud_handoff_whose_push_failed_pushes_on_the_retry() {
     ] {
         git(&machine.root(), args).expect("seed");
     }
-    let hook = machine.script("state.git/hooks/pre-receive", "exit 1\n");
     let args = [
         "shift",
         "handoff",
@@ -2048,13 +2068,22 @@ fn a_cloud_handoff_whose_push_failed_pushes_on_the_retry() {
         "--cloud",
     ];
     let handoff = || code(&machine.run(FRIDAY, &args, &GIT_ENV));
+    let show = |path: &str| git(&home.join("state.git"), &["show", &format!("HEAD:{path}")]);
+    let meta = || show(&format!("shifts/{shift}/meta.json")).expect("meta");
+    // a trail that refuses the event is no handoff to push
+    let trail = machine.write(".sandman/trail", "");
+    assert_eq!(handoff(), 1, "the trail refuses");
+    assert!(!meta().contains(r#""ended":"#), "{}", meta());
+    fs::remove_file(trail).expect("rm");
+    let hook = machine.script("state.git/hooks/pre-receive", "exit 1\n");
     assert_eq!(handoff(), 1, "the push is refused");
     fs::remove_file(hook).expect("rm");
     assert_eq!(handoff(), 0, "the retry pushes the handoff already made");
-    let show = |path: &str| git(&home.join("state.git"), &["show", &format!("HEAD:{path}")]);
     assert!(show("shifts/current.json").is_err());
-    let meta = show(&format!("shifts/{shift}/meta.json")).expect("meta");
-    assert!(meta.contains(r#""ended":"#), "{meta}");
+    assert!(meta().contains(r#""ended":"#), "{}", meta());
+    let events = machine.trail();
+    let handoffs = events.iter().filter(|line| line.contains("shift.handoff"));
+    assert_eq!(handoffs.count(), 1, "{events:?}");
 }
 
 #[test]
@@ -2206,6 +2235,16 @@ fn a_repo_switched_off_stays_off_while_its_trunk_is_missing() {
         machine.ok(FRIDAY, &["shift", "rotation", flag, "jgeschwendt/alpha"]);
         assert_eq!(machine.read(file), format!("off = [{off}]\n"));
     }
+    // listed, and --on clears it; a name in neither is still the command line's fault
+    assert_eq!(
+        machine.ok(FRIDAY, &["shift", "rotation"]),
+        "jgeschwendt/alpha · on · never shifted\njgeschwendt/gone · off · not found\n"
+    );
+    let on = ["shift", "rotation", "--on"];
+    machine.ok(FRIDAY, &[&on[..], &["jgeschwendt/gone"]].concat());
+    assert_eq!(machine.read(file), "off = []\n");
+    let output = machine.run(FRIDAY, &[&on[..], &["jgeschwendt/gone"]].concat(), &[]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
 }
 
 /// A trunk at `<code>/jgeschwendt/<name>/main` cloned from a bare remote

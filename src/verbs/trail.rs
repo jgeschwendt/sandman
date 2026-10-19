@@ -527,7 +527,7 @@ pub fn append_event(data_root: &Path, event: Event, remint: bool) -> Result<Even
 }
 
 /// [`append_event`]'s body, for a caller already holding `.commit.lock`.
-fn append_locked(data_root: &Path, mut event: Event, remint: bool) -> Result<Event> {
+pub(crate) fn append_locked(data_root: &Path, mut event: Event, remint: bool) -> Result<Event> {
     if let Some(parent) = &event.draft.parent
         && find(&read(data_root, None)?, parent).is_none()
     {
