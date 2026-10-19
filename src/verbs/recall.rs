@@ -136,23 +136,30 @@ pub fn compose(data_root: &Path, home: &Path, cwd: &Path, now: Timestamp) -> Rec
         recent: recent.map(|(section, _)| section),
         tools: tools(data_root, home),
     };
-    let (text, budget, ceiling_lines) = sections.compose();
+    let (text, budget) = sections.compose();
+    // A bank the ceiling cut to nothing put nothing in front of the session.
+    let graph: Vec<_> = (sections
+        .graph
+        .iter()
+        .zip(&budget.graph)
+        .zip(sections.kept(&budget)))
+    .filter(|(_, kept)| *kept > 0)
+    .map(|(bank, _)| bank)
+    .collect();
     Recalled {
-        banks: sections
-            .graph
+        banks: graph
             .iter()
-            .zip(&budget.graph)
             .map(|(section, full)| RecalledBank {
-                degraded: !full,
+                degraded: !**full,
                 key: section.key.clone(),
                 memories: section.files.clone(),
             })
             .collect(),
-        memories: sections.graph.iter().map(|section| section.memories).sum(),
+        memories: graph.iter().map(|(section, _)| section.memories).sum(),
         pointers: sections.pointers,
         trimmed: Trimmed {
-            banks_degraded: budget.graph.iter().filter(|full| !**full).count(),
-            ceiling_lines,
+            banks_degraded: graph.iter().filter(|(_, full)| !**full).count(),
+            ceiling_lines: budget.cut,
             sections: sections.dropped(&budget),
         },
         text,
@@ -192,6 +199,8 @@ struct Sections {
 struct Budget {
     /// Whether the chronological surface is in.
     chronological: bool,
+    /// How many graph lines the ceiling cut takes — see [`Sections::kept`].
+    cut: usize,
     /// Per bank: `true` while it still renders bodies.
     graph: Vec<bool>,
     /// Whether the pointer surface is in.
@@ -221,11 +230,11 @@ impl Sections {
     /// chronological surface excepted, whose cost is reserved before the trim
     /// sequence begins.
     ///
-    /// The budget it settled on comes back with the text, along with the graph
-    /// lines the ceiling cut took: what was cut is not recoverable from the
-    /// payload, and it is exactly what the journal has to say for `budget=` to
-    /// mean anything.
-    fn compose(&self) -> (String, Budget, usize) {
+    /// The budget it settled on comes back with the text, the graph lines the
+    /// ceiling cut took among it: the payload marks the cut but cannot say
+    /// which banks it took, and the journal has to for `budget=` to mean
+    /// anything.
+    fn compose(&self) -> (String, Budget) {
         let mut budget = Budget {
             // The voyage log is never trimmed while it fits under the budget
             // on its own: a dated, page-cheap surface outranks the bodies it
@@ -242,6 +251,7 @@ impl Sections {
                 .chronological
                 .as_ref()
                 .is_some_and(|section| !over(&format!("{HEADER}{section}"))),
+            cut: 0,
             graph: vec![true; self.graph.len()],
             recent: self.recent.is_some(),
             tools: self.tools.is_some(),
@@ -295,34 +305,35 @@ impl Sections {
         // cut that fits is the one taken — binary search, since a wider cut is
         // never a longer payload.
         if !over(&text) {
-            return (text, budget, 0);
+            return (text, budget);
         }
-        let lines = text.lines().count();
         let (mut low, mut high) = (0, self.graph_lines(&budget));
         while low < high {
-            let mid = low + (high - low) / 2;
-            if over(&self.render_cut(&budget, mid)) {
-                low = mid + 1;
+            budget.cut = low + (high - low) / 2;
+            if over(&self.render(&budget)) {
+                low = budget.cut + 1;
             } else {
-                high = mid;
+                high = budget.cut;
             }
         }
         // The widest cut always fits: every bank is gone and what is left is
         // the preamble plus the chronological surface, which was reserved only
         // on the condition that the two of them fit together. The other
         // optional surfaces cannot be in — reinstatement admits one only when
-        // the payload it makes fits, and this payload did not.
-        let text = self.render_cut(&budget, low);
-        let cut_lines = lines - text.lines().count();
-        (text, budget, cut_lines)
+        // the payload it makes fits, and this payload did not. Its marker then
+        // stands alone, and goes too when the reserved log leaves it no room.
+        budget.cut = low;
+        let text = self.render(&budget);
+        let text = if over(&text) {
+            text.replacen(&format!("{}\n\n", cut_mark(low)), "", 1)
+        } else {
+            text
+        };
+        (text, budget)
     }
 
-    /// The payload at this budget.
-    fn render(&self, budget: &Budget) -> String {
-        self.render_cut(budget, 0)
-    }
-
-    /// The payload at this budget, with `cut` of the graph's lines gone.
+    /// Per bank, the lines left under its heading once the ceiling cut has
+    /// taken `budget.cut` of them.
     ///
     /// The cut eats the last bank's tail first and reaches the cwd's own bank
     /// only once every ancestor behind it has nothing left to give — the
@@ -331,34 +342,46 @@ impl Sections {
     /// heading with its lines: a heading over no memories names a bank and
     /// says nothing about it.
     ///
-    /// Only [`Self::compose`]'s ceiling passes a non-zero cut, and only with
+    /// Only [`Self::compose`]'s ceiling sets a non-zero cut, and only with
     /// every bank already at its index rendering.
-    fn render_cut(&self, budget: &Budget, cut: usize) -> String {
-        let mut keep: Vec<usize> = Vec::with_capacity(self.graph.len());
-        let mut remaining = cut;
-        for (section, full) in self.graph.iter().zip(&budget.graph).rev() {
-            let lines = body_lines(rendering(section, *full));
-            let taken = remaining.min(lines);
-            remaining -= taken;
-            keep.push(lines - taken);
-        }
+    fn kept(&self, budget: &Budget) -> Vec<usize> {
+        let mut remaining = budget.cut;
+        let mut keep: Vec<usize> = (self.graph.iter().zip(&budget.graph).rev())
+            .map(|(section, full)| {
+                let lines = body_lines(rendering(section, *full));
+                let taken = remaining.min(lines);
+                remaining -= taken;
+                lines - taken
+            })
+            .collect();
         keep.reverse();
+        keep
+    }
 
+    /// The payload at this budget.
+    ///
+    /// A cut is marked with its whole count on the last line it kept, never
+    /// silent: it can land inside a pinned body, or take the home bank's rules
+    /// whole, and either would otherwise read as everything there was. With
+    /// no line kept the marker stands alone.
+    fn render(&self, budget: &Budget) -> String {
+        let keep = self.kept(budget);
+        let last = keep.iter().rposition(|kept| *kept > 0);
+        let mark = cut_mark(budget.cut);
         let mut parts: Vec<Cow<'_, str>> = Vec::new();
-        for ((section, full), kept) in self.graph.iter().zip(&budget.graph).zip(&keep) {
+        for (index, ((section, full), kept)) in
+            self.graph.iter().zip(&budget.graph).zip(&keep).enumerate()
+        {
             let body = rendering(section, *full);
-            if *kept == body_lines(body) {
-                parts.push(Cow::Borrowed(body));
-            } else if *kept > 0 {
-                // Marked on the last kept line, never silent: the cut can land
-                // inside a pinned body, which would otherwise read as whole.
+            if budget.cut > 0 && last == Some(index) {
                 let head: Vec<&str> = body.lines().take(kept + 1).collect();
-                let cut = body_lines(body) - kept;
-                parts.push(Cow::Owned(format!(
-                    "{} … {cut} more lines cut",
-                    head.join("\n")
-                )));
+                parts.push(Cow::Owned(format!("{} {mark}", head.join("\n"))));
+            } else if *kept > 0 {
+                parts.push(Cow::Borrowed(body));
             }
+        }
+        if budget.cut > 0 && last.is_none() {
+            parts.push(Cow::Borrowed(&mark));
         }
         for (enabled, section) in [
             (budget.recent, self.recent.as_ref()),
@@ -385,6 +408,11 @@ impl Sections {
             .map(|(section, full)| body_lines(rendering(section, *full)))
             .sum()
     }
+}
+
+/// What a cut of `lines` says where it happened.
+fn cut_mark(lines: usize) -> String {
+    format!("… {lines} more lines cut")
 }
 
 /// The rendering a bank is at: bodies while it is `full`, index lines after.
@@ -722,16 +750,23 @@ pub fn bearing(data_root: &Path, home: &Path, cwd: &Path, cap: usize) -> String 
         full[index] = false;
         text = render(&full);
     }
-    let (mut kept, mut chars) = (String::new(), 0);
-    for line in text.lines() {
-        chars += line.chars().count() + 1;
-        if chars > cap {
-            break;
-        }
-        kept.push_str(line);
-        kept.push('\n');
-    }
-    kept.trim_end().to_owned()
+    // The most whole lines that fit with the mark of what went after them.
+    let lines: Vec<&str> = text.lines().collect();
+    (0..=lines.len())
+        .rev()
+        .map(|kept| {
+            let head = lines[..kept].join("\n");
+            let head = head.trim_end();
+            if kept == lines.len() {
+                head.to_owned()
+            } else {
+                format!("{head} {}", cut_mark(lines.len() - kept))
+                    .trim_start()
+                    .to_owned()
+            }
+        })
+        .find(|text| text.chars().count() <= cap)
+        .unwrap_or_default()
 }
 
 /// A bank at its floor: one line per memory, except a pinned one, which keeps
@@ -1385,6 +1420,14 @@ mod tests {
         assert!(tight.chars().count() <= 700, "{tight}");
         assert!(tight.contains("fuzz the parser"), "{tight}");
         assert!(tight.contains("- home (user) — the home memory"), "{tight}");
+        // Tighter: whole lines go off the tail, and the last kept one says so.
+        let cap = tight.find('\n').expect("a heading") + 40;
+        let cut = bearing(&root.path, &root.home, &root.cwd, cap);
+        assert!(cut.chars().count() <= cap, "{cut}");
+        assert!(
+            cut.starts_with("## Long-term") && cut.ends_with(" more lines cut"),
+            "{cut}"
+        );
         assert!(
             bearing(&root.path, &root.home, &root.cwd, 10)
                 .chars()
@@ -1608,7 +1651,7 @@ title: Two writers, one trunk\nwritten: 2026-08-04T03:30:12Z\n---\n\n{}\n",
     }
 
     #[test]
-    fn a_pinned_body_cut_at_the_ceiling_says_so() {
+    fn a_ceiling_cut_says_how_much_it_took_from_every_bank() {
         let root = Root::new("recall-ceiling-pin");
         root.memory(
             &root.bank(),
@@ -1616,14 +1659,61 @@ title: Two writers, one trunk\nwritten: 2026-08-04T03:30:12Z\n---\n\n{}\n",
             "name: rule\ntype: user\nrecall: pin\n",
             &format!("{}except when Y\n", "pinned line lorem ipsum\n".repeat(399)),
         );
-        let text = root.compose().text;
+        root.memory(
+            &root.home_bank(),
+            "user_home.md",
+            "name: home\ntype: user\nrecall: pin\n",
+            "home rule Z\n",
+        );
+        let composed = root.compose();
+        let text = &composed.text;
         assert!(text.chars().count() <= BUDGET_CHARS);
-        assert!(!text.contains("except when Y"), "{text}");
+        assert!(
+            !text.contains("except when Y") && !text.contains("home rule Z"),
+            "{text}"
+        );
+        // The home bank went whole — its heading and its two lines — and the
+        // marker on the cwd's last kept line counts them with the cwd's own.
+        let cut = 2 + 400 - text.matches("pinned line lorem ipsum").count();
+        assert_eq!(composed.trimmed.ceiling_lines, cut);
         let last = text.lines().next_back().expect("a last line");
         assert!(
-            last.contains(" lorem ipsum … ") && last.ends_with(" more lines cut"),
+            last.ends_with(&format!(" lorem ipsum … {cut} more lines cut")),
             "{last}"
         );
+        assert_eq!(composed.banks.len(), 1, "{:?}", composed.banks);
+        assert_eq!(composed.memories, 1);
+    }
+
+    #[test]
+    fn a_cut_of_every_bank_says_so_where_the_log_leaves_it_room() {
+        for (room, marked) in [(40, true), (10, false)] {
+            let root = Root::new("recall-ceiling-all");
+            let log = |title: &str| {
+                root.log_index(&format!(
+                    "---\nname: voyage log\n---\n\n- day 1 · [{title}](2026-08-02.md) — discovery\n"
+                ));
+            };
+            log("");
+            let bare = root.compose().text.chars().count();
+            log(&"t".repeat(BUDGET_CHARS - room - bare));
+            root.memory(
+                &root.bank(),
+                "user_here.md",
+                "name: here\ndescription: d\ntype: user\n",
+                "body\n",
+            );
+            let composed = root.compose();
+            let text = &composed.text;
+            assert!(text.chars().count() <= BUDGET_CHARS, "{room}");
+            assert!(text.ends_with("discovery"), "{text}");
+            assert_eq!(composed.banks, []);
+            assert_eq!(
+                text.contains("\n\n… 1 more lines cut\n\n"),
+                marked,
+                "{text}"
+            );
+        }
     }
 
     #[test]
