@@ -6,9 +6,10 @@
 //! [`crate::commit_memory`]'s; this module is the plumbing between them —
 //! build the prompt, run the trio, stamp the pointer, write the log line.
 //!
-//! Nothing here is fatal but a missing root: a mind that fails abstains, a
-//! pointer that cannot raise a quorum is simply left for the next run, and the
-//! pass exits 0 either way. Dream is idempotent over the queue.
+//! Nothing here is fatal but a missing root or a commit path that cannot
+//! write: a mind that fails abstains, a pointer that cannot raise a quorum is
+//! simply left for the next run, and the pass exits 0 either way. Dream is
+//! idempotent over the queue.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -185,7 +186,14 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
         let mut notes: Vec<String> = Vec::new();
         let mut voices: Vec<(Tier, Proposal)> = Vec::new();
         let mut responders = 0_usize;
-        for (tier, reply) in consult(options, keep_for(options, &pointer).as_ref(), &prompt) {
+        let keep = keep_for(options, &pointer);
+        let replies = consult(options, keep.as_ref(), &prompt);
+        // Forgotten while the minds read it: their transcripts landed after
+        // the forget did, so they go the way it sent everything else.
+        if let Some(keep) = keep.filter(|_| !pointer.path.exists()) {
+            let _ = fs::remove_dir_all(&keep.into);
+        }
+        for (tier, reply) in replies {
             let read = match reply {
                 Ok(text) => proposals(&text, &keys),
                 Err(abstained) => Err(abstained.as_str().to_owned()),
@@ -216,9 +224,7 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
             // longer the conversation they read: committing would outlive the
             // forget, and stamping the snapshot would resurrect the pointer or
             // mark a fresh ending dreamt.
-            read_pointer(&pointer.path)
-                .is_none_or(|fresh| fresh.value != pointer.value)
-                .then_some("changed")
+            (!unchanged(&pointer)).then_some("changed")
         };
         if let Some(why) = skipped {
             atomic::append_line(
@@ -266,6 +272,10 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
                     committed.push(landed.filename.clone());
                     outcome.committed.push(landed.path);
                 }
+                // A commit path that cannot write — a lock a killed writer
+                // left, a full disk — stops the run with this pointer and the
+                // rest unstamped; whatever already landed dedupes next run.
+                Err(error @ (Error::Io { .. } | Error::LockHeld { .. })) => return Err(error),
                 // A bank the commit path refuses costs only this claim, as an
                 // unreadable memory does in `already_held`: aborting would
                 // strand this pointer and every one queued behind it.
@@ -459,8 +469,18 @@ fn read_pointer(path: &Path) -> Option<Pointer> {
     })
 }
 
-/// Stamp the pointer routed, keeping everything else it carries.
+/// Whether the pointer file still holds what was read from it.
+fn unchanged(pointer: &Pointer) -> bool {
+    read_pointer(&pointer.path).is_some_and(|fresh| fresh.value == pointer.value)
+}
+
+/// Stamp the pointer routed, keeping everything else it carries — unless it
+/// was forgotten or re-taken since it was read, which re-reading right before
+/// the write narrows to the read-to-rename window.
 fn mark_dreamed(pointer: &Pointer, at: Timestamp) -> Result<()> {
+    if !unchanged(pointer) {
+        return Ok(());
+    }
     let Value::Object(entries) = &pointer.value else {
         return Err(Error::Json {
             path: Some(pointer.path.clone()),
@@ -601,14 +621,15 @@ Reply with ONLY this JSON object — no prose, no code fence:
 
 /// Where this pointer's minds leave their transcripts. `None` keeps none.
 ///
-/// Every mind reading one pointer files under the same session it read, so a
-/// later evaluation can put the three side by side.
+/// Every mind reading one pointer files under `<lane>/<the session id it
+/// read>/`, so a later evaluation can put the three side by side and `forget`
+/// finds them by name.
 fn keep_for(options: &Options, pointer: &Pointer) -> Option<Keep> {
     let transcripts = options.transcripts.as_ref()?;
     let lane = claude_slug(pointer).unwrap_or_else(|| ORPHANS_DIR_NAME.to_owned());
     Some(Keep {
         cwd: transcripts.dream.clone(),
-        into: transcripts.dream.join(lane),
+        into: transcripts.dream.join(lane).join(&pointer.sid),
         projects: transcripts.projects.clone(),
     })
 }
@@ -1161,6 +1182,42 @@ mod tests {
                 .exists()
         );
         assert!(read_log(&scratch.root).contains("skipped=changed"));
+        // The minds' transcripts landed after the forget; the run destroys them.
+        assert!(
+            !crate::paths::dream_dir(&scratch.root)
+                .join(SLUG)
+                .join(SID)
+                .exists()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_commit_path_that_cannot_write_stops_the_run_with_the_queue_intact() {
+        let scratch = Scratch::new("dream-commit-lock");
+        scratch.queue("sid-early", "2026-08-11T12:00:00Z");
+        scratch.queue("sid-late", "2026-08-12T12:00:00Z");
+        fs::write(scratch.root.join(crate::lock::LOCK_FILE_NAME), "99999").expect("a dead lock");
+        let agreed = reply(&scratch.bank_key(), "the queue is the recall surface", "b");
+        let options = scratch.options(&[("claude-sonnet-5", &agreed), ("claude-fable-5", &agreed)]);
+        assert!(matches!(
+            dream(&scratch.root, &scratch.home, &options),
+            Err(crate::error::Error::LockHeld { .. })
+        ));
+        assert_eq!(super::depth(&scratch.root).expect("depth"), 2);
+    }
+
+    #[test]
+    fn a_pointer_changed_before_its_stamp_is_left_as_it_now_is() {
+        let scratch = Scratch::new("dream-stamp-race");
+        let path = scratch.queue(SID, "2026-08-11T12:00:00Z");
+        let read = super::read_pointer(&path).expect("pointer");
+        fs::write(&path, "{\"ended\":\"2026-08-12T00:00:00Z\"}\n").expect("re-taken");
+        super::mark_dreamed(&read, Timestamp::from_unix_seconds(0)).expect("mark");
+        assert_eq!(
+            fs::read_to_string(&path).expect("pointer"),
+            "{\"ended\":\"2026-08-12T00:00:00Z\"}\n"
+        );
     }
 
     #[cfg(unix)]
@@ -1402,7 +1459,7 @@ mod tests {
 
         dream(&scratch.root, &scratch.home, &options).expect("dream");
 
-        let kept = crate::paths::dream_dir(&scratch.root).join(SLUG);
+        let kept = crate::paths::dream_dir(&scratch.root).join(SLUG).join(SID);
         let names: Vec<PathBuf> = fs::read_dir(&kept)
             .expect("kept dir")
             .map(|entry| entry.expect("entry").path())

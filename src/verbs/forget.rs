@@ -37,8 +37,13 @@ pub fn forget(data_root: &Path, claude_root: &Path, session_id: &str) -> Result<
     let mut targets: Vec<PathBuf> = Vec::new();
     targets.extend(found.transcripts);
     targets.extend(found.directories);
-    let archived = archived_copies(data_root, session_id)?;
-    targets.extend(dreamt_copies(data_root, &archived)?);
+    let archived = named(&data_root.join(paths::ARCHIVE_DIR_NAME), session_id, |_| {
+        false
+    })?;
+    let read = reads(&archived);
+    targets.extend(named(&paths::dream_dir(data_root), session_id, |path| {
+        legacy(path, &read)
+    })?);
     targets.extend(archived);
     let pointer = paths::recent_dir(data_root).join(format!("{session_id}.json"));
     if pointer.exists() {
@@ -55,55 +60,72 @@ pub fn forget(data_root: &Path, claude_root: &Path, session_id: &str) -> Result<
     Ok(targets)
 }
 
-/// Every archived path under the data root whose name carries the session id.
-fn archived_copies(data_root: &Path, session_id: &str) -> Result<Vec<PathBuf>> {
+/// Every path under `dir` whose name carries the session id, or that `also`
+/// claims. A match is destroyed whole, so the walk does not descend into it.
+fn named(dir: &Path, session_id: &str, also: impl Fn(&Path) -> bool) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
-    walk(&data_root.join(paths::ARCHIVE_DIR_NAME), &mut |path| {
-        if path
+    walk(dir, &mut |path| {
+        let hit = path
             .file_name()
             .and_then(std::ffi::OsStr::to_str)
             .is_some_and(|name| name.contains(session_id))
-        {
+            || also(path);
+        if hit {
             out.push(path.to_path_buf());
-            // The match is destroyed whole; descending into it is pointless.
-            return false;
         }
-        true
+        !hit
     })?;
     Ok(out)
 }
 
-/// Every dream mind's kept transcript of an archived copy. The minds run
-/// under session ids of their own, so the only tie back is the prompt they
-/// were handed, which ends with the extracted conversation (`dream::prompt`).
-fn dreamt_copies(data_root: &Path, archived: &[PathBuf]) -> Result<Vec<PathBuf>> {
-    let tails: Vec<String> = archived
+/// What each archived copy reads as to a mind — its extract — and every cwd
+/// its lines record. Read lossily, as dream reads it.
+fn reads(archived: &[PathBuf]) -> Vec<(String, Vec<String>)> {
+    archived
         .iter()
-        .filter_map(|path| fs::read_to_string(path).ok())
-        .map(|text| transcript::extract(&text).trim_end().to_owned())
-        .filter(|said| !said.is_empty())
-        .map(|said| format!("## The conversation\n{said}"))
-        .collect();
-    let mut out = Vec::new();
-    walk(&paths::dream_dir(data_root), &mut |path| {
-        let kept = fs::read_to_string(path).is_ok_and(|text| {
-            text.lines()
-                .any(|line| json::parse(line).is_ok_and(|value| ends_with(&value, &tails)))
-        });
-        if kept {
-            out.push(path.to_path_buf());
-        }
-        true
-    })?;
-    Ok(out)
+        .filter_map(|path| fs::read(path).ok())
+        .map(|bytes| {
+            let text = String::from_utf8_lossy(&bytes);
+            let cwds = text
+                .lines()
+                .filter_map(|line| Some(json::parse(line).ok()?.get("cwd")?.as_str()?.to_owned()))
+                .collect();
+            (transcript::extract(&text).trim_end().to_owned(), cwds)
+        })
+        .collect()
 }
 
-/// Whether any string inside `value` ends with one of `tails`.
-fn ends_with(value: &Value, tails: &[String]) -> bool {
+/// Whether a kept mind transcript that predates `<lane>/<session id>/` — one
+/// named by the mind's own id — read one of `reads`. The only tie back is the
+/// prompt (`dream::prompt`): its `  cwd:` line must be a cwd the archive
+/// records, and its conversation must be the extract or, since a later take
+/// may have joined a fragment on, a whole-block prefix of it. Residual: a
+/// session whose conversation and cwd both match another's still matches.
+fn legacy(path: &Path, reads: &[(String, Vec<String>)]) -> bool {
+    fs::read(path).is_ok_and(|bytes| {
+        String::from_utf8_lossy(&bytes)
+            .lines()
+            .any(|line| json::parse(line).is_ok_and(|value| asked(&value, reads)))
+    })
+}
+
+/// Whether any string inside `value` is a prompt made from one of `reads`.
+fn asked(value: &Value, reads: &[(String, Vec<String>)]) -> bool {
     match value {
-        Value::String(text) => tails.iter().any(|tail| text.trim_end().ends_with(tail)),
-        Value::Array(items) => items.iter().any(|item| ends_with(item, tails)),
-        Value::Object(entries) => entries.iter().any(|(_, item)| ends_with(item, tails)),
+        Value::String(text) => {
+            text.split_once("\n## The conversation\n")
+                .is_some_and(|(head, said)| {
+                    let said = said.trim_end();
+                    let cwd = head.lines().find_map(|line| line.strip_prefix("  cwd: "));
+                    !said.is_empty()
+                        && reads.iter().any(|(whole, cwds)| {
+                            (whole == said || whole.starts_with(&format!("{said}\n\n")))
+                                && cwds.iter().any(|known| Some(known.as_str()) == cwd)
+                        })
+                })
+        }
+        Value::Array(items) => items.iter().any(|item| asked(item, reads)),
+        Value::Object(entries) => entries.iter().any(|(_, item)| asked(item, reads)),
         _ => false,
     }
 }
@@ -172,8 +194,15 @@ mod tests {
         fs::create_dir_all(&archive).expect("archive");
         let archived = archive.join(format!("121137-projects-{PROJECT}-{SID}.jsonl"));
         let archived_dir = archive.join(format!("121137-projects-{PROJECT}-{SID}-dir"));
-        let said = r#"{"type":"user","message":{"content":"a secret diary"}}"#;
-        fs::write(&archived, said).expect("archived");
+        // What an earlier mind read, then a stray byte and a fragment a later
+        // take joined on.
+        let said = r#"{"type":"user","cwd":"/code","message":{"content":"a secret diary"}}"#;
+        let joined = r#"{"type":"assistant","cwd":"/code","message":{"content":"joined"}}"#;
+        fs::write(
+            &archived,
+            [said.as_bytes(), b"\n\xff\n", joined.as_bytes()].concat(),
+        )
+        .expect("archived");
         fs::create_dir_all(&archived_dir).expect("archived dir");
         fs::write(archived_dir.join("agent.jsonl"), "{}\n").expect("archived sidecar");
         let unrelated = archive.join("121137-projects-other.jsonl");
@@ -183,33 +212,38 @@ mod tests {
         fs::create_dir_all(&recent).expect("recent");
         let pointer = recent.join(format!("{SID}.json"));
         let body = format!(
-            r#"{{"archived":{}}}"#,
+            r#"{{"archived":{},"cwd":"/code"}}"#,
             Value::string(archived.display().to_string()).render()
         );
         fs::write(&pointer, body).expect("pointer");
         fs::write(recent.join("other.json"), "{}\n").expect("other pointer");
 
-        // The dream minds' kept transcripts, named by their own session ids:
-        // one read this session, one read another.
-        let kept = crate::paths::dream_dir(&root).join(PROJECT);
-        fs::create_dir_all(&kept).expect("kept");
-        let mind = |name: &str, sid: &str, conversation: &str| {
-            let read = dream::pending(&root)
-                .expect("pending")
-                .into_iter()
-                .find(|pointer| pointer.sid == sid)
-                .expect("pointer");
-            let asked = Value::string(dream::prompt(&read, &[], conversation)).render();
-            let path = kept.join(name);
-            fs::write(
-                &path,
-                format!("{{\"type\":\"user\",\"message\":{{\"content\":{asked}}}}}\n"),
-            )
-            .expect("mind");
+        // The minds' kept transcripts: today's filed under the session id;
+        // legacy ones named by the minds' own ids, one of this session and
+        // one of another with the same conversation in another cwd.
+        let lane = crate::paths::dream_dir(&root).join(PROJECT);
+        let named = lane.join(SID);
+        fs::create_dir_all(&named).expect("kept");
+        fs::write(named.join("m0.jsonl"), "{}\n").expect("named mind");
+        let asked = dream::prompt(
+            &dream::pending(&root).expect("pending")[0],
+            &[],
+            &crate::transcript::extract(said),
+        );
+        let mind = |name: &str, asked: &str| {
+            let path = lane.join(name);
+            let said = format!(
+                "{{\"message\":{{\"content\":{}}}}}\n",
+                Value::string(asked).render()
+            );
+            fs::write(&path, [said.as_bytes(), b"\xff"].concat()).expect("mind");
             path
         };
-        let dreamt = mind("m1.jsonl", SID, &crate::transcript::extract(said));
-        let undreamt = mind("m2.jsonl", "other", "[user] a secret diary, and more");
+        let dreamt = mind("m1.jsonl", &asked);
+        let twin = mind(
+            "m2.jsonl",
+            &asked.replace("  cwd: /code", "  cwd: /elsewhere"),
+        );
 
         // A bank whose files carry the session id in their name and source.
         let bank = root.join("memories").join(PROJECT);
@@ -225,6 +259,7 @@ mod tests {
                 archived.clone(),
                 archived_dir.clone(),
                 dreamt,
+                named,
                 pointer.clone(),
             ];
             paths.sort();
@@ -237,7 +272,7 @@ mod tests {
 
         // Untouched: other sessions, and every bank memory.
         assert!(project.join("other.jsonl").is_file());
-        assert!(unrelated.is_file() && undreamt.is_file());
+        assert!(unrelated.is_file() && twin.is_file());
         assert!(recent.join("other.json").is_file());
         assert!(memory.is_file());
     }
