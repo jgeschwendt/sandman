@@ -679,7 +679,7 @@ pub(crate) struct Meta {
 }
 
 /// Read a shift's `meta.json`.
-fn read_meta(data_root: &Path, shift: &str) -> Result<Meta> {
+pub(crate) fn read_meta(data_root: &Path, shift: &str) -> Result<Meta> {
     let path = paths::shift_dir(data_root, shift).join("meta.json");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
@@ -1091,10 +1091,17 @@ pub fn rotation(ctx: &Context) -> Result<Vec<Rotating>> {
         .collect())
 }
 
-/// Write `shifts/rotation.toml` with `off` sorted and deduped, and hand back
-/// its line.
-pub fn set_off(data_root: &Path, off: impl IntoIterator<Item = String>) -> Result<String> {
-    let off: BTreeSet<String> = off.into_iter().collect();
+/// Write `shifts/rotation.toml` with `off`, the rotation trunks to leave off,
+/// plus the entries already there for repos not found now — sorted and
+/// deduped — and hand back its line.
+pub fn set_off(ctx: &Context, off: impl IntoIterator<Item = String>) -> Result<String> {
+    let found = trunks(ctx);
+    let _lock = CommitLock::acquire(&ctx.data_root)?;
+    let off: BTreeSet<String> = self::off(&ctx.data_root)?
+        .into_iter()
+        .filter(|label| !found.iter().any(|(trunk, _)| trunk == label))
+        .chain(off)
+        .collect();
     let line = toml::Document {
         root: vec![(
             "off".to_owned(),
@@ -1103,9 +1110,9 @@ pub fn set_off(data_root: &Path, off: impl IntoIterator<Item = String>) -> Resul
         tables: Vec::new(),
     }
     .render();
-    let _lock = CommitLock::acquire(data_root)?;
-    let path = paths::shift_rotation(data_root);
-    fs::create_dir_all(paths::shifts_dir(data_root)).map_err(|source| Error::io(&path, source))?;
+    let path = paths::shift_rotation(&ctx.data_root);
+    fs::create_dir_all(paths::shifts_dir(&ctx.data_root))
+        .map_err(|source| Error::io(&path, source))?;
     atomic::write(&path, &line)?;
     Ok(line.trim_end().to_owned())
 }
@@ -2196,10 +2203,19 @@ pub fn handoff(
     truncate: bool,
     cost_usd: Option<f64>,
 ) -> Result<trail::Event> {
+    // held from the read on, so an overlapping handoff reads this one's `ended`
+    let lock = CommitLock::acquire(&ctx.data_root)?;
     let meta = read_meta(&ctx.data_root, shift)?;
+    let current = read_current(&ctx.data_root)?
+        .filter(|value| value.get("shift").and_then(Value::as_str) == Some(shift));
+    let current_path = paths::shift_current(&ctx.data_root);
     if let Some(ended) = &meta.ended {
+        // a handoff that died between meta.json and the release left the lock
+        let released = (current.is_some() && fs::remove_file(&current_path).is_ok())
+            .then_some("; released current.json");
         return Err(Error::refused(format!(
-            "shift {shift} was handed off at {ended}"
+            "shift {shift} was handed off at {ended}{}",
+            released.unwrap_or_default()
         )));
     }
     let dir = paths::shift_dir(&ctx.data_root, shift);
@@ -2280,30 +2296,25 @@ pub fn handoff(
     if abandoned {
         entries.push(("abandoned".to_owned(), Value::Bool(true)));
     }
-    {
-        let _lock = CommitLock::acquire(&ctx.data_root)?;
-        let current = read_current(&ctx.data_root)?
-            .filter(|value| value.get("shift").and_then(Value::as_str) == Some(shift));
-        // the session's ids outlive the lock, so the runner can reap it later
-        for key in ["bg_id", "session_id"] {
-            if let Some(id) = current.as_ref().and_then(|value| value.get(key)?.as_str()) {
-                entries.retain(|(name, _)| name != key);
-                entries.push((key.to_owned(), Value::string(id)));
-            }
-        }
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        if write {
-            atomic::write(&path, &text)?;
-        }
-        atomic::write(
-            &dir.join("meta.json"),
-            &format!("{}\n", Value::Object(entries).render()),
-        )?;
-        if current.is_some() {
-            let current = paths::shift_current(&ctx.data_root);
-            fs::remove_file(&current).map_err(|source| Error::io(&current, source))?;
+    // the session's ids outlive the lock, so the runner can reap it later
+    for key in ["bg_id", "session_id"] {
+        if let Some(id) = current.as_ref().and_then(|value| value.get(key)?.as_str()) {
+            entries.retain(|(name, _)| name != key);
+            entries.push((key.to_owned(), Value::string(id)));
         }
     }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    if write {
+        atomic::write(&path, &text)?;
+    }
+    atomic::write(
+        &dir.join("meta.json"),
+        &format!("{}\n", Value::Object(entries).render()),
+    )?;
+    if current.is_some() {
+        fs::remove_file(&current_path).map_err(|source| Error::io(&current_path, source))?;
+    }
+    drop(lock);
     let first = text
         .lines()
         .map(|line| line.trim_start_matches('#').trim())
@@ -2656,7 +2667,10 @@ pub fn sync(data_root: &Path, message: &str) -> Result<()> {
         let relative = paths::shift_current(Path::new("."));
         grove::git(data_root, &["add", "-f", "--", &relative.to_string_lossy()])?;
     }
-    grove::git(data_root, &["commit", "--quiet", "-m", message])?;
+    // nothing staged: a retry pushing the commit a rejected push left
+    if !grove::git_ok(data_root, &["diff", "--cached", "--quiet"]) {
+        grove::git(data_root, &["commit", "--quiet", "-m", message])?;
+    }
     let push = || grove::git_ok(data_root, &["push", "--quiet", "origin", "HEAD"]);
     if push() || (grove::git_ok(data_root, &["pull", "--rebase", "--quiet"]) && push()) {
         return Ok(());

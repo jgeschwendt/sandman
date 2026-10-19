@@ -490,3 +490,21 @@ fn serve_keeps_the_rotation_checklist() {
     }
     assert!(server.wait().expect("exit").success());
 }
+
+#[test]
+fn serve_keeps_off_a_repo_whose_trunk_is_missing() {
+    let home = Machine::new("report-rotation-gone");
+    fs::create_dir_all(home.grove_code().join("jgeschwendt/alpha/main/.git")).expect("checkout");
+    let file = home.write(
+        ".sandman/shifts/rotation.toml",
+        "off = [\"jgeschwendt/gone\"]\n",
+    );
+    let (mut server, ask) = serve(&home, 1);
+    let saved = ask("POST /rotation", "", "");
+    assert!(saved.starts_with("HTTP/1.1 303 "), "{saved}");
+    assert_eq!(
+        fs::read_to_string(&file).expect("rotation"),
+        "off = [\"jgeschwendt/alpha\", \"jgeschwendt/gone\"]\n"
+    );
+    assert!(server.wait().expect("exit").success());
+}

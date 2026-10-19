@@ -112,7 +112,7 @@ usage: sandman <verb> [args]
 
   forget <session-id>
       The privacy ending: destroy every copy — transcript, subagent directory,
-      archives, pointer. Never touches a bank. The id must be a whole uuid.
+      archives, the dream minds' kept transcripts, pointer. Never touches a bank. The id must be a whole uuid.
 
   breathe init
   breathe sources [--due] [--kind skim|deep] [--json]
@@ -223,7 +223,8 @@ usage: sandman <verb> [args]
       ($SANDMAN_DOCKET_BIN, else ~/.local/bin/docket), appends a decision
       event and redirects to /; 404 for an unknown key, 502 when thread
       fails. The Rotation form checks every rotation trunk not off; POST
-      /rotation (on, repeated) leaves off the rest, writes
+      /rotation (on, repeated) leaves off the rest, keeping off a repo
+      whose trunk is not found now, writes
       <root>/shifts/rotation.toml, appends a guard event and redirects to /. A Host other than the bound address, or a foreign Origin, is
       403. --requests answers N requests, then exits.
 
@@ -281,7 +282,8 @@ usage: sandman <verb> [args]
       exits 3; --untrusted lists those trunks; --shift prints the target a
       shift was briefed on. rotation prints every trunk · on/off · last
       shifted · frozen, after --off/--on (repeatable; a repo outside the
-      rotation exits 2) rewrite the off list. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
+      rotation exits 2) rewrite the off list, keeping off a repo not found
+      now. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
       York hours HH-HH (default 21-07) — and a night carries the theme of the
       day it began on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
@@ -299,7 +301,8 @@ usage: sandman <verb> [args]
       shift.handoff (--cost, the session's own total, as its cost_usd; 0
       journals a cost zero note), copies current.json's bg_id and session_id
       into meta.json and releases current.json; a shift already handed off
-      exits 1, and so does a handoff over 2,000 characters
+      exits 1 (releasing a current.json that still names it), and so does a
+      handoff over 2,000 characters
       unless --truncate keeps its head and notes the cut (--abandoned always
       truncates); every handoff but --abandoned refuses (exit 1) without a
       shifts/<id>/report.md carrying the report's five headings in order, under
@@ -335,7 +338,8 @@ usage: sandman <verb> [args]
       meta.json, commits, pushes (one pull --rebase on a rejection, then exit
       1 `state push rejected`) and prints the brief; templates default to
       $SANDMAN_GROVE/sandman/prompts. handoff --cloud commits and pushes the
-      same way. On a Redesign night pick puts approved proposals first too.
+      same way, and pushes again when rerun on the shift it handed off. On
+      a Redesign night pick puts approved proposals first too.
 
   trail append --kind K [--shift S] [--repo R] [--branch B] [--sha SHA]
                [--rationale TEXT] [--cost USD] [--model M] [--parent ID]
@@ -2485,6 +2489,14 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
                 "shift",
                 &format!("handoff shift={id} error: {error}"),
             );
+            // a handoff already made whose push failed: push it now
+            if parsed.set("--cloud")
+                && shift::read_meta(&ctx.data_root, &id).is_ok_and(|meta| meta.ended.is_some())
+            {
+                eprintln!("sandman: {error}; pushing it");
+                let message = format!("shift({id}): handoff");
+                return Ok(shift::sync(&ctx.data_root, &message)?);
+            }
             Err(error.into())
         }
     }
@@ -2554,7 +2566,7 @@ fn shift_rotation(args: &[String]) -> Result<(), Failure> {
         .filter(|row| !row.on)
         .map(|row| row.label.clone());
     if !parsed.values.is_empty() {
-        shift::set_off(&ctx.data_root, off)?;
+        shift::set_off(&ctx, off)?;
     }
     for row in rows {
         println!(

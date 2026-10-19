@@ -362,7 +362,8 @@ rather than turn an off repo back on. `sandman shift rotation [--off <repo>]… 
 <repo>]…` prints each rotation trunk as `<repo> · on|off · <last shifted, or never
 shifted>[ · frozen]` — the owner's week's word, as above — after the flags rewrite the
 list (`--on` applied last; a repo outside the rotation exits 2 and writes nothing);
-the page's Rotation form (§ report) writes the same file. Every write holds
+the page's Rotation form (§ report) writes the same file. Either keeps an off repo
+whose trunk is not found now off. Every write holds
 `.commit.lock`, tmp → rename. The Sabbath's pick ignores the list.
 
 **The Sabbath's pick.** In Saturday's night `shift pick` returns `jgeschwendt/sandman`'s
@@ -576,6 +577,9 @@ no shift commits to it, and after a merge the sweep, else `grove-sync`, fast-for
   naming `shifts/<id>/report.md`, nothing written, the shift still open — while the
   report is missing, lacks one of its five headings in order, or is over 6,000
   characters (§ report). The runner recording a dead session has nobody to write one.
+- **A shift is handed off once.** A second `shift handoff` exits 1 `shift <id> was
+  handed off at <ended>`; a `current.json` still naming it — a handoff that died before
+  the release — is released, and the refusal says so.
 - **A handoff is at most 2,000 characters.** `shift handoff` refuses a longer
   `handoff.md` (or `--file`) — exit 1 with the count, nothing written, the shift still
   open — unless `--truncate`, which keeps the head and appends a note of how many
@@ -775,7 +779,8 @@ default to `$SANDMAN_GROVE/sandman/prompts`.
 
 `shift handoff … --cloud` hands off as ever (the report gate included), then commits
 and pushes the state the same way, subject `shift(<id>): handoff`, the released
-`current.json` staged as a deletion.
+`current.json` staged as a deletion. Rerun on a shift already handed off — its push
+rejected — it pushes what is committed instead of refusing.
 
 ## breath/ — the ruach
 
@@ -1073,7 +1078,7 @@ external fetch, the style inline in `ui`'s green-and-gold palette. `POST /answer
 `/`: `400` for another answer, `404` for an unknown key, `502` with thread's stderr when
 it fails, `500` when the trail refuses. `POST /rotation` (`on=<repo>`, repeated — what
 the checked boxes send) leaves off every rotation trunk the body does not name, ignoring
-names outside the rotation, writes `shifts/rotation.toml`, appends a `guard` event
+names outside the rotation and keeping off a repo whose trunk is not found now, writes `shifts/rotation.toml`, appends a `guard` event
 (rationale `owner set the rotation: off = [...]`, the file's line) and answers `303` to
 `/`, `500` when the file or the trail refuses; a rotation file that will not read makes
 `GET /` a `500`. Both POSTs answer to the same Host and Origin checks. A request whose `Host` is not the bound address,
