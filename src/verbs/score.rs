@@ -3,7 +3,7 @@
 //! routines' `runs.jsonl`. No model, no network, no git.
 //!
 //! The page is `score/<yyyy>-W<ww>.md`, rewritten whole under `.commit.lock`
-//! on every run. The contract is `docs/BANK-FORMAT.md` § score.
+//! on every run. The contract is `docs/bank-format.html#score`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;

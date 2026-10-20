@@ -2,7 +2,7 @@
 //! `_archive/` lineage.
 //!
 //! The index is regenerated, never hand-edited: fixed frontmatter, then one
-//! line per memory file sorted by filename (`docs/BANK-FORMAT.md`).
+//! line per memory file sorted by filename (`docs/bank-format.html#memory-md`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,7 +46,7 @@ pub struct Bank {
 
 impl Bank {
     /// The bank key for a working directory: every non-alphanumeric **byte**
-    /// replaced by `-` (`docs/BANK-FORMAT.md`).
+    /// replaced by `-` (`docs/bank-format.html#bank-key`).
     ///
     /// The same encoding Claude Code uses for `~/.claude/projects/`, so a
     /// transcript directory and its bank carry the same name.

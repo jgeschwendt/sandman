@@ -2,7 +2,7 @@
 
 ```stele
 kind: container
-purpose: the ruach's seed — `sources.toml`, the feed list `sandman breathe init` copies to `<root>/breath/` when absent; its schema is `docs/BANK-FORMAT.md` § breath
+purpose: the ruach's seed — `sources.toml`, the feed list `sandman breathe init` copies to `<root>/breath/` when absent; its schema is `docs/bank-format.html#breath`
 ```
 
 ## Working here

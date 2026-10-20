@@ -6,7 +6,7 @@
 //! append holds `.commit.lock` and rewrites the day's file tmp → rename, so a
 //! reader never sees half a line.
 //!
-//! The contract is `docs/BANK-FORMAT.md` § trail.
+//! The contract is `docs/bank-format.html#trail`.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
