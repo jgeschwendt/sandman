@@ -516,11 +516,19 @@ them: home-sync commits them every fifteen minutes without trailers, so a shift'
 there could not be told from the sync's or revoked cleanly, and a shift working
 <code class="code">~/.sandman</code> or <code class="code">~/.routines</code> could edit the trail it answers to or the live runner
 that supervises it. Least recently shifted first, never-shifted before any; a tie goes
-to a failing <code class="code">stele check</code> (run only where <code class="code">.stele/graph.lock</code> exists, 20 s timeout, a
-missing binary skipped), then the most open threads naming the slug, then the most
+to a failing <code class="code">stele check</code> (run only where <code class="code">.stele/graph.lock</code> exists, as CI runs it — under the
+trunk's pinned tools, <code class="code">mise x -C &lt;trunk&gt; -- stele check</code>, bare only when <code class="code">mise</code> is not on PATH — 20 s
+timeout, a missing binary skipped), then the most open threads naming the slug (a
+<code class="code">proposal:</code> thread waiting on the owner, <code class="code">waiting: user</code>, is no signal and not counted), then the most
 untried breaths (<code class="code">state: new</code> or <code class="code">spiked</code>) filed against it, then the name. On a Redesign
 night, repos with an approved <code class="code">proposal:&lt;repo&gt;:*</code> thread (open, <code class="code">answer: approve</code>,
-<code class="code">decided:</code>) come before all the rest, least recently shifted first among them. The open shift's repo and
+<code class="code">decided:</code>, <code class="code">waiting: agent</code> — the owner's message is the latest) come before all the rest, least
+recently shifted first among them; an approved thread whose latest message is the agent's
+(<code class="code">waiting: user</code>) waits on the owner and promotes nothing. A repo is <strong>cooled</strong> when its newest
+shift (<code class="code">meta.json</code>) started under 6 h ago and lasted under 15 min, <code class="code">started</code> to
+<code class="code">ended</code>: it gets neither that promotion nor the tie-break signals and competes on recency
+alone, named on stderr, <code class="code">skipped promotion: &lt;repo&gt; (cooled: last shift &lt;m&gt;m)</code> — a signal its
+shifts cannot clear must not win it the night over and over. The open shift's repo and
 <code class="code">$SANDMAN_SHIFT_SKIP</code> (colon-separated slugs) are passed over, and so is a repo the owner
 switched off — <code class="code">shifts/rotation.toml</code>, versioned content, flat TOML (below) — each named once on stderr, <code class="code">skipped: &lt;repo&gt; (off)</code>, before a repo he
 froze: its section of the week's targets file (§ The brief and its slots) says <code class="code">freeze</code>,
@@ -608,7 +616,7 @@ computed); <code class="code">$SANDMAN_NOW</code> pins the instant.</p>
 </tr>
 <tr>
 <td><code class="code">proposals.approved</code></td>
-<td>the target's open <code class="code">proposal:&lt;repo&gt;:*</code> threads (§ report) whose <code class="code">answer:</code> is <code class="code">approve</code> (case and outer space aside) and that carry <code class="code">decided:</code> — <code class="code">- &lt;key&gt; · decided &lt;ts&gt; · &lt;title&gt;</code> each, else <code class="code">none.</code></td>
+<td>the target's open <code class="code">proposal:&lt;repo&gt;:*</code> threads (§ report) whose <code class="code">answer:</code> is <code class="code">approve</code> (case and outer space aside), that carry <code class="code">decided:</code> and that wait on the agent (<code class="code">waiting: agent</code>) — the set <code class="code">pick</code> promotes — <code class="code">- &lt;key&gt; · decided &lt;ts&gt; · &lt;title&gt;</code> each, else <code class="code">none.</code></td>
 </tr>
 <tr>
 <td><code class="code">prs.open</code></td>
