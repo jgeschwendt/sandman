@@ -43,6 +43,10 @@ use crate::verbs::trail;
 
 /// The composed brief's hard ceiling.
 pub const BRIEF_CHARS: usize = 24_000;
+/// A repo whose last shift started less than this long ago and lasted under
+/// [`SHORT_SHIFT_SECONDS`] is cooled: it competes on recency alone, so a
+/// signal its shifts cannot clear never wins it the night over and over.
+const COOL_DOWN_SECONDS: i64 = 6 * 3600;
 /// How long before the window resets a shift must hand off.
 const HANDOFF_MARGIN_SECONDS: i64 = 15 * 60;
 /// `$SANDMAN_SHIFT_MIN_WINDOW_MIN`'s default: how many minutes `--check`
@@ -134,6 +138,8 @@ const SABBATH_PREVIOUS_CHARS: usize = 2_000;
 const SABBATH_WEEK_CHARS: usize = 6_000;
 /// How many lines of the week's score the brief carries.
 const SCORE_LINES: usize = 20;
+/// A shift shorter than this found nothing to do; see [`COOL_DOWN_SECONDS`].
+const SHORT_SHIFT_SECONDS: i64 = 15 * 60;
 /// How long `pick` waits for one `stele check`.
 const STELE_TIMEOUT: Duration = Duration::from_secs(20);
 /// A window file older than this is reported stale.
@@ -727,6 +733,26 @@ fn last_shifted(ctx: &Context) -> BTreeMap<String, Timestamp> {
     last
 }
 
+/// The cooled repos, each with its last shift's length in minutes: the
+/// newest shift started within [`COOL_DOWN_SECONDS`] before now and ended within
+/// [`SHORT_SHIFT_SECONDS`] of starting.
+fn cooled(ctx: &Context) -> BTreeMap<String, i64> {
+    // metas come oldest first, so the last insert per repo is its newest
+    let newest: BTreeMap<String, (Timestamp, Option<String>)> = metas(&ctx.data_root)
+        .into_iter()
+        .filter_map(|meta| Some((meta.repo?, (meta.started?, meta.ended))))
+        .collect();
+    newest
+        .into_iter()
+        .filter_map(|(repo, (started, ended))| {
+            let lasted = Timestamp::parse_iso8601(&ended?)?.unix_seconds() - started.unix_seconds();
+            ((0..COOL_DOWN_SECONDS).contains(&(ctx.now.unix_seconds() - started.unix_seconds()))
+                && lasted < SHORT_SHIFT_SECONDS)
+                .then_some((repo, lasted / 60))
+        })
+        .collect()
+}
+
 /// The open shift's `current.json`, when one is open.
 fn read_current(data_root: &Path) -> Result<Option<Value>> {
     let path = paths::shift_current(data_root);
@@ -934,13 +960,19 @@ fn names(text: &str, slug: &str) -> bool {
     })
 }
 
-/// Open threads whose text names `slug`, one line each.
-fn open_threads(ctx: &Context, slug: &str) -> Vec<String> {
+/// Open threads whose text names `slug`, one line each. As a `signal`, a
+/// `proposal:` thread waiting on the owner (`waiting: user`) is left out:
+/// the ball is his, and nothing a shift does moves it.
+fn open_threads(ctx: &Context, slug: &str, signal: bool) -> Vec<String> {
     front_files(&ctx.docket)
         .into_iter()
         .filter(|(_, fields, body)| {
-            fields.get("state").map(String::as_str) == Some("open")
+            let field = |key: &str| fields.get(key).map(String::as_str);
+            field("state") == Some("open")
                 && (names(body, slug) || fields.values().any(|value| names(value, slug)))
+                && !(signal
+                    && field("waiting") == Some("user")
+                    && field("key").is_some_and(|key| key.starts_with("proposal:")))
         })
         .map(|(stem, fields, body)| {
             let waiting = fields
@@ -1089,7 +1121,9 @@ pub fn set_off(ctx: &Context, off: impl IntoIterator<Item = String>) -> Result<S
 /// The rotation's choice: the least recently shifted trunk, ties broken by the
 /// live signals (a failing `stele check`, then open threads, then breaths) and
 /// then by name. On a Redesign night repos
-/// with an approved `proposal:` thread come before the rest. Repos the open
+/// with an approved `proposal:` thread waiting on the agent come before the
+/// rest. A cooled repo ([`COOL_DOWN_SECONDS`]) gets neither that promotion nor
+/// the signals, and is named on stderr. Repos the open
 /// shift names, `skip`, repos the owner switched off (`shifts/rotation.toml`),
 /// repos he froze (the week's targets line says
 /// `freeze`, `frozen` or `on ice`, or his answer on a `proposal:` thread says
@@ -1123,7 +1157,7 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
     let last = last_shifted(ctx);
     let trust = trusted(ctx);
     let weighted = ctx.night.anchor(ctx.now).weekday == 1;
-    let (off, frozen) = (off(&ctx.data_root)?, frozen(ctx));
+    let (off, frozen, cooled) = (off(&ctx.data_root)?, frozen(ctx), cooled(ctx));
     let (mut candidates, untrusted): (Vec<_>, Vec<_>) = trunks(ctx)
         .into_iter()
         .filter(|(label, _)| !busy.contains(label) && !ctx.skip.contains(label))
@@ -1139,7 +1173,11 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
             false
         })
         .map(|(label, path)| {
+            if let Some(minutes) = cooled.get(&label) {
+                eprintln!("skipped promotion: {label} (cooled: last shift {minutes}m)");
+            }
             let approved = weighted
+                && !cooled.contains_key(&label)
                 && report::proposals(&ctx.docket, Some(&label))
                     .iter()
                     .any(|proposal| proposal.approved.is_some());
@@ -1160,10 +1198,14 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
         .into_iter()
         .take_while(|(rank, ..)| *rank == (Reverse(approved), front))
         .map(|(_, label, path)| {
-            let signals = Signals {
-                breaths: breaths(ctx, &label).len(),
-                stale_lock: stele_fails(&path),
-                threads: open_threads(ctx, &label).len(),
+            let signals = if cooled.contains_key(&label) {
+                Signals::default()
+            } else {
+                Signals {
+                    breaths: breaths(ctx, &label).len(),
+                    stale_lock: stele_fails(&path),
+                    threads: open_threads(ctx, &label, true).len(),
+                }
             };
             (signals, label, path)
         })
@@ -1817,7 +1859,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
     let clock = clock(ctx);
     let handoff_by = clock.handoff_by();
     let entries = trail::read(&ctx.data_root, None)?;
-    let threads = open_threads(ctx, &target.label);
+    let threads = open_threads(ctx, &target.label, false);
     let scores = paths::score_dir(&ctx.data_root);
     let targets_name = format!("{}-targets.md", Week::targets(ctx.now).name());
     let targets = scores.join(&targets_name);

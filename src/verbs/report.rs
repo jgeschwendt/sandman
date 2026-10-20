@@ -55,7 +55,9 @@ pub fn refusal(text: &str) -> Option<String> {
 
 /// An open `proposal:` thread.
 pub(crate) struct Proposal {
-    /// When the owner approved it, if he has.
+    /// When the owner approved it, while the ball is the machine's: his
+    /// answer is `approve` and the thread waits on the agent (`waiting:
+    /// agent`). Approved but waiting on him again is no approval to act on.
     pub(crate) approved: Option<String>,
     /// Whether it waits on him: `waiting: user`, whatever he answered before.
     pub(crate) awaiting: bool,
@@ -122,7 +124,7 @@ pub(crate) fn proposals(threads: &Path, repo: Option<&str>) -> Vec<Proposal> {
                 .join(" ");
             (field("state") == Some("open")).then(|| Proposal {
                 approved: field("decided")
-                    .filter(|_| said("approve"))
+                    .filter(|_| said("approve") && field("waiting") == Some("agent"))
                     .map(ToOwned::to_owned),
                 awaiting,
                 exchange,
