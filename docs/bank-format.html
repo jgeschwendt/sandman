@@ -519,8 +519,8 @@ that supervises it. Least recently shifted first, never-shifted before any; a ti
 to a failing <code class="code">stele check</code> (run only where <code class="code">.stele/graph.lock</code> exists, 20 s timeout, a
 missing binary skipped), then the most open threads naming the slug, then the most
 untried breaths (<code class="code">state: new</code> or <code class="code">spiked</code>) filed against it, then the name. On a Redesign
-night, and every night in the cloud (§ The cloud), repos with an approved <code class="code">proposal:</code>
-thread come before all the rest, least recently shifted first among them. The open shift's repo and
+night, repos with an approved <code class="code">proposal:&lt;repo&gt;:*</code> thread (open, <code class="code">answer: approve</code>,
+<code class="code">decided:</code>) come before all the rest, least recently shifted first among them. The open shift's repo and
 <code class="code">$SANDMAN_SHIFT_SKIP</code> (colon-separated slugs) are passed over, and so is a repo the owner
 switched off — <code class="code">shifts/rotation.toml</code>, versioned content, flat TOML (below) — each named once on stderr, <code class="code">skipped: &lt;repo&gt; (off)</code>, before a repo he
 froze: its section of the week's targets file (§ The brief and its slots) says <code class="code">freeze</code>,
@@ -1001,43 +1001,6 @@ shift builds and tests its binary but never replaces the installed one.</li>
 per repo per local day — the target's plan-next, its open threads, and the newest five
 <code class="code">guard</code>/<code class="code">correction</code> events touching it — replaced in place when the same heading is
 briefed again.</p>
-<h3 class="h3" id="shifts-cloud">The cloud</h3>
-<p class="docs-note">The same shift, run by a Claude Code cloud routine instead of the Mac's runner
-(<code class="code">cloud/README.md</code> holds its configuration, <code class="code">prompts/cloud-shift.md</code> its prompt).
-Each fire is a fresh VM: <code class="code">$SANDMAN_ROOT</code> names the clone of the state repo
-(<code class="code">jgeschwendt/.sandman</code>), <code class="code">$SANDMAN_GROVE</code> the directory holding every attached repo as
-<code class="code">&lt;dir&gt;/&lt;repo&gt;</code> on its default branch, <code class="code">$SANDMAN_DOCKET</code> the docket clone; templates
-default to <code class="code">$SANDMAN_GROVE/sandman/prompts</code>.</p>
-<p class="docs-note"><code class="code">shift open --cloud</code> is the cloud's <code class="code">brief</code>:</p>
-<ol class="steps">
-<li><code class="code">git pull --rebase</code> the state clone.</li>
-<li><strong>The committed lock.</strong> <code class="code">current.json</code>, gitignored on the Mac, is committed here, so
-every VM sees the open shift. Under seventy minutes old by its <code class="code">started</code>, exit 1
-<code class="code">busy: &lt;id&gt; open since &lt;started&gt;</code>; older, the shift is handed off <code class="code">--abandoned</code> with
-the reason <code class="code">cloud: stale lock</code> and the open goes on.</li>
-<li><strong>The rotation over the clones.</strong> The candidates are <code class="code">$SANDMAN_GROVE</code>'s clones,
-labelled <code class="code">&lt;first $SANDMAN_SHIFT_OWNERS owner&gt;/&lt;dir name&gt;</code>, the state and docket
-clones aside; trust is moot and every clone counts. Repos with an approved
-<code class="code">proposal:&lt;repo&gt;:*</code> thread (open, <code class="code">answer: approve</code>, <code class="code">decided:</code>) come first on every
-cloud night — on the Mac, on a Redesign night — among them the least recently
-shifted; the rest of § The rotation stands.</li>
-<li><strong>The brief</strong> is composed as <code class="code">brief</code> composes it, with no night gate (the routine's
-cron is the clock) and <code class="code">handoff_by</code> the open plus fifty minutes; <code class="code">current.json</code> and
-<code class="code">meta.json</code> gain <code class="code">cloud: true</code> and, when <code class="code">$CLAUDE_CODE_REMOTE_SESSION_ID</code> is set,
-<code class="code">session_url: https://claude.ai/code/&lt;id&gt;</code> — the handoff keeps both in <code class="code">meta.json</code>.</li>
-<li><strong>Commit and push.</strong> Everything the state clone carries is committed (<code class="code">git add -A</code>,
-<code class="code">current.json</code> forced), subject <code class="code">shift(&lt;id&gt;): open &lt;repo&gt;</code>, and pushed to
-<code class="code">origin HEAD</code>. A rejected push pulls <code class="code">--rebase</code> once and pushes again; a second
-rejection, or a rebase that conflicts (aborted, the clone left as it was), exits 1
-<code class="code">state push rejected</code>. Machine state carries no trailers: reconcile scans the data
-root, and a revoked shift must not revert its own record.</li>
-<li>stdout is the brief; nothing is spawned or attached.</li>
-</ol>
-<p class="docs-note"><code class="code">shift handoff … --cloud</code> hands off as ever (the report gate included), then commits
-and pushes the state the same way, subject <code class="code">shift(&lt;id&gt;): handoff</code>, the released
-<code class="code">current.json</code> staged as a deletion. Rerun on a shift already handed off — its push
-rejected — it pushes what is committed instead of refusing; any other failure exits 1
-and pushes nothing.</p>
 </div>
 </section>
 
