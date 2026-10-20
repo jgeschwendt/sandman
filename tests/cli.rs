@@ -823,10 +823,22 @@ fn the_hooks_read_their_payloads_from_stdin() {
         assert!(stderr(&homeless).contains("$HOME is not set"), "{env:?}");
     }
 
-    // A malformed payload is an error, not a panic.
-    let broken = machine.run_with_stdin(&["take", "--hook"], "not json");
-    assert_eq!(code(&broken), 1);
-    assert!(stderr(&broken).contains("hook payload"));
+    // Only a hook journals its error: a by-hand one has a terminal to fail into.
+    assert!(!machine.journal("take").contains(" error: "));
+
+    // A malformed payload is an error, not a panic — journalled with the evidence.
+    for verb in ["take", "recall"] {
+        let broken = machine.run_with_stdin(&[verb, "--hook"], "not json");
+        assert_eq!(code(&broken), 1);
+        assert!(stderr(&broken).contains("hook payload"));
+        let log = machine.journal(verb);
+        assert!(
+            log.contains("hook payload unparseable: ")
+                && log.contains("payload=not json")
+                && log.contains(" error: hook payload"),
+            "{log}"
+        );
+    }
     // So is a stdin that will not read: a directory gives EISDIR.
     for verb in ["take", "recall", "report"] {
         let unread = machine
@@ -838,13 +850,6 @@ fn the_hooks_read_their_payloads_from_stdin() {
         assert_eq!(code(&unread), 1, "{verb}");
         assert!(stderr(&unread).contains("<stdin>: "), "{verb}");
     }
-    let broken = machine.run_with_stdin(&["recall", "--hook"], "not json");
-    assert_eq!(code(&broken), 1);
-    let log = machine.journal("recall");
-    assert!(
-        log.contains("hook payload unparseable: ") && log.contains(" error: "),
-        "{log}"
-    );
 
     // SessionStart → recall, answered in the hook envelope.
     let recalled = machine.run_with_stdin(
@@ -925,6 +930,11 @@ fn take_hook_declines_a_resume_because_a_resume_is_a_beginning() {
     assert!(
         machine.took_nothing(),
         "the transcript stays in the live set"
+    );
+    assert!(
+        machine
+            .journal("take")
+            .contains(&format!("declined resume session={SID}"))
     );
 
     // Every other reason is an ending, taken as ever.
@@ -1268,6 +1278,13 @@ fn take_hook_declines_when_the_caller_says_this_is_not_an_ending() {
         quiet(&machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", value)]));
         assert!(machine.took_nothing(), "{value}");
     }
+    assert_eq!(
+        machine
+            .journal("take")
+            .matches("declined no-take-env")
+            .count(),
+        2
+    );
 
     // A session named by hand means it, guard or not.
     took(&machine.run_with(&["take", SID], "", &[("SANDMAN_NO_TAKE", "1")]));
@@ -1283,19 +1300,50 @@ const OTHER: &str = "bbbbcccc-dddd-eeee-ffff-000011112222";
 
 #[test]
 fn any_ending_reclaims_a_pending_take_whose_job_is_gone() {
+    const WORKER: &str = "ccccdddd-eeee-ffff-0000-111122223333";
     let machine = Machine::new("pending-reclaim");
     // The 2026-08-30 shape: a backgrounded session was declined behind its
     // job, the operator deleted the job, and nothing came back for it.
-    let stranded = machine.transcript(SAID);
-    machine.pend(SID, "09901667");
     machine.transcript_for(OTHER, SAID);
+    machine.job(
+        "11112222",
+        Some(&format!(r#"{{"sessionId":"{WORKER}","state":"done"}}"#)),
+    );
 
-    // Only what the hook named reaches stdout: a reclaim is the journal's
-    // business, and the caller asked about one session.
-    took(&machine.run_with_stdin(&["take", "--hook"], &session_end(OTHER, "other")));
-    // …and the stranded session came with it: archived, pointed at, cleared.
-    assert!(!stranded.exists());
-    assert!(!machine.pending(SID).exists());
+    // Every ending that is not a quiet decline drains: the take itself, a
+    // payload naming no session, a session already gone, a worker's
+    // retirement. Only what the hook named reaches stdout: a reclaim is the
+    // journal's business, and the caller asked about one session.
+    for (payload, line) in [
+        (session_end(OTHER, "other"), format!("took session={OTHER}")),
+        (
+            r#"{"cwd":"/Users/you/code"}"#.to_owned(),
+            "declined no-session".to_owned(),
+        ),
+        (
+            session_end(OTHER, "other"),
+            format!("declined forgotten session={OTHER}"),
+        ),
+        (
+            session_end(WORKER, "other"),
+            format!("declined live-job session={WORKER}"),
+        ),
+    ] {
+        let stranded = machine.transcript(SAID);
+        machine.pend(SID, "09901667");
+        let output = machine.run_with_stdin(&["take", "--hook"], &payload);
+        if line.starts_with("took") {
+            took(&output);
+        } else {
+            quiet(&output);
+        }
+        // …and the stranded session came with it: archived, pointed at, cleared.
+        assert!(
+            !stranded.exists() && !machine.pending(SID).exists(),
+            "{line}"
+        );
+        assert!(machine.journal("take").contains(&line), "{line}");
+    }
     let pointer = machine
         .root()
         .join("memories")
@@ -1424,6 +1472,11 @@ fn a_full_queue_spawns_a_detached_dream() {
         "{}",
         stderr(&taken)
     );
+    assert!(
+        machine
+            .journal("take")
+            .contains("dream spawned queue=10 log=")
+    );
 
     // take returned without waiting; the dream lands in its own log.
     let log_dir = machine.root().join(".trace");
@@ -1443,7 +1496,7 @@ fn a_full_queue_spawns_a_detached_dream() {
                     .collect::<String>()
             })
             .unwrap_or_default();
-        if lines.matches(" dream sid=").count() >= 10 {
+        if lines.contains("dreamt 10 pointer(s)") {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
