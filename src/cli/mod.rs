@@ -273,8 +273,10 @@ usage: sandman <verb> [args]
       Sabbath's score/<week>-targets.md. pick is the rotation — the least
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
       (default jgeschwendt), Saturday shifts aside — never ~, ~/.routines or
-      the data root — ties broken by a failing stele check, open threads and
-      breaths; it skips the open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs),
+      the data root — ties broken by a failing stele check (mise x -C <trunk>
+      -- stele check), open threads and breaths, none of them for a repo whose
+      last shift began under 6 h ago and lasted under 15 min (`skipped
+      promotion: <repo> (cooled: last shift <m>m)` on stderr); it skips the open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs),
       a repo the owner switched off (<root>/shifts/rotation.toml's off = [...];
       `skipped: <repo> (off)` on stderr), one he froze (`freeze`, `frozen` or
       `on ice` in its targets line,

@@ -709,7 +709,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
     };
 
     // Over by a little: the trail alone gives, oldest lines first.
-    threads(0..103);
+    threads(0..101);
     machine.ok(FRIDAY, &["shift", "brief"]);
     let brief = machine.read(".sandman/shifts/s-20261016T1600Z/brief.md");
     assert!(
@@ -731,7 +731,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
         !brief.contains("change number 5 "),
         "the oldest trail lines go first"
     );
-    assert!(brief.contains("- `t102` · "), "the threads were not needed");
+    assert!(brief.contains("- `t100` · "), "the threads were not needed");
     let start = start_event("s-20261016T1600Z");
     assert!(start.contains(r#""trimmed:trail.recent""#), "{start}");
     assert!(!start.contains("trimmed:threads.open"), "{start}");
@@ -751,7 +751,7 @@ fn the_brief_is_capped_and_the_cut_is_recorded() {
             "--abandoned",
         ],
     );
-    threads(103..300);
+    threads(101..300);
     machine.ok("2026-10-16T16:01:00Z", &["shift", "brief"]);
     let brief = machine.read(".sandman/shifts/s-20261016T1601Z/brief.md");
     assert!(
