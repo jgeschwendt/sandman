@@ -5,7 +5,7 @@
 //! regeneration live here and nowhere else; every writer — the CLI verbs, the
 //! dream pass, any future client — goes through [`commit_memory`].
 //!
-//! The format is documented in `docs/BANK-FORMAT.md`, measured from the live
+//! The format is documented in `docs/bank-format.html`, measured from the live
 //! banks: those files are the regression suite, and parse → render is
 //! byte-identical for every one of them.
 

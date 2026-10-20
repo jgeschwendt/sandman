@@ -4,7 +4,7 @@
 # reweight`). Every verb that rewrites the file — file --source, adopt, drop,
 # close, reweight — drops these comments. Budget is items a pass reads from
 # the source. kind: atom | rss | json | html. bears_on: repo
-# slugs or "*". The schema is docs/BANK-FORMAT.md § breath.
+# slugs or "*". The schema is docs/bank-format.html#breath.
 
 [anthropic-claude-code]
 kind = "atom"

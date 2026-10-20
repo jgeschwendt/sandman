@@ -6,7 +6,7 @@ on_error: claude
 
 # Breathe · skim
 
-The ruach's hourly pass. Research is its own perpetual engine, outside the creation week: every hour at :17 it skims what the due feeds published since their cursors, against the open problems, and files what bears. This routine never reads a feed itself; it composes the pass prompt with `sandman breathe pass --kind skim` and starts a Claude Code `--bg` session through `dispatch run`, exactly as `shift.md` does, with cwd at the breath store. The session reads the due sources, files breaths with provenance, and ends with `sandman breathe close`. Each tick first removes the sessions of closed passes from Claude Code's listing, where a finished session otherwise stays forever. The contract is sandman's `docs/BANK-FORMAT.md` § breath; the plan is sandman's `docs/index.html` § The perpetual shift, The ruach.
+The ruach's hourly pass. Research is its own perpetual engine, outside the creation week: every hour at :17 it skims what the due feeds published since their cursors, against the open problems, and files what bears. This routine never reads a feed itself; it composes the pass prompt with `sandman breathe pass --kind skim` and starts a Claude Code `--bg` session through `dispatch run`, exactly as `shift.md` does, with cwd at the breath store. The session reads the due sources, files breaths with provenance, and ends with `sandman breathe close`. Each tick first removes the sessions of closed passes from Claude Code's listing, where a finished session otherwise stays forever. The contract is sandman's `docs/bank-format.html#breath`; the plan is sandman's `docs/index.html` § The perpetual shift, The ruach.
 
 ## State
 

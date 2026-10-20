@@ -15,7 +15,7 @@
 //! the state clone's committed `current.json` is the lock, and `sync` commits
 //! and pushes what the open and the handoff wrote.
 //!
-//! The contract is `docs/BANK-FORMAT.md` § shift.
+//! The contract is `docs/bank-format.html#shifts`.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
@@ -86,7 +86,7 @@ pub fn is_context(slot: &str) -> bool {
 pub const HANDOFF_CHARS: usize = 2_000;
 
 /// The Claude Code settings a shift or breath session starts under — the
-/// strict Bash sandbox and the deny rules (BANK-FORMAT § shifts, The sandbox).
+/// strict Bash sandbox and the deny rules (docs/bank-format.html#shifts-sandbox).
 /// Compiled in, so a profile change reaches a session only through a rebuilt
 /// binary.
 pub const PROFILE: &str = include_str!("../../profiles/session.json");

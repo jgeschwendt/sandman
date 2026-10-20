@@ -12,7 +12,7 @@
 //!
 //! Every write holds `.commit.lock` and goes tmp → rename; the `breath` trail
 //! events are appended after the lock is released, through the trail's own
-//! append. The contract is `docs/BANK-FORMAT.md` § breath.
+//! append. The contract is `docs/bank-format.html#breath`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -285,7 +285,7 @@ impl Sources {
     #[must_use]
     pub fn render(&self) -> String {
         format!(
-            "# The ruach's feeds — rewritten by `sandman breathe`; the schema is docs/BANK-FORMAT.md § breath.\n\n{}",
+            "# The ruach's feeds — rewritten by `sandman breathe`; the schema is docs/bank-format.html#breath.\n\n{}",
             self.document().render()
         )
     }

@@ -4,7 +4,7 @@
 //! network, no git. `serve` makes it a loopback page whose forms answer the
 //! proposals through the `docket` binary.
 //!
-//! The contract is `docs/BANK-FORMAT.md` § report.
+//! The contract is `docs/bank-format.html#report`.
 
 mod html;
 pub mod serve;

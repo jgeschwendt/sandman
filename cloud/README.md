@@ -6,9 +6,9 @@ routine's prompt (`prompts/cloud-shift.md`) runs `sandman shift open --cloud`,
 follows the brief it prints, lands on each target's default branch and pushes,
 then `shift handoff --cloud`. The machine's state travels through
 `jgeschwendt/.sandman`: the open shift's `shifts/current.json` is committed there
-and is the lock every VM sees (BANK-FORMAT § cloud).
+and is the lock every VM sees (docs/bank-format.html#shifts-cloud).
 
-Parked: on the Mac every landing is a pull request (BANK-FORMAT § shifts, Landing);
+Parked: on the Mac every landing is a pull request (docs/bank-format.html#shifts-landing);
 cloud landings would be too, and the session proxy refuses `gh pr`, so cloud mode stays
 parked until that is solved; the flow below still pushes the default branch.
 

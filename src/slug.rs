@@ -1,7 +1,7 @@
 //! The naming rules: `name` → slug → `<type>_<slug>.md`.
 //!
 //! Measured against the live banks — the rule below reproduces all 232
-//! filenames with zero violations (`docs/BANK-FORMAT.md`).
+//! filenames with zero violations (`docs/bank-format.html#memory-file`).
 
 /// Slugs are cut at this many characters; 39 of the 232 live files sit exactly
 /// here.

@@ -4,7 +4,7 @@
 <dict>
   <key>Label</key><string>io.jlg.sandman-report</string>
   <!-- `sandman report serve` on 127.0.0.1:1705: the nights' reports and the
-       proposals awaiting an answer (docs/BANK-FORMAT.md § report). launchd
+       proposals awaiting an answer (docs/bank-format.html#report). launchd
        expands no `~`, so the paths are the owner's home, spelled out. -->
   <key>ProgramArguments</key>
   <array>

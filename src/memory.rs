@@ -2,7 +2,7 @@
 //!
 //! The parser is byte-faithful by construction — a field keeps the raw text
 //! that followed its colon, so unknown keys, unusual spacing and key order all
-//! survive a parse/render round-trip unchanged (`docs/BANK-FORMAT.md`).
+//! survive a parse/render round-trip unchanged (`docs/bank-format.html#memory-file`).
 
 use std::fmt;
 use std::fs;

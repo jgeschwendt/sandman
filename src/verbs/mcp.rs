@@ -5,7 +5,7 @@
 //! commits one memory through the commit path, `banks` says which banks exist
 //! and which of them still name a directory. `take`, `dream`, `reflect` and
 //! `forget` stay off the wire — they are lifecycle verbs with no remote caller,
-//! and `forget` is the privacy ending (`docs/MCP.md`).
+//! and `forget` is the privacy ending (`docs/mcp.html`).
 //!
 //! The handlers here are plain functions over a [`Context`]: roots in, a
 //! `Value` and a journal fragment out, nothing read from the environment and
@@ -138,7 +138,7 @@ pub struct Context {
 
 /// A handler's failure.
 ///
-/// The split is the one `docs/MCP.md` draws: the caller got the call wrong, or
+/// The split is the one `docs/mcp.html` draws: the caller got the call wrong, or
 /// the call was fine and the verb refused. Only the first is a protocol error;
 /// the second is a result the model is meant to read and recover from.
 #[derive(Debug)]
