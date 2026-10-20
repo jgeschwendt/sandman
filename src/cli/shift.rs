@@ -4,7 +4,6 @@ use std::env;
 use std::path::PathBuf;
 
 use crate::error::Error;
-use crate::paths;
 use crate::time::Timestamp;
 use crate::verbs::shift;
 
@@ -26,7 +25,6 @@ pub(super) fn shift_verb(args: &[String]) -> Result<(), Failure> {
         "clock" => shift_clock(rest),
         "handoff" => shift_handoff(rest),
         "land" => shift_land(rest),
-        "open" => shift_open(rest),
         "pick" => shift_pick(rest),
         "pr" => shift_pr(rest),
         "profile" => shift_profile(rest),
@@ -193,45 +191,6 @@ fn shift_brief(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `shift open --cloud [--mind M]`.
-fn shift_open(args: &[String]) -> Result<(), Failure> {
-    let parsed = Args::parse(args, "shift open", &["--mind"], &["--cloud"], 0)?;
-    let clones = paths::cloud_clones().filter(|_| parsed.set("--cloud"));
-    let Some(clones) = clones else {
-        return Err(Failure::Usage(
-            "shift open runs in the cloud: --cloud, with $SANDMAN_GROVE naming the clones"
-                .to_owned(),
-        ));
-    };
-    let ctx = shift::Context {
-        cloud: Some(shift::Cloud {
-            clones,
-            session_url: env::var("CLAUDE_CODE_REMOTE_SESSION_ID")
-                .ok()
-                .filter(|id| !id.is_empty())
-                .map(|id| format!("https://claude.ai/code/{id}")),
-        }),
-        ..shift_context()?
-    };
-    let briefed = shift::open(&ctx, &brief_options(&parsed, false)?).inspect_err(|error| {
-        note(
-            Some(&ctx.data_root),
-            "shift",
-            &format!("open error: {error}"),
-        );
-    })?;
-    note(
-        Some(&ctx.data_root),
-        "shift",
-        &format!(
-            "opened shift={} repo={} cloud",
-            briefed.shift, briefed.target.label
-        ),
-    );
-    println!("{}", briefed.text);
-    Ok(())
-}
-
 /// `shift clock [--check]`.
 fn shift_clock(args: &[String]) -> Result<(), Failure> {
     let parsed = Args::parse(args, "shift clock", &[], &["--check"], 0)?;
@@ -253,7 +212,7 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
         args,
         "shift handoff",
         &["--cost", "--file", "--reason", "--shift"],
-        &["--abandoned", "--cloud", "--from-session", "--truncate"],
+        &["--abandoned", "--from-session", "--truncate"],
         0,
     )?;
     let cost = parsed
@@ -303,9 +262,6 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
                 "shift",
                 &format!("handed off shift={id} event={}", event.id),
             );
-            if parsed.set("--cloud") {
-                shift::sync(&ctx.data_root, &format!("shift({id}): handoff"))?;
-            }
             println!("{}", event.id);
             Ok(())
         }
@@ -315,13 +271,6 @@ fn shift_handoff(args: &[String]) -> Result<(), Failure> {
                 "shift",
                 &format!("handoff shift={id} error: {error}"),
             );
-            // a handoff already made whose push failed: push it now
-            let made = format!("shift {id} was handed off at ");
-            if parsed.set("--cloud") && error.to_string().starts_with(&made) {
-                eprintln!("sandman: {error}; pushing it");
-                let message = format!("shift({id}): handoff");
-                return Ok(shift::sync(&ctx.data_root, &message)?);
-            }
             Err(error.into())
         }
     }

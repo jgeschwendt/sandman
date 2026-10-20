@@ -4,7 +4,7 @@
 //!
 //! `$SANDMAN_NOW` pins the instant, so the weekday, the shift id and the clock
 //! are the test's to choose. Nothing here runs a model, `stele` or the real
-//! `gh`; git runs only against bare remotes — the cloud's state clone, the
+//! `gh`; git runs only against bare remotes — the
 //! landings and the sweep's trunks — and the other fixture checkouts carry a
 //! `.git` directory and no `.stele/`.
 
@@ -1440,6 +1440,13 @@ fn a_window_file_of_the_wrong_shape_is_a_fault_never_unknown() {
     let output = machine.run(now, &["shift", "clock"], &[]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert!(stdout(&output).contains(" used=0% "), "{}", stdout(&output));
+    // Without $CLAUDE_WINDOW_FILE it lives under $XDG_STATE_HOME.
+    fs::create_dir(machine.home.join("claude")).expect("dir");
+    fs::rename(machine.window(), machine.home.join("claude/window.json")).expect("move");
+    let state = machine.home.to_string_lossy();
+    let env = [("CLAUDE_WINDOW_FILE", ""), ("XDG_STATE_HOME", &*state)];
+    let output = machine.run(now, &["shift", "clock"], &env);
+    assert!(stdout(&output).contains(" used=0% "), "{}", stderr(&output));
 }
 
 #[test]
@@ -1532,6 +1539,24 @@ fn an_abandoned_handoff_says_why_when_the_runner_does() {
         rationale(&machine).contains(r#""rationale":"Begun""#),
         "{}",
         rationale(&machine)
+    );
+
+    // With one and none written: the reason is the handoff.
+    let fourth = "s-20261016T1900Z";
+    machine.meta(fourth, "jgeschwendt/alpha", "2026-10-16T19:00:00Z");
+    let args = [
+        "shift",
+        "handoff",
+        "--shift",
+        fourth,
+        "--abandoned",
+        "--reason",
+        "gone",
+    ];
+    machine.ok(now, &args);
+    assert_eq!(
+        machine.read(&format!(".sandman/shifts/{fourth}/handoff.md")),
+        "Abandoned: gone\n"
     );
 }
 
@@ -1901,192 +1926,6 @@ fn sabbath_shifts_do_not_count_toward_last_shifted() {
 }
 
 #[test]
-fn cloud_shifts_lock_through_the_state_remote() {
-    let machine = Machine::prompted("cloud");
-    let home = &machine.home;
-    let remote = home.join("state.git");
-    git(
-        home,
-        &["init", "-q", "--bare", "--initial-branch=main", "state.git"],
-    )
-    .expect("bare");
-    git(home, &["clone", "-q", "state.git", "seed"]).expect("clone");
-    machine.write(
-        "seed/.gitignore",
-        "shifts/current.json\nshifts/PAUSE\n.trace/\n",
-    );
-    git(&home.join("seed"), &["add", "."]).expect("add");
-    git(&home.join("seed"), &["commit", "-qm", "seed"]).expect("seed");
-    git(&home.join("seed"), &["push", "-q", "origin", "HEAD"]).expect("push");
-    // two VMs, each holding the state clone, the docket clone and the repos
-    let [vm, other] = ["vm", "other"].map(|name| {
-        git(home, &["clone", "-q", "state.git", &format!("{name}/.sandman")]).expect("clone");
-        for repo in ["-", "alpha", "beta", "sandman"] {
-            fs::create_dir_all(home.join(name).join(repo).join(".git")).expect("clone");
-        }
-        machine.write(format!("{name}/sandman/prompts/shift.md"), TEMPLATE);
-        machine.write(
-            format!("{name}/-/p1.md"),
-            "---\nstate: open\nkey: proposal:jgeschwendt/beta:split\nanswer: approve\ndecided: 2026-10-15T09:00:00Z\n---\n\n# Split beta\n",
-        );
-        home.join(name)
-    });
-    let run = |vm: &Path, now: &str, args: &[&str], extra: &[(&str, &str)]| {
-        let [clones, root, threads] = [vm.to_path_buf(), vm.join(".sandman"), vm.join("-")]
-            .map(|dir| dir.to_string_lossy().into_owned());
-        let mut env = vec![
-            ("SANDMAN_GROVE", clones.as_str()),
-            ("SANDMAN_PROMPTS", ""),
-            ("SANDMAN_ROOT", root.as_str()),
-            ("SANDMAN_DOCKET", threads.as_str()),
-        ];
-        env.extend(GIT_ENV.iter().chain(extra));
-        let output = machine.run(now, args, &env);
-        (code(&output), stdout(&output) + &stderr(&output))
-    };
-    let open = |vm: &Path, now: &str, extra: &[(&str, &str)]| {
-        run(vm, now, &["shift", "open", "--cloud"], extra)
-    };
-    let show = |path: &str| git(&remote, &["show", &format!("HEAD:{path}")]).unwrap_or_default();
-
-    let (code_, brief) = open(&vm, FRIDAY, &[("CLAUDE_CODE_REMOTE_SESSION_ID", "abc")]);
-    assert_eq!(code_, 0, "{brief}");
-    assert!(brief.contains("Target `jgeschwendt/beta` at `"), "{brief}");
-    assert!(
-        brief.contains("picked because an approved proposal waits; never shifted"),
-        "{brief}"
-    );
-    assert_eq!(
-        git(&remote, &["log", "-1", "--format=%s"]).ok().as_deref(),
-        Some("shift(s-20261016T1600Z): open jgeschwendt/beta\n")
-    );
-    for (file, key) in [
-        ("current.json", r#""handoff_by":"2026-10-16T16:50:00Z""#),
-        ("current.json", r#""cloud":true"#),
-        (
-            "s-20261016T1600Z/meta.json",
-            r#""session_url":"https://claude.ai/code/abc""#,
-        ),
-        ("s-20261016T1600Z/brief.md", "# Shift brief"),
-    ] {
-        assert!(
-            show(&format!("shifts/{file}")).contains(key),
-            "{file}: {key}"
-        );
-    }
-    assert_eq!(code(&machine.run(FRIDAY, &["shift", "open"], &[])), 2);
-
-    // another VM sees the committed lock: busy within seventy minutes, stale after
-    let (code_, said) = open(&other, "2026-10-16T16:30:00Z", &[]);
-    assert_eq!(
-        (code_, said.trim()),
-        (
-            1,
-            "sandman: busy: s-20261016T1600Z open since 2026-10-16T16:00:00Z"
-        )
-    );
-    let skip = [("SANDMAN_SHIFT_SKIP", "jgeschwendt/beta")];
-    let (code_, brief) = open(&other, "2026-10-16T17:15:00Z", &skip);
-    assert_eq!(code_, 0, "{brief}");
-    assert!(
-        brief.contains("Target `jgeschwendt/alpha`"),
-        "the state clones are never targets: {brief}"
-    );
-    assert!(show("shifts/s-20261016T1600Z/handoff.md").starts_with("Abandoned: cloud: stale lock"));
-    assert!(show("shifts/current.json").contains("s-20261016T1715Z"));
-
-    // the first VM's late handoff loses the race and leaves its rebase undone
-    let handoff = |vm: &Path, shift: &str| {
-        let dir = vm.join(".sandman").join("shifts").join(shift);
-        fs::write(dir.join("report.md"), REPORT).expect("report");
-        fs::write(dir.join("handoff.md"), "# Done\n").expect("handoff");
-        let args = [
-            "shift",
-            "handoff",
-            "--shift",
-            shift,
-            "--from-session",
-            "--cloud",
-        ];
-        run(vm, "2026-10-16T17:40:00Z", &args, &[])
-    };
-    assert_eq!(
-        handoff(&vm, "s-20261016T1600Z"),
-        (1, "sandman: state push rejected\n".to_owned())
-    );
-    assert!(!vm.join(".sandman/.git/rebase-merge").exists());
-    // a push the remote turns away once goes through after one pull --rebase
-    machine.script(
-        "state.git/hooks/pre-receive",
-        "[ -e once ] || { touch once; exit 1; }\n",
-    );
-    assert_eq!(handoff(&other, "s-20261016T1715Z").0, 0);
-    assert!(remote.join("once").exists());
-    assert_eq!(
-        show("shifts/current.json"),
-        "",
-        "the lock is released on the remote"
-    );
-    let meta = show("shifts/s-20261016T1715Z/meta.json");
-    assert!(
-        meta.contains(r#""cloud":true"#) && meta.contains(r#""ended":"2026-10-16T17:40:00Z""#),
-        "{meta}"
-    );
-}
-
-#[test]
-fn a_cloud_handoff_whose_push_failed_pushes_on_the_retry() {
-    let machine = Machine::prompted("cloud-retry");
-    let home = &machine.home;
-    git(
-        home,
-        &["init", "-q", "--bare", "--initial-branch=main", "state.git"],
-    )
-    .expect("bare");
-    git(home, &["clone", "-q", "state.git", ".sandman"]).expect("clone");
-    let shift = "s-20261016T1600Z";
-    machine.meta(shift, "jgeschwendt/alpha", FRIDAY);
-    machine.report(shift, REPORT);
-    machine.write(format!(".sandman/shifts/{shift}/handoff.md"), "# Done\n");
-    machine.write(
-        ".sandman/shifts/current.json",
-        &format!(r#"{{"shift":"{shift}"}}"#),
-    );
-    for args in [
-        &["add", "-A", "."][..],
-        &["commit", "-qm", "open"],
-        &["push", "-q", "origin", "HEAD"],
-    ] {
-        git(&machine.root(), args).expect("seed");
-    }
-    let args = [
-        "shift",
-        "handoff",
-        "--shift",
-        shift,
-        "--from-session",
-        "--cloud",
-    ];
-    let handoff = || code(&machine.run(FRIDAY, &args, &GIT_ENV));
-    let show = |path: &str| git(&home.join("state.git"), &["show", &format!("HEAD:{path}")]);
-    let meta = || show(&format!("shifts/{shift}/meta.json")).expect("meta");
-    // a trail that refuses the event is no handoff to push
-    let trail = machine.write(".sandman/trail", "");
-    assert_eq!(handoff(), 1, "the trail refuses");
-    assert!(!meta().contains(r#""ended":"#), "{}", meta());
-    fs::remove_file(trail).expect("rm");
-    let hook = machine.script("state.git/hooks/pre-receive", "exit 1\n");
-    assert_eq!(handoff(), 1, "the push is refused");
-    fs::remove_file(hook).expect("rm");
-    assert_eq!(handoff(), 0, "the retry pushes the handoff already made");
-    assert!(show("shifts/current.json").is_err());
-    assert!(meta().contains(r#""ended":"#), "{}", meta());
-    let events = machine.trail();
-    let handoffs = events.iter().filter(|line| line.contains("shift.handoff"));
-    assert_eq!(handoffs.count(), 1, "{events:?}");
-}
-
-#[test]
 fn a_shift_file_that_cannot_be_read_is_an_error_and_odd_values_still_show() {
     let machine = Machine::prompted("unreadable");
     let current = ".sandman/shifts/current.json";
@@ -2148,6 +1987,26 @@ fn pick_passes_over_repos_the_owner_froze() {
         stderr(&output),
         "skipped: jgeschwendt/alpha (frozen)\nskipped: jgeschwendt/beta (frozen)\n"
     );
+}
+
+#[test]
+fn only_a_redesign_night_puts_an_approved_proposal_first() {
+    let machine = Machine::prompted("approved");
+    for slug in ["alpha", "beta"] {
+        machine.repo(&format!("jgeschwendt/{slug}"));
+    }
+    machine.write(
+        ".docket/p1.md",
+        "---\nstate: open\nkey: proposal:jgeschwendt/beta:split\nanswer: approve\ndecided: 2026-10-11T09:00:00Z\n---\n\n# Split beta\n",
+    );
+    for (now, weighted) in [(FRIDAY, false), ("2026-10-12T16:00:00Z", true)] {
+        let brief = machine.ok(now, &["shift", "brief", "--dry-run"]);
+        assert_eq!(
+            brief.contains("picked because an approved proposal waits"),
+            weighted,
+            "{now}: {brief}"
+        );
+    }
 }
 
 #[test]

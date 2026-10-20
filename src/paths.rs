@@ -62,8 +62,6 @@ pub const ROUTINES_STATE_ENV: &str = "SANDMAN_ROUTINES_STATE";
 /// The week's score pages, `<iso-week>.md`, and the Sabbath's
 /// `<iso-week>-targets.md`.
 pub const SCORE_DIR_NAME: &str = "score";
-/// The environment variable naming the cloud routine's clones directory.
-pub const CLOUD_GROVE_ENV: &str = "SANDMAN_GROVE";
 /// The environment variable that moves `~/.docket`.
 pub const DOCKET_ENV: &str = "SANDMAN_DOCKET";
 /// One directory per shift, plus `current.json` while one is open.
@@ -322,26 +320,13 @@ pub fn claude_window_file() -> Result<PathBuf> {
     Ok(state.join("claude").join("window.json"))
 }
 
-/// The cloud routine's clones, `$SANDMAN_GROVE`: each attached repo at
-/// `<dir>/<repo>`, on its default branch.
-#[must_use]
-pub fn cloud_clones() -> Option<PathBuf> {
-    env::var_os(CLOUD_GROVE_ENV)
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-}
-
-/// The machine's prompt templates: `$SANDMAN_PROMPTS`, else sandman's clone's
-/// `prompts/` in the cloud, else the `prompts/` directory of sandman's trunk
-/// checkout in the grove. Not the build's own source tree — the installed
+/// The machine's prompt templates: `$SANDMAN_PROMPTS`, else the `prompts/`
+/// directory of sandman's trunk checkout in the grove. Not the build's own source tree — the installed
 /// binary is built in a scratch worktree that is gone by the time it runs, and
 /// the trunk is where the Sabbath edits land.
 pub fn prompts_dir() -> Result<PathBuf> {
     if let Some(dir) = env::var_os(PROMPTS_ENV).filter(|dir| !dir.is_empty()) {
         return Ok(PathBuf::from(dir));
-    }
-    if let Some(clones) = cloud_clones() {
-        return Ok(clones.join("sandman").join("prompts"));
     }
     Ok(grove_code()?
         .join("jgeschwendt")
