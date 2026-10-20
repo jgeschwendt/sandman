@@ -78,6 +78,12 @@ pub fn home() -> Result<PathBuf> {
         .ok_or(Error::MissingEnv { name: "HOME" })
 }
 
+/// A compiled-in template with every `{{HOME}}` spelled out as `$HOME`: what
+/// launchd and Claude Code's sandbox read expands no `~`.
+pub fn render(template: &str) -> Result<String> {
+    Ok(template.replace("{{HOME}}", &home()?.to_string_lossy()))
+}
+
 /// The data root: `$SANDMAN_ROOT`, else `$HOME/.sandman`.
 pub fn data_root() -> Result<PathBuf> {
     if let Some(root) = env::var_os(ROOT_ENV).filter(|root| !root.is_empty()) {

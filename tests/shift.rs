@@ -132,7 +132,12 @@ fn profile_prints_the_session_settings_for_either_kind() {
     let machine = Machine::prompted("profile");
     let now = "2026-10-09T23:00:00Z";
     let shift = machine.ok(now, &["shift", "profile"]);
-    assert_eq!(shift, include_str!("../profiles/session.json"));
+    let home = machine.home.to_string_lossy();
+    assert_eq!(
+        shift,
+        include_str!("../profiles/session.json").replace("{{HOME}}", &home)
+    );
+    assert!(!shift.contains("{{"), "{shift}");
     let text = shift.trim();
     // a project `.mcp.json` server asks at start, which a `--bg` dontAsk session never answers
     assert!(
@@ -146,7 +151,9 @@ fn profile_prints_the_session_settings_for_either_kind() {
     for needed in [
         "\"api.anthropic.com\",",
         "\"Bash(shift-test *)\"\n",
-        "\"excludedCommands\": [\n      \"/Users/jlg/.local/bin/shift-test *\",\n      \"git fetch *\",\n      \"git pull *\",\n      \"git push *\",\n      \"grove sync *\",\n      \"~/.local/bin/shift-test *\"\n    ],",
+        &format!(
+            "\"excludedCommands\": [\n      \"{home}/.local/bin/shift-test *\",\n      \"git fetch *\",\n      \"git pull *\",\n      \"git push *\",\n      \"grove sync *\",\n      \"~/.local/bin/shift-test *\"\n    ],"
+        ),
         "\"allowWrite\": [\n        \"~/.bun\",\n        \"~/.cache\",\n        \"~/.cargo\",\n        \"~/.docket\",\n        \"~/.grove\",\n        \"~/.hex\",\n        \"~/.local/state/claude\",\n        \"~/.local/state/mise\",\n        \"~/.mix\",\n        \"~/.routines\",\n        \"~/.sandman\",\n        \"~/Library/Caches\"\n      ],",
         "\"denyWrite\": [\n        \"~/.bun/bin\",\n        \"~/.cargo/bin\",\n        \"~/.cargo/config\",\n        \"~/.cargo/config.toml\",\n        \"~/.mix/archives\",\n        \"~/.mix/escripts\"\n      ]",
     ] {

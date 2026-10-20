@@ -960,8 +960,9 @@ services (1701, 1703, 1705, 7777) and the unix sockets of launchd's listeners
 sandboxed process may exec, so it alone runs unconfined. The wrapper drops the proxy and
 agent variables, takes the home from the user database rather than <code class="code">$HOME</code>, and sets
 <code class="code">CARGO_NET_OFFLINE</code>, <code class="code">HEX_OFFLINE</code> and <code class="code">MIX_ENV=test</code>. The matcher is literal and keys
-on the spelling: probed 2026-10-12 on 2.1.296, the <code class="code">/Users/jlg/…</code> entry let out only
-the <code class="code">~/…</code> spelling and the <code class="code">~/…</code> entry only the absolute one, so the profile lists both,
+on the spelling: probed 2026-10-12 on 2.1.296, the absolute entry let out only
+the <code class="code">~/…</code> spelling and the <code class="code">~/…</code> entry only the absolute one, so the profile lists both —
+the absolute one as <code class="code">{{HOME}}/…</code>, which <code class="code">shift profile</code> renders as <code class="code">$HOME</code> —
 and denies a bare <code class="code">shift-test</code>. Every command in a call must match for it to leave, and
 a call holding <code class="code">cd</code>, a pipe, a redirect, <code class="code">&amp;&amp;</code> or <code class="code">$(…)</code> stays sandboxed, where nested
 <code class="code">sandbox-exec</code> fails <code class="code">sandbox_apply: Operation not permitted</code> (observed 2026-10-13: <code class="code">… bun test 2&gt;&amp;1 | tail -15</code>); the wrapper probes for that first and exits 71 with
