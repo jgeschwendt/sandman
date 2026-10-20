@@ -1504,8 +1504,11 @@ or whose <code class="code">Origin</code> is not <code class="code">http://&lt;b
 foreign form reaches it; other paths <code class="code">404</code>, other methods <code class="code">405</code>. Open it at
 <code class="code">http://127.0.0.1:1705</code>, never <code class="code">localhost</code>, which the Host check refuses. The launchd
 agent <code class="code">launchd/io.jlg.sandman-report.plist</code> keeps it up (log
-<code class="code">~/Library/Logs/sandman-report.log</code>):</p>
-<pre class="snippet"><code data-lang="sh">cp launchd/io.jlg.sandman-report.plist ~/Library/LaunchAgents/ &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.jlg.sandman-report.plist
+<code class="code">~/Library/Logs/sandman-report.log</code>). launchd expands no <code class="code">~</code>, so the file is a
+template: <code class="code">sandman report plist</code> prints it with <code class="code">{{HOME}}</code> spelled out as
+<code class="code">$HOME</code>, and <code class="code">$SANDMAN_SHIFT_NIGHT</code>, when set in the rendering shell, added to the
+agent's environment:</p>
+<pre class="snippet"><code data-lang="sh">sandman report plist &gt; ~/Library/LaunchAgents/io.jlg.sandman-report.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.jlg.sandman-report.plist
 </code></pre>
 </div>
 </section>

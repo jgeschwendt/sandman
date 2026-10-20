@@ -38,7 +38,7 @@ These reach `sandman shift brief` through this routine's environment (the tick's
 - `SANDMAN_SHIFT_SKIP` — colon-separated repo slugs the rotation passes over.
 - `SANDMAN_SHIFT_GRACE_MIN` — minutes past `handoff_by` before a still-working shift is stopped, default `20`.
 - `SANDMAN_SHIFT_MIN_WINDOW_MIN` — the least window, and the least night, a shift may open with, default `60`; `handoff_by` is the reset minus fifteen, never past dawn, so a shift always has at least 45 minutes.
-- `SANDMAN_SHIFT_NIGHT` — the night, New York hours `HH-HH`, default `21-07`; set it on `io.jlg.sandman-report` too, whose pages are keyed by the same nights.
+- `SANDMAN_SHIFT_NIGHT` — the night, New York hours `HH-HH`, default `21-07`; set it on `io.jlg.sandman-report` too, whose pages are keyed by the same nights: export it in the shell that runs `sandman report plist`, which carries it into the rendered agent, or edit the installed copy.
 
 ## The sandbox
 
