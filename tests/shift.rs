@@ -485,7 +485,7 @@ fn brief_fills_every_slot_and_records_the_start() {
     for expected in [
         "Shift `s-20261016T1600Z` · Friday, Day 6 · Image; the work finished, very good · theme **Ship** · instrument `/gigareview`",
         "Target `jgeschwendt/alpha`",
-        "last shifted never; picked because never shifted; 5 open thread(s); 2 breath(s) filed",
+        "last shifted never; picked because never shifted; 3 open thread(s); 2 breath(s) filed",
         "### Proposals the owner approved\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:split · decided 2026-10-15T09:00:00Z · Proposal p1\n```",
         "### Proposals awaiting the owner\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:cache · opened 2026-10-14T10:00:00Z · Proposal p3\n- proposal:jgeschwendt/alpha:arena · opened 2026-10-14T10:00:00Z · Proposal p5\n```",
         &format!(
@@ -2008,23 +2008,116 @@ fn pick_passes_over_repos_the_owner_froze() {
     );
 }
 
+/// On a Redesign night an approved proposal comes first only while it waits
+/// on the agent; one whose last word is the agent's waits on the owner and is
+/// no signal at all — neither promotion, nor brief slot, nor open thread.
 #[test]
-fn only_a_redesign_night_puts_an_approved_proposal_first() {
+fn only_a_redesign_night_puts_an_approved_proposal_the_agent_owes_first() {
     let machine = Machine::prompted("approved");
+    for slug in ["alpha", "beta"] {
+        machine.repo(&format!("jgeschwendt/{slug}"));
+    }
+    let monday = "2026-10-12T16:00:00Z";
+    // Friday: the thread the agent owes breaks the tie, but promotes nothing.
+    for (now, waiting, picked, promoted) in [
+        (FRIDAY, "agent", "jgeschwendt/beta", false),
+        (monday, "agent", "jgeschwendt/beta", true),
+        (monday, "user", "jgeschwendt/alpha", false),
+    ] {
+        machine.write(
+            ".docket/p1.md",
+            &format!("---\nstate: open\nwaiting: {waiting}\nkey: proposal:jgeschwendt/beta:split\nanswer: approve\ndecided: 2026-10-11T09:00:00Z\n---\n\n# Split beta\n"),
+        );
+        assert_eq!(
+            machine.ok(now, &["shift", "pick"]).trim(),
+            picked,
+            "{now} {waiting}"
+        );
+        let output = machine.run(
+            now,
+            &["shift", "brief", "--dry-run"],
+            &[("SANDMAN_SHIFT_SKIP", "jgeschwendt/alpha")],
+        );
+        let brief = stdout(&output);
+        assert_eq!(
+            brief.contains("picked because an approved proposal waits"),
+            promoted,
+            "{now} {waiting}: {brief}"
+        );
+        assert_eq!(
+            brief.contains("- proposal:jgeschwendt/beta:split · decided"),
+            waiting == "agent",
+            "{now} {waiting}: {brief}"
+        );
+    }
+}
+
+/// A repo whose last shift was short and recent loses every promotion and
+/// competes on recency alone, named on stderr.
+#[test]
+fn a_short_recent_shift_cools_its_repo_off_promotion() {
+    let machine = Machine::prompted("cooled");
     for slug in ["alpha", "beta"] {
         machine.repo(&format!("jgeschwendt/{slug}"));
     }
     machine.write(
         ".docket/p1.md",
-        "---\nstate: open\nkey: proposal:jgeschwendt/beta:split\nanswer: approve\ndecided: 2026-10-11T09:00:00Z\n---\n\n# Split beta\n",
+        "---\nstate: open\nwaiting: agent\nkey: proposal:jgeschwendt/beta:split\nanswer: approve\ndecided: 2026-10-11T09:00:00Z\n---\n\n# Split beta\n",
     );
-    for (now, weighted) in [(FRIDAY, false), ("2026-10-12T16:00:00Z", true)] {
-        let brief = machine.ok(now, &["shift", "brief", "--dry-run"]);
-        assert_eq!(
-            brief.contains("picked because an approved proposal waits"),
-            weighted,
-            "{now}: {brief}"
+    let monday = "2026-10-12T16:00:00Z";
+    let shift = |id: &str, repo: &str, started: &str, ended: &str| {
+        machine.write(
+            format!(".sandman/shifts/{id}/meta.json"),
+            &format!(r#"{{"ended":"{ended}","repo":"jgeschwendt/{repo}","shift":"{id}","started":"{started}"}}"#),
         );
+    };
+    shift(
+        "s-1",
+        "alpha",
+        "2026-10-12T11:00:00Z",
+        "2026-10-12T12:00:00Z",
+    );
+    for (started, ended, picked, said) in [
+        // a minute, two hours ago: cooled, and alpha is the longer rested
+        (
+            "2026-10-12T14:00:00Z",
+            "2026-10-12T14:01:30Z",
+            "jgeschwendt/alpha",
+            "skipped promotion: jgeschwendt/beta (cooled: last shift 1m)\n",
+        ),
+        // twenty minutes is a real shift
+        (
+            "2026-10-12T14:00:00Z",
+            "2026-10-12T14:20:00Z",
+            "jgeschwendt/beta",
+            "",
+        ),
+        // a shift dated after now is no evidence either way
+        (
+            "2026-10-12T17:00:00Z",
+            "2026-10-12T17:01:00Z",
+            "jgeschwendt/beta",
+            "",
+        ),
+        // seven hours back the cool-down is over
+        (
+            "2026-10-12T09:00:00Z",
+            "2026-10-12T09:01:00Z",
+            "jgeschwendt/beta",
+            "",
+        ),
+        // tied on recency, beta's proposal thread no longer breaks the tie
+        (
+            "2026-10-12T11:00:00Z",
+            "2026-10-12T11:05:00Z",
+            "jgeschwendt/alpha",
+            "skipped promotion: jgeschwendt/beta (cooled: last shift 5m)\n",
+        ),
+    ] {
+        shift("s-2", "beta", started, ended);
+        let output = machine.run(monday, &["shift", "pick"], &[]);
+        assert_eq!(stdout(&output).trim(), picked, "{started}–{ended}");
+        assert_eq!(stderr(&output), said, "{started}–{ended}");
     }
 }
 
