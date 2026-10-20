@@ -11,6 +11,8 @@ use std::process::Output;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{Machine, bank_key, code, feed, stderr, stdout};
+use sandman::paths::run_log;
+use sandman::time::Timestamp;
 
 const SID: &str = "aaaabbbb-cccc-dddd-eeee-ffff00001111";
 /// The Claude Code project the fabricated sessions run under.
@@ -906,6 +908,7 @@ fn recall_is_silent_with_nothing_to_say_and_for_the_pipeline() {
 fn take_hook_stays_out_of_the_memory_pipeline() {
     let machine = Machine::new("pipeline-guard");
     let pipeline = [("CLAUDE_MEMORY_PIPELINE", "1")];
+    machine.transcript(SAID);
 
     // A dream mind's ending is not a session to keep — taking it would feed
     // the queue that spawned the mind, recursively. A payload that will not
@@ -913,6 +916,7 @@ fn take_hook_stays_out_of_the_memory_pipeline() {
     // hook.
     quiet(&machine.run_with(&["take", "--hook"], &session_end(SID, "other"), &pipeline));
     quiet(&machine.run_with(&["take", "--hook"], "{not json", &pipeline));
+    assert!(machine.took_nothing());
     // The decline names its session: a line nobody can tie to a conversation
     // is a line no later reclaim can act on. The unparsed one falls back to
     // the bare form.
@@ -930,13 +934,13 @@ fn take_hook_stays_out_of_the_memory_pipeline() {
 #[test]
 fn take_hook_declines_a_resume_because_a_resume_is_a_beginning() {
     let machine = Machine::new("resume-guard");
-    machine.transcript(SAID);
+    let source = machine.transcript(SAID);
 
     // Claude Code fires this on the session it is adopting. Taking it would
     // move the transcript out from under the turn about to append to it.
     quiet(&machine.run_with_stdin(&["take", "--hook"], &session_end(SID, "resume")));
     assert!(
-        machine.took_nothing(),
+        machine.took_nothing() && source.is_file(),
         "the transcript stays in the live set"
     );
     assert!(
@@ -1597,25 +1601,25 @@ fn a_full_queue_under_a_held_dream_lock_spawns_nothing() {
     );
 
     // Released, the eleventh take is due a dream that cannot start: a
-    // directory squats on the day's dream log. A note, never a failed take.
+    // directory squats on the day's dream log — today's and, should the run
+    // straddle midnight UTC, tomorrow's. A note, never a failed take; a spawn
+    // that slipped through still reaches no model.
     drop(held);
-    let trace = machine.root().join(".trace");
-    let day = fs::read_dir(&trace)
-        .expect("trace")
-        .flatten()
-        .find_map(|entry| {
-            Some(
-                entry
-                    .file_name()
-                    .to_str()?
-                    .strip_prefix("take-")?
-                    .to_owned(),
-            )
-        })
-        .expect("the take journal");
-    fs::create_dir_all(trace.join(format!("dream-{day}"))).expect("a log that will not open");
+    let now = Timestamp::now().expect("clock").unix_seconds();
+    for at in [now, now + 300] {
+        fs::create_dir_all(run_log(
+            &machine.root(),
+            "dream",
+            Timestamp::from_unix_seconds(at),
+        ))
+        .expect("a log that will not open");
+    }
     machine.transcript_for(OTHER, SAID);
-    let taken = machine.run(&["take", OTHER]);
+    let taken = machine.run_with(
+        &["take", OTHER],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", "/nonexistent/claude")],
+    );
     took(&taken);
     assert!(
         stderr(&taken).starts_with("queue at 11 — dream could not be spawned: "),
