@@ -41,7 +41,7 @@
     "allowUnsandboxedCommands": false,
     "enabled": true,
     "excludedCommands": [
-      "/Users/jlg/.local/bin/shift-test *",
+      "{{HOME}}/.local/bin/shift-test *",
       "git fetch *",
       "git pull *",
       "git push *",

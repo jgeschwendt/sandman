@@ -86,7 +86,7 @@ pub const HANDOFF_CHARS: usize = 2_000;
 /// The Claude Code settings a shift or breath session starts under — the
 /// strict Bash sandbox and the deny rules (docs/bank-format.html#shifts-sandbox).
 /// Compiled in, so a profile change reaches a session only through a rebuilt
-/// binary.
+/// binary; a template, `{{HOME}}` rendered by `paths::render`.
 pub const PROFILE: &str = include_str!("../../profiles/session.json");
 
 /// The session kinds `shift profile --kind` takes. One profile serves both

@@ -4,6 +4,7 @@ use std::env;
 use std::path::PathBuf;
 
 use crate::error::Error;
+use crate::paths;
 use crate::time::Timestamp;
 use crate::verbs::shift;
 
@@ -318,7 +319,7 @@ fn shift_profile(args: &[String]) -> Result<(), Failure> {
             shift::PROFILE_KINDS.join(", ")
         ))
     })?;
-    print!("{profile}");
+    print!("{}", paths::render(profile)?);
     Ok(())
 }
 
