@@ -61,13 +61,24 @@ impl Machine {
             .join(format!("{session}.json"))
     }
 
-    /// Write a ledger entry by hand — the on-disk shape a decline leaves.
-    fn pend(&self, session: &str, job: &str) -> PathBuf {
+    /// One session's short-term pointer.
+    fn pointer(&self, session: &str) -> PathBuf {
+        self.root()
+            .join("memories")
+            .join(".recent")
+            .join(format!("{session}.json"))
+    }
+
+    /// Write a ledger entry by hand — the on-disk shape a decline leaves, owed
+    /// behind job 09901667, which no test creates.
+    fn pend(&self, session: &str) -> PathBuf {
         let path = self.pending(session);
         fs::create_dir_all(path.parent().expect("ledger dir")).expect("ledger dir");
         fs::write(
             &path,
-            format!(r#"{{"declined":"2026-08-30T02:00:00Z","job":"{job}","session":"{session}"}}"#),
+            format!(
+                r#"{{"declined":"2026-08-30T02:00:00Z","job":"09901667","session":"{session}"}}"#
+            ),
         )
         .expect("ledger entry");
         path
@@ -582,10 +593,10 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
     )
     .expect("archived transcript");
 
-    let recent = machine.root().join("memories").join(".recent");
-    fs::create_dir_all(&recent).expect("recent dir");
+    let pointer = machine.pointer(SID);
+    fs::create_dir_all(pointer.parent().expect("recent dir")).expect("recent dir");
     fs::write(
-        recent.join(format!("{SID}.json")),
+        &pointer,
         format!(
             "{{\"archived\":\"{}\",\"cwd\":\"{}\",\"ended\":\"2026-08-11T12:00:00Z\",\"title\":\"the recall surface\",\"highlights\":[]}}\n",
             transcript.display(),
@@ -687,7 +698,7 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
     );
 
     // The pointer is stamped, so a second run has nothing to do.
-    let pointer = fs::read_to_string(recent.join(format!("{SID}.json"))).expect("pointer");
+    let pointer = fs::read_to_string(&pointer).expect("pointer");
     assert!(pointer.contains("\"dreamed\":\""), "{pointer}");
 }
 
@@ -758,11 +769,7 @@ fn take_archives_then_recall_surfaces_the_pointer() {
     assert!(!machine.project().join(format!("{SID}.jsonl")).exists());
     assert!(stderr(&taken).is_empty(), "one pointer is not a due queue");
 
-    let pointer = machine
-        .root()
-        .join("memories")
-        .join(".recent")
-        .join(format!("{SID}.json"));
+    let pointer = machine.pointer(SID);
     let text = fs::read_to_string(&pointer).expect("read the pointer");
     assert!(text.contains(r#""title":"port the session edges""#));
     assert!(text.contains(r#""highlights":["pointers are the short-term surface"]"#));
@@ -809,7 +816,8 @@ fn the_hooks_read_their_payloads_from_stdin() {
         &[("HOME", "")],
     ));
 
-    // A session forget already destroyed is a quiet no-op for the hook…
+    // A session no longer in the live set (taken above, as forget would leave
+    // it) is a quiet no-op for the hook…
     quiet(&machine.run_with_stdin(&["take", "--hook"], &payload));
     // …and still an error when it was asked for by hand.
     let by_hand = machine.run(&["take", SID]);
@@ -1303,7 +1311,10 @@ fn any_ending_reclaims_a_pending_take_whose_job_is_gone() {
     const WORKER: &str = "ccccdddd-eeee-ffff-0000-111122223333";
     let machine = Machine::new("pending-reclaim");
     // The 2026-08-30 shape: a backgrounded session was declined behind its
-    // job, the operator deleted the job, and nothing came back for it.
+    // job, the operator deleted the job, and nothing came back for it. That
+    // job is 09901667, the one every pended entry names and no directory
+    // holds; 11112222 is a different, live job — the worker whose retirement
+    // is the last ending in the loop.
     machine.transcript_for(OTHER, SAID);
     machine.job(
         "11112222",
@@ -1330,7 +1341,7 @@ fn any_ending_reclaims_a_pending_take_whose_job_is_gone() {
         ),
     ] {
         let stranded = machine.transcript(SAID);
-        machine.pend(SID, "09901667");
+        machine.pend(SID);
         let output = machine.run_with_stdin(&["take", "--hook"], &payload);
         if line.starts_with("took") {
             took(&output);
@@ -1344,13 +1355,8 @@ fn any_ending_reclaims_a_pending_take_whose_job_is_gone() {
         );
         assert!(machine.journal("take").contains(&line), "{line}");
     }
-    let pointer = machine
-        .root()
-        .join("memories")
-        .join(".recent")
-        .join(format!("{SID}.json"));
-    let archived = fs::read_to_string(&pointer).expect("read the pointer");
-    assert!(archived.contains(&format!("-{SID}.jsonl")), "{archived}");
+    let text = fs::read_to_string(machine.pointer(SID)).expect("read the pointer");
+    assert!(text.contains(&format!("-{SID}.jsonl")), "{text}");
     let log = machine.journal("take");
     assert!(
         log.contains(&format!("reclaimed session={SID} archived=")),
@@ -1362,7 +1368,7 @@ fn any_ending_reclaims_a_pending_take_whose_job_is_gone() {
 fn a_pending_take_survives_the_declines_that_must_stay_quiet() {
     let machine = Machine::new("pending-quiet");
     let stranded = machine.transcript(SAID);
-    let entry = machine.pend(SID, "09901667");
+    let entry = machine.pend(SID);
 
     // A machine-driven resume turn, a dream mind's own ending, and a session
     // being adopted: none of the three is an ending that may archive a
@@ -1390,7 +1396,7 @@ fn reflect_is_the_backstop_for_a_ledger_no_ending_came_to_drain() {
     // Nothing has ended on this machine for a stretch — the case a
     // take-driven drain alone would never reach.
     let stranded = machine.transcript(SAID);
-    let entry = machine.pend(SID, "09901667");
+    let entry = machine.pend(SID);
     // No bank is due, so no mind is asked; the stub is here to guarantee it.
     let claude = machine.script("claude", "exit 1\n");
 
