@@ -76,10 +76,6 @@ fn take_run(
                 "take --hook reads the session from stdin".to_owned(),
             ));
         }
-        // A resume turn ends the session it borrowed. Taking it would move the
-        // transcript out of the live set mid-conversation, leaving the next
-        // turn nothing to resume — so the caller driving those turns declares
-        // that its endings are not endings, and the hook declines.
         if env::var_os(NO_TAKE_ENV).is_some_and(|value| !value.is_empty()) {
             say("declined no-take-env");
             return Ok(false);
