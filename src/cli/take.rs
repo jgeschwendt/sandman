@@ -29,10 +29,19 @@ pub(super) fn take_verb(args: &[String]) -> Result<(), Failure> {
         from_hook,
         // SessionEnd is the proof the session is over — the hook fires the
         // instant the transcript's last line lands, which is exactly what the
-        // by-hand live-window heuristic refuses. Hook mode implies force.
+        // by-hand live-window heuristic refuses.
         from_hook || parsed.set("--force"),
         parsed.positionals.into_iter().next(),
-    );
+    )
+    .map(|drain| {
+        // Never fails: a take that succeeded stays a success however the ledger went.
+        if drain
+            && let Some(data_root) = journal.as_deref()
+            && let Ok(claude_root) = paths::claude_root()
+        {
+            take::drain_pending(data_root, &claude_root);
+        }
+    });
     // A hook has no terminal to fail into: without this line the only trace of
     // a broken take is the exit code Claude Code discards.
     if from_hook && let Err(Failure::Error(error)) = &result {
@@ -41,13 +50,18 @@ pub(super) fn take_verb(args: &[String]) -> Result<(), Failure> {
     result
 }
 
-/// The whole of `take` once the command line is understood.
+/// The whole of `take` once the command line is understood; `Ok(true)` asks
+/// the caller to settle the takes a live job deferred.
+///
+/// Every ending drains except the quiet declines (`$SANDMAN_NO_TAKE`, the
+/// pipeline: they must not archive bystanders) and `resume`, a beginning that
+/// does nothing.
 fn take_run(
     journal: Option<&Path>,
     from_hook: bool,
     force: bool,
     session_id: Option<String>,
-) -> Result<(), Failure> {
+) -> Result<bool, Failure> {
     let say = |line: &str| note(journal, "take", line);
     let claude_root = paths::claude_root();
     let live_job = |id: &str| {
@@ -68,7 +82,7 @@ fn take_run(
         // that its endings are not endings, and the hook declines.
         if env::var_os(NO_TAKE_ENV).is_some_and(|value| !value.is_empty()) {
             say("declined no-take-env");
-            return Ok(());
+            return Ok(false);
         }
         // A dream mind's own ending is not a session to keep: archiving it
         // feeds the very queue that spawned it, and at depth the next take
@@ -81,13 +95,13 @@ fn take_run(
             // tied to no session is one no reclaim can account for. One that
             // will not read still declines quietly: a dream turn never fails
             // its hook.
-            let named = stdin()
+            let session = stdin()
                 .ok()
                 .and_then(|payload| hook::session_end(&payload).ok())
                 .and_then(|ending| ending.session_id)
-                .map_or_else(String::new, |session_id| format!(" session={session_id}"));
-            say(&format!("declined pipeline{named}"));
-            return Ok(());
+                .map_or_else(String::new, |id| format!(" session={id}"));
+            say(&format!("declined pipeline{session}"));
+            return Ok(false);
         }
         let payload = stdin()?;
         let ending = hook::session_end(&payload).inspect_err(|error| {
@@ -116,24 +130,22 @@ fn take_run(
         // ※ resume-is-not-an-ending
         if ending.is_resume() {
             say(&format!("declined resume session={named}"));
-            return Ok(());
+            return Ok(false);
         }
-        // `/clear` is the one ending no worker can be behind: it closes the
-        // transcript for good, and a job it ran under carries on under a new
-        // session id (2026-08-28). It switches off only the job guard below,
-        // so it is read before the id leaves the payload.
-        let cleared = ending.reason.as_deref() == Some("clear");
         // A payload with no session is a session with nothing to take.
         let Some(session_id) = ending.session_id else {
             say("declined no-session");
-            return drained(journal);
+            return Ok(true);
         };
-        // Nor is a retirement. The daemon retires an idle, done background
-        // worker, and its exit fires SessionEnd with an ordinary reason — but a
-        // job directory still naming the session says the conversation will be
-        // resumed. The guard is the hook's alone: a session named by hand is
-        // taken on the operator's word, job or no job.
-        if !cleared
+        // A retirement is not an ending either. The daemon retires an idle,
+        // done background worker, and its exit fires SessionEnd with an
+        // ordinary reason — but a job directory still naming the session says
+        // the conversation will be resumed. The guard is the hook's alone: a
+        // session named by hand is taken on the operator's word, job or no job.
+        // `/clear` is the one ending no worker can be behind: it closes the
+        // transcript for good, and a job it ran under carries on under a new
+        // session id (2026-08-28), so it alone passes the guard.
+        if ending.reason.as_deref() != Some("clear")
             && let Some(data_root) = journal
             && let Some(job) = live_job(&session_id)
         {
@@ -152,7 +164,7 @@ fn take_run(
                 Ok(_) => format!("pending session={session_id} job={job}"),
                 Err(error) => format!("pending unrecorded session={session_id}: {error}"),
             });
-            return drained(journal);
+            return Ok(true);
         }
         session_id
     } else {
@@ -163,10 +175,9 @@ fn take_run(
         // unreconstructable only because nothing recorded the guard would have
         // fired. Recorded before the take, so one killed mid-move still leaves
         // the marker.
-        let guard = live_job(&session_id);
         say(&format!(
             "by-hand session={session_id} guard={}",
-            guard.as_deref().unwrap_or(EMPTY)
+            live_job(&session_id).as_deref().unwrap_or(EMPTY)
         ));
         session_id
     };
@@ -178,7 +189,7 @@ fn take_run(
         // Asked for by hand, a missing transcript is still an error.
         Err(Error::NotFound { .. }) if from_hook => {
             say(&format!("declined forgotten session={session_id}"));
-            return drained(journal);
+            return Ok(true);
         }
         taken => taken?,
     };
@@ -220,22 +231,7 @@ fn take_run(
         say(&line);
         eprintln!("queue at {queue} — {said}");
     }
-    drained(journal)
-}
-
-/// Settle the takes a live job deferred, then answer `Ok`.
-///
-/// Every ending passes through here except the quiet declines
-/// (`$SANDMAN_NO_TAKE`, the pipeline: they must not archive bystanders) and
-/// `resume`, a beginning that does nothing. Never fails: a take that
-/// succeeded stays a success however the ledger went.
-fn drained(journal: Option<&Path>) -> Result<(), Failure> {
-    if let Some(data_root) = journal
-        && let Ok(claude_root) = paths::claude_root()
-    {
-        take::drain_pending(data_root, &claude_root);
-    }
-    Ok(())
+    Ok(true)
 }
 
 /// Start `sandman dream` and walk away.
@@ -243,8 +239,8 @@ fn drained(journal: Option<&Path>) -> Result<(), Failure> {
 /// Take is called from a `SessionEnd` hook, which Claude Code will not wait
 /// on, so the dream must outlive it: the child is never waited for, and both
 /// its streams go to the day's dream log rather than to a terminal that is
-/// already gone. Failing to start one is a note on stderr, never a failed
-/// take — the queue is still there for the next run.
+/// already gone. Failing to start one is a journal line and a note on stderr,
+/// never a failed take — the queue is still there for the next run.
 fn spawn_dream(data_root: &Path) -> Result<PathBuf, Error> {
     use std::os::unix::process::CommandExt;
     let log = paths::run_log(data_root, "dream", Timestamp::now()?);
