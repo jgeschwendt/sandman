@@ -532,7 +532,9 @@ fn plist_renders_the_launchd_agent_under_this_home() {
         "",
     ));
     assert!(
-        !plist.contains("{{") && !plist.contains("<key>SANDMAN_SHIFT_NIGHT"),
+        !plist.contains("{{")
+            && !plist.contains("<key>SANDMAN_SHIFT_NIGHT")
+            && plist.contains("<string>dev.gigantic.sandman.report</string>"),
         "{plist}"
     );
     assert!(

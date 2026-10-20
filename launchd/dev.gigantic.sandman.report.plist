@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>io.jlg.sandman-report</string>
+  <key>Label</key><string>dev.gigantic.sandman.report</string>
   <!-- `sandman report serve` on 127.0.0.1:1705: the nights' reports and the
        proposals awaiting an answer (docs/bank-format.html#report). launchd
        expands no `~`, so this is a template: `sandman report plist` renders
@@ -15,8 +15,8 @@
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>StandardOutPath</key><string>{{HOME}}/Library/Logs/sandman-report.log</string>
-  <key>StandardErrorPath</key><string>{{HOME}}/Library/Logs/sandman-report.log</string>
+  <key>StandardOutPath</key><string>{{HOME}}/Library/Logs/dev.gigantic.sandman.report.log</string>
+  <key>StandardErrorPath</key><string>{{HOME}}/Library/Logs/dev.gigantic.sandman.report.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key><string>{{HOME}}</string>

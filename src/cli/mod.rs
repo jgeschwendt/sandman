@@ -208,11 +208,11 @@ usage: sandman <verb> [args]
       a cwd under the data root.
 
   report plist
-      The launchd agent launchd/io.jlg.sandman-report.plist, which keeps
+      The launchd agent launchd/dev.gigantic.sandman.report.plist, which keeps
       report serve up, rendered on stdout: {{HOME}} spelled out as $HOME
       (launchd expands no ~), and $SANDMAN_SHIFT_NIGHT added to its
       environment when set. Install: sandman report plist >
-      ~/Library/LaunchAgents/io.jlg.sandman-report.plist.
+      ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist.
 
   report serve [--bind 127.0.0.1:1705] [--requests N]
       The report as a loopback page (a non-loopback --bind exits 2), printing
