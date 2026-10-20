@@ -843,22 +843,31 @@ impl Signals {
     }
 }
 
-/// Whether `stele check` fails in `dir`. A missing binary, a repo without a
-/// lock, or a check that outlives the timeout reads as passing — the signal is
-/// a tie-break, never a reason to stall.
+/// Whether `stele check` fails in `dir`, run as CI runs it: under the trunk's
+/// pinned tools (`mise x -C <dir> -- stele check`), bare only when `mise` is
+/// not on PATH. A missing binary, a repo without a lock, or a check that
+/// outlives the timeout reads as passing — the signal is a tie-break, never a
+/// reason to stall.
 fn stele_fails(dir: &Path) -> bool {
     if !dir.join(".stele").join("graph.lock").is_file() {
         return false;
     }
-    let mut command = Command::new("stele");
-    command
-        .arg("check")
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    grove::scrub(&mut command);
-    let Ok(mut child) = command.spawn() else {
+    let spawn = |mut command: Command| {
+        command
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        grove::scrub(&mut command);
+        command.spawn()
+    };
+    let (mut mise, mut bare) = (Command::new("mise"), Command::new("stele"));
+    mise.arg("x")
+        .arg("-C")
+        .arg(dir)
+        .args(["--", "stele", "check"]);
+    bare.arg("check");
+    let Ok(mut child) = spawn(mise).or_else(|_| spawn(bare)) else {
         return false;
     };
     let deadline = Instant::now() + STELE_TIMEOUT;

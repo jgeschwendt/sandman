@@ -294,23 +294,35 @@ fn pick_rotates_to_the_least_recently_shifted_trunk() {
         machine.ok(FRIDAY, &["shift", "pick"]).trim(),
         "jgeschwendt/beta"
     );
-    // A failing `stele check` on alpha's committed lock outranks the thread; a
+    // A failing `stele check` on alpha's committed lock outranks the thread —
+    // under the trunk's pinned tools when `mise` is on PATH, bare otherwise; a
     // stele that cannot run reads as passing.
     let lock = alpha.join(".stele/graph.lock");
     fs::create_dir_all(alpha.join(".stele")).expect("stele dir");
     fs::write(&lock, "").expect("lock");
-    let stele = machine.script("bin/stele", "exit 1\n");
-    let path = format!(
-        "{}:{}",
-        stele.parent().expect("bin").display(),
-        std::env::var("PATH").unwrap_or_default()
+    machine.script("bin/stele", "exit 1\n");
+    let log = machine.home.join("mise.log");
+    machine.script(
+        "mise/mise",
+        &format!("echo \"$@\" > {}\nshift 4\nexec \"$@\"\n", log.display()),
     );
-    for (path, picked) in [
-        (path.as_str(), "jgeschwendt/alpha"),
-        ("/nonexistent", "jgeschwendt/beta"),
+    let (bin, mise) = (machine.home.join("bin"), machine.home.join("mise"));
+    for (path, picked, logged) in [
+        (bin.display().to_string(), "jgeschwendt/alpha", false),
+        (
+            format!("{}:{}", mise.display(), bin.display()),
+            "jgeschwendt/alpha",
+            true,
+        ),
+        ("/nonexistent".to_owned(), "jgeschwendt/beta", false),
     ] {
-        let output = machine.run(FRIDAY, &["shift", "pick"], &[("PATH", path)]);
+        let _ = fs::remove_file(&log);
+        let output = machine.run(FRIDAY, &["shift", "pick"], &[("PATH", &path)]);
         assert_eq!(stdout(&output).trim(), picked, "{}", stderr(&output));
+        assert_eq!(
+            fs::read_to_string(&log).ok(),
+            logged.then(|| format!("x -C {} -- stele check\n", alpha.display()))
+        );
     }
     fs::remove_file(lock).expect("rm lock");
 
