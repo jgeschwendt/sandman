@@ -239,9 +239,8 @@ usage: sandman <verb> [args]
   shift brief [--mind M] [--dry-run]
   shift clock [--check]
   shift handoff --shift ID (--from-session | --abandoned [--reason TEXT] |
-                --file PATH) [--cost USD] [--truncate] [--cloud]
+                --file PATH) [--cost USD] [--truncate]
   shift land --shift ID --branch NAME
-  shift open --cloud [--mind M]
   shift pick [--path] [--shift ID | --untrusted]
   shift pr --shift ID (--number N --url U | --auto BOOL | --red SHA |
            --merged | --closed)
@@ -324,19 +323,7 @@ usage: sandman <verb> [args]
       under (profiles/session.json, compiled in; one profile for both kinds).
       $SANDMAN_NOW (ISO-8601) fixes the instant; $SANDMAN_SHIFT_MIND (default
       opus) and $SANDMAN_SHIFT_BUDGET_USD (default 15) fill the brief.
-      open --cloud is the cloud routine's brief: in the state clone
-      ($SANDMAN_ROOT) it pulls --rebase, takes the committed current.json as
-      the lock (exit 1 `busy: <id> open since <ts>` under 70 min old, else
-      abandoned `cloud: stale lock`), picks among the clones in $SANDMAN_GROVE
-      (<dir>/<repo>, the state and $SANDMAN_DOCKET clones aside, every clone
-      trusted, approved proposals first), composes as brief does with
-      handoff_by now + 50 min and no night gate, adds cloud: true and
-      session_url ($CLAUDE_CODE_REMOTE_SESSION_ID) to current.json and
-      meta.json, commits, pushes (one pull --rebase on a rejection, then exit
-      1 `state push rejected`) and prints the brief; templates default to
-      $SANDMAN_GROVE/sandman/prompts. handoff --cloud commits and pushes the
-      same way, and pushes again when rerun on the shift it handed off. On
-      a Redesign night pick puts approved proposals first too.
+      On a Redesign night pick puts approved proposals first.
 
   trail append --kind K [--shift S] [--repo R] [--branch B] [--sha SHA]
                [--rationale TEXT] [--cost USD] [--model M] [--parent ID]
@@ -495,7 +482,6 @@ fn shift_context() -> Result<verbs::shift::Context, Failure> {
     let home = paths::home()?;
     Ok(verbs::shift::Context {
         claude_json: paths::claude_json()?,
-        cloud: None,
         data_root: paths::data_root()?,
         docket: paths::docket_dir(&home),
         now,
