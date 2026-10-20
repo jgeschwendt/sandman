@@ -171,7 +171,7 @@ fn version_prints_the_stamp_every_journal_line_carries() {
     // And it is the same string a line carries, so a line found in the log a
     // month later names a build that can be checked out.
     machine.transcript(&[r#"{"type":"user","message":{"content":"a session"}}"#]);
-    assert_eq!(code(&machine.run(&["take", SID])), 0);
+    took(&machine.run(&["take", SID]));
     let log = machine.journal("take");
     assert!(log.contains(&format!(" v={stamp} ")), "{log}");
 
@@ -729,9 +729,7 @@ fn take_archives_then_recall_surfaces_the_pointer() {
     ]);
 
     let taken = machine.run(&["take", SID]);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
-    let archived = PathBuf::from(stdout(&taken).trim());
-    assert!(archived.is_file());
+    let archived = took(&taken);
     // A fresh root gets the day's directories made on the way:
     // `.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…`.
     let shelf = archived
@@ -798,25 +796,19 @@ fn the_hooks_read_their_payloads_from_stdin() {
     ]);
 
     // SessionEnd → take.
-    let payload = format!(
-        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code"}}"#
-    );
-    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
-    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
+    took(&machine.run_with_stdin(
+        &["take", "--hook"],
+        &format!(
+            r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code"}}"#
+        ),
+    ));
 
     // A payload with no session is a quiet no-op.
-    let empty = machine.run_with_stdin(&["take", "--hook"], r#"{"cwd":"/Users/you/code"}"#);
-    assert_eq!(code(&empty), 0);
-    assert!(stdout(&empty).is_empty());
-    assert!(stderr(&empty).is_empty());
+    quiet(&machine.run_with_stdin(&["take", "--hook"], r#"{"cwd":"/Users/you/code"}"#));
 
     // A session forget already destroyed is a quiet no-op for the hook…
     let payload = format!(r#"{{"session_id":"{SID}","cwd":"/Users/you/code"}}"#);
-    let gone = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&gone), 0);
-    assert!(stdout(&gone).is_empty());
-    assert!(stderr(&gone).is_empty());
+    quiet(&machine.run_with_stdin(&["take", "--hook"], &payload));
     // …and still an error when it was asked for by hand.
     let by_hand = machine.run(&["take", SID]);
     assert_eq!(code(&by_hand), 1);
@@ -884,20 +876,15 @@ fn take_hook_stays_out_of_the_memory_pipeline() {
         r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
         r#"{"type":"user","message":{"content":"a dream mind's own session"}}"#,
     ]);
-    let payload = format!(
-        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code"}}"#
-    );
+    let payload = session_end(SID, "other");
 
     // A dream mind's ending is not a session to keep — taking it would feed
     // the queue that spawned the mind, recursively.
-    let guarded = machine.run_with(
+    quiet(&machine.run_with(
         &["take", "--hook"],
         &payload,
         &[("CLAUDE_MEMORY_PIPELINE", "1")],
-    );
-    assert_eq!(code(&guarded), 0, "{}", stderr(&guarded));
-    assert!(stdout(&guarded).is_empty());
-    assert!(stderr(&guarded).is_empty());
+    ));
     // The decline names its session: a line nobody can tie to a conversation
     // is a line no later reclaim can act on.
     let log = machine.journal("take");
@@ -908,14 +895,11 @@ fn take_hook_stays_out_of_the_memory_pipeline() {
 
     // A payload that will not parse declines just as quietly, under the bare
     // form — the dream turn must never fail its own hook.
-    let malformed = machine.run_with(
+    quiet(&machine.run_with(
         &["take", "--hook"],
         "{not json",
         &[("CLAUDE_MEMORY_PIPELINE", "1")],
-    );
-    assert_eq!(code(&malformed), 0, "{}", stderr(&malformed));
-    assert!(stdout(&malformed).is_empty());
-    assert!(stderr(&malformed).is_empty());
+    ));
     let log = machine.journal("take");
     assert!(
         log.lines().any(|line| line.ends_with("declined pipeline")),
@@ -923,9 +907,7 @@ fn take_hook_stays_out_of_the_memory_pipeline() {
     );
 
     // The same ending outside the pipeline is taken as ever.
-    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
-    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
+    took(&machine.run_with_stdin(&["take", "--hook"], &payload));
 }
 
 #[test]
@@ -935,18 +917,10 @@ fn take_hook_declines_a_resume_because_a_resume_is_a_beginning() {
         r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
         r#"{"type":"user","message":{"content":"the session being adopted"}}"#,
     ]);
-    let payload = |reason: &str| {
-        format!(
-            r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"{reason}"}}"#
-        )
-    };
 
     // Claude Code fires this on the session it is adopting. Taking it would
     // move the transcript out from under the turn about to append to it.
-    let declined = machine.run_with_stdin(&["take", "--hook"], &payload("resume"));
-    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
-    assert!(stdout(&declined).is_empty());
-    assert!(stderr(&declined).is_empty());
+    quiet(&machine.run_with_stdin(&["take", "--hook"], &session_end(SID, "resume")));
     assert!(source.is_file(), "the transcript stays in the live set");
     assert!(machine.took_nothing(), "and nothing is taken");
 
@@ -956,72 +930,9 @@ fn take_hook_declines_a_resume_because_a_resume_is_a_beginning() {
             r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
             r#"{"type":"user","message":{"content":"an ending"}}"#,
         ]);
-        let taken = machine.run_with_stdin(&["take", "--hook"], &payload(reason));
-        assert_eq!(code(&taken), 0, "{reason}: {}", stderr(&taken));
-        assert!(PathBuf::from(stdout(&taken).trim()).is_file(), "{reason}");
+        took(&machine.run_with_stdin(&["take", "--hook"], &session_end(SID, reason)));
         assert!(!source.exists(), "{reason}");
     }
-
-    // Named by hand, a resume is still a take — the guard is the hook's.
-    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"by hand"}}"#]);
-    let by_hand = machine.run(&["take", SID]);
-    assert_eq!(code(&by_hand), 0, "{}", stderr(&by_hand));
-    assert!(!source.exists());
-}
-
-#[test]
-fn take_hook_declines_a_session_a_live_job_still_names() {
-    let machine = Machine::new("job-guard");
-    let source = machine.transcript(&[
-        r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
-        r#"{"type":"user","message":{"content":"a backgrounded conversation"}}"#,
-    ]);
-    let payload = format!(
-        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"other"}}"#
-    );
-    let job = machine.job(
-        "11112222",
-        Some(&format!(
-            r#"{{"sessionId":"{SID}","resumeSessionId":"{SID}","state":"done"}}"#
-        )),
-    );
-
-    // The daemon retires an idle worker and its exit fires SessionEnd like any
-    // other ending — but the job still names the session, so the conversation
-    // is resumable and will be resumed. A retirement is not an ending — even
-    // when the ledger cannot write the debt down, which is journalled.
-    let ledger = machine.write(".sandman/pending-takes", "");
-    let declined = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
-    assert!(stdout(&declined).is_empty());
-    assert!(stderr(&declined).is_empty());
-    assert!(source.is_file(), "the transcript stays in the live set");
-    assert!(machine.took_nothing(), "and nothing is taken");
-    let log = machine.journal("take");
-    assert!(log.contains("pending unrecorded session="), "{log}");
-    fs::remove_file(ledger).expect("rm");
-
-    // A job naming somebody else's session is not this session's job.
-    machine.job("33334444", Some(r#"{"sessionId":"99990000-dead"}"#));
-    let declined = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
-    assert!(source.is_file());
-
-    // Named by hand, a backgrounded session is still a take — the guard is the
-    // hook's, and --force reaches past it as it reaches past the live window.
-    let by_hand = machine.run(&["take", SID, "--force"]);
-    assert_eq!(code(&by_hand), 0, "{}", stderr(&by_hand));
-    assert!(!source.exists(), "the job dir never blocks a take by hand");
-    assert!(PathBuf::from(stdout(&by_hand).trim()).is_file());
-    assert!(job.is_dir(), "and the job itself is left alone");
-
-    // Delete the job and the ending is an ending again.
-    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"a real ending"}}"#]);
-    fs::remove_dir_all(&job).expect("delete the job");
-    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
-    assert!(!source.exists());
-    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
 }
 
 #[test]
@@ -1029,11 +940,6 @@ fn take_hook_takes_past_a_job_that_has_moved_on_or_been_cleared() {
     const SUCCESSOR: &str = "0ddf70a8-1111-2222-3333-444455556666";
 
     let machine = Machine::new("job-guard-moved-on");
-    let payload = |reason: &str| {
-        format!(
-            r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"{reason}"}}"#
-        )
-    };
 
     // A `/clear` inside a backgrounded conversation ended this session and the
     // job carried on under the successor, leaving the old id behind in
@@ -1046,10 +952,8 @@ fn take_hook_takes_past_a_job_that_has_moved_on_or_been_cleared() {
             r#"{{"sessionId":"{SID}","resumeSessionId":"{SUCCESSOR}","state":"running"}}"#
         )),
     );
-    let taken = machine.run_with_stdin(&["take", "--hook"], &payload("other"));
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    took(&machine.run_with_stdin(&["take", "--hook"], &session_end(SID, "other")));
     assert!(!source.exists());
-    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
     assert!(job.is_dir(), "the job itself is left alone");
 
     // And a `/clear` reaches past the guard even while the job still names the
@@ -1061,22 +965,8 @@ fn take_hook_takes_past_a_job_that_has_moved_on_or_been_cleared() {
         format!(r#"{{"sessionId":"{SID}","resumeSessionId":"{SID}","state":"running"}}"#),
     )
     .expect("rewrite the job state");
-    let cleared = machine.run_with_stdin(&["take", "--hook"], &payload("clear"));
-    assert_eq!(code(&cleared), 0, "{}", stderr(&cleared));
+    took(&machine.run_with_stdin(&["take", "--hook"], &session_end(SID, "clear")));
     assert!(!source.exists());
-    assert!(PathBuf::from(stdout(&cleared).trim()).is_file());
-
-    // The same job, an ordinary ending: the guard is back in force.
-    let source = machine.transcript(&[r#"{"type":"user","message":{"content":"still live"}}"#]);
-    let declined = machine.run_with_stdin(&["take", "--hook"], &payload("other"));
-    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
-    assert!(stdout(&declined).is_empty());
-    assert!(source.is_file(), "the transcript stays in the live set");
-    let log = machine.journal("take");
-    assert!(
-        log.contains(&format!("declined live-job session={SID} job=11112222")),
-        "{log}"
-    );
 }
 
 #[test]
@@ -1086,19 +976,30 @@ fn the_journal_records_what_the_hook_decided_either_way() {
         r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
         r#"{"type":"user","message":{"content":"a backgrounded conversation"}}"#,
     ]);
-    let payload = format!(
-        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code","reason":"other"}}"#
-    );
+    let payload = session_end(SID, "other");
     let job = machine.job(
         "11112222",
         Some(&format!(r#"{{"sessionId":"{SID}","state":"done"}}"#)),
     );
 
+    // The daemon retires an idle worker and its exit fires SessionEnd like any
+    // other ending — but the job still names the session, so the conversation
+    // is resumable and will be resumed. A retirement is not an ending — even
+    // when the ledger cannot write the debt down, which is journalled.
+    let ledger = machine.write(".sandman/pending-takes", "");
+    quiet(&machine.run_with_stdin(&["take", "--hook"], &payload));
+    assert!(source.is_file(), "the transcript stays in the live set");
+    assert!(machine.took_nothing(), "and nothing is taken");
+    assert!(
+        machine
+            .journal("take")
+            .contains("pending unrecorded session=")
+    );
+    fs::remove_file(ledger).expect("rm");
+
     // A decline says what it declined and which job stopped it — the two facts
     // the 2026-08-26 incident had to be reconstructed from daemon.log.
-    let declined = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
-    assert!(stdout(&declined).is_empty(), "the hook is still quiet");
+    quiet(&machine.run_with_stdin(&["take", "--hook"], &payload));
     let log = machine.journal("take");
     assert!(
         log.contains(&format!(
@@ -1124,15 +1025,13 @@ fn the_journal_records_what_the_hook_decided_either_way() {
         );
         assert!(line.starts_with("20"), "{line}");
     }
-    assert_eq!(log.lines().count(), 3, "{log}");
+    assert_eq!(log.lines().count(), 6, "{log}");
 
     // The take that does happen says so, with the size that tells a whole
     // conversation from a recreated stub.
     fs::remove_dir_all(&job).expect("delete the job");
-    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    let archived = took(&machine.run_with_stdin(&["take", "--hook"], &payload));
     assert!(!source.exists());
-    let archived = PathBuf::from(stdout(&taken).trim());
     let bytes = fs::metadata(&archived).expect("stat").len();
     let log = machine.journal("take");
     assert!(
@@ -1149,7 +1048,7 @@ fn the_journal_records_what_the_hook_decided_either_way() {
         "{log}"
     );
     assert!(!machine.pending(SID).exists());
-    assert_eq!(log.lines().count(), 6, "{log}");
+    assert_eq!(log.lines().count(), 9, "{log}");
 }
 
 #[test]
@@ -1167,8 +1066,7 @@ fn a_take_by_hand_leaves_the_marker_the_guard_would_have_left() {
     // The guard is the hook's and stays that way — the take happens. But the
     // line records that a job named the session, which is the fact the
     // 2026-08-26 incident had no record of.
-    let taken = machine.run(&["take", SID, "--force"]);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    took(&machine.run(&["take", SID, "--force"]));
     assert!(!source.exists(), "the job never blocks a take by hand");
     let log = machine.journal("take");
     assert!(
@@ -1178,14 +1076,14 @@ fn a_take_by_hand_leaves_the_marker_the_guard_would_have_left() {
     // …and it is written before the take, so a take that dies mid-move still
     // explains what it was doing.
     let by_hand = log.find("by-hand").expect("the marker");
-    let took = log.find("took session=").expect("the take");
-    assert!(by_hand < took, "{log}");
+    let take = log.find("took session=").expect("the take");
+    assert!(by_hand < take, "{log}");
 
     // With no job naming it, the marker says so rather than going missing:
     // a take with no line is indistinguishable from a take that never ran.
     fs::remove_dir_all(&job).expect("delete the job");
     let source = machine.transcript(&[r#"{"type":"user","message":{"content":"unguarded"}}"#]);
-    assert_eq!(code(&machine.run(&["take", SID, "--force"])), 0);
+    took(&machine.run(&["take", SID, "--force"]));
     assert!(!source.exists());
     let log = machine.journal("take");
     assert!(
@@ -1197,6 +1095,30 @@ fn a_take_by_hand_leaves_the_marker_the_guard_would_have_left() {
     // the field, not the word: the fabricated home's own path carries the
     // label, and it lands in every `archived=`.
     assert_eq!(log.matches(" by-hand session=").count(), 2, "{log}");
+}
+
+/// A `SessionEnd` payload for `session`, ending for `reason`.
+fn session_end(session: &str, reason: &str) -> String {
+    format!(
+        r#"{{"hook_event_name":"SessionEnd","session_id":"{session}","cwd":"/Users/you/code","reason":"{reason}"}}"#
+    )
+}
+
+/// The archive a successful take printed, which must exist.
+fn took(output: &Output) -> PathBuf {
+    assert_eq!(code(output), 0, "{}", stderr(output));
+    let archived = PathBuf::from(stdout(output).trim());
+    assert!(archived.is_file(), "{}", archived.display());
+    archived
+}
+
+/// A hook that declined, as quietly as a decline must.
+fn quiet(output: &Output) {
+    assert_eq!(code(output), 0, "{}", stderr(output));
+    assert!(
+        stdout(output).is_empty() && stderr(output).is_empty(),
+        "{output:?}"
+    );
 }
 
 /// The pid a journal line carries, for asserting the shape without hardcoding
@@ -1233,7 +1155,7 @@ fn the_journal_records_what_recall_primed_a_session_with() {
         r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
         r#"{"type":"user","message":{"content":"the secret body"}}"#,
     ]);
-    assert_eq!(code(&machine.run(&["take", SID])), 0);
+    took(&machine.run(&["take", SID]));
     assert!(!taken.exists());
 
     let recalled = machine.run_with_stdin(&["recall", "--hook"], &payload);
@@ -1336,7 +1258,7 @@ fn forget_is_the_one_verb_that_leaves_no_line() {
         r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
         r#"{"type":"user","message":{"content":"to be destroyed"}}"#,
     ]);
-    assert_eq!(code(&machine.run(&["take", SID])), 0);
+    took(&machine.run(&["take", SID]));
     let before = machine.journal("take");
     assert!(before.contains(&format!("took session={SID}")), "{before}");
 
@@ -1367,36 +1289,26 @@ fn take_hook_declines_when_the_caller_says_this_is_not_an_ending() {
         r#"{"type":"attachment","cwd":"/Users/you/code"}"#,
         r#"{"type":"user","message":{"content":"a resume turn's ending"}}"#,
     ]);
-    let payload = format!(
-        r#"{{"hook_event_name":"SessionEnd","session_id":"{SID}","cwd":"/Users/you/code"}}"#
-    );
+    let payload = session_end(SID, "other");
 
     // A driven resume turn ends the session it borrowed; the transcript has to
     // stay live for the next one.
-    let declined = machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "1")]);
-    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
-    assert!(stdout(&declined).is_empty());
-    assert!(stderr(&declined).is_empty());
+    quiet(&machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "1")]));
     assert!(source.is_file());
     assert!(machine.took_nothing());
 
     // Any value declines.
-    let declined = machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "yes")]);
-    assert_eq!(code(&declined), 0, "{}", stderr(&declined));
+    quiet(&machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "yes")]));
     assert!(source.is_file());
 
     // A session named by hand means it, guard or not.
-    let by_hand = machine.run_with(&["take", SID], "", &[("SANDMAN_NO_TAKE", "1")]);
-    assert_eq!(code(&by_hand), 0, "{}", stderr(&by_hand));
+    took(&machine.run_with(&["take", SID], "", &[("SANDMAN_NO_TAKE", "1")]));
     assert!(!source.exists());
-    assert!(PathBuf::from(stdout(&by_hand).trim()).is_file());
 
     // Set-but-empty is not set: the ending is an ending again.
     let source = machine.transcript(&[r#"{"type":"user","message":{"content":"a real ending"}}"#]);
-    let taken = machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "")]);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    took(&machine.run_with(&["take", "--hook"], &payload, &[("SANDMAN_NO_TAKE", "")]));
     assert!(!source.exists());
-    assert!(PathBuf::from(stdout(&taken).trim()).is_file());
 }
 
 /// A session other than the fixture's default — the one whose ending drives a
@@ -1415,12 +1327,9 @@ fn any_ending_reclaims_a_pending_take_whose_job_is_gone() {
         OTHER,
         &[r#"{"type":"user","message":{"content":"an unrelated session"}}"#],
     );
-    let payload = format!(
-        r#"{{"hook_event_name":"SessionEnd","session_id":"{OTHER}","cwd":"/Users/you/code","reason":"other"}}"#
-    );
 
-    let taken = machine.run_with_stdin(&["take", "--hook"], &payload);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    let taken = machine.run_with_stdin(&["take", "--hook"], &session_end(OTHER, "other"));
+    took(&taken);
     assert!(!ending.exists(), "the named take still happened");
     // …and the stranded session came with it: archived, pointed at, cleared.
     assert!(!stranded.exists());
@@ -1450,11 +1359,6 @@ fn a_pending_take_survives_the_declines_that_must_stay_quiet() {
     let stranded =
         machine.transcript(&[r#"{"type":"user","message":{"content":"a backgrounded run"}}"#]);
     let entry = machine.pend(SID, "09901667");
-    let payload = |reason: &str| {
-        format!(
-            r#"{{"hook_event_name":"SessionEnd","session_id":"{OTHER}","cwd":"/Users/you/code","reason":"{reason}"}}"#
-        )
-    };
 
     // A machine-driven resume turn, a dream mind's own ending, and a session
     // being adopted: none of the three is an ending that may archive a
@@ -1464,9 +1368,7 @@ fn a_pending_take_survives_the_declines_that_must_stay_quiet() {
         ("other", vec![("CLAUDE_MEMORY_PIPELINE", "1")]),
         ("resume", Vec::new()),
     ] {
-        let declined = machine.run_with(&["take", "--hook"], &payload(reason), &env);
-        assert_eq!(code(&declined), 0, "{}", stderr(&declined));
-        assert!(stdout(&declined).is_empty());
+        quiet(&machine.run_with(&["take", "--hook"], &session_end(OTHER, reason), &env));
         assert!(entry.is_file(), "the debt is still owed after {env:?}");
         assert!(stranded.is_file(), "and the transcript is untouched");
     }
@@ -1476,8 +1378,7 @@ fn a_pending_take_survives_the_declines_that_must_stay_quiet() {
         OTHER,
         &[r#"{"type":"user","message":{"content":"named by hand"}}"#],
     );
-    let taken = machine.run(&["take", OTHER]);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    took(&machine.run(&["take", OTHER]));
     assert!(!by_hand.exists());
     assert!(!stranded.exists(), "the by-hand take drained too");
     assert!(!entry.exists());
@@ -1542,8 +1443,7 @@ fn a_live_transcript_is_refused_with_one_line() {
     assert!(stderr(&refused).contains("looks live"));
     assert!(path.is_file());
 
-    let forced = machine.run(&["take", SID, "--force"]);
-    assert_eq!(code(&forced), 0, "{}", stderr(&forced));
+    took(&machine.run(&["take", SID, "--force"]));
     assert!(!path.exists());
 }
 
@@ -1568,7 +1468,7 @@ fn a_full_queue_spawns_a_detached_dream() {
         "",
         &[("SANDMAN_CLAUDE_BIN", stub.to_str().expect("stub path"))],
     );
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    took(&taken);
     assert!(
         stderr(&taken).starts_with("queue at 10 — dreaming in the background"),
         "{}",
@@ -1674,7 +1574,7 @@ fn a_full_queue_under_a_held_dream_lock_spawns_nothing() {
     machine.transcript(&[r#"{"type":"user","message":{"content":"the tenth"}}"#]);
     fs::create_dir_all(machine.project().join(SID)).expect("a sidecar directory");
     let taken = machine.run(&["take", SID]);
-    assert_eq!(code(&taken), 0, "{}", stderr(&taken));
+    took(&taken);
     assert!(
         stderr(&taken).starts_with("queue at 10 — a dream is already running"),
         "{}",
@@ -1685,6 +1585,38 @@ fn a_full_queue_under_a_held_dream_lock_spawns_nothing() {
         log.contains(" directory=") && log.contains("dream held queue=10"),
         "{log}"
     );
+
+    // Released, the eleventh take is due a dream that cannot start: a
+    // directory squats on the day's dream log. A note, never a failed take.
+    drop(held);
+    let trace = machine.root().join(".trace");
+    let day = fs::read_dir(&trace)
+        .expect("trace")
+        .flatten()
+        .find_map(|entry| {
+            Some(
+                entry
+                    .file_name()
+                    .to_str()?
+                    .strip_prefix("take-")?
+                    .to_owned(),
+            )
+        })
+        .expect("the take journal");
+    fs::create_dir_all(trace.join(format!("dream-{day}"))).expect("a log that will not open");
+    machine.transcript_for(
+        OTHER,
+        &[r#"{"type":"user","message":{"content":"the eleventh"}}"#],
+    );
+    let taken = machine.run(&["take", OTHER]);
+    took(&taken);
+    assert!(
+        stderr(&taken).starts_with("queue at 11 — dream could not be spawned: "),
+        "{}",
+        stderr(&taken)
+    );
+    let log = machine.journal("take");
+    assert!(log.contains("dream spawn-failed queue=11: "), "{log}");
 }
 
 #[test]
