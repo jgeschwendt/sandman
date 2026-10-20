@@ -1503,12 +1503,12 @@ unchecked — writes <code class="code">shifts/rotation.toml</code>, appends a <
 or whose <code class="code">Origin</code> is not <code class="code">http://&lt;bound address&gt;</code>, is <code class="code">403</code> — no rebinding DNS name or
 foreign form reaches it; other paths <code class="code">404</code>, other methods <code class="code">405</code>. Open it at
 <code class="code">http://127.0.0.1:1705</code>, never <code class="code">localhost</code>, which the Host check refuses. The launchd
-agent <code class="code">launchd/io.jlg.sandman-report.plist</code> keeps it up (log
-<code class="code">~/Library/Logs/sandman-report.log</code>). launchd expands no <code class="code">~</code>, so the file is a
+agent <code class="code">launchd/dev.gigantic.sandman.report.plist</code> keeps it up (log
+<code class="code">~/Library/Logs/dev.gigantic.sandman.report.log</code>). launchd expands no <code class="code">~</code>, so the file is a
 template: <code class="code">sandman report plist</code> prints it with <code class="code">{{HOME}}</code> spelled out as
 <code class="code">$HOME</code>, and <code class="code">$SANDMAN_SHIFT_NIGHT</code>, when set in the rendering shell, added to the
-agent's environment:</p>
-<pre class="snippet"><code data-lang="sh">sandman report plist &gt; ~/Library/LaunchAgents/io.jlg.sandman-report.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.jlg.sandman-report.plist
+agent's environment (the label was <code class="code">io.jlg.sandman-report</code> until 2026-10-20; the first two commands retire it):</p>
+<pre class="snippet"><code data-lang="sh">launchctl bootout gui/$(id -u)/io.jlg.sandman-report 2&gt;/dev/null; rm -f ~/Library/LaunchAgents/io.jlg.sandman-report.plist; sandman report plist &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist
 </code></pre>
 </div>
 </section>

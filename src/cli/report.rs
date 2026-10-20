@@ -99,8 +99,10 @@ fn report_plist(args: &[String]) -> Result<(), Failure> {
         });
     print!(
         "{}",
-        paths::render(include_str!("../../launchd/io.jlg.sandman-report.plist"))?
-            .replace("{{EXTRA_ENV}}", &night)
+        paths::render(include_str!(
+            "../../launchd/dev.gigantic.sandman.report.plist"
+        ))?
+        .replace("{{EXTRA_ENV}}", &night)
     );
     Ok(())
 }
