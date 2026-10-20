@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en" class="ui">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sandman — mcp</title>
+<link rel="stylesheet" href="https://gigantic.dev/ui/ui.css" />
+<link rel="stylesheet" href="https://gigantic.dev/ui/docs.css" />
+<link rel="stylesheet" href="page.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23476349'/%3E%3Cpath d='M11.5 9.5A5 5 0 0 1 6.5 4.5 5 5 0 1 0 11.5 9.5Z' fill='white'/%3E%3C/svg%3E" />
+</head>
+<body data-page="mcp">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<!-- Phosphor Icons (regular), MIT (c) 2023 Phosphor Icons — via jgeschwendt/ui icons/ -->
+<symbol id="ph-circle-half" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm8,16.37a86.4,86.4,0,0,1,16,3V212.67a86.4,86.4,0,0,1-16,3Zm32,9.26a87.81,87.81,0,0,1,16,10.54V195.83a87.81,87.81,0,0,1-16,10.54ZM40,128a88.11,88.11,0,0,1,80-87.63V215.63A88.11,88.11,0,0,1,40,128Zm160,50.54V77.46a87.82,87.82,0,0,1,0,101.08Z"/></symbol>
+<symbol id="ph-moon" viewBox="0 0 256 256" fill="currentColor"><path d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11a89,89,0,0,1,31.4-26A106,106,0,0,0,96,56,104.11,104.11,0,0,0,200,160a106,106,0,0,0,14.92-1.06A89,89,0,0,1,188.9,190.34Z"/></symbol>
+<symbol id="ph-sun" viewBox="0 0 256 256" fill="currentColor"><path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"/></symbol>
+</svg>
+
+<header class="appbar">
+  <h1 class="appbar-title">
+    <svg class="icon" aria-hidden="true"><use href="#ph-moon" /></svg>
+    sandman <small>· mcp</small>
+  </h1>
+  <span class="spacer"></span>
+  <div class="segmented" role="group" aria-label="theme">
+    <button type="button" data-theme-set="light" aria-pressed="false" title="light">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-sun" /></svg>light
+    </button>
+    <button type="button" data-theme-set="auto" aria-pressed="true" title="follow the system">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-circle-half" /></svg>auto
+    </button>
+    <button type="button" data-theme-set="dark" aria-pressed="false" title="dark">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-moon" /></svg>dark
+    </button>
+  </div>
+</header>
+
+<main class="docs-shell" data-container>
+
+<header class="stack">
+  <p class="eyebrow"><code class="code">sandman mcp</code>: the banks as a tool server</p>
+  <p class="lead docs-lead">Status: <strong>shipped 2026-09-10</strong> — phases 1, 2 and 4 in this repo; phase 3 is registered in Claude Code (user scope) and in the desktop app, which spawns the server at launch (verified 2026-09-10 · <code class="code">~/Library/Logs/Claude/mcp-server-sandman.log</code>); the Cowork tool calls are the operator's check. The brief is kept below as written, with the facts verified since marked inline. Read <code class="code">AGENTS.md</code>, <code class="code">src/AGENTS.md</code>, <code class="code">docs/index.html</code>, and <a href="bank-format.html"><code class="code">docs/bank-format.html</code></a> first; this document adds one verb and changes nothing about the format, the lock, or the passes.</p>
+<p class="docs-note">The operator's ask, from the Cowork session that ablated the cloud memory store the same day: "why not a mcp server for sandman that gives you access?" then "can we make sandman a real server? on vercel? then everything can access my memory yeah?" then "maybe later." The decision that session reached: a local, stdio MCP server now; a remote (HTTP) server deferred; the server is what makes the cloud-to-sandman drain a single piece instead of an inbox plus a launchd routine.</p>
+  <nav class="row docs-toc" aria-label="sections">
+    <a class="pill" href="#why">why</a>
+    <a class="pill" href="#contract">contract</a>
+    <a class="pill" href="#phases">phases</a>
+    <a class="pill" href="#decisions">decisions</a>
+    <a class="pill" href="#hard-rules">hard rules</a>
+    <a class="pill" href="#after">after</a>
+    <a class="pill" href="#todo">todo</a>
+    <a class="pill" href="index.html">design</a>
+    <a class="pill" href="bank-format.html">bank format</a>
+  </nav>
+</header>
+
+<section class="docs-section" id="why">
+<header>
+<h2 class="h2">Why</h2>
+</header>
+<div class="stack">
+<p class="docs-note">Cloud sessions (Cowork, and the desktop app's linked sessions) reach this Mac through the desktop bridge. The bridge proxies the desktop app's local MCP servers into the cloud session as native tools (<code class="code">Filesystem</code>, <code class="code">Control Chrome</code>, and any server the operator adds), and it gives the session a shell, but that shell is a Linux VM with <code class="code">~/.sandman</code> mounted, not a Mac process: <code class="code">sandman</code> is not on its PATH and cannot be. So today a cloud session can read the banks as files and cannot call <code class="code">remember</code> without hand-editing a bank, which the format-authority invariant forbids.</p>
+<p class="docs-note">A <code class="code">sandman mcp</code> server registered with the desktop app closes that gap with zero data movement: the cloud session calls <code class="code">recall</code> and <code class="code">remember</code> as tools, the binary runs on the Mac under the real commit lock, <code class="code">MEMORY.md</code> regenerates through <code class="code">commit.rs</code>, and no consumer re-implements slugging or the index. The same server is usable from Claude Code (<code class="code">claude mcp add</code>) though Code keeps its <code class="code">SessionStart</code> hook for recall; the hook is automatic and the tool is not.</p>
+<p class="docs-note">What this does not do: phone and web chat do not route through the desktop bridge, so they still cannot reach sandman. That is the remote server's job, deferred. The cloud memory store keeps its projected <code class="code">profile.md</code> and <code class="code">preferences.md</code> for those surfaces until then.</p>
+</div>
+</section>
+
+<section class="docs-section" id="contract">
+<header>
+<h2 class="h2">The contract</h2>
+</header>
+<div class="stack">
+<p class="docs-note">One new verb, one new module, no new dependency.</p>
+<pre class="snippet"><code>sandman mcp
+    Serve the banks over MCP on stdio: JSON-RPC 2.0, one message per line,
+    requests on stdin, responses on stdout, nothing else on stdout ever.
+    Journals to &lt;root&gt;/.trace/mcp-&lt;date&gt;.log. Exits 0 on EOF.
+</code></pre>
+<p class="docs-note">Transport is stdio only in this phase. The handlers are written as plain functions over <code class="code">(data_root, home, params) -&gt; Result&lt;Value, McpError&gt;</code> with the transport as a thin loop around them, so the deferred HTTP transport is a second loop and not a second server.</p>
+<h3 class="h3" id="contract-tools">Tools</h3>
+<p class="docs-note">Three tools. Names are the verbs; the surface is deliberately smaller than the CLI because <code class="code">take</code>, <code class="code">dream</code>, <code class="code">reflect</code>, and <code class="code">forget</code> are Mac-lifecycle verbs with no cloud caller.</p>
+<pre class="snippet"><code>recall
+    input:  { cwd?: string }            absolute; default: $HOME
+    output: { text: string, banks: [{key, degraded, memories: [filename]}],
+              memories: number, pointers: number, trimmed: {…} }
+    Composes exactly what `sandman recall --cwd` composes: verbs::recall::compose.
+    `text` is the payload a session would have been primed with; the rest is
+    the Recalled shape so a caller can see what the budget cut.
+
+remember
+    input:  { body: string, bank?: string, cwd?: string, type?: "user"|"feedback"|"project"|"reference",
+              name?: string, description?: string }
+    output: { bank: string, file: string, outcome: "created"|"collided", index: string }
+    Commits through verbs::remember::remember with the same defaults as the CLI.
+    Exactly one of bank/cwd resolves the bank; both given is an invalid-params
+    error, and neither given is the home bank. A cwd that is not absolute is an
+    invalid-params error for both tools; trailing separators and `.` are dropped
+    by project::root, the key path the CLI and the hooks share, so a cwd keys
+    the same bank on every surface.
+    session_id comes from $CLAUDE_SESSION_ID when set, else absent, as today.
+
+banks
+    input:  {}
+    output: { banks: [{ key: string, live: boolean, memories: number }] }
+    Every bank under &lt;root&gt;/memories/, each marked live when the directory
+    its key decodes to still exists. A cloud caller uses this to pick a home
+    instead of guessing the slug encoding; `live: false` is the signal that a
+    bank should be retired, not written to.
+</code></pre>
+<p class="docs-note">Tool descriptions (the strings a model reads) state the budget rule from <code class="code">~/.sandman/memories/-Users-jlg/user_memory_is_a_budget.md</code>: short bodies, no counts, versions, prices, or listings; bank the rule and the probe. The server does not enforce lengths; <code class="code">commit.rs</code> is the authority and the description is the nudge.</p>
+<h3 class="h3" id="contract-protocol">Protocol</h3>
+<p class="docs-note">JSON-RPC 2.0 over stdio, newline-delimited, per the current MCP specification. Verified 2026-09-10: Claude Code 2.1.268 opens the server with the legacy <code class="code">initialize</code> handshake and asks for <code class="code">2025-11-25</code>. The server answers <code class="code">2025-11-25</code>, <code class="code">2025-06-18</code>, <code class="code">2025-03-26</code> and <code class="code">2024-11-05</code>, echoing the client's requested version when it is one of those and <code class="code">2025-11-25</code> otherwise (a missing or non-string version included). The spec's newest revision, 2026-07-28, replaces <code class="code">initialize</code> with per-request <code class="code">_meta</code> and is deliberately not implemented until a client sends it. The methods that must work:</p>
+<pre class="snippet"><code>initialize                → { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "sandman", version } }
+notifications/initialized → no response
+ping                      → {}
+tools/list                → { tools: [ {name, description, inputSchema} × 3 ] }
+tools/call                → { content: [ { type: "text", text: &lt;JSON of the output shape&gt; } ], isError: false }
+                            or { content: [ { type: "text", text: &lt;message&gt; } ], isError: true } for a verb failure
+anything else             → JSON-RPC error -32601
+malformed line            → JSON-RPC error -32700 with id null, then keep reading
+invalid params            → -32602
+request before initialize → -32600
+</code></pre>
+<p class="docs-note">A verb failure (bad bank, empty body, lock contention) is a tool result with <code class="code">isError: true</code>, not a JSON-RPC error: the model should read it and recover. Only protocol-level problems are JSON-RPC errors.</p>
+<p class="docs-note"><code class="code">version</code> is the same stamp <code class="code">sandman version</code> prints (<code class="code">src/version.rs</code>), so a journal line can be read against the build that wrote it.</p>
+<h3 class="h3" id="contract-json">JSON</h3>
+<p class="docs-note"><code class="code">src/json.rs</code> is <code class="code">pub(crate)</code>, hand-rolled, and the reason <code class="code">[dependencies]</code> is empty. It parses and renders <code class="code">Value</code> with key order kept; that is all this verb needs. Do not add serde. If <code class="code">json.rs</code> lacks a helper the server wants (object construction from pairs, a <code class="code">Number</code> from <code class="code">usize</code>), add it there with the same discipline: typed failures, no panics on hostile input, depth-bounded.</p>
+<h3 class="h3" id="contract-journal">Journal</h3>
+<p class="docs-note">Every request journals one line to <code class="code">&lt;root&gt;/.trace/mcp-&lt;date&gt;.log</code> through <code class="code">src/journal.rs</code>, the same shape every verb uses: stamped, pid, build, then <code class="code">method= tool= bank= outcome=</code> and for recall the <code class="code">Recalled</code> counts (<code class="code">chars= banks= degraded= trimmed=</code>) and never the payload. Errors journal their kind and never a body.</p>
+<h3 class="h3" id="contract-concurrency">Concurrency</h3>
+<p class="docs-note">Stdio is one client, one request at a time; the server handles requests sequentially and does not spawn. The commit lock (<code class="code">src/lock.rs</code>) already serializes against reflect, dream, and a concurrent CLI <code class="code">remember</code>; a lock still held after the five-second wait every writer gives it surfaces as an <code class="code">isError</code> tool result naming the lockfile, and the caller retries. Nothing here reads <code class="code">.recent/</code> or the queue for itself (see the <code class="code">lm:queue-definition</code> invariant).</p>
+<h3 class="h3" id="contract-registration">Registration</h3>
+<p class="docs-note">Desktop app, so the bridge proxies it into cloud sessions:</p>
+<pre class="snippet"><code>"sandman": { "command": "/Users/jlg/.local/bin/sandman", "args": ["mcp"] }
+</code></pre>
+<p class="docs-note">The desktop app reads this from <code class="code">~/Library/Application Support/Claude/claude_desktop_config.json</code> under the <code class="code">mcpServers</code> key (Settings › Developer › Edit Config opens the same file); a restart of the app picks it up (verified 2026-09-10 · the file on this Mac). Claude Code, optional, for sessions that want the tools alongside the hook:</p>
+<pre class="snippet"><code>claude mcp add --scope user sandman -- "$HOME/.local/bin/sandman" mcp
+</code></pre>
+<p class="docs-note">The binary path is absolute because hooks and spawned processes get a stale PATH snapshot (<code class="code">~/.sandman/memories/-Users-jlg--claude/project_claude_harness_path_and_classifier.md</code>).</p>
+</div>
+</section>
+
+<section class="docs-section" id="phases">
+<header>
+<h2 class="h2">Phases</h2>
+</header>
+<div class="stack">
+<p class="docs-note" id="phases-handlers"><strong>1. Handlers — shipped.</strong> <code class="code">src/verbs/mcp.rs</code>: the three tool functions over <code class="code">data_root</code>/<code class="code">home</code>, the tool schemas as constants, <code class="code">McpError</code>. Unit tests against a temp <code class="code">$SANDMAN_ROOT</code> seeded with two banks: <code class="code">recall</code> equals <code class="code">verbs::recall::compose</code> byte for byte; <code class="code">remember</code> produces the file <code class="code">tests/cli.rs</code> would expect from the equivalent CLI call and regenerates the index; <code class="code">banks</code> decodes keys back to paths and marks a missing directory <code class="code">live: false</code>.</p>
+<p class="docs-note" id="phases-transport"><strong>2. Transport — shipped.</strong> The stdio loop in the same module: read a line, parse, dispatch, render, write, flush; <code class="code">initialize</code> handshake state (a <code class="code">tools/call</code> before <code class="code">initialize</code> is an error); EOF exits 0. <code class="code">src/cli/</code> gains the <code class="code">mcp</code> arm (<code class="code">rest.rs</code>) and the usage stanza above. Integration test in <code class="code">tests/mcp.rs</code> driving the built binary with a scripted stdin (initialize, initialized, tools/list, three tools/call, a malformed line, EOF) and asserting every stdout line parses and matches.</p>
+<p class="docs-note" id="phases-live-check"><strong>3. Live check.</strong> Register with the desktop app. From a Cowork session linked to this Mac: <code class="code">sandman__banks</code> lists every bank under <code class="code">memories/</code> (25, measured 2026-09-10 · the scripted session against a copy of the root); <code class="code">sandman__recall {cwd: "/Users/jlg"}</code> returns the same text as <code class="code">sandman recall --cwd ~</code> run in a terminal, compared in <code class="code">.trace/</code>; <code class="code">sandman__remember</code> into a scratch bank under a temp <code class="code">$SANDMAN_ROOT</code> (the server inherits the env of its launcher, so the check runs against a copy, not the live root) writes the file and the index. Then the real root.</p>
+<p class="docs-note" id="phases-docs"><strong>4. Docs — shipped.</strong> <code class="code">README.md</code> gains the verb; <code class="code">AGENTS.md</code> map gains <code class="code">verbs/mcp.rs</code>; this document's status line changes to shipped with the date.</p>
+</div>
+</section>
+
+<section class="docs-section" id="decisions">
+<header>
+<h2 class="h2">Decisions taken here, open to the operator</h2>
+</header>
+<div class="stack">
+<ul class="claims stack" role="list">
+<li><strong>Three tools, not the CLI.</strong> <code class="code">take</code>/<code class="code">dream</code>/<code class="code">reflect</code>/<code class="code">forget</code> stay CLI-only; a cloud session has no transcript to take and no business running a pass. Reversible: a tool is a function and a schema.</li>
+<li><strong><code class="code">recall</code> returns the rendered text, not the memories.</strong> The tool exists so a cloud session sees what a Code session sees; a structured dump would invite a second renderer downstream. The <code class="code">Recalled</code> counts ride along for diagnosis.</li>
+<li><strong>No <code class="code">forget</code> over MCP.</strong> The privacy ending should not be one tool call away from any session that can see the server.</li>
+<li><strong>stdio before HTTP.</strong> HTTP means a public door with OAuth in front so Anthropic's servers can call it, which cuts against the Tailscale-only rule for personal tooling; that is a separate decision with its own doc when the operator wants phone reach.</li>
+</ul>
+</div>
+</section>
+
+<section class="docs-section" id="hard-rules">
+<header>
+<h2 class="h2">Hard rules</h2>
+</header>
+<div class="stack">
+<ul class="claims stack" role="list">
+<li>Std only. <code class="code">[dependencies]</code> stays empty.</li>
+<li>Every bank write goes through <code class="code">commit.rs</code>. The server holds no format knowledge of its own.</li>
+<li>Nothing but JSON-RPC on stdout. Diagnostics go to stderr or the journal; one stray <code class="code">println!</code> breaks the client.</li>
+<li>Never journal a body or a recall payload.</li>
+<li><code class="code">$SANDMAN_ROOT</code> else <code class="code">~/.sandman</code>, resolved in <code class="code">paths.rs</code> and nowhere else.</li>
+<li><code class="code">cargo clippy --all-targets -- -D warnings &amp;&amp; cargo fmt --check &amp;&amp; cargo test</code> green before the operator is asked to look.</li>
+<li>No commit, push, or PR without the operator's word, per change.</li>
+</ul>
+</div>
+</section>
+
+<section class="docs-section" id="after">
+<header>
+<h2 class="h2">After this ships</h2>
+</header>
+<div class="stack">
+<p class="docs-note">The cloud-to-sandman drain becomes one scheduled Cowork task, Mac-linked, nightly beside <code class="code">sandman-reflect</code>: read the cloud memory store, <code class="code">sandman__remember</code> every line not marked <code class="code">(bank: …)</code>, then rewrite the store's <code class="code">profile.md</code> and <code class="code">preferences.md</code> from the <code class="code">~</code> bank's <code class="code">user_*</code> and <code class="code">feedback_*</code> memories. Auto-memory (<code class="code">~/.claude/projects/*/memory/</code>) is retired independently of all of this; its tarball from 2026-09-09 is the rollback.</p>
+</div>
+</section>
+
+<section class="docs-section" id="todo">
+<header>
+<h2 class="h2">TODO · from the first live Cowork check (2026-09-11)</h2>
+</header>
+<div class="stack">
+<p class="docs-note">The operator's phase-3 check ran from a Cowork session linked to this Mac. <code class="code">banks</code> listed every bank; <code class="code">remember</code> created <code class="code">reference_sandman_reachable_from_cowork_cloud.md</code> in the <code class="code">~</code> bank and regenerated the index; <code class="code">recall</code> with no cwd answered for <code class="code">~</code> and reported <code class="code">trimmed.sections: ["chronological"]</code>, no <code class="code">tools</code>.</p>
+<ul class="claims stack" role="list">
+<li><strong>Resolved (2026-09-15, this commit) — the voyage log gets a reserved floor.</strong> <code class="code">compose</code> costs the chronological surface first and trims only tools and recent, and the last-resort cut takes index lines out of the graph instead of characters off the payload's tail; the log now leaves a payload only when it is empty or wider than the whole budget.</li>
+<li><strong>Retire a wrong memory.</strong> The Cowork session banked that recall's payload "omits the voyage log tail and tool index the description promises". It does not: the log was budget-trimmed and said so; the tool index is empty on this box. <code class="code">sandman forget</code> it from <code class="code">~/.sandman/memories/-Users-jlg/reference_sandman_reachable_from_cowork_cloud.md</code>, or re-<code class="code">remember</code> it with the first sentence only (the bridge path and the ToolSearch step are right).</li>
+<li><strong>Resolved (2026-09-15, this commit) — the description names the trim.</strong> <code class="code">RECALL_DESCRIPTION</code> now says not every surface arrives, that <code class="code">trimmed.sections</code> names the ones the budget dropped and <code class="code">trimmed.banks_degraded</code> counts the banks it cut back, and that the voyage log's latest entry is carried whenever the log has one.</li>
+</ul>
+</div>
+</section>
+
+</main>
+
+<script>
+/* The theme contract, verbatim from jgeschwendt/ui docs.js — same localStorage
+   key, so a theme chosen on the ui pages is the theme this one opens in. */
+const THEME_KEY = "ui-theme";
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "auto") {
+    root.removeAttribute("data-theme");
+    localStorage.removeItem(THEME_KEY);
+  } else {
+    root.dataset.theme = mode;
+    localStorage.setItem(THEME_KEY, mode);
+  }
+  for (const b of document.querySelectorAll("[data-theme-set]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.themeSet === mode));
+  }
+}
+for (const b of document.querySelectorAll("[data-theme-set]")) {
+  b.addEventListener("click", () => applyTheme(b.dataset.themeSet));
+}
+applyTheme(localStorage.getItem(THEME_KEY) || "auto");
+</script>
+</body>
+</html>
