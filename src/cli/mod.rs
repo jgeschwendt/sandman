@@ -207,6 +207,13 @@ usage: sandman <verb> [args]
       own sessions — the open shift's session_id, a cwd that is its path, or
       a cwd under the data root.
 
+  report plist
+      The launchd agent launchd/io.jlg.sandman-report.plist, which keeps
+      report serve up, rendered on stdout: {{HOME}} spelled out as $HOME
+      (launchd expands no ~), and $SANDMAN_SHIFT_NIGHT added to its
+      environment when set. Install: sandman report plist >
+      ~/Library/LaunchAgents/io.jlg.sandman-report.plist.
+
   report serve [--bind 127.0.0.1:1705] [--requests N]
       The report as a loopback page (a non-loopback --bind exits 2), printing
       `listening on http://<address>`: GET / shows a night — the newest with
