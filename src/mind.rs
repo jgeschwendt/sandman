@@ -25,7 +25,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -325,11 +325,23 @@ fn transcript(projects: &Path, name: &str) -> Option<PathBuf> {
 /// stubs here, never an installed `claude` — and the window is transient, so
 /// the spawn is retried briefly (the same remedy cargo applies to its own
 /// just-built artifacts).
+///
+/// Spawns are serialized: on macOS std opens a child's pipes and marks them
+/// close-on-exec in two steps, so a sibling mind forked between them inherits
+/// the write end, and a mind that answered at once is read to EOF only when
+/// that sibling exits — a timeout, and the dream's 2-of-3 lost (the
+/// dream-timeout test failed 5 runs in 49 that way; 0 in 120 serialized,
+/// 2026-10-21).
 fn spawn(request: &Ask, session: Option<&str>) -> io::Result<std::process::Child> {
     const ETXTBSY: i32 = 26;
+    static SPAWNING: Mutex<()> = Mutex::new(());
     let mut tries = 0;
     loop {
-        match command(request, session).spawn() {
+        let spawned = {
+            let _turn = SPAWNING.lock();
+            command(request, session).spawn()
+        };
+        match spawned {
             Err(error) if error.raw_os_error() == Some(ETXTBSY) && tries < 40 => {
                 tries += 1;
                 thread::sleep(Duration::from_millis(5));

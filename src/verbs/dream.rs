@@ -1565,9 +1565,9 @@ mod tests {
         let started = std::time::Instant::now();
         let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
         assert!(started.elapsed() < Duration::from_secs(60), "it waited");
-        assert_eq!(outcome.dreamed, 1);
-        assert_eq!(outcome.committed.len(), 1);
         let log = read_log(&scratch.root);
+        assert_eq!(outcome.dreamed, 1, "{log}");
+        assert_eq!(outcome.committed.len(), 1);
         assert!(log.contains("fable:abstain(timeout)"), "{log}");
     }
 
