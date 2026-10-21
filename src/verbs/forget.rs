@@ -171,6 +171,7 @@ mod tests {
     use crate::testutil::TempDir;
     use crate::verbs::dream;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     const SID: &str = "aaaabbbb-cccc-dddd-eeee-ffff00001111";
@@ -233,7 +234,7 @@ mod tests {
         let mind = |name: &str, asked: &str| {
             let path = lane.join(name);
             let said = format!(
-                "{{\"message\":{{\"content\":{}}}}}\n",
+                "{{\"message\":{{\"content\":[{}]}},\"isSidechain\":false}}\n",
                 Value::string(asked).render()
             );
             fs::write(&path, [said.as_bytes(), b"\xff"].concat()).expect("mind");
@@ -278,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn forgetting_nothing_is_an_error() {
+    fn forgetting_nothing_or_past_an_unreadable_tree_is_an_error() {
         let temp = TempDir::new("forget-missing");
         let claude = temp.path().join(".claude");
         let root = temp.path().join(".sandman");
@@ -286,6 +287,18 @@ mod tests {
             forget(&root, &claude, SID),
             Err(Error::NotFound { what: "trace", .. })
         ));
+        // A pointer its directory will not let go of.
+        let recent = crate::paths::recent_dir(&root);
+        fs::create_dir_all(&recent).expect("recent");
+        fs::write(recent.join(format!("{SID}.json")), "{}\n").expect("pointer");
+        let chmod = |mode| fs::set_permissions(&recent, fs::Permissions::from_mode(mode));
+        chmod(0o555).expect("chmod");
+        let pinned = forget(&root, &claude, SID);
+        chmod(0o755).expect("chmod back");
+        assert!(matches!(pinned, Err(Error::Io { .. })), "{pinned:?}");
+        // An archive that is a file, not a tree.
+        fs::write(root.join(crate::paths::ARCHIVE_DIR_NAME), "").expect("blocker");
+        assert!(matches!(forget(&root, &claude, SID), Err(Error::Io { .. })));
     }
 
     #[test]
@@ -307,11 +320,9 @@ mod tests {
             short,
             &SID.replace('a', "g"),
         ] {
+            let got = forget(&root, &claude, fragment);
             assert!(
-                matches!(
-                    forget(&root, &claude, fragment),
-                    Err(Error::InvalidInput { .. })
-                ),
+                matches!(got, Err(Error::InvalidInput { .. })),
                 "{fragment} was not refused"
             );
         }

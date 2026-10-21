@@ -175,8 +175,10 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 mod tests {
     use super::Timestamp;
 
-    /// Reference values from `datetime.datetime.fromtimestamp(s, timezone.utc)`.
-    const KNOWN: [(i64, &str); 10] = [
+    /// Reference values from `datetime.datetime.fromtimestamp(s, timezone.utc)`;
+    /// year 0, before Python's range, is 719 528 proleptic Gregorian days back.
+    const KNOWN: [(i64, &str); 11] = [
+        (-62_167_219_200, "0000-01-01T00:00:00Z"),
         (0, "1970-01-01T00:00:00Z"),
         (1_000_000_000, "2001-09-09T01:46:40Z"),
         (1_234_567_890, "2009-02-13T23:31:30Z"),
@@ -254,8 +256,7 @@ mod tests {
             assert_eq!(
                 Timestamp::parse_iso8601(&stamp.iso8601()),
                 Some(stamp),
-                "for {}",
-                stamp.iso8601()
+                "for {stamp:?}"
             );
             day += 86_400;
         }
@@ -281,6 +282,9 @@ mod tests {
             "2026-08-11",
             "2026-08-11T12:00",
             "2026-08-11T12:00:00+02:00",
+            "2026-08-11T12:00:00.5+02:00",
+            "2026-08-11X12:00:00Z",
+            "2026-0a-11T12:00:00Z",
             "2026-13-11T12:00:00Z",
             "2026-08-32T12:00:00Z",
             "2026-08-11T24:00:00Z",

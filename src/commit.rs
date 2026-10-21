@@ -403,13 +403,27 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_replaces_target_is_a_typed_error() {
+    fn a_replaces_target_missing_unreadable_or_unparseable_is_a_typed_error() {
         let temp = TempDir::new("commit-replaces-missing");
-        let mut req = request("ghost");
-        req.replaces = Some("project_not_here.md".to_owned());
+        let bank = Bank::in_data_root(temp.path(), BANK);
+        fs::create_dir_all(bank.dir().join("project_a_dir.md")).expect("a directory");
+        let replacing = |filename: &str| {
+            let mut req = request("ghost");
+            req.replaces = Some(filename.to_owned());
+            commit_memory(temp.path(), BANK, req)
+        };
         assert!(matches!(
-            commit_memory(temp.path(), BANK, req),
+            replacing("project_not_here.md"),
             Err(Error::ReplacesMissing { .. })
+        ));
+        assert!(matches!(
+            replacing("project_a_dir.md"),
+            Err(Error::Io { .. })
+        ));
+        fs::write(bank.dir().join("project_broken.md"), "# no frontmatter\n").expect("broken");
+        assert!(matches!(
+            replacing("project_broken.md"),
+            Err(Error::Parse { .. })
         ));
         // The lock did not survive the failure.
         assert!(!temp.path().join(crate::lock::LOCK_FILE_NAME).exists());
@@ -439,6 +453,15 @@ mod tests {
             index.lines().filter(|line| line.starts_with("- [")).count(),
             3
         );
+        // Every suffix taken: the commit refuses rather than counting on.
+        for nth in 4..=super::MAX_COLLISIONS {
+            let taken = bank.dir().join(format!("project_same_name_{nth}.md"));
+            fs::copy(&first.path, taken).expect("taken");
+        }
+        assert!(matches!(
+            commit_memory(temp.path(), BANK, request("same name")),
+            Err(Error::TooManyCollisions { .. })
+        ));
     }
 
     #[test]
@@ -474,10 +497,11 @@ mod tests {
         ];
         for (index, (what, req)) in cases.into_iter().enumerate() {
             let key = if index == 0 { "../escape" } else { BANK };
-            match commit_memory(temp.path(), key, req) {
-                Err(Error::InvalidInput { what: got, .. }) => assert_eq!(got, what),
-                other => panic!("expected InvalidInput({what}), got {other:?}"),
-            }
+            let got = commit_memory(temp.path(), key, req);
+            assert!(
+                matches!(got, Err(Error::InvalidInput { what: refused, .. }) if refused == what),
+                "{what}: {got:?}"
+            );
         }
         assert!(!temp.path().join("memories").exists());
     }
