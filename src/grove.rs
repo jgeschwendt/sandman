@@ -328,7 +328,7 @@ pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>, shift: Option<&
 
 #[cfg(test)]
 mod tests {
-    use super::{Roots, checkouts, git, manifest_repos, manifest_trunks, repos_with_hits};
+    use super::{Roots, checkouts, git, hits, manifest_repos, manifest_trunks, repos_with_hits};
     use crate::testutil::TempDir;
     use std::collections::BTreeSet;
     use std::fs;
@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn checkouts_are_branch_directories_carrying_git_and_a_repo_git_refuses_is_skipped() {
+    fn checkouts_are_branch_directories_carrying_git_and_git_refusals_are_skipped() {
         let temp = TempDir::new("grove-checkouts");
         let code = temp.path().join("code");
         for dir in [
@@ -393,7 +393,9 @@ mod tests {
                 ("~/home".to_owned(), extra),
             ]
         );
-        // The fake checkouts are no repositories; the extra's log is refused.
+        // The fake checkouts are no repositories and the extra's log is
+        // refused: none of them is a repo, and nothing fails.
+        assert!(hits(&temp.path().join("home"), &BTreeSet::new(), None).is_err());
         assert!(repos_with_hits(&roots, &BTreeSet::new(), None).is_empty());
     }
 }

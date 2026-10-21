@@ -44,6 +44,7 @@ fn fixture() -> Machine {
         ("s-20261005T1400Z", "alpha", "2026-10-05T14:00:00Z"),
         ("s-20261013T1400Z", "alpha", "2026-10-13T14:00:00Z"),
         ("s-20261015T1400Z", "alpha", "2026-10-15T14:00:00Z"),
+        ("s-20261016T1400Z", "alpha", "2026-10-16T14:00:00Z"),
         // a Sabbath shift covers nothing
         ("s-20261017T1400Z", "beta", "2026-10-17T14:00:00Z"),
     ] {
@@ -52,16 +53,18 @@ fn fixture() -> Machine {
             &format!(r#"{{"repo":"jgeschwendt/{repo}","shift":"{shift}","started":"{started}"}}"#),
         );
     }
-    // the newest report with a line wins; an empty section displaces nothing
+    // the newest report with a line wins; a blank or `none.` section and a
+    // Sabbath displace nothing; the heading may trail spaces and CRLFs
     for (shift, numbers) in [
         ("s-20261005T1400Z", "tests 1→2"),
-        ("s-20261013T1400Z", "tests 2→3 | coverage 90→95 %"),
-        ("s-20261015T1400Z", ""),
+        ("s-20261013T1400Z", "tests 2→3"),
+        ("s-20261015T1400Z", "tests 3→4 | coverage 90→95 %"),
+        ("s-20261016T1400Z", "none."),
         ("s-20261017T1400Z", "tests 9→9"),
     ] {
         home.write(
             format!(".sandman/shifts/{shift}/report.md"),
-            &format!("# {shift}\n\n## Numbers\n\n{numbers}\n## Next\n\nmore\n"),
+            &format!("# {shift}\r\n\r\n## Numbers \r\n\r\n{numbers}\r\n## Next\r\n\r\nmore\r\n"),
         );
     }
     let alpha = r#""repo":"jgeschwendt/alpha""#;
@@ -265,7 +268,7 @@ fn score_writes_the_weeks_page_worst_three_first() {
         "{page}"
     );
     for row in [
-        "| jgeschwendt/alpha | 2 |\n| jgeschwendt/beta | 0 |\n| jgeschwendt/gamma | 0 |\n| covered | 1/3 |\n\n## Numbers\n\n| repo | shift | numbers |\n| --- | --- | --- |\n| jgeschwendt/alpha | s-20261013T1400Z | tests 2→3 \\| coverage 90→95 % |\n\n## Shifts",
+        "| jgeschwendt/alpha | 3 |\n| jgeschwendt/beta | 0 |\n| jgeschwendt/gamma | 0 |\n| covered | 1/3 |\n\n## Numbers\n\n| repo | shift | numbers |\n| --- | --- | --- |\n| jgeschwendt/alpha | s-20261015T1400Z | tests 3→4 \\| coverage 90→95 % |\n\n## Shifts",
         "| opened | handed off | abandoned | mean minutes | cost per shift |\n| --- | --- | --- | --- | --- |\n| 2 | 1 | 1 | 150 | 1.50 |",
         "| breath | 2 |\n| change | 3 |\n| correction | 2 |\n| decay | 0 |\n| decision | 0 |\n| guard | 1 |",
         "| 12 | 1 | 5.00 | 2 |",
@@ -298,8 +301,8 @@ fn score_json_prints_the_metrics_and_week_names_a_week() {
     for expected in [
         r#""context":{"fresh":3,"fresh_ratio":0.75,"slots":4}"#,
         r#""corrections":{"recurring":1,"total":2}"#,
-        r#""coverage":{"jgeschwendt/alpha":2,"jgeschwendt/beta":0,"jgeschwendt/gamma":0}"#,
-        r#""numbers":{"jgeschwendt/alpha":{"line":"tests 2→3 | coverage 90→95 %","shift":"s-20261013T1400Z"}}"#,
+        r#""coverage":{"jgeschwendt/alpha":3,"jgeschwendt/beta":0,"jgeschwendt/gamma":0}"#,
+        r#""numbers":{"jgeschwendt/alpha":{"line":"tests 3→4 | coverage 90→95 %","shift":"s-20261015T1400Z"}}"#,
         r#""routines":{"breathe-skim":{"failed":0,"ticks":1},"shift":{"failed":1,"ticks":3}}"#,
         r#""shifts":{"abandoned":1,"cost_per_shift":1.5,"handed_off":1,"mean_minutes":150,"opened":2}"#,
         r#""threads":{"by_kind":{"decision":1,"problem":1},"from_shifts":1}"#,
