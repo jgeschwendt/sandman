@@ -92,7 +92,18 @@ fn confines(home: &Path) {
         "-c",
         "echo mine; rm w.log; ln -s ok w.log",
     ]);
-    let astray = run(&[wrapper, "--log", "/etc/t.log", "true"]);
+    // A session's $TMPDIR (/tmp/claude-501/…) is neither root: the refusal names both.
+    let astray = Command::new(wrapper)
+        .args(["--log", "/tmp/t.log", "true"])
+        .current_dir(&probe)
+        .env("TMPDIR", "/tmp")
+        .output()
+        .expect("shift-test");
+    let tmp = Command::new("getconf")
+        .arg("DARWIN_USER_TEMP_DIR")
+        .output()
+        .expect("getconf");
+    let tmp = fs::canonicalize(String::from_utf8_lossy(&tmp.stdout).trim()).expect("temp root");
     let bare = run(&[wrapper, "--log", "t.log"]);
     let nested = run(&[
         "/usr/bin/sandbox-exec",
@@ -118,7 +129,13 @@ fn confines(home: &Path) {
     assert!(String::from_utf8_lossy(&linked.stderr).contains("is a symlink"));
     assert_eq!(String::from_utf8_lossy(&swapped.stdout), "mine\n");
     assert_eq!(astray.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&astray.stderr).contains("is not under"));
+    assert_eq!(
+        String::from_utf8_lossy(&astray.stderr),
+        format!(
+            "shift-test: --log /tmp/t.log is not under {there} or {}\n",
+            tmp.display()
+        )
+    );
     assert_eq!(bare.status.code(), Some(2));
     assert_eq!(nested.status.code(), Some(71));
     assert!(String::from_utf8_lossy(&nested.stderr).contains("make it the whole Bash call"));
