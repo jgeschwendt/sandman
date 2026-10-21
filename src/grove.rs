@@ -328,8 +328,9 @@ pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>, shift: Option<&
 
 #[cfg(test)]
 mod tests {
-    use super::{Roots, checkouts, manifest_repos, manifest_trunks};
+    use super::{Roots, checkouts, git, manifest_repos, manifest_trunks, repos_with_hits};
     use crate::testutil::TempDir;
+    use std::collections::BTreeSet;
     use std::fs;
 
     #[test]
@@ -354,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn checkouts_are_branch_directories_carrying_git() {
+    fn checkouts_are_branch_directories_carrying_git_and_a_repo_git_refuses_is_skipped() {
         let temp = TempDir::new("grove-checkouts");
         let code = temp.path().join("code");
         for dir in [
@@ -366,7 +367,13 @@ mod tests {
             fs::create_dir_all(code.join(dir)).expect("dir");
         }
         let extra = temp.path().join("home");
-        fs::create_dir_all(extra.join(".git")).expect("extra");
+        git(temp.path(), &["init", "-q", "home"]).expect("extra");
+        // A ref to an object that is not there: `rev-parse` passes, `log` fails.
+        fs::write(
+            extra.join(".git/refs/heads/broken"),
+            format!("{}\n", "1".repeat(40)),
+        )
+        .expect("broken ref");
         let roots = Roots {
             extras: vec![extra.clone(), temp.path().join("missing")],
             grove_code: code.clone(),
@@ -386,5 +393,7 @@ mod tests {
                 ("~/home".to_owned(), extra),
             ]
         );
+        // The fake checkouts are no repositories; the extra's log is refused.
+        assert!(repos_with_hits(&roots, &BTreeSet::new(), None).is_empty());
     }
 }

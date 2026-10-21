@@ -109,16 +109,11 @@ impl Bank {
                 .file_type()
                 .map_err(|source| Error::io(entry.path(), source))?
                 .is_file();
-            if !is_file {
-                continue;
+            // A name that is not UTF-8 reads as empty, which is no memory.
+            let name = entry.file_name().into_string().unwrap_or_default();
+            if is_file && name != INDEX_FILE_NAME && is_memory_filename(&name) {
+                names.push(name);
             }
-            let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
-                continue;
-            };
-            if name == INDEX_FILE_NAME || !is_memory_filename(&name) {
-                continue;
-            }
-            names.push(name);
         }
         names.sort();
         Ok(names)
@@ -250,18 +245,21 @@ mod tests {
     }
 
     #[test]
-    fn a_memory_without_a_description_is_a_typed_error() {
+    fn a_memory_without_a_name_or_a_description_is_a_typed_error() {
         let temp = TempDir::new("index-missing");
         let bank = Bank::at(temp.path().join("bank"));
         fs::create_dir_all(bank.dir()).expect("bank dir");
-        fs::write(
-            bank.dir().join("user_bare.md"),
-            "---\nname: bare\ntype: user\n---\n\nbody\n",
-        )
-        .expect("seed");
-        match bank.render_index() {
-            Err(Error::MissingField { key, .. }) => assert_eq!(key, "description"),
-            other => panic!("expected MissingField, got {other:?}"),
+        for (field, missing) in [("name: bare", "description"), ("description: d", "name")] {
+            fs::write(
+                bank.dir().join("user_bare.md"),
+                format!("---\n{field}\ntype: user\n---\n\nbody\n"),
+            )
+            .expect("seed");
+            let got = bank.render_index();
+            assert!(
+                matches!(got, Err(Error::MissingField { key, .. }) if key == missing),
+                "{got:?}"
+            );
         }
     }
 

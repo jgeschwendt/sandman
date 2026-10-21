@@ -1425,13 +1425,9 @@ fn reflect_is_the_backstop_for_a_ledger_no_ending_came_to_drain() {
 }
 
 #[test]
-fn remember_stamps_the_session_from_the_environment() {
+fn remember_takes_the_session_and_the_cwd_from_the_environment() {
     let machine = Machine::new("remember-session");
-    let output = machine.run_with(
-        &["remember", "a body", "--cwd", "/Users/you/code"],
-        "",
-        &[("CLAUDE_SESSION_ID", SID)],
-    );
+    let output = machine.run_with(&["remember", "a body"], "", &[("CLAUDE_SESSION_ID", SID)]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let text = fs::read_to_string(stdout(&output).trim()).expect("read the memory");
     assert!(text.contains(&format!(" · {SID}\n")), "{text}");
@@ -1631,10 +1627,14 @@ fn a_full_queue_under_a_held_dream_lock_spawns_nothing() {
 }
 
 #[test]
-fn a_root_that_is_a_file_fails_both_reflects() {
+fn a_root_that_is_a_file_fails_both_reflects_and_the_score() {
     let machine = Machine::new("root-file");
     let root = machine.write("root", "");
-    for args in [&["reflect"][..], &["reflect", "--day", "2026-08-31"]] {
+    for args in [
+        &["reflect"][..],
+        &["reflect", "--day", "2026-08-31"],
+        &["score"],
+    ] {
         let output = feed(machine.sandman(args).env("SANDMAN_ROOT", &root), "");
         assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
     }

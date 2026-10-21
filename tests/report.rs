@@ -526,6 +526,8 @@ fn serve_keeps_off_a_repo_whose_trunk_is_missing() {
 fn plist_renders_the_launchd_agent_under_this_home() {
     let home = Machine::new("report-plist");
     let plist = home.out(&["plist"], "", 0);
+    let homeless = feed(home.command(&["report", "plist"]).env_remove("HOME"), "");
+    assert_eq!(common::code(&homeless), 1, "{}", stderr(&homeless));
     let night = stdout(&feed(
         home.command(&["report", "plist"])
             .env("SANDMAN_SHIFT_NIGHT", "07-06"),

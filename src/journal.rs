@@ -139,17 +139,12 @@ mod tests {
         assert_eq!(names.len(), 2, "{names:?}");
         let text = fs::read_to_string(paths::trace_dir(&root).join(&names[1])).expect("take log");
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines.len(), 3, "{text}");
-        assert!(lines[0].ends_with("hook session=one"), "{}", lines[0]);
         assert!(
-            lines[1].ends_with("took session=one queue=1"),
-            "{}",
-            lines[1]
-        );
-        assert!(
-            lines[2].ends_with(r#"payload={   "a": 1 }"#),
-            "{}",
-            lines[2]
+            lines.len() == 3
+                && lines[0].ends_with("hook session=one")
+                && lines[1].ends_with("took session=one queue=1")
+                && lines[2].ends_with(r#"payload={   "a": 1 }"#),
+            "{text}"
         );
     }
 
@@ -161,7 +156,10 @@ mod tests {
         let blocked = temp.path().join("blocked");
         fs::write(&blocked, "not a directory").expect("the blocker");
         note(&blocked, "take", "declined pipeline");
-        assert!(blocked.is_file(), "the blocker is untouched");
+        assert!(
+            blocked.is_file() && logs(&blocked).is_empty(),
+            "the blocker is untouched"
+        );
 
         // And a root nobody can create under at all.
         note(

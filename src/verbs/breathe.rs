@@ -1335,8 +1335,8 @@ pub fn pass(
             ),
             ("started".to_owned(), Value::string(ctx.now.iso8601())),
         ],
-    )?;
-    Ok(Composed {
+    )
+    .map(|()| Composed {
         id,
         sources: names,
         text,
