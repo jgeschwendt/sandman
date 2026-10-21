@@ -3,8 +3,9 @@
 # Claude Code's, which the session profile excludes this wrapper from
 # (docs/bank-format.html#shifts-sandbox). The proxy and agent variables go: the
 # profile has no network, and nothing should go looking for one. The home comes from the
-# user database, never $HOME, which a caller could point anywhere. `--log <path>` (under
-# the working tree or $TMPDIR) gets a copy of stdout and stderr, so the call needs no
+# user database, never $HOME, which a caller could point anywhere — and the log's temp root
+# from getconf, never $TMPDIR, for the same reason. `--log <path>` (under the working tree
+# or that root) gets a copy of stdout and stderr, so the call needs no
 # pipe or redirect — either keeps it inside Claude Code's sandbox, where Seatbelt cannot nest;
 # `-C <dir>` runs it from <dir>, so the call needs no `cd` either and works from any cwd.
 # Install: install -m755 profiles/shift-test ~/.local/bin/ &&
@@ -30,8 +31,8 @@ run() {
 }
 [ -n "$log" ] || { run "$@"; exit; }
 dir=$(cd "$(dirname "$log")" 2>/dev/null && pwd -P)
-tmp=$(cd "${TMPDIR:-/tmp}" && pwd -P)
-case "$dir/" in "$cwd/"* | "$tmp/"*) ;; *) echo "shift-test: --log $log is not under $cwd or \$TMPDIR" >&2; exit 2 ;; esac
+tmp=$(cd "$(getconf DARWIN_USER_TEMP_DIR)" && pwd -P)
+case "$dir/" in "$cwd/"* | "$tmp/"*) ;; *) echo "shift-test: --log $log is not under $cwd or $tmp" >&2; exit 2 ;; esac
 log="$dir/$(basename "$log")"
 # This sh opens the log outside both sandboxes: a link there would write wherever it points,
 # so a symlink or special file is refused, and the file is made afresh, never reopened —

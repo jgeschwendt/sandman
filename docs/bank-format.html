@@ -977,7 +977,7 @@ a call holding <code class="code">cd</code>, a pipe, a redirect, <code class="co
 <code class="code">shift-test: still inside the session sandbox — make it the whole Bash call: …</code>. So a
 shift names its worktree with <code class="code">-C &lt;dir&gt;</code> instead of a <code class="code">cd</code> (a spawned Agent's cwd resets
 each call) and captures output with <code class="code">shift-test -C &lt;dir&gt; --log &lt;file&gt; &lt;command…&gt;</code>, which
-writes stdout and stderr to <code class="code">&lt;file&gt;</code> — under the working tree or <code class="code">$TMPDIR</code>, else exit 2 —
+writes stdout and stderr to <code class="code">&lt;file&gt;</code> — under the working tree or <code class="code">getconf DARWIN_USER_TEMP_DIR</code> (never the caller's <code class="code">$TMPDIR</code>), else exit 2 naming both —
 then prints it and exits with the command's status (<code class="code">prompts/shift.md</code> rule 7).</li>
 <li><strong>Pushing is the runner's.</strong> <code class="code">git push</code> from a session fails at the sandbox proxy
 despite <code class="code">excludedCommands</code> — "This proxy requires authentication", exit 128 (observed
