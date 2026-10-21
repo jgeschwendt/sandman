@@ -17,6 +17,7 @@ use crate::lock::CommitLock;
 use crate::paths;
 use crate::time::{Timestamp, civil_from_days, days_from_civil};
 use crate::verbs::breathe;
+use crate::verbs::report;
 use crate::verbs::shift::{self, Local};
 use crate::verbs::trail;
 
@@ -363,14 +364,13 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
     Ok(score)
 }
 
-/// A report's `## Numbers` line: the section's first non-blank line.
-fn numbers(report: &str) -> Option<String> {
-    let (_, section) = report.split_once("\n## Numbers\n")?;
-    section
-        .lines()
+/// A report's `## Numbers` line: the section's first non-blank line, unless
+/// it is the empty section's `none.`.
+fn numbers(text: &str) -> Option<String> {
+    report::section(text, report::HEADINGS[4])
         .map(str::trim)
-        .take_while(|line| !line.starts_with("## "))
         .find(|line| !line.is_empty())
+        .filter(|line| *line != "none.")
         .map(ToOwned::to_owned)
 }
 

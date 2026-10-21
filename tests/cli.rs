@@ -1425,7 +1425,7 @@ fn reflect_is_the_backstop_for_a_ledger_no_ending_came_to_drain() {
 }
 
 #[test]
-fn remember_takes_the_session_and_the_cwd_from_the_environment() {
+fn remember_stamps_the_session_from_the_environment() {
     let machine = Machine::new("remember-session");
     let output = machine.run_with(&["remember", "a body"], "", &[("CLAUDE_SESSION_ID", SID)]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
