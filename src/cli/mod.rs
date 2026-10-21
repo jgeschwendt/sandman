@@ -232,11 +232,12 @@ usage: sandman <verb> [args]
       403. --requests answers N requests, then exits.
 
   score [--week yyyy-Www] [--json]
-      The week's numbers from the trail, shifts/*/meta.json, the breath
-      store, ~/.docket ($SANDMAN_DOCKET) and the shift and breathe-*
-      runs.jsonl under ~/.routines/.state ($SANDMAN_ROUTINES_STATE): repo
-      coverage, shift outcomes, events by kind/repo/model, cost, recurring
-      corrections, fresh context, breaths, open threads, routine ticks. The
+      The week's numbers from the trail, shifts/*/meta.json and report.md,
+      the breath store, ~/.docket ($SANDMAN_DOCKET) and the shift and
+      breathe-* runs.jsonl under ~/.routines/.state ($SANDMAN_ROUTINES_STATE):
+      repo coverage, each repo's newest report Numbers line, shift outcomes,
+      events by kind/repo/model, cost, recurring corrections, fresh context,
+      breaths, open threads, routine ticks. The
       week is ISO, its days New York's, the current one by default
       ($SANDMAN_NOW pins it). Rewrites <root>/score/<yyyy>-W<ww>.md —
       frontmatter, the worst three, a table per section — and prints its

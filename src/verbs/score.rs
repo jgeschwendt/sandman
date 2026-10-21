@@ -1,5 +1,5 @@
 //! `score` — the week's numbers, derived from what the machine already keeps:
-//! the trail, `shifts/*/meta.json`, the breath store, `~/.docket` and the
+//! the trail, `shifts/*/meta.json` and `report.md`, the breath store, `~/.docket` and the
 //! routines' `runs.jsonl`. No model, no network, no git.
 //!
 //! The page is `score/<yyyy>-W<ww>.md`, rewritten whole under `.commit.lock`
@@ -193,6 +193,8 @@ pub struct Score {
     pub kinds: Tally,
     /// Events by model.
     pub models: Tally,
+    /// Per repo, the newest weekday shift's report `## Numbers` line: shift, line.
+    pub numbers: BTreeMap<String, (String, String)>,
     /// Events by repo.
     pub repos: Tally,
     /// Per routine: ticks this week, non-zero exits.
@@ -316,6 +318,13 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
             && !ctx.night.sabbath(started)
         {
             tally(&mut shifted, repo);
+            // metas come oldest first, so the newest report with a line wins
+            let report = paths::shift_dir(&ctx.data_root, &meta.shift).join("report.md");
+            if let Some(line) = fs::read_to_string(report).ok().as_deref().and_then(numbers) {
+                score
+                    .numbers
+                    .insert(repo.clone(), (meta.shift.clone(), line));
+            }
         }
     }
     score.coverage = shift::trunks(ctx)
@@ -352,6 +361,17 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
     }
     score.routines = routine_runs(routines, week);
     Ok(score)
+}
+
+/// A report's `## Numbers` line: the section's first non-blank line.
+fn numbers(report: &str) -> Option<String> {
+    let (_, section) = report.split_once("\n## Numbers\n")?;
+    section
+        .lines()
+        .map(str::trim)
+        .take_while(|line| !line.starts_with("## "))
+        .find(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 /// The day before `ymd` — trail files are UTC days, the week New York's.
@@ -517,6 +537,18 @@ impl Score {
             ),
             ("from", Value::string(from)),
             (
+                "numbers",
+                Value::object(self.numbers.iter().map(|(repo, (shift, line))| {
+                    (
+                        repo.as_str(),
+                        Value::object([
+                            ("line", Value::string(line.clone())),
+                            ("shift", Value::string(shift.clone())),
+                        ]),
+                    )
+                })),
+            ),
+            (
                 "routines",
                 Value::object(self.routines.iter().map(|(name, ticks, failed)| {
                     (
@@ -619,6 +651,17 @@ impl Score {
             format!("{covered}/{}", self.coverage.len()),
         ]);
         table(&mut out, "Coverage", &["repo", "shifts"], coverage);
+        table(
+            &mut out,
+            "Numbers",
+            &["repo", "shift", "numbers"],
+            self.numbers
+                .iter()
+                .map(|(repo, (shift, line))| {
+                    vec![repo.clone(), shift.clone(), line.replace('|', "\\|")]
+                })
+                .collect(),
+        );
         let (opened, handed, abandoned, mean, cost) = self.shifts;
         table(
             &mut out,
