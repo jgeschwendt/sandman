@@ -59,7 +59,7 @@ pub fn remember(data_root: &Path, request: Remember) -> Result<CommitOutcome> {
             .unwrap_or_else(|| first_line(&body).to_owned()),
         kind: request.kind.unwrap_or(MemoryType::Feedback),
         name: request.name.unwrap_or_else(|| default_name(&body)),
-        replaces: None,
+        replaces: Vec::new(),
         source: source_line(now, request.session_id.as_deref()),
         body,
     };

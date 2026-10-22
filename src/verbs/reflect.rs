@@ -37,8 +37,8 @@
 //! A merge gets a second call of its own. The planning mind sees three lines
 //! of each body and is in no position to write the merged one; it proposes the
 //! grouping and the title, and a focused ask carrying the sources whole writes
-//! the body that is committed. The merged memory supersedes the member with
-//! the earliest `created:`, so a claim keeps the day it was first made.
+//! the body that is committed. The merged memory supersedes every member and
+//! takes the earliest `created:`, so a claim keeps the day it was first made.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet};
@@ -149,16 +149,19 @@ pub fn reflect(
     let day = log::day_ended(now);
     let (entry, entry_status) = entry_step(data_root, day, options)?;
     let swept = sweep(data_root, now)?;
-    let (banks, _applied, due) = upkeep_all(data_root, now, options)?;
+    let (banks, due, failed) = upkeep_all(data_root, now, options)?;
     let index = write_index(data_root, day)?;
-    Ok(Outcome {
-        banks,
-        due,
-        entry,
-        entry_status,
-        index,
-        swept,
-    })
+    failed.map_or(
+        Ok(Outcome {
+            banks,
+            due,
+            entry,
+            entry_status,
+            index,
+            swept,
+        }),
+        Err,
+    )
 }
 
 // ─── the voyage entry ─────────────────────────────────────────────────────
@@ -420,26 +423,29 @@ fn write_baseline(path: &Path, baseline: Baseline) -> Result<()> {
     atomic::write(path, &format!("{}\n", document.render()))
 }
 
-/// Run upkeep over every bank: one log line each, and how many operations
-/// were applied across all of them.
+/// Run upkeep over every bank: one log line each, how many were due, and the
+/// last failure. A failure is that bank's alone — its line says so and the
+/// banks after it still run — and the pass reports it once it has ended.
 fn upkeep_all(
     data_root: &Path,
     now: Timestamp,
     options: &Options,
-) -> Result<(Vec<String>, usize, usize)> {
+) -> Result<(Vec<String>, usize, Option<Error>)> {
     let log = paths::run_log(data_root, "reflect", now);
-    let mut lines = Vec::new();
-    let mut applied = 0;
-    let mut due = 0;
+    let (mut lines, mut due, mut failed) = (Vec::new(), 0, None);
     for (key, dir) in log::banks(data_root) {
-        let (note, ops, fired) = upkeep_bank(data_root, &key, &Bank::at(&dir), now, options)?;
-        applied += ops;
-        due += usize::from(fired);
+        let note = match upkeep_bank(data_root, &key, &Bank::at(&dir), now, options) {
+            Ok((note, fired)) => {
+                due += usize::from(fired);
+                note
+            }
+            Err(error) => format!("failed({})", failed.insert(error)),
+        };
         let line = format!("{} reflect bank={key} {note}", now.iso8601());
         atomic::append_line(&log, &line)?;
         lines.push(line);
     }
-    Ok((lines, applied, due))
+    Ok((lines, due, failed))
 }
 
 /// One bank: seed it, skip it, or rework it.
@@ -449,7 +455,7 @@ fn upkeep_bank(
     bank: &Bank,
     now: Timestamp,
     options: &Options,
-) -> Result<(String, usize, bool)> {
+) -> Result<(String, bool)> {
     let count = bank.memory_filenames().map(|names| names.len())?;
     let baseline_path = bank.dir().join(BASELINE_FILE_NAME);
     let Some(baseline) = read_baseline(&baseline_path) else {
@@ -463,7 +469,7 @@ fn upkeep_bank(
                 last_ops: 0,
             },
         )?;
-        return Ok((format!("count={count} seeded"), 0, false));
+        return Ok((format!("count={count} seeded"), false));
     };
     let grown = count >= baseline.count + UPKEEP_GROWTH;
     let settled = now.unix_seconds() - baseline.at.unix_seconds() >= UPKEEP_HOURS * 3600;
@@ -480,11 +486,10 @@ fn upkeep_bank(
                 "count={count} due=no grown={grown} settled={settled} backlog={backlog} last_ops={}",
                 baseline.last_ops
             ),
-            0,
             false,
         ));
     }
-    upkeep(data_root, key, bank, now, options, count).map(|(note, ops)| (note, ops, true))
+    upkeep(data_root, key, bank, now, options, count).map(|note| (note, true))
 }
 
 /// One upkeep call over one due bank, and its application.
@@ -495,7 +500,7 @@ fn upkeep(
     now: Timestamp,
     options: &Options,
     count: usize,
-) -> Result<(String, usize)> {
+) -> Result<String> {
     let (listing, fingerprints) = listing(bank)?;
     let request = Ask {
         binary: options.binary.clone(),
@@ -510,13 +515,11 @@ fn upkeep(
     // tomorrow rather than skipped for another five files.
     let reply = match mind::ask(&request) {
         Ok(reply) => reply,
-        Err(abstained) => {
-            return Ok((format!("count={count} due=yes abstain({abstained})"), 0));
-        }
+        Err(abstained) => return Ok(format!("count={count} due=yes abstain({abstained})")),
     };
     let ops = match read_ops(&reply, bank) {
         Ok(ops) => ops,
-        Err(why) => return Ok((format!("count={count} due=yes rejected({why})"), 0)),
+        Err(why) => return Ok(format!("count={count} due=yes rejected({why})")),
     };
 
     let proposed = ops.len();
@@ -530,41 +533,44 @@ fn upkeep(
     // be grepped for. Mirror them here so "what became of that memory?" is one
     // `rg` over `<root>/.trace`, the question the journal exists to answer.
     let mut merged: Vec<String> = Vec::new();
-    for op in &ops {
-        // Guarded on both sides of `resolved`: once so a merge whose files
-        // have already moved never costs a call, and again on the far side,
-        // because that call is itself minutes wide.
-        let mut changed = conflicts(bank, op, &fingerprints);
-        let ready = if changed.is_empty() {
-            let ready = resolved(bank, key, op, options)?;
-            changed = conflicts(bank, op, &fingerprints);
-            ready
-        } else {
-            None
-        };
-        if !changed.is_empty() {
-            skipped += 1;
-            moved.extend(changed);
-            continue;
+    // The call is spent whatever becomes of its plan, so the baseline records
+    // the pass even when applying it fails: a bank that refuses its plan or its
+    // index would otherwise cost a call every day until someone repairs it.
+    let applying = (|| {
+        for op in &ops {
+            // Guarded on both sides of `resolved`: once so a merge whose files
+            // have already moved never costs a call, and again on the far
+            // side, because that call is itself minutes wide.
+            let mut changed = conflicts(bank, op, &fingerprints);
+            let ready = if changed.is_empty() {
+                let ready = resolved(bank, key, op, options)?;
+                changed = conflicts(bank, op, &fingerprints);
+                ready
+            } else {
+                None
+            };
+            if !changed.is_empty() {
+                skipped += 1;
+                moved.extend(changed);
+                continue;
+            }
+            let Some(ready) = ready else {
+                abstained.extend(files_of(op));
+                continue;
+            };
+            // The resolved op, not the proposed one: what reaches disk is what
+            // the second call settled on, and that is what the line must name.
+            if let Op::Merge { files, .. } = &ready {
+                merged.push(files.join("+"));
+            }
+            apply(data_root, key, bank, now, &ready)?;
+            applied += 1;
         }
-        let Some(ready) = ready else {
-            abstained.extend(files_of(op));
-            continue;
-        };
-        // The resolved op, not the proposed one: what reaches disk is what the
-        // second call settled on, and that is what the line must name.
-        if let Op::Merge { files, .. } = &ready {
-            merged.push(files.join("+"));
-        }
-        apply(data_root, key, bank, now, &ready)?;
-        applied += 1;
-    }
-    // `commit_memory` regenerates the index, but a run of pure prunes never
-    // reaches it.
-    {
+        // `commit_memory` regenerates the index, but a run of pure prunes
+        // never reaches it.
         let _lock = crate::lock::CommitLock::acquire(data_root)?;
-        bank.write_index()?;
-    }
+        bank.write_index()
+    })();
     let after = bank.memory_filenames().map(|names| names.len())?;
     write_baseline(
         &bank.dir().join(BASELINE_FILE_NAME),
@@ -574,6 +580,7 @@ fn upkeep(
             last_ops: proposed,
         },
     )?;
+    applying?;
     let mut note = format!(
         "count={count} due=yes ops={proposed} applied={applied} conflicts={skipped} after={after}"
     );
@@ -586,7 +593,7 @@ fn upkeep(
     if !merged.is_empty() {
         let _ = write!(note, " merged({})", merged.join(", "));
     }
-    Ok((note, applied))
+    Ok(note)
 }
 
 /// What each listed file held when the mind read it, by filename.
@@ -605,20 +612,20 @@ fn fingerprint(text: &str) -> u64 {
 /// The bank as the upkeep mind sees it: every file, its name, description and
 /// the first lines of its body — and the fingerprint of each file as it was
 /// read, which is what the plan will be checked against before it is applied.
+///
+/// A file that will not read or parse fails the bank here, before the call: no
+/// plan could reach it, so the index it breaks would refuse the pass after a
+/// call spent for nothing.
 fn listing(bank: &Bank) -> Result<(String, Fingerprints)> {
     let mut out = String::new();
     let mut fingerprints = Fingerprints::new();
     for name in bank.memory_filenames()? {
+        let path = bank.dir().join(&name);
+        let raw = fs::read_to_string(&path).map_err(|source| Error::io(&path, source))?;
+        let memory = MemoryFile::parse(&raw).map_err(|source| Error::Parse { path, source })?;
         if name.starts_with('_') {
             continue;
         }
-        let path = bank.dir().join(&name);
-        let Ok(raw) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(memory) = MemoryFile::parse(&raw) else {
-            continue;
-        };
         fingerprints.insert(name.clone(), fingerprint(&raw));
         let _ = writeln!(
             out,
@@ -942,33 +949,13 @@ fn apply(data_root: &Path, key: &str, bank: &Bank, now: Timestamp, op: &Op) -> R
             name,
         } => {
             // The merged memory is the same claim its members were making, so
-            // it dates from the earliest of them rather than from today. That
-            // member is superseded rather than archived outright: `replaces`
-            // is the one path that carries `created:` forward, and it archives
-            // the file it replaces in the same step. The commit's index check
-            // runs first over the non-members, so a sibling it would refuse
-            // archives nothing, while a member it would refuse is the repair.
-            for file in bank
-                .memory_filenames()?
-                .into_iter()
-                .filter(|file| !files.contains(file))
-            {
-                let path = bank.dir().join(file);
-                let memory = MemoryFile::read(&path)?;
-                for (key, value) in [
-                    ("name", memory.name()),
-                    ("description", memory.description()),
-                ] {
-                    value.ok_or_else(|| Error::MissingField {
-                        key,
-                        path: path.clone(),
-                    })?;
-                }
-            }
-            let origin = origin(bank, files);
-            for file in files.iter().filter(|file| *file != &origin) {
-                archive_memory(data_root, key, file)?;
-            }
+            // it dates from the earliest of them rather than from today: that
+            // member leads `replaces`, whose first file hands its `created:`
+            // forward. Every member is archived by the commit itself, once its
+            // checks have passed — the index over the non-members, so a
+            // sibling it would refuse archives nothing while a member it would
+            // refuse is the repair, and the free name — so a refused merge
+            // leaves every member where it was.
             commit_memory(
                 data_root,
                 key,
@@ -977,7 +964,7 @@ fn apply(data_root: &Path, key: &str, bank: &Bank, now: Timestamp, op: &Op) -> R
                     description: description.clone(),
                     kind: *kind,
                     name: name.clone(),
-                    replaces: Some(origin),
+                    replaces: by_origin(bank, files),
                     source: format!("reflect {} · merge of {}", now.iso8601(), files.join(", ")),
                 },
             )?;
@@ -1006,7 +993,7 @@ fn apply(data_root: &Path, key: &str, bank: &Bank, now: Timestamp, op: &Op) -> R
                     description: description.clone(),
                     kind,
                     name: name.clone(),
-                    replaces: Some(file.clone()),
+                    replaces: vec![file.clone()],
                     source: format!("reflect {} · retitle of {file}", now.iso8601()),
                 },
             )?;
@@ -1015,20 +1002,18 @@ fn apply(data_root: &Path, key: &str, bank: &Bank, now: Timestamp, op: &Op) -> R
     }
 }
 
-/// Which member a merge inherits its `created:` from: the earliest one
-/// carrying a stamp anyone can read, and the first the operation named when
-/// none of them do or two of them tie.
-fn origin(bank: &Bank, files: &[String]) -> String {
-    let first = || files.first().cloned().unwrap_or_default();
+/// A merge's members, the one it inherits its `created:` from first: the
+/// earliest carrying a stamp anyone can read, and the first the operation
+/// named when none of them do or two of them tie — the sort is stable.
+fn by_origin(bank: &Bank, files: &[String]) -> Vec<String> {
+    let mut files = files.to_vec();
+    files.sort_by_cached_key(|file| {
+        let memory = MemoryFile::read(&bank.dir().join(file)).ok();
+        let created =
+            memory.and_then(|memory| Timestamp::parse_iso8601(memory.frontmatter.get("created")?));
+        (created.is_none(), created)
+    });
     files
-        .iter()
-        .filter_map(|file| {
-            let memory = MemoryFile::read(&bank.dir().join(file)).ok()?;
-            let created = Timestamp::parse_iso8601(memory.frontmatter.get("created")?)?;
-            Some((created, file.clone()))
-        })
-        .min_by_key(|(created, _)| *created)
-        .map_or_else(first, |(_, file)| file)
 }
 
 #[cfg(test)]
@@ -1191,7 +1176,7 @@ mod tests {
                     description: description.to_owned(),
                     kind: MemoryType::Project,
                     name: name.to_owned(),
-                    replaces: None,
+                    replaces: Vec::new(),
                     source: "test".to_owned(),
                 },
             )
@@ -1887,7 +1872,7 @@ is wrong on sight — retitle it."
         );
         // Members with no stamp to read date from the first one named.
         let unstamped = ["project_a.md".to_owned(), "project_b.md".to_owned()];
-        assert_eq!(super::origin(&bank, &unstamped), unstamped[0]);
+        assert_eq!(super::by_origin(&bank, &unstamped), unstamped);
 
         // Every member ended in `_archive/` — the superseded one included.
         let archived: Vec<String> = fs::read_dir(bank.archive_dir())
@@ -1946,6 +1931,9 @@ is wrong on sight — retitle it."
                 !member,
                 "{names:?}"
             );
+            // The call was spent either way, and the baseline says so.
+            let baseline = read_baseline(&scratch.baseline_path()).expect("baseline");
+            assert_eq!(baseline.at, Scratch::now());
         }
     }
 
@@ -1992,21 +1980,59 @@ is wrong on sight — retitle it."
 
     #[cfg(unix)]
     #[test]
-    fn a_file_upkeep_cannot_read_is_left_out_of_the_listing() {
-        let scratch = Scratch::new("reflect-listing-unreadable");
-        let files = make_due(&scratch);
-        let dir = scratch.bank().dir().to_path_buf();
-        fs::write(dir.join("project_bytes.md"), b"\xff\xfe").expect("not utf-8");
-        fs::write(dir.join("project_junk.md"), "no frontmatter\n").expect("junk");
+    fn a_bank_upkeep_cannot_index_fails_alone_and_before_its_call() {
+        let scratch = Scratch::new("reflect-bank-fails");
+        make_due(&scratch);
+        fs::write(scratch.bank().dir().join("project_junk.md"), "junk\n").expect("junk");
+        fs::create_dir_all(Bank::in_data_root(&scratch.root, "-Users-you-code-z").dir())
+            .expect("a later bank");
         let (options, asked) = scratch.replies(&[r#"{"ops":[]}"#], "");
 
-        // The pass itself fails on the bank's index; the listing it asked
-        // from had already passed both files over.
-        let _ = reflect(&scratch.root, &scratch.claude, Scratch::now(), &options);
-        let planning = read(&asked.join("asked-1"));
-        assert!(planning.contains(&files[0]), "{planning}");
-        assert!(!planning.contains("project_bytes.md"), "{planning}");
-        assert!(!planning.contains("project_junk.md"), "{planning}");
+        // The pass fails, but only once every bank and the log index have run.
+        assert!(reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).is_err());
+        assert!(!asked.join("asked-1").exists(), "a call spent on it");
+        let log = scratch.log();
+        assert!(log.contains(&format!("bank={BANK} failed(")), "{log}");
+        assert!(
+            log.contains("bank=-Users-you-code-z count=0 seeded"),
+            "{log}"
+        );
+        assert!(
+            crate::paths::log_dir(&scratch.root)
+                .join("INDEX.md")
+                .is_file()
+        );
+        // Its baseline stays put: still due, and reworked the day it is repaired.
+        assert_eq!(
+            read_baseline(&scratch.baseline_path())
+                .expect("baseline")
+                .count,
+            0
+        );
+    }
+
+    #[test]
+    fn a_merge_the_commit_refuses_leaves_every_member_in_place() {
+        let scratch = Scratch::new("reflect-merge-refused");
+        let files = [scratch.seed("one", "d", "b"), scratch.seed("two", "d", "b")];
+        let dir = scratch.bank().dir().to_path_buf();
+        for nth in 1..=1_000 {
+            let taken = crate::slug::filename_nth("project", "taken", nth);
+            fs::copy(dir.join(&files[0]), dir.join(taken)).expect("taken");
+        }
+        let merge = Op::Merge {
+            body: "b".to_owned(),
+            description: "d".to_owned(),
+            files: files.to_vec(),
+            kind: MemoryType::Project,
+            name: "taken".to_owned(),
+        };
+        let bank = scratch.bank();
+        assert!(super::apply(&scratch.root, BANK, &bank, Scratch::now(), &merge).is_err());
+        assert!(
+            files.iter().all(|file| dir.join(file).is_file()),
+            "{files:?}"
+        );
     }
 
     #[cfg(unix)]

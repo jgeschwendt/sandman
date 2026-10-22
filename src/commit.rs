@@ -30,8 +30,9 @@ pub struct CommitRequest {
     pub kind: MemoryType,
     /// The memory's name; the slug is derived from it.
     pub name: String,
-    /// The filename of a memory in this bank that this one supersedes.
-    pub replaces: Option<String>,
+    /// The filenames of memories in this bank that this one supersedes; the
+    /// first hands its `created:` forward.
+    pub replaces: Vec<String>,
     /// Where the memory came from — session, pass, or operator.
     pub source: String,
 }
@@ -39,8 +40,8 @@ pub struct CommitRequest {
 /// What a commit did.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitOutcome {
-    /// Where the superseded file was moved, when `replaces` was set.
-    pub archived: Option<PathBuf>,
+    /// Where each superseded file was moved, in `replaces` order.
+    pub archived: Vec<PathBuf>,
     /// Whether the filename took a collision suffix because the slug's own
     /// name was already taken in the bank.
     pub collided: bool,
@@ -54,9 +55,10 @@ pub struct CommitOutcome {
 
 /// Commit one memory into `bank_key` under `data_root`.
 ///
-/// Holds `.commit.lock` at the data root for the whole write: archive the
-/// replaced file, place the new one under a free name, then regenerate the
-/// index. Both file writes are atomic.
+/// Holds `.commit.lock` at the data root for the whole write: check
+/// everything that can refuse the commit, then archive the replaced files,
+/// place the new one under a free name and regenerate the index. Both file
+/// writes are atomic.
 pub fn commit_memory(
     data_root: &Path,
     bank_key: &str,
@@ -69,7 +71,7 @@ pub fn commit_memory(
     if request.name.trim().is_empty() {
         return Err(Error::invalid("name", &request.name));
     }
-    if let Some(replaces) = &request.replaces {
+    for replaces in &request.replaces {
         check_filename("replaces", replaces)?;
     }
 
@@ -78,26 +80,33 @@ pub fn commit_memory(
     fs::create_dir_all(bank.dir()).map_err(|source| Error::io(bank.dir(), source))?;
     // A sibling the index cannot read fails the commit before anything lands,
     // not after: a write that then reports failure invites a duplicating retry.
-    bank.render_index_without(request.replaces.as_deref())?;
+    // Every other refusal — a replaced file missing or unparseable, a name with
+    // no free suffix — runs before anything moves too, so a refused commit
+    // leaves the bank as it stood.
+    bank.render_index_without(&request.replaces)?;
+    let created = request
+        .replaces
+        .iter()
+        .map(|file| created_of(&bank, file))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .next()
+        .flatten();
+    let (filename, path, collided) =
+        free_filename(&bank, request.kind, &request.name, &request.replaces)?;
 
     let now = Timestamp::now()?;
-    let mut created = now.iso8601();
-    let mut archived = None;
-    if let Some(replaces) = &request.replaces {
-        let superseded = supersede(&bank, replaces, now)?;
-        if let Some(inherited) = superseded.created {
-            created = inherited;
-        }
-        archived = Some(superseded.archived);
-    }
-
-    let (filename, path, collided) = free_filename(&bank, request.kind, &request.name)?;
+    let archived = request
+        .replaces
+        .iter()
+        .map(|file| stow(&bank, file, now))
+        .collect::<Result<_>>()?;
 
     let mut frontmatter = Frontmatter::new();
     frontmatter.set("name", &request.name);
     frontmatter.set("description", &request.description);
     frontmatter.set("type", request.kind.as_str());
-    frontmatter.set("created", &created);
+    frontmatter.set("created", created.unwrap_or_else(|| now.iso8601()));
     frontmatter.set("source", &request.source);
     frontmatter.set("updated", now.iso8601());
 
@@ -132,17 +141,8 @@ pub fn archive_memory(data_root: &Path, bank_key: &str, filename: &str) -> Resul
     stow(&bank, filename, Timestamp::now()?)
 }
 
-/// What the superseded file handed forward.
-struct Superseded {
-    /// Where it now lives.
-    archived: PathBuf,
-    /// Its `created:`, carried into the replacement.
-    created: Option<String>,
-}
-
-/// Move `filename` out of the bank into `_archive/<stamp>_<filename>`,
-/// verbatim, and read the `created:` it hands forward.
-fn supersede(bank: &Bank, filename: &str, now: Timestamp) -> Result<Superseded> {
+/// The `created:` a replaced file hands forward, read before anything moves.
+fn created_of(bank: &Bank, filename: &str) -> Result<Option<String>> {
     let path = bank.dir().join(filename);
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
@@ -155,9 +155,7 @@ fn supersede(bank: &Bank, filename: &str, now: Timestamp) -> Result<Superseded> 
         path: path.clone(),
         source,
     })?;
-    let created = old.frontmatter.get("created").map(ToOwned::to_owned);
-    let archived = stow(bank, filename, now)?;
-    Ok(Superseded { archived, created })
+    Ok(old.frontmatter.get("created").map(ToOwned::to_owned))
 }
 
 /// The move itself: `<bank>/<filename>` → `<bank>/_archive/<stamp>_<filename>`.
@@ -173,13 +171,18 @@ fn stow(bank: &Bank, filename: &str, now: Timestamp) -> Result<PathBuf> {
 /// The first filename in the bank that is not taken, `_2`, `_3`, … suffixed,
 /// and whether it needed a suffix at all.
 ///
-/// A replaced file has already moved to `_archive/`, so it never counts as a
+/// A replaced file is about to move to `_archive/`, so it never counts as a
 /// collision with its own replacement.
-fn free_filename(bank: &Bank, kind: MemoryType, name: &str) -> Result<(String, PathBuf, bool)> {
+fn free_filename(
+    bank: &Bank,
+    kind: MemoryType,
+    name: &str,
+    replaced: &[String],
+) -> Result<(String, PathBuf, bool)> {
     for nth in 1..=MAX_COLLISIONS {
         let filename = slug::filename_nth(kind.as_str(), name, nth);
         let path = bank.dir().join(&filename);
-        if !path.exists() {
+        if !path.exists() || replaced.contains(&filename) {
             return Ok((filename, path, nth > 1));
         }
     }
@@ -249,7 +252,7 @@ mod tests {
             description: format!("description of {name}"),
             kind: MemoryType::Project,
             name: name.to_owned(),
-            replaces: None,
+            replaces: Vec::new(),
             source: "unit test".to_owned(),
         }
     }
@@ -264,7 +267,7 @@ mod tests {
         let outcome =
             commit_memory(temp.path(), BANK, request("orrery extraction")).expect("commit");
         assert_eq!(outcome.filename, "project_orrery_extraction.md");
-        assert_eq!(outcome.archived, None);
+        assert!(outcome.archived.is_empty());
 
         let text = read(&outcome.path);
         let parsed = MemoryFile::parse(&text).expect("well-formed");
@@ -333,7 +336,7 @@ mod tests {
         )
         .expect("readme");
         let mut repair = request("kept");
-        repair.replaces = Some("README.md".to_owned());
+        repair.replaces = vec!["README.md".to_owned()];
         commit_memory(temp.path(), BANK, repair).expect("repair");
         assert!(bank.index_path().is_file());
         // A bank that is a file cannot be committed into.
@@ -360,12 +363,13 @@ mod tests {
 
         let mut second = request("stele v1");
         second.body = "Superseding body.\n".to_owned();
-        second.replaces = Some(first.filename.clone());
+        second.replaces = vec![first.filename.clone()];
         let outcome = commit_memory(temp.path(), BANK, second).expect("second commit");
 
         // Same name → same filename; the archive freed it.
         assert_eq!(outcome.filename, first.filename);
-        let archived = outcome.archived.expect("archived path");
+        assert_eq!(outcome.archived.len(), 1);
+        let archived = &outcome.archived[0];
         assert_eq!(archived.parent(), Some(bank.archive_dir().as_path()));
         let archived_name = archived
             .file_name()
@@ -377,7 +381,7 @@ mod tests {
         );
         assert_eq!(archived_name.len(), 15 + 1 + first.filename.len());
         // Archived verbatim — byte for byte as it stood.
-        assert_eq!(read(&archived), original);
+        assert_eq!(read(archived), original);
 
         let replacement = MemoryFile::parse(&read(&outcome.path)).expect("well-formed");
         assert_eq!(
@@ -402,7 +406,7 @@ mod tests {
         let bank = Bank::in_data_root(temp.path(), BANK);
         let first = commit_memory(temp.path(), BANK, request("old name")).expect("first");
         let mut second = request("new name");
-        second.replaces = Some(first.filename.clone());
+        second.replaces = vec![first.filename.clone()];
         let outcome = commit_memory(temp.path(), BANK, second).expect("second");
 
         assert_eq!(outcome.filename, "project_new_name.md");
@@ -417,7 +421,7 @@ mod tests {
         fs::create_dir_all(bank.dir().join("project_a_dir.md")).expect("a directory");
         let replacing = |filename: &str| {
             let mut req = request("ghost");
-            req.replaces = Some(filename.to_owned());
+            req.replaces = vec![filename.to_owned()];
             commit_memory(temp.path(), BANK, req)
         };
         assert!(matches!(
@@ -461,7 +465,7 @@ mod tests {
             index.lines().filter(|line| line.starts_with("- [")).count(),
             3
         );
-        // Every suffix taken: the commit refuses rather than counting on.
+        // Every suffix taken: the commit refuses rather than counting on…
         for nth in 4..=super::MAX_COLLISIONS {
             let taken = bank.dir().join(format!("project_same_name_{nth}.md"));
             fs::copy(&first.path, taken).expect("taken");
@@ -470,6 +474,12 @@ mod tests {
             commit_memory(temp.path(), BANK, request("same name")),
             Err(Error::TooManyCollisions { .. })
         ));
+        // …and before the file it would replace has moved.
+        let other = commit_memory(temp.path(), BANK, request("other")).expect("other");
+        let mut retitle = request("same name");
+        retitle.replaces = vec![other.filename];
+        assert!(commit_memory(temp.path(), BANK, retitle).is_err());
+        assert!(other.path.is_file() && !bank.archive_dir().exists());
     }
 
     #[test]
@@ -499,7 +509,7 @@ mod tests {
             }),
             ("replaces", {
                 let mut req = request("escape");
-                req.replaces = Some("../../etc/passwd".to_owned());
+                req.replaces = vec!["../../etc/passwd".to_owned()];
                 req
             }),
         ];

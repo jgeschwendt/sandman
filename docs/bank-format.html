@@ -143,7 +143,9 @@ Descriptions are raw text end to end — no quoting layer ever interprets them.<
 <div class="stack">
 <p class="docs-note">A replaced file moves (never copies) to <code class="code">_archive/&lt;YYYYMMDDTHHMMSS&gt;_&lt;filename&gt;</code> —
 UTC timestamp prefix, archived content verbatim as it stood. Nothing in <code class="code">_archive/</code>
-is ever deleted.</p>
+is ever deleted. A commit moves the files it replaces only once everything that can refuse it
+has passed — the index over the rest of the bank, each replaced file read, a free filename found —
+so a refused commit leaves the bank as it stood.</p>
 </div>
 </section>
 

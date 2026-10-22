@@ -165,8 +165,10 @@ usage: sandman <verb> [args]
       The 24 h pass: the voyage entry for the day that ended (one
       $SANDMAN_MIND_LOG call, skipped when the day's sources are unchanged),
       the log index, the pointer sweep (dreamt and older than 72 h), and one
-      gated opus upkeep call per grown bank ($SANDMAN_MIND_UPKEEP). --day
-      renders that day's entry only — no drain, no sweep, no upkeep.
+      gated opus upkeep call per grown bank ($SANDMAN_MIND_UPKEEP). A bank
+      that fails is logged and passed; the pass exits 1 once the rest has
+      run. --day renders that day's entry only — no drain, no sweep, no
+      upkeep.
 
   mcp
       Serve the banks over MCP on stdio: JSON-RPC 2.0, one message per line,
