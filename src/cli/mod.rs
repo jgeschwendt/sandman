@@ -166,8 +166,9 @@ usage: sandman <verb> [args]
       $SANDMAN_MIND_LOG call, skipped when the day's sources are unchanged),
       the log index, the pointer sweep (dreamt and older than 72 h), and one
       gated opus upkeep call per grown bank ($SANDMAN_MIND_UPKEEP). A bank
-      that fails is logged and passed; the pass exits 1 once the rest has
-      run. --day renders that day's entry only — no drain, no sweep, no
+      that fails is logged and passed; the pass still prints its entry and
+      index and journals its run line (failed=N), then exits 1 naming the
+      count. --day renders that day's entry only — no drain, no sweep, no
       upkeep.
 
   mcp

@@ -239,6 +239,34 @@ fn dream_and_reflect_run_on_an_empty_root() {
     assert!(stderr(&output).contains("swept 0 pointer(s)"));
     let journal = machine.journal("reflect");
     assert!(journal.contains("entry=quiet"), "{journal}");
+
+    // A bank that fails still lets the pass report itself — its stdout and
+    // its run line — before the exit says so.
+    let bank = machine.root().join("memories").join(PROJECT);
+    fs::create_dir_all(&bank).expect("bank dir");
+    fs::write(bank.join("project_junk.md"), "junk\n").expect("junk");
+    fs::write(
+        bank.join("_reflect.json"),
+        r#"{"at":"2026-08-11T08:00:00Z","count":0,"last_ops":6}"#,
+    )
+    .expect("a backlog");
+    let failed = machine.run_with(
+        &["reflect"],
+        "",
+        &[("SANDMAN_CLAUDE_BIN", "/nonexistent/claude")],
+    );
+    assert_eq!(code(&failed), 1, "{}", stderr(&failed));
+    assert_eq!(stdout(&failed), printed);
+    assert!(
+        stderr(&failed).contains("1 bank(s) failed"),
+        "{}",
+        stderr(&failed)
+    );
+    let journal = machine.journal("reflect");
+    assert!(
+        journal.contains(" failed=1 swept=0 entry=quiet ms="),
+        "{journal}"
+    );
 }
 
 // ─── the voyage log ───────────────────────────────────────────────────────

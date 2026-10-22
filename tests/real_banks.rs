@@ -110,8 +110,8 @@ fn every_live_memory_file_round_trips() {
         }
     }
 
-    // MEMORY.md differences are reported, never fatal: the on-disk indexes were
-    // may predate the current truncation rule.
+    // MEMORY.md differences are reported, never fatal: the on-disk indexes may
+    // predate the current truncation rule.
     println!(
         "round-tripped {files} memory files across {} banks",
         banks.len()
