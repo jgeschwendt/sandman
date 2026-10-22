@@ -259,7 +259,7 @@ pub fn dream(data_root: &Path, home: &Path, options: &Options) -> Result<Outcome
                 description: group.draft.description.clone(),
                 kind: group.draft.kind,
                 name: group.draft.name.clone(),
-                replaces: None,
+                replaces: Vec::new(),
                 source: format!(
                     "dream {} · {} · minds={}",
                     now.iso8601(),
@@ -1071,7 +1071,7 @@ mod tests {
                 description: description.to_owned(),
                 kind: MemoryType::Project,
                 name: name.to_owned(),
-                replaces: None,
+                replaces: Vec::new(),
                 source: "remember · earlier".to_owned(),
             },
         )

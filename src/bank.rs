@@ -121,15 +121,15 @@ impl Bank {
 
     /// The index as it should be on disk.
     pub fn render_index(&self) -> Result<String> {
-        self.render_index_without(None)
+        self.render_index_without(&[])
     }
 
     /// The index as it would be without `except` — a file about to be
     /// superseded need not be readable to be replaced.
-    pub fn render_index_without(&self, except: Option<&str>) -> Result<String> {
+    pub fn render_index_without(&self, except: &[String]) -> Result<String> {
         let mut out = String::from(INDEX_HEADER);
         for name in self.memory_filenames()? {
-            if except == Some(name.as_str()) {
+            if except.contains(&name) {
                 continue;
             }
             let path = self.dir.join(&name);
