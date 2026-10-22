@@ -158,12 +158,12 @@ fn created_of(bank: &Bank, filename: &str) -> Result<Option<String>> {
     Ok(old.frontmatter.get("created").map(ToOwned::to_owned))
 }
 
-/// The move itself: `<bank>/<filename>` → `<bank>/_archive/<stamp>_<filename>`.
+/// The move itself: `<bank>/<filename>` → `<bank>/_archive/<stamp>_<filename>`,
+/// or `<stamp>-<n>_<filename>` (n from 2) when that name is taken.
 fn stow(bank: &Bank, filename: &str, now: Timestamp) -> Result<PathBuf> {
     let archive_dir = bank.archive_dir();
     fs::create_dir_all(&archive_dir).map_err(|source| Error::io(&archive_dir, source))?;
-    // The stamp resolves to the second and a rename replaces: a second archive
-    // of the filename within it takes `<stamp>-<n>_…` instead of the first.
+    // The stamp resolves to the second and a rename replaces.
     let stamp = now.stamp();
     let mut archived = archive_dir.join(format!("{stamp}_{filename}"));
     for n in 2.. {
@@ -601,17 +601,24 @@ mod tests {
         fs::create_dir_all(bank.archive_dir()).expect("archive dir");
         let now = Timestamp::now().expect("now").unix_seconds();
         let earlier: Vec<PathBuf> = (now..now + 3)
-            .map(|second| {
+            .flat_map(|second| {
                 let stamp = Timestamp::from_unix_seconds(second).stamp();
-                let path = bank
-                    .archive_dir()
-                    .join(format!("{stamp}_{}", first.filename));
-                fs::write(&path, "earlier\n").expect("earlier archive");
-                path
+                ["_", "-2_"].map(|step| {
+                    let path = bank
+                        .archive_dir()
+                        .join(format!("{stamp}{step}{}", first.filename));
+                    fs::write(&path, "earlier\n").expect("earlier archive");
+                    path
+                })
             })
             .collect();
         let archived = archive_memory(temp.path(), BANK, &first.filename).expect("archive");
         assert!(read(&archived).contains("twice"), "{archived:?}");
+        let name = archived.file_name().map(|name| name.to_string_lossy());
+        assert!(
+            name.is_some_and(|name| name.ends_with(&format!("-3_{}", first.filename))),
+            "{archived:?}"
+        );
         for path in earlier {
             assert_eq!(read(&path), "earlier\n");
         }
