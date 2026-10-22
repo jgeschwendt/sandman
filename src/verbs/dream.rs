@@ -1143,7 +1143,15 @@ mod tests {
         assert!(lock_held(&scratch.root));
         assert!(Lock::acquire(&scratch.root).expect("acquire").is_none());
         drop(lock);
-        assert!(Lock::acquire(&scratch.root).expect("acquire").is_some());
+        // A sibling test's fork holds a copy of the descriptor until its exec
+        // closes it, so the release is awaited, not assumed (5 of 33 runs).
+        assert!((0..200).any(|_| {
+            let free = Lock::acquire(&scratch.root).expect("acquire").is_some();
+            if !free {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            free
+        }));
     }
 
     #[test]

@@ -981,7 +981,8 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_session_with_nothing_left_to_take_is_dropped_and_a_stuck_entry_on_the_next_drain() {
+    fn a_pending_session_with_nothing_left_to_take_is_dropped_and_a_stuck_entry_on_the_next_drain()
+    {
         let fixture = Fixture::new("take-pending-gone");
         // No transcript at all: taken or forgotten by other means since the
         // decline. The debt is settled, whoever settled it.
