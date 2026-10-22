@@ -295,13 +295,9 @@ pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>, shift: Option<&
     let mut repos: BTreeMap<String, Repo> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     for checkout in checkouts(roots) {
-        let Ok(common) = git(
-            &checkout.path,
-            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        ) else {
+        let Some(common) = common_dir(&checkout.path) else {
             continue;
         };
-        let common = common.trim().to_owned();
         if let Some(repo) = repos.get_mut(&common) {
             repo.checkouts.push(checkout);
             continue;
@@ -324,6 +320,22 @@ pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>, shift: Option<&
         .filter_map(|common| repos.remove(&common))
         .filter(|repo| !repo.hits.is_empty())
         .collect()
+}
+
+/// The git common directory a checkout shares with its linked worktrees,
+/// read from disk rather than asked of `git rev-parse`: a spawn per checkout
+/// was most of `trail show`'s time on a grove of 165 checkouts. `.git` is the
+/// directory itself, or a file whose `gitdir:` names the worktree's admin
+/// directory, whose `commondir` (when present) leads back to the shared one.
+fn common_dir(checkout: &Path) -> Option<String> {
+    let dot = checkout.join(".git");
+    let admin = match fs::read_to_string(&dot) {
+        Ok(file) => checkout.join(file.strip_prefix("gitdir:")?.trim()),
+        Err(_) => dot,
+    };
+    let common = fs::read_to_string(admin.join("commondir"))
+        .map_or_else(|_| admin.clone(), |common| admin.join(common.trim()));
+    Some(fs::canonicalize(common).ok()?.display().to_string())
 }
 
 #[cfg(test)]
@@ -399,5 +411,47 @@ mod tests {
         // refused: none of them is a repo, and nothing fails.
         assert!(hits(&temp.path().join("home"), &BTreeSet::new(), None).is_err());
         assert!(repos_with_hits(&roots, &BTreeSet::new(), None).is_empty());
+    }
+
+    #[test]
+    fn a_linked_worktree_is_one_repo_and_an_unreadable_git_file_is_skipped() {
+        let temp = TempDir::new("grove-linked");
+        let code = temp.path().join("code");
+        let main = code.join("o/r/main");
+        fs::create_dir_all(&main).expect("main");
+        for args in [
+            &["init", "-q", "--initial-branch=main"][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "one\n\nEvent: e-1",
+            ],
+            &["worktree", "add", "-q", "-b", "dev", "../dev"],
+        ] {
+            git(&main, args).expect("git");
+        }
+        for (checkout, file) in [("gone", "gitdir: missing\n"), ("odd", "not a pointer\n")] {
+            fs::create_dir_all(code.join("o/r").join(checkout)).expect("checkout");
+            fs::write(code.join("o/r").join(checkout).join(".git"), file).expect(".git");
+        }
+        let roots = Roots {
+            extras: Vec::new(),
+            grove_code: code.clone(),
+            home: temp.path().to_path_buf(),
+            manifest: temp.path().join("manifest.toml"),
+        };
+        let events = BTreeSet::from(["e-1".to_owned()]);
+        let repos = repos_with_hits(&roots, &events, None);
+        assert_eq!(repos.len(), 1);
+        let paths: Vec<_> = repos[0].checkouts.iter().map(|c| c.path.clone()).collect();
+        assert_eq!(paths, [code.join("o/r/dev"), main]);
+        assert_eq!(repos[0].hits.len(), 1);
+        assert_eq!(repos[0].hits[0].event, "e-1");
     }
 }
