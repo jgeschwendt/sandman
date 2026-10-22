@@ -197,16 +197,12 @@ struct Sections {
 
 /// Which rendering each surface is currently at.
 struct Budget {
-    /// Whether the chronological surface is in.
-    chronological: bool,
     /// How many graph lines the ceiling cut takes — see [`Sections::kept`].
     cut: usize,
     /// Per bank: `true` while it still renders bodies.
     graph: Vec<bool>,
-    /// Whether the pointer surface is in.
-    recent: bool,
-    /// Whether the tool surface is in.
-    tools: bool,
+    /// Per optional surface, indexed by [`Surface`]: whether it is in.
+    on: [bool; 3],
 }
 
 impl Sections {
@@ -221,7 +217,7 @@ impl Sections {
             (Surface::Recent, self.recent.is_some()),
         ]
         .into_iter()
-        .filter(|(surface, had)| *had && !surface.get(budget))
+        .filter(|(surface, had)| *had && !budget.on[*surface as usize])
         .map(|(surface, _)| surface.name())
         .collect()
     }
@@ -236,25 +232,26 @@ impl Sections {
     /// anything.
     fn compose(&self) -> (String, Budget) {
         let mut budget = Budget {
-            // The voyage log is never trimmed while it fits under the budget
-            // on its own: a dated, page-cheap surface outranks the bodies it
-            // costs, and the trim sequence used to drop it from the one cwd
-            // whose bank fills the budget alone. The single way out is a log
-            // bigger than the entire budget, where reserving it would leave
-            // the graph nothing — that drops, and `dropped` names it.
-            //
-            // "On its own" is the payload it would be the whole of, preamble
-            // included: the preamble is not optional, and reserving a section
-            // that leaves no room for it would put the ceiling cut back on the
-            // log, which is exactly what the floor exists to prevent.
-            chronological: self
-                .chronological
-                .as_ref()
-                .is_some_and(|section| !over(&format!("{HEADER}{section}"))),
             cut: 0,
             graph: vec![true; self.graph.len()],
-            recent: self.recent.is_some(),
-            tools: self.tools.is_some(),
+            on: [
+                // The voyage log is never trimmed while it fits under the budget
+                // on its own: a dated, page-cheap surface outranks the bodies it
+                // costs, and the trim sequence used to drop it from the one cwd
+                // whose bank fills the budget alone. The single way out is a log
+                // bigger than the entire budget, where reserving it would leave
+                // the graph nothing — that drops, and `dropped` names it.
+                //
+                // "On its own" is the payload it would be the whole of, preamble
+                // included: the preamble is not optional, and reserving a section
+                // that leaves no room for it would put the ceiling cut back on the
+                // log, which is exactly what the floor exists to prevent.
+                self.chronological
+                    .as_ref()
+                    .is_some_and(|section| !over(&format!("{HEADER}{section}"))),
+                self.recent.is_some(),
+                self.tools.is_some(),
+            ],
         };
         let mut text = self.render(&budget);
 
@@ -264,7 +261,7 @@ impl Sections {
             if !over(&text) {
                 break;
             }
-            step.set(&mut budget, false);
+            budget.on[step as usize] = false;
             text = self.render(&budget);
         }
 
@@ -283,11 +280,11 @@ impl Sections {
         // order, each only if it still fits.
         if floored {
             for step in [Surface::Recent, Surface::Tools] {
-                let had = step.get(&budget);
-                step.set(&mut budget, true);
+                let had = budget.on[step as usize];
+                budget.on[step as usize] = true;
                 let candidate = self.render(&budget);
                 if over(&candidate) {
-                    step.set(&mut budget, had);
+                    budget.on[step as usize] = had;
                 } else {
                     text = candidate;
                 }
@@ -383,12 +380,12 @@ impl Sections {
         if budget.cut > 0 && last.is_none() {
             parts.push(Cow::Borrowed(&mark));
         }
-        for (enabled, section) in [
-            (budget.recent, self.recent.as_ref()),
-            (budget.chronological, self.chronological.as_ref()),
-            (budget.tools, self.tools.as_ref()),
+        for (surface, section) in [
+            (Surface::Recent, &self.recent),
+            (Surface::Chronological, &self.chronological),
+            (Surface::Tools, &self.tools),
         ] {
-            if let (true, Some(section)) = (enabled, section) {
+            if let (true, Some(section)) = (budget.on[surface as usize], section) {
                 parts.push(Cow::Borrowed(section));
             }
         }
@@ -425,7 +422,7 @@ fn body_lines(section: &str) -> usize {
     section.lines().count().saturating_sub(1)
 }
 
-/// The optional surfaces, as budget switches.
+/// The optional surfaces — the index of each one's switch in [`Budget::on`].
 #[derive(Clone, Copy)]
 enum Surface {
     /// The voyage log tail.
@@ -443,24 +440,6 @@ impl Surface {
             Self::Chronological => "chronological",
             Self::Recent => "recent",
             Self::Tools => "tools",
-        }
-    }
-
-    /// Whether the surface is currently in.
-    fn get(self, budget: &Budget) -> bool {
-        match self {
-            Self::Chronological => budget.chronological,
-            Self::Recent => budget.recent,
-            Self::Tools => budget.tools,
-        }
-    }
-
-    /// Switch the surface in or out.
-    fn set(self, budget: &mut Budget, enabled: bool) {
-        match self {
-            Self::Chronological => budget.chronological = enabled,
-            Self::Recent => budget.recent = enabled,
-            Self::Tools => budget.tools = enabled,
         }
     }
 }
@@ -968,8 +947,8 @@ fn strip_comments(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        BUDGET_CHARS, INDEX_DESCRIPTION_CHARS, Recalled, bearing, compose, recall,
-        split_frontmatter, strip_comments,
+        BUDGET_CHARS, INDEX_DESCRIPTION_CHARS, Recalled, bearing, compose, frontmatter_fields,
+        recall, split_frontmatter, strip_comments,
     };
     use crate::bank::Bank;
     use crate::testutil::TempDir;
@@ -1138,6 +1117,42 @@ mod tests {
     }
 
     #[test]
+    fn a_bank_with_nothing_readable_gets_no_heading() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = Root::new("recall-silent-banks");
+        // The cwd bank holds only its index; the parent's cannot be listed.
+        root.memory(&root.bank(), "MEMORY.md", "name: index\n", "- nope\n");
+        root.memory(
+            &root.parent_bank(),
+            "user_locked.md",
+            "name: locked\ndescription: d\ntype: user\n",
+            "locked body\n",
+        );
+        root.memory(
+            &root.home_bank(),
+            "user_home.md",
+            "name: home\ndescription: d\ntype: user\n",
+            "home body\n",
+        );
+        let locked = root.path.join("memories").join(root.parent_bank());
+        let chmod = |mode| fs::set_permissions(&locked, fs::Permissions::from_mode(mode));
+        chmod(0o000).expect("chmod");
+        let text = root.recall();
+        chmod(0o755).expect("chmod back");
+        let headers: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("## "))
+            .collect();
+        assert_eq!(
+            headers,
+            [format!(
+                "## Long-term · ancestor bank · ~/.sandman/memories/{}/",
+                root.home_bank()
+            )]
+        );
+    }
+
+    #[test]
     fn a_linked_worktree_recalls_its_repos_bank_as_its_own() {
         let root = Root::new("recall-worktree");
         let repo = root.home.join("code").join("o").join("r");
@@ -1189,6 +1204,8 @@ mod tests {
             ("user_old.md", "old user", "user", "2026-01-01T00:00:00Z"),
             ("user_new.md", "new user", "user", "2026-08-05T00:00:00Z"),
             ("feedback_f.md", "fb", "feedback", "2026-08-04T00:00:00Z"),
+            // An unknown type ranks below every known one, however recent.
+            ("custom_c.md", "odd", "custom", "2026-08-09T00:00:00Z"),
         ] {
             root.memory(
                 &bank,
@@ -1230,7 +1247,9 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["pinned", "indexed", "new user", "old user", "fb", "ref"]
+            [
+                "pinned", "indexed", "new user", "old user", "fb", "ref", "odd"
+            ]
         );
         assert!(text.contains("### pinned (reference)\npinned body"));
         assert!(!text.contains("muted"));
@@ -1251,11 +1270,14 @@ mod tests {
         root.pointer("sid-fresh", "2026-08-06T09:00:00Z", "the fresh one", "/a");
         root.pointer("sid-older", "2026-08-04T12:00:00Z", "still inside", "/b");
         root.pointer("sid-stale", "2026-08-03T11:00:00Z", "too old", "/c");
-        fs::write(
-            root.path.join("memories").join(".recent").join("junk.json"),
-            "not json",
+        let recent_dir = root.path.join("memories").join(".recent");
+        fs::write(recent_dir.join("junk.json"), "not json").expect("junk");
+        // A well-formed pointer under any other extension is not a pointer.
+        fs::copy(
+            recent_dir.join("sid-older.json"),
+            recent_dir.join("sid-older.txt"),
         )
-        .expect("junk");
+        .expect("txt");
 
         let text = root.recall();
         let recent = text
@@ -1827,6 +1849,11 @@ title: Two writers, one trunk\nwritten: 2026-08-04T03:30:12Z\n---\n\n{}\n",
             (Some("a: 1\n"), "\nbody\n")
         );
         assert_eq!(split_frontmatter("---\nunterminated\n").0, None);
+        // A keyless, ill-keyed or empty-valued line is no field.
+        assert_eq!(
+            frontmatter_fields(": orphan\nbad key: x\nempty:\n  name: 'n'\n"),
+            [("name", "n")]
+        );
         assert_eq!(strip_comments("a<!--b-->c"), "ac");
         assert_eq!(strip_comments("a<!--b"), "a");
         assert_eq!(strip_comments("plain"), "plain");

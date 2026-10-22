@@ -508,6 +508,7 @@ mod tests {
     use crate::time::Timestamp;
     use std::fs;
     use std::io;
+    use std::os::unix::fs::PermissionsExt as _;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
@@ -680,13 +681,12 @@ mod tests {
         let source = fixture.seed(&transcript_lines());
         Fixture::age(&source, 5);
 
-        match take(&fixture.root, &fixture.claude, SID, false) {
-            Err(Error::Refused { message }) => {
-                assert!(message.contains("looks live"), "{message}");
-                assert!(message.contains("--force"), "{message}");
-            }
-            other => panic!("expected a refusal, got {other:?}"),
-        }
+        let refused = take(&fixture.root, &fixture.claude, SID, false);
+        assert!(
+            matches!(&refused, Err(Error::Refused { message })
+                if message.contains("looks live") && message.contains("--force")),
+            "{refused:?}"
+        );
         // Refused means untouched — but the refusal is on the record, so a
         // take that never happened can still be explained afterwards.
         assert!(source.is_file());
@@ -962,43 +962,48 @@ mod tests {
         // The operator deletes the job — the moment nothing else notices.
         fixture.retire("11112222");
         let drained = drain_pending(&fixture.root, &fixture.claude);
-        let [Drained::Reclaimed { outcome, session }] = drained.as_slice() else {
-            panic!("expected one reclaim, got {drained:?}");
-        };
-        assert_eq!(session, SID);
-        assert!(!source.exists(), "the take is the move");
-        assert!(outcome.archived.is_file());
-        assert!(outcome.pointer.is_file());
-        assert!(!entry.exists(), "a settled debt leaves the ledger");
         let journal = journal(&fixture.root);
         assert!(
-            journal.contains(&format!(
-                "reclaimed session={SID} archived={} bytes={} queue={}",
-                outcome.archived.display(),
-                outcome.archived_bytes,
-                outcome.queue_depth
-            )),
-            "{journal}"
+            matches!(drained.as_slice(), [Drained::Reclaimed { outcome, session }]
+            if session == SID
+                && outcome.archived.is_file()
+                && outcome.pointer.is_file()
+                && journal.contains(&format!(
+                    "reclaimed session={SID} archived={} bytes={} queue={}",
+                    outcome.archived.display(),
+                    outcome.archived_bytes,
+                    outcome.queue_depth
+                ))),
+            "{drained:?}\n{journal}"
         );
+        assert!(!source.exists(), "the take is the move");
+        assert!(!entry.exists(), "a settled debt leaves the ledger");
     }
 
     #[test]
-    fn a_pending_session_with_nothing_left_to_take_is_dropped() {
+    fn a_pending_session_with_nothing_left_to_take_is_dropped_and_a_stuck_entry_on_the_next_drain() {
         let fixture = Fixture::new("take-pending-gone");
         // No transcript at all: taken or forgotten by other means since the
         // decline. The debt is settled, whoever settled it.
         let entry = pend(&fixture.root, SID, "11112222");
-        let drained = drain_pending(&fixture.root, &fixture.claude);
-        assert_eq!(
-            drained,
-            vec![Drained::Dropped {
-                session: SID.to_owned()
-            }]
-        );
+        let dropped = vec![Drained::Dropped {
+            session: SID.to_owned(),
+        }];
+        // An entry that will not be removed is journalled and left for the
+        // next drain, which finds the session still gone and drops it then.
+        let ledger = entry.parent().expect("the ledger dir");
+        let chmod = |mode| fs::set_permissions(ledger, fs::Permissions::from_mode(mode));
+        chmod(0o555).expect("chmod");
+        let stuck = drain_pending(&fixture.root, &fixture.claude);
+        chmod(0o755).expect("chmod back");
+        assert_eq!(stuck, dropped);
+        assert!(entry.is_file());
+        assert_eq!(drain_pending(&fixture.root, &fixture.claude), dropped);
         assert!(!entry.exists());
         let journal = journal(&fixture.root);
         assert!(
-            journal.contains(&format!("pending dropped session={SID} gone")),
+            journal.contains(&format!("pending stuck entry={}: ", entry.display()))
+                && journal.contains(&format!("pending dropped session={SID} gone")),
             "{journal}"
         );
     }
@@ -1013,11 +1018,11 @@ mod tests {
         let entry = pend(&fixture.root, SID, "11112222");
 
         let drained = drain_pending(&fixture.root, &fixture.claude);
-        let [Drained::Kept { session, why }] = drained.as_slice() else {
-            panic!("expected one kept entry, got {drained:?}");
-        };
-        assert_eq!(session, SID);
-        assert!(why.contains("looks live"), "{why}");
+        assert!(
+            matches!(drained.as_slice(), [Drained::Kept { session, why }]
+                if session == SID && why.contains("looks live")),
+            "{drained:?}"
+        );
         assert!(source.is_file(), "the conversation is left alone");
         assert!(entry.is_file(), "and the debt is still owed");
         let journal = journal(&fixture.root);
@@ -1144,13 +1149,11 @@ mod tests {
             Path::new("/b/archived.jsonl"),
             &io::Error::from(io::ErrorKind::CrossesDevices),
         );
-        match error {
-            Error::CrossDevice { from, to } => {
-                assert_eq!(from, Path::new("/a/live.jsonl"));
-                assert_eq!(to, Path::new("/b/archived.jsonl"));
-            }
-            other => panic!("expected CrossDevice, got {other:?}"),
-        }
+        assert!(
+            matches!(&error, Error::CrossDevice { from, to }
+                if from == Path::new("/a/live.jsonl") && to == Path::new("/b/archived.jsonl")),
+            "{error:?}"
+        );
         assert!(matches!(
             classify_rename(
                 Path::new("/a"),
