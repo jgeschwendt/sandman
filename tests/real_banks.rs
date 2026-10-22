@@ -1,5 +1,5 @@
-//! The live banks are the regression suite: every memory file under
-//! `$ORRERY_MEMORY` (default `~/.orrery/memory`) must round-trip byte-for-byte
+//! The live banks are the regression suite: every memory file under the data
+//! root's `memories/` (`$SANDMAN_ROOT`, else `~/.sandman`) must round-trip byte-for-byte
 //! through the crate's parser, and each bank's `MEMORY.md` is regenerated in
 //! memory and compared against the on-disk one.
 //!
@@ -7,22 +7,13 @@
 //! default because it depends on the operator's machine: run it with
 //! `cargo test -- --ignored`.
 
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use sandman::{Bank, MemoryFile};
+use sandman::{Bank, MemoryFile, paths};
 
 /// How many differing index lines are printed per bank.
 const DIFF_SAMPLE: usize = 4;
-
-/// The live memory root: `$ORRERY_MEMORY`, else `$HOME/.orrery/memory`.
-fn memory_root() -> Option<PathBuf> {
-    if let Some(root) = env::var_os("ORRERY_MEMORY") {
-        return Some(PathBuf::from(root));
-    }
-    env::var_os("HOME").map(|home| PathBuf::from(home).join(".orrery").join("memory"))
-}
 
 /// Bank directories: every child of the root that is not `_`- or `.`-prefixed.
 fn banks(root: &Path) -> Vec<PathBuf> {
@@ -71,11 +62,10 @@ fn summarize(disk: &str, generated: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "reads the operator's live ~/.orrery/memory banks"]
+#[ignore = "reads the operator's live banks under the data root"]
 fn every_live_memory_file_round_trips() {
-    let Some(root) = memory_root() else {
-        panic!("neither ORRERY_MEMORY nor HOME is set");
-    };
+    let recent = paths::recent_dir(&paths::data_root().expect("a data root"));
+    let root = recent.parent().expect("memories/ holds .recent/");
     assert!(
         root.is_dir(),
         "memory root {} is not a directory",
@@ -86,7 +76,7 @@ fn every_live_memory_file_round_trips() {
     let mut index_matches = 0_usize;
     let mut index_differs = Vec::new();
 
-    let banks = banks(&root);
+    let banks = banks(root);
     assert!(!banks.is_empty(), "no banks under {}", root.display());
 
     for dir in &banks {
@@ -121,7 +111,7 @@ fn every_live_memory_file_round_trips() {
     }
 
     // MEMORY.md differences are reported, never fatal: the on-disk indexes were
-    // written by orrery and may predate the current truncation rule.
+    // may predate the current truncation rule.
     println!(
         "round-tripped {files} memory files across {} banks",
         banks.len()
