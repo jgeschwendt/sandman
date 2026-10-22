@@ -103,11 +103,7 @@ pub struct Digest {
 pub fn digest(text: &str) -> Digest {
     let mut digest = Digest::default();
     for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(value) = json::parse(line) else {
+        let Ok(value) = json::parse(line.trim()) else {
             continue;
         };
         if digest.cwd.is_none() {
@@ -145,11 +141,7 @@ pub const EXTRACT_TAIL_CHARS: usize = 80_000;
 pub fn extract(text: &str) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(value) = json::parse(line) else {
+        let Ok(value) = json::parse(line.trim()) else {
             continue;
         };
         let Some(role @ ("assistant" | "user")) = value.get("type").and_then(Value::as_str) else {
@@ -367,13 +359,17 @@ mod tests {
                 .expect("find without projects")
                 .is_empty()
         );
+        // A projects path that cannot be listed is.
+        fs::write(temp.path().join("projects"), "").expect("projects file");
+        assert!(matches!(find(temp.path(), "sid-1"), Err(Error::Io { .. })));
     }
 
     #[test]
     fn the_digest_takes_cwd_title_and_highlights_from_the_jsonl() {
         let text = transcript(&[
-            r#"{"type":"last-prompt","sessionId":"sid"}"#,
+            r#"{"type":"last-prompt","sessionId":"sid","n":1,"ok":true}"#,
             "not json at all",
+            r#"{"type":"user","message":{"content":42}}"#,
             r#"{"type":"attachment","cwd":"/Users/you/code","sessionId":"sid"}"#,
             r#"{"type":"user","cwd":"/elsewhere","message":{"content":"  first   words\nspill over  "}}"#,
             r#"{"type":"user","message":{"content":"a later message"}}"#,
@@ -487,5 +483,8 @@ mod tests {
         );
         assert!(quoted_bodies("sandman remember --help").is_empty());
         assert!(quoted_bodies(r#"sandman remember "unterminated"#).is_empty());
+        // Any other escape is kept as typed; a trailing backslash ends nothing.
+        assert_eq!(quoted_bodies(r#"sandman remember "a\nb""#), [r"a\nb"]);
+        assert!(quoted_bodies(r#"sandman remember "dangling\"#).is_empty());
     }
 }
