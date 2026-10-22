@@ -327,6 +327,8 @@ pub fn repos_with_hits(roots: &Roots, events: &BTreeSet<String>, shift: Option<&
 /// was most of `trail show`'s time on a grove of 165 checkouts. `.git` is the
 /// directory itself, or a file whose `gitdir:` names the worktree's admin
 /// directory, whose `commondir` (when present) leads back to the shared one.
+/// One without a `HEAD` is no repository — git would walk past it to an
+/// enclosing one (`~` holds the grove) and count that repo's commits twice.
 fn common_dir(checkout: &Path) -> Option<String> {
     let dot = checkout.join(".git");
     let admin = match fs::read_to_string(&dot) {
@@ -335,7 +337,11 @@ fn common_dir(checkout: &Path) -> Option<String> {
     };
     let common = fs::read_to_string(admin.join("commondir"))
         .map_or_else(|_| admin.clone(), |common| admin.join(common.trim()));
-    Some(fs::canonicalize(common).ok()?.display().to_string())
+    let common = fs::canonicalize(common).ok()?;
+    common
+        .join("HEAD")
+        .is_file()
+        .then(|| common.display().to_string())
 }
 
 #[cfg(test)]
@@ -414,44 +420,60 @@ mod tests {
     }
 
     #[test]
-    fn a_linked_worktree_is_one_repo_and_an_unreadable_git_file_is_skipped() {
+    fn a_linked_worktree_is_one_repo_and_a_git_entry_that_is_no_repo_is_skipped() {
         let temp = TempDir::new("grove-linked");
-        let code = temp.path().join("code");
+        let (home, code) = (temp.path().to_path_buf(), temp.path().join("code"));
         let main = code.join("o/r/main");
         fs::create_dir_all(&main).expect("main");
-        for args in [
-            &["init", "-q", "--initial-branch=main"][..],
-            &[
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "commit",
-                "-q",
-                "--allow-empty",
-                "-m",
-                "one\n\nEvent: e-1",
-            ],
-            &["worktree", "add", "-q", "-b", "dev", "../dev"],
+        let commit = [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "one\n\nEvent: e-1",
+        ];
+        // `~` is a repo holding the grove, as on the live machine.
+        for (dir, args) in [
+            (&home, &["init", "-q"][..]),
+            (&home, &commit[..]),
+            (&main, &["init", "-q"][..]),
+            (&main, &commit[..]),
+            (&main, &["worktree", "add", "-q", "-b", "dev", "../dev"][..]),
         ] {
-            git(&main, args).expect("git");
+            git(dir, args).expect("git");
         }
+        // An empty `.git` (an interrupted clone), a pointer to nothing, and a
+        // file that is no pointer: git walks past the first to `~`.
+        fs::create_dir_all(code.join("o/r/empty/.git")).expect("empty");
         for (checkout, file) in [("gone", "gitdir: missing\n"), ("odd", "not a pointer\n")] {
             fs::create_dir_all(code.join("o/r").join(checkout)).expect("checkout");
             fs::write(code.join("o/r").join(checkout).join(".git"), file).expect(".git");
         }
         let roots = Roots {
-            extras: Vec::new(),
+            extras: vec![home.clone()],
             grove_code: code.clone(),
-            home: temp.path().to_path_buf(),
-            manifest: temp.path().join("manifest.toml"),
+            home: home.clone(),
+            manifest: home.join("manifest.toml"),
         };
         let events = BTreeSet::from(["e-1".to_owned()]);
-        let repos = repos_with_hits(&roots, &events, None);
-        assert_eq!(repos.len(), 1);
-        let paths: Vec<_> = repos[0].checkouts.iter().map(|c| c.path.clone()).collect();
-        assert_eq!(paths, [code.join("o/r/dev"), main]);
-        assert_eq!(repos[0].hits.len(), 1);
-        assert_eq!(repos[0].hits[0].event, "e-1");
+        let found: Vec<(String, Vec<std::path::PathBuf>, usize)> =
+            repos_with_hits(&roots, &events, None)
+                .into_iter()
+                .map(|repo| {
+                    let paths = repo.checkouts.into_iter().map(|c| c.path).collect();
+                    (repo.label, paths, repo.hits.len())
+                })
+                .collect();
+        assert_eq!(
+            found,
+            [
+                ("o/r".to_owned(), vec![code.join("o/r/dev"), main], 1),
+                ("~/".to_owned(), vec![home], 1),
+            ]
+        );
     }
 }
