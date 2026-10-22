@@ -192,6 +192,7 @@ fn an_unknown_kind_is_a_usage_failure_that_writes_nothing() {
     for args in [
         &["trail", "append", "--kind", "nonsense"][..],
         &["trail", "append", "--json", r#"{"kind":"nonsense"}"#],
+        &["trail", "append", "--json", "{nope"],
         &["trail", "append"],
         &["trail", "append", "--kind", "change", "--cost", "-1"],
         &["trail", "frobnicate"],
@@ -248,10 +249,12 @@ fn revoke_is_idempotent_and_show_lists_descendants_and_commits() {
     assert_eq!(revokes.lines().count(), 1, "{revokes}");
     assert!(revokes.contains(&format!(r#""parent":"{root}""#)));
     assert!(revokes.contains(r#""rationale":"wrong path""#));
-    assert_eq!(
-        code(&machine.run(&["trail", "revoke", "e-nope", "--reason", "x"])),
-        1
-    );
+    for args in [
+        &["trail", "revoke", "e-nope", "--reason", "x"][..],
+        &["trail", "show", "e-nope"],
+    ] {
+        assert_eq!(code(&machine.run(args)), 1, "{args:?}");
+    }
     assert_eq!(code(&machine.run(&["trail", "revoke", &root])), 2);
 
     let alone = machine.ok(&["trail", "show", &stranger]);
@@ -387,6 +390,20 @@ fn a_dry_run_reports_the_plan_and_changes_nothing() {
     let second = machine.append(&["--kind", "change", "--parent", &first]);
     let (checkout, shas) = fixture(&machine, &[("one", &first), ("two", &second)]);
     memory(&machine, "project_doomed.md", &second);
+    // Checkouts holding nothing to revert, skipped: no repository at all, a
+    // repository without a commit, one whose log git refuses.
+    let owner = machine.grove_code().join("o");
+    fs::create_dir_all(owner.join("fake/main/.git")).expect("fake");
+    for repo in ["broken", "empty"] {
+        let dir = owner.join(repo).join("main");
+        fs::create_dir_all(&dir).expect("checkout");
+        git(&dir, &["init", "--quiet"]);
+    }
+    fs::write(
+        owner.join("broken/main/.git/refs/heads/broken"),
+        format!("{}\n", "1".repeat(40)),
+    )
+    .expect("a ref to an object that is not there");
     let trail = machine.trail_bytes();
     let refs = git(&checkout, &["for-each-ref"]);
 
@@ -441,28 +458,39 @@ fn a_dry_run_reports_the_plan_and_changes_nothing() {
 }
 
 #[test]
-fn a_scratch_tree_git_will_not_remove_is_swept_and_the_run_fails() {
-    let machine = Machine::new("unremovable");
-    let first = machine.append(&["--kind", "change"]);
-    let (checkout, shas) = fixture(&machine, &[("one", &first)]);
+fn a_git_step_failing_mid_pass_fails_the_repo_and_sweeps_the_scratch_tree() {
     let path = std::env::var("PATH").unwrap_or_default();
-    machine.script(
-        "bin/git",
-        &format!(
-            "case \"$*\" in *'worktree remove'*) exit 1;; esac\nPATH='{path}' exec git \"$@\"\n"
-        ),
-    );
-    let output = machine
-        .command(&["reconcile", &first])
-        .env(
-            "PATH",
-            format!("{}:{path}", machine.home.join("bin").display()),
-        )
-        .output()
-        .expect("run sandman");
-    assert_eq!(code(&output), 1, "{}", stderr(&output));
-    assert!(stdout(&output).contains(&format!("reverted: {}", shas[0])));
-    assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+    // The history read, the revert's commit, the scratch tree's removal.
+    for (step, reverted) in [
+        ("rev-list --topo-order", false),
+        ("commit --no-verify", false),
+        ("worktree remove", true),
+    ] {
+        let machine = Machine::new("git-fails");
+        let first = machine.append(&["--kind", "change"]);
+        let (checkout, shas) = fixture(&machine, &[("one", &first)]);
+        machine.script(
+            "bin/git",
+            &format!("case \"$*\" in *'{step}'*) exit 1;; esac\nPATH='{path}' exec git \"$@\"\n"),
+        );
+        let output = machine
+            .command(&["reconcile", &first])
+            .env(
+                "PATH",
+                format!("{}:{path}", machine.home.join("bin").display()),
+            )
+            .output()
+            .expect("run sandman");
+        assert_eq!(code(&output), 1, "{step}: {}", stderr(&output));
+        let report = stdout(&output);
+        assert!(report.contains("  failed: "), "{step}: {report}");
+        assert_eq!(
+            report.contains(&format!("reverted: {}", shas[0])),
+            reverted,
+            "{step}: {report}"
+        );
+        assert_eq!(git(&checkout, &["worktree", "list"]).lines().count(), 1);
+    }
 }
 
 #[test]

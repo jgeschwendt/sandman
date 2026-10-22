@@ -264,12 +264,15 @@ mod tests {
     }
 
     #[test]
-    fn an_unparseable_memory_is_a_typed_error() {
+    fn an_unparseable_or_unreadable_memory_is_a_typed_error() {
         let temp = TempDir::new("index-broken");
         let bank = Bank::at(temp.path().join("bank"));
         fs::create_dir_all(bank.dir()).expect("bank dir");
-        fs::write(bank.dir().join("user_broken.md"), "no frontmatter\n").expect("seed");
+        let broken = bank.dir().join("user_broken.md");
+        fs::write(&broken, "no frontmatter\n").expect("seed");
         assert!(matches!(bank.render_index(), Err(Error::Parse { .. })));
+        fs::write(&broken, b"\xff\n").expect("not utf-8");
+        assert!(matches!(bank.render_index(), Err(Error::Io { path, .. }) if path == broken));
     }
 
     #[test]

@@ -367,11 +367,12 @@ impl Parser<'_> {
         ) {
             self.pos += 1;
         }
-        let text = std::str::from_utf8(&self.bytes[start..self.pos])
-            .map_err(|_| JsonError::Number(start))?;
-        text.parse::<f64>()
+        // ASCII by the loop above, so only the parse can refuse it.
+        std::str::from_utf8(&self.bytes[start..self.pos])
+            .ok()
+            .and_then(|text| text.parse::<f64>().ok())
             .map(Value::Number)
-            .map_err(|_| JsonError::Number(start))
+            .ok_or(JsonError::Number(start))
     }
 
     /// A quoted string, unescaped.
@@ -447,16 +448,15 @@ impl Parser<'_> {
     /// Four hex digits — and only hex digits, so no sign slips through.
     fn hex4(&mut self) -> Result<u32, JsonError> {
         let start = self.pos;
-        let digits = self
+        let value = self
             .bytes
             .get(start..start + 4)
             .ok_or(JsonError::Eof)?
-            .to_owned();
-        if !digits.iter().all(u8::is_ascii_hexdigit) {
-            return Err(JsonError::Escape(start));
-        }
-        let text = std::str::from_utf8(&digits).map_err(|_| JsonError::Escape(start))?;
-        let value = u32::from_str_radix(text, 16).map_err(|_| JsonError::Escape(start))?;
+            .iter()
+            .try_fold(0, |value, &byte| {
+                Some(value * 16 + char::from(byte).to_digit(16)?)
+            })
+            .ok_or(JsonError::Escape(start))?;
         self.pos += 4;
         Ok(value)
     }

@@ -419,6 +419,24 @@ mod tests {
     }
 
     #[test]
+    fn one_tiers_wordings_of_one_claim_are_ordered_by_name_then_description_then_body() {
+        let name = "stele owns the graph lock";
+        let base = proposal(name, "f");
+        for other in [
+            proposal("Stele owns the graph locks", "f"),
+            described(name, &format!("Description of {name}"), "f"),
+            proposal(name, "g"),
+        ] {
+            let (left, right) = ((Tier::Fable, base.clone()), (Tier::Fable, other));
+            assert_eq!(
+                group(vec![left.clone(), right.clone()]),
+                group(vec![right, left]),
+                "the draft must not depend on the order"
+            );
+        }
+    }
+
+    #[test]
     fn a_claim_never_crosses_a_bank_or_a_type() {
         let mut elsewhere = proposal("the queue is the surface", "elsewhere");
         elsewhere.bank = "-Users-you".to_owned();

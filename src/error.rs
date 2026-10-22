@@ -226,6 +226,7 @@ mod tests {
                 },
                 "/b/x.md: missing frontmatter key `name`",
             ),
+            (Error::not_found("event", "e-1"), "no event for e-1"),
             (
                 Error::Parse {
                     path: path(),
@@ -242,6 +243,10 @@ mod tests {
                     filename: "x.md".to_owned(),
                 },
                 "too many colliding filenames for x.md",
+            ),
+            (
+                Error::Untrusted(vec![path(), PathBuf::from("/a")]),
+                "no trusted target: run claude once in each trunk and accept the trust prompt\n/b/x.md\n/a",
             ),
         ] {
             assert_eq!(error.to_string(), line);

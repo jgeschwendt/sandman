@@ -115,15 +115,39 @@ fn the_toml_reader_round_trips_the_seed_and_refuses_a_nested_table() {
     assert_eq!(Sources::parse(&sources.render()).expect("again"), sources);
 
     let table = "[x]\nkind = \"rss\"\nurl = \"u\"\nweight = 1.0\nbears_on = [\"*\"]\n";
+    let full = format!("{table}budget = 5\n");
+    let cut = |line: &str| full.replace(line, "");
     for (text, why) in [
-        ("answer = 1\n", "unknown root key `answer`"),
+        ("answer = 1\n".to_owned(), "unknown root key `answer`"),
         (
-            &format!("{table}budget = 5\nnope = 1\n"),
-            "[x]: unknown key `nope`",
+            "reweighted = \"soon\"\n".to_owned(),
+            "`reweighted` wants ISO-8601, got `soon`",
         ),
-        (table, "[x]: `budget` is required"),
+        (format!("{full}nope = 1\n"), "[x]: unknown key `nope`"),
+        (table.to_owned(), "[x]: `budget` is required"),
+        (cut("kind = \"rss\"\n"), "[x]: `kind` is required"),
+        (cut("url = \"u\"\n"), "[x]: `url` is required"),
+        (cut("weight = 1.0\n"), "[x]: `weight` is required"),
+        (cut("bears_on = [\"*\"]\n"), "[x]: `bears_on` is required"),
+        (full.replace("\"rss\"", "1"), "[x]: `kind` wants a string"),
+        (
+            full.replace("= 5", "= -5"),
+            "[x]: `budget` wants a non-negative integer",
+        ),
+        (
+            full.replace("1.0", "-1.0"),
+            "[x]: `weight` wants a non-negative number",
+        ),
+        (
+            full.replace("[\"*\"]", "\"*\""),
+            "[x]: `bears_on` wants an array of strings",
+        ),
+        (
+            format!("{full}last_read = \"soon\"\n"),
+            "[x]: `last_read` wants ISO-8601, got `soon`",
+        ),
     ] {
-        assert_eq!(Sources::parse(text).expect_err(why), why);
+        assert_eq!(Sources::parse(&text).expect_err(why), why);
     }
     let nested = toml::parse("[a]\nkind = \"rss\"\n[a.b]\nx = 1\n").expect_err("nested");
     assert_eq!(nested.line, 3);
@@ -1093,21 +1117,55 @@ fn the_store_refuses_what_it_cannot_read_and_skips_what_it_cannot_parse() {
     };
     machine.write(".sandman/breath", "");
     fails(&["breathe", "list"], 1, "breath");
+    fails(&["breathe", "init"], 1, "breath");
     fs::remove_file(machine.root().join("breath")).expect("rm");
     fails(&["breathe", "reweight"], 1, "run `sandman breathe init`");
     fs::create_dir_all(machine.root().join("breath/sources.toml")).expect("dir");
     fails(&["breathe", "sources"], 1, "sources.toml");
     fs::remove_dir(machine.root().join("breath/sources.toml")).expect("rmdir");
     machine.ok(NOW, &["breathe", "init"]);
+    // A `passes` that is a file reads as no pass, then cannot hold one.
+    let passes = machine.root().join("breath/passes");
+    fs::remove_dir(&passes).expect("rmdir");
+    machine.write(".sandman/breath/passes", "");
+    fails(&["breathe", "pass", "--kind", "skim"], 3, "passes");
+    fs::remove_file(&passes).expect("rm");
+    fs::create_dir(&passes).expect("mkdir");
+    // A number, a count or a clock that does not read is the command line's.
+    let close = ["breathe", "close", "--id", "b-x", "--cost"];
+    fails(
+        &[&close[..], &["nan"]].concat(),
+        2,
+        "--cost wants a number, got `nan`",
+    );
+    fails(
+        &[&close[..], &["0", "--dropped", "many"]].concat(),
+        2,
+        "--dropped wants a count, got `many`",
+    );
+    let output = machine.run("soon", &["breathe", "list"], &[]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("$SANDMAN_NOW wants ISO-8601, got `soon`"),
+        "{}",
+        stderr(&output)
+    );
     fails(&["breathe", "list", "--state", "nope"], 1, "state");
     fails(&["breathe", "pass", "--kind", "nope"], 1, "pass kind");
     fails(&["breathe", "attach", "--id", "../x"], 1, "pass id");
     fails(&["breathe", "attach", "--id", "b-nope"], 1, "b-nope");
-    machine.write(".sandman/breath/passes/b-bad/pass.json", "nope");
-    fails(&["breathe", "attach", "--id", "b-bad"], 1, "pass.json");
+    for (id, text, why) in [("b-bad", "nope", "pass.json"), ("b-list", "[]", "b-list")] {
+        machine.write(format!(".sandman/breath/passes/{id}/pass.json"), text);
+        fails(&["breathe", "attach", "--id", id], 1, why);
+    }
     fs::create_dir_all(machine.root().join("breath/passes/b-dir/pass.json")).expect("dir");
     fails(&["breathe", "attach", "--id", "b-dir"], 1, "pass.json");
-    fails(&["breathe", "adopt", "nope"], 1, "nope");
+    for bad in ["nope", ".."] {
+        fails(&["breathe", "adopt", bad], 1, bad);
+    }
+    let output = machine.file(NOW, "https://g", "g", &["--source", "ghost"]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(stderr(&output).contains("ghost"), "{}", stderr(&output));
     for blank in ["title", "summary"] {
         let mut args = vec![
             "breathe",
@@ -1267,6 +1325,12 @@ fn the_store_refuses_what_it_cannot_read_and_skips_what_it_cannot_parse() {
     }
     let output = machine.file(NOW, "https://c", "crowded", &[]);
     assert_eq!(code(&output), 1, "{}", stderr(&output));
+    // An empty one is no breath to move.
+    fails(
+        &["breathe", "spike", "2026-10-16-crowded"],
+        1,
+        "invalid breath",
+    );
 
     // A trail that cannot be written fails the verbs that append to it.
     let kept = filed_name(&machine.file(NOW, "https://k", "kept", &[]));
@@ -1277,7 +1341,8 @@ fn the_store_refuses_what_it_cannot_read_and_skips_what_it_cannot_parse() {
     fails(&["breathe", "adopt", &kept], 1, "trail");
     fails(&["breathe", "reweight"], 1, "trail");
 
-    // A breath that is a directory cannot be read.
+    // A breath that is a directory cannot be read, to move or to list.
     fs::create_dir_all(machine.root().join("breath/2026-10-16-dir.md")).expect("dir");
     fails(&["breathe", "spike", "2026-10-16-dir"], 1, "2026-10-16-dir");
+    fails(&["breathe", "list"], 1, "2026-10-16-dir.md");
 }

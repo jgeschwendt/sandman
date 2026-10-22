@@ -296,9 +296,19 @@ mod tests {
         let pinned = forget(&root, &claude, SID);
         chmod(0o755).expect("chmod back");
         assert!(matches!(pinned, Err(Error::Io { .. })), "{pinned:?}");
-        // An archive that is a file, not a tree.
-        fs::write(root.join(crate::paths::ARCHIVE_DIR_NAME), "").expect("blocker");
-        assert!(matches!(forget(&root, &claude, SID), Err(Error::Io { .. })));
+        // An archive or a dream tree that is a file, not a tree.
+        for tree in [
+            root.join(crate::paths::ARCHIVE_DIR_NAME),
+            crate::paths::dream_dir(&root),
+        ] {
+            fs::write(&tree, "").expect("blocker");
+            let got = forget(&root, &claude, SID);
+            assert!(
+                matches!(&got, Err(Error::Io { path, .. }) if *path == tree),
+                "{got:?}"
+            );
+            fs::remove_file(&tree).expect("rm");
+        }
     }
 
     #[test]

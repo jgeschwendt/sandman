@@ -477,6 +477,17 @@ fn brief_fills_every_slot_and_records_the_start() {
         "denied a force push".to_owned(),
     )]);
 
+    // `$SANDMAN_SHIFT_MIND` names the mind when `--mind` does not.
+    let dry = machine.run(
+        FRIDAY,
+        &["shift", "brief", "--dry-run"],
+        &[("SANDMAN_SHIFT_MIND", "sonnet")],
+    );
+    assert!(
+        stdout(&dry).contains("Orchestrator model `sonnet`"),
+        "{}",
+        stderr(&dry)
+    );
     let id = machine.ok(FRIDAY, &["shift", "brief", "--mind", "fable"]);
     assert_eq!(id.trim(), "s-20261016T1600Z");
 
