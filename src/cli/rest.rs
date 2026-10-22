@@ -126,9 +126,10 @@ fn reflect_pass() -> Result<(), Failure> {
         journal.as_deref(),
         "reflect",
         &format!(
-            "reflect done banks={} due={} swept={} entry={} ms={}",
+            "reflect done banks={} due={} failed={} swept={} entry={} ms={}",
             outcome.banks.len(),
             outcome.due,
+            outcome.failed,
             outcome.swept,
             outcome.entry_status,
             started.elapsed().as_millis()
@@ -144,7 +145,13 @@ fn reflect_pass() -> Result<(), Failure> {
         outcome.swept,
         outcome.banks.len()
     );
-    Ok(())
+    match outcome.failed {
+        0 => Ok(()),
+        failed => Err(Error::refused(format!(
+            "{failed} bank(s) failed upkeep: see their failed(…) lines in the reflect run log"
+        ))
+        .into()),
+    }
 }
 
 /// One past day's entry and the index behind it, and nothing else — the

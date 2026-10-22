@@ -121,6 +121,8 @@ pub struct Outcome {
     /// Why: `written`, `kept` (the fingerprint matched), `quiet` (the day had
     /// no sources) or `abstained` (the mind said nothing usable).
     pub entry_status: &'static str,
+    /// How many banks' upkeep failed — each named in its own line.
+    pub failed: usize,
     /// The log index that was regenerated.
     pub index: PathBuf,
     /// How many pointers the sweep deleted.
@@ -151,17 +153,15 @@ pub fn reflect(
     let swept = sweep(data_root, now)?;
     let (banks, due, failed) = upkeep_all(data_root, now, options)?;
     let index = write_index(data_root, day)?;
-    failed.map_or(
-        Ok(Outcome {
-            banks,
-            due,
-            entry,
-            entry_status,
-            index,
-            swept,
-        }),
-        Err,
-    )
+    Ok(Outcome {
+        banks,
+        due,
+        entry,
+        entry_status,
+        failed,
+        index,
+        swept,
+    })
 }
 
 // ─── the voyage entry ─────────────────────────────────────────────────────
@@ -423,23 +423,26 @@ fn write_baseline(path: &Path, baseline: Baseline) -> Result<()> {
     atomic::write(path, &format!("{}\n", document.render()))
 }
 
-/// Run upkeep over every bank: one log line each, how many were due, and the
-/// last failure. A failure is that bank's alone — its line says so and the
-/// banks after it still run — and the pass reports it once it has ended.
+/// Run upkeep over every bank: one log line each, how many were due, and how
+/// many failed. A failure is that bank's alone — its line says so and the
+/// banks after it still run — and the pass reports the count once it has ended.
 fn upkeep_all(
     data_root: &Path,
     now: Timestamp,
     options: &Options,
-) -> Result<(Vec<String>, usize, Option<Error>)> {
+) -> Result<(Vec<String>, usize, usize)> {
     let log = paths::run_log(data_root, "reflect", now);
-    let (mut lines, mut due, mut failed) = (Vec::new(), 0, None);
+    let (mut lines, mut due, mut failed) = (Vec::new(), 0, 0);
     for (key, dir) in log::banks(data_root) {
         let note = match upkeep_bank(data_root, &key, &Bank::at(&dir), now, options) {
             Ok((note, fired)) => {
                 due += usize::from(fired);
                 note
             }
-            Err(error) => format!("failed({})", failed.insert(error)),
+            Err(error) => {
+                failed += 1;
+                format!("failed({error})")
+            }
         };
         let line = format!("{} reflect bank={key} {note}", now.iso8601());
         atomic::append_line(&log, &line)?;
@@ -534,8 +537,10 @@ fn upkeep(
     // `rg` over `<root>/.trace`, the question the journal exists to answer.
     let mut merged: Vec<String> = Vec::new();
     // The call is spent whatever becomes of its plan, so the baseline records
-    // the pass even when applying it fails: a bank that refuses its plan or its
-    // index would otherwise cost a call every day until someone repairs it.
+    // the pass even when applying it fails — and with no backlog, since a
+    // plan that failed left nothing a next call could finish: a bank that
+    // refuses its plan or its index would otherwise cost a call every day
+    // until someone repairs it.
     let applying = (|| {
         for op in &ops {
             // Guarded on both sides of `resolved`: once so a merge whose files
@@ -577,7 +582,7 @@ fn upkeep(
         Baseline {
             at: now,
             count: after,
-            last_ops: proposed,
+            last_ops: if applying.is_ok() { proposed } else { 0 },
         },
     )?;
     applying?;
@@ -613,19 +618,22 @@ fn fingerprint(text: &str) -> u64 {
 /// the first lines of its body — and the fingerprint of each file as it was
 /// read, which is what the plan will be checked against before it is applied.
 ///
-/// A file that will not read or parse fails the bank here, before the call: no
-/// plan could reach it, so the index it breaks would refuse the pass after a
-/// call spent for nothing.
+/// A bank the index refuses — a file that will not read or parse, or lacks
+/// `name:` or `description:` — fails here, before the call: the index
+/// regenerated behind the plan runs the same check, and would refuse the pass
+/// after a call spent for nothing.
 fn listing(bank: &Bank) -> Result<(String, Fingerprints)> {
+    bank.render_index()?;
     let mut out = String::new();
     let mut fingerprints = Fingerprints::new();
-    for name in bank.memory_filenames()? {
-        let path = bank.dir().join(&name);
-        let raw = fs::read_to_string(&path).map_err(|source| Error::io(&path, source))?;
-        let memory = MemoryFile::parse(&raw).map_err(|source| Error::Parse { path, source })?;
-        if name.starts_with('_') {
-            continue;
-        }
+    // Past the index's check, a file that breaks now has broken under the
+    // listing: it goes unlisted, so no operation may touch it.
+    let readable = bank.memory_filenames()?.into_iter().filter_map(|name| {
+        let raw = fs::read_to_string(bank.dir().join(&name)).ok()?;
+        let memory = MemoryFile::parse(&raw).ok()?;
+        (!name.starts_with('_')).then_some((name, raw, memory))
+    });
+    for (name, raw, memory) in readable {
         fingerprints.insert(name.clone(), fingerprint(&raw));
         let _ = writeln!(
             out,
@@ -1903,27 +1911,27 @@ is wrong on sight — retitle it."
         assert!(index.contains("- [the one claim](project_the_one_claim.md) — one line\n"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_merge_checks_the_index_over_its_non_members_only() {
         // An unreadable sibling refuses the merge before a member moves; an
         // unreadable member is what the merge repairs.
         for member in [false, true] {
             let scratch = Scratch::new("reflect-merge-unindexable");
-            let files = make_due(&scratch);
+            let files = [scratch.seed("one", "d", "b"), scratch.seed("two", "d", "b")];
             fs::write(
                 scratch.bank().dir().join("user_hand.md"),
                 "---\nname: by hand\ntype: user\n---\n\nbody\n",
             )
             .expect("hand-written");
             let second = if member { "user_hand.md" } else { &files[1] };
-            let reply = format!(
-                "{{\"ops\":[{{\"op\":\"merge\",\"files\":[\"{}\",\"{second}\"],\"type\":\"reference\",\"name\":\"the merged claim\",\"description\":\"one line\",\"body\":\"draft\"}}]}}",
-                files[0]
-            );
-            let (options, _) = scratch.replies(&[&reply, r#"{"body":"both claims, kept"}"#], "");
-
-            let result = reflect(&scratch.root, &scratch.claude, Scratch::now(), &options);
+            let merge = Op::Merge {
+                body: "both claims, kept".to_owned(),
+                description: "one line".to_owned(),
+                files: vec![files[0].clone(), second.to_owned()],
+                kind: MemoryType::Reference,
+                name: "the merged claim".to_owned(),
+            };
+            let result = super::apply(&scratch.root, BANK, &scratch.bank(), Scratch::now(), &merge);
             let names = scratch.bank().memory_filenames().expect("list");
             assert_eq!(result.is_ok(), member, "{result:?}");
             assert_eq!(
@@ -1931,9 +1939,6 @@ is wrong on sight — retitle it."
                 !member,
                 "{names:?}"
             );
-            // The call was spent either way, and the baseline says so.
-            let baseline = read_baseline(&scratch.baseline_path()).expect("baseline");
-            assert_eq!(baseline.at, Scratch::now());
         }
     }
 
@@ -1981,34 +1986,58 @@ is wrong on sight — retitle it."
     #[cfg(unix)]
     #[test]
     fn a_bank_upkeep_cannot_index_fails_alone_and_before_its_call() {
-        let scratch = Scratch::new("reflect-bank-fails");
-        make_due(&scratch);
-        fs::write(scratch.bank().dir().join("project_junk.md"), "junk\n").expect("junk");
-        fs::create_dir_all(Bank::in_data_root(&scratch.root, "-Users-you-code-z").dir())
-            .expect("a later bank");
-        let (options, asked) = scratch.replies(&[r#"{"ops":[]}"#], "");
+        // A file the index refuses — unparseable, or without a description —
+        // fails its bank before the call; one that arrives during the call
+        // fails it after, and the spent call clears the backlog.
+        for (junk, during) in [
+            ("junk\n", false),
+            ("---\nname: by hand\ntype: user\n---\n\nbody\n", false),
+            ("---\nname: by hand\ntype: user\n---\n\nbody\n", true),
+        ] {
+            let scratch = Scratch::new("reflect-bank-fails");
+            let files = make_due(&scratch);
+            let (held, landed) = (
+                scratch.home.join("junk.md"),
+                scratch.bank().dir().join("project_junk.md"),
+            );
+            fs::write(if during { &held } else { &landed }, junk).expect("junk");
+            fs::create_dir_all(Bank::in_data_root(&scratch.root, "-Users-you-code-z").dir())
+                .expect("a later bank");
+            let prunes: Vec<String> = files[..UPKEEP_MAX_OPS]
+                .iter()
+                .map(|file| format!("{{\"op\":\"prune\",\"file\":\"{file}\"}}"))
+                .collect();
+            let copy = format!("cp '{}' '{}'", held.display(), landed.display());
+            let (options, asked) = scratch.replies(
+                &[&format!("{{\"ops\":[{}]}}", prunes.join(","))],
+                if during { &copy } else { "" },
+            );
 
-        // The pass fails, but only once every bank and the log index have run.
-        assert!(reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).is_err());
-        assert!(!asked.join("asked-1").exists(), "a call spent on it");
-        let log = scratch.log();
-        assert!(log.contains(&format!("bank={BANK} failed(")), "{log}");
-        assert!(
-            log.contains("bank=-Users-you-code-z count=0 seeded"),
-            "{log}"
-        );
-        assert!(
-            crate::paths::log_dir(&scratch.root)
-                .join("INDEX.md")
-                .is_file()
-        );
-        // Its baseline stays put: still due, and reworked the day it is repaired.
-        assert_eq!(
-            read_baseline(&scratch.baseline_path())
-                .expect("baseline")
-                .count,
-            0
-        );
+            // The bank fails, but every bank and the log index still run.
+            let outcome =
+                reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
+            assert_eq!(outcome.failed, 1);
+            assert_eq!(asked.join("asked-1").exists(), during, "a call spent on it");
+            let log = scratch.log();
+            assert!(log.contains(&format!("bank={BANK} failed(")), "{log}");
+            assert!(
+                log.contains("bank=-Users-you-code-z count=0 seeded"),
+                "{log}"
+            );
+            assert!(
+                crate::paths::log_dir(&scratch.root)
+                    .join("INDEX.md")
+                    .is_file()
+            );
+            // Before the call the baseline stays put: still due, and reworked
+            // the day it is repaired. After it, the pass is recorded with no
+            // backlog, so the bank waits on growth like any other.
+            let baseline = read_baseline(&scratch.baseline_path()).expect("baseline");
+            assert_eq!(
+                (baseline.at == Scratch::now(), baseline.last_ops),
+                (during, 0)
+            );
+        }
     }
 
     #[test]

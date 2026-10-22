@@ -422,17 +422,27 @@ mod tests {
     fn one_tiers_wordings_of_one_claim_are_ordered_by_name_then_description_then_body() {
         let name = "stele owns the graph lock";
         let base = proposal(name, "f");
-        for other in [
-            proposal("Stele owns the graph locks", "f"),
-            described(name, &format!("Description of {name}"), "f"),
-            proposal(name, "g"),
+        // Byte order: an uppercase name or description sorts first, `f` before `g`.
+        for (other, base_wins) in [
+            (proposal("Stele owns the graph locks", "f"), false),
+            (
+                described(name, &format!("Description of {name}"), "f"),
+                false,
+            ),
+            (proposal(name, "g"), true),
         ] {
-            let (left, right) = ((Tier::Fable, base.clone()), (Tier::Fable, other));
-            assert_eq!(
-                group(vec![left.clone(), right.clone()]),
-                group(vec![right, left]),
-                "the draft must not depend on the order"
-            );
+            let winner = if base_wins { &base } else { &other };
+            for (first, second) in [(&base, &other), (&other, &base)] {
+                let groups = group(vec![
+                    (Tier::Fable, first.clone()),
+                    (Tier::Fable, second.clone()),
+                ]);
+                assert_eq!(groups.len(), 1);
+                assert_eq!(
+                    &groups[0].draft, winner,
+                    "the byte-least wording carries, whatever the order"
+                );
+            }
         }
     }
 
