@@ -141,7 +141,7 @@ Descriptions are raw text end to end — no quoting layer ever interprets them.<
 <h2 class="h2">_archive/ — supersession lineage</h2>
 </header>
 <div class="stack">
-<p class="docs-note">A replaced file moves (never copies) to <code class="code">_archive/&lt;YYYYMMDDTHHMMSS&gt;_&lt;filename&gt;</code> —
+<p class="docs-note">A replaced file moves (never copies) to <code class="code">_archive/&lt;YYYYMMDDTHHMMSS&gt;_&lt;filename&gt;</code>, or <code class="code">&lt;YYYYMMDDTHHMMSS&gt;-&lt;n&gt;_&lt;filename&gt;</code> when that name is already taken within the second —
 UTC timestamp prefix, archived content verbatim as it stood. Nothing in <code class="code">_archive/</code>
 is ever deleted. A commit moves the files it replaces only once everything that can refuse it
 has passed — the index over the rest of the bank, each replaced file read, a free filename found —

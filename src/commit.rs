@@ -162,7 +162,16 @@ fn created_of(bank: &Bank, filename: &str) -> Result<Option<String>> {
 fn stow(bank: &Bank, filename: &str, now: Timestamp) -> Result<PathBuf> {
     let archive_dir = bank.archive_dir();
     fs::create_dir_all(&archive_dir).map_err(|source| Error::io(&archive_dir, source))?;
-    let archived = archive_dir.join(format!("{}_{filename}", now.stamp()));
+    // The stamp resolves to the second and a rename replaces: a second archive
+    // of the filename within it takes `<stamp>-<n>_…` instead of the first.
+    let stamp = now.stamp();
+    let mut archived = archive_dir.join(format!("{stamp}_{filename}"));
+    for n in 2.. {
+        if !archived.exists() {
+            break;
+        }
+        archived = archive_dir.join(format!("{stamp}-{n}_{filename}"));
+    }
     fs::rename(bank.dir().join(filename), &archived)
         .map_err(|source| Error::io(&archived, source))?;
     Ok(archived)
@@ -240,9 +249,10 @@ mod tests {
     use crate::lock::CommitLock;
     use crate::memory::{MemoryFile, MemoryType};
     use crate::testutil::TempDir;
+    use crate::time::Timestamp;
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     const BANK: &str = "-Users-you--code-project";
 
@@ -581,6 +591,30 @@ mod tests {
             Err(Error::Io { path, .. }) if path == archive
         ));
         assert!(kept.path.is_file());
+    }
+
+    #[test]
+    fn an_archive_within_an_earlier_ones_second_never_replaces_it() {
+        let temp = TempDir::new("commit-same-second");
+        let bank = Bank::in_data_root(temp.path(), BANK);
+        let first = commit_memory(temp.path(), BANK, request("twice")).expect("commit");
+        fs::create_dir_all(bank.archive_dir()).expect("archive dir");
+        let now = Timestamp::now().expect("now").unix_seconds();
+        let earlier: Vec<PathBuf> = (now..now + 3)
+            .map(|second| {
+                let stamp = Timestamp::from_unix_seconds(second).stamp();
+                let path = bank
+                    .archive_dir()
+                    .join(format!("{stamp}_{}", first.filename));
+                fs::write(&path, "earlier\n").expect("earlier archive");
+                path
+            })
+            .collect();
+        let archived = archive_memory(temp.path(), BANK, &first.filename).expect("archive");
+        assert!(read(&archived).contains("twice"), "{archived:?}");
+        for path in earlier {
+            assert_eq!(read(&path), "earlier\n");
+        }
     }
 
     #[test]
