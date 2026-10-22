@@ -287,16 +287,19 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
         .copied()
         .filter(|e| e.draft.kind == "correction" && (week.contains(e.at) || last.contains(e.at)))
         .collect();
-    let said = |e: &trail::Event| e.draft.rationale.clone().unwrap_or_default();
+    // tokenized once each: the pairwise scan is quadratic in a fortnight's
+    // corrections, and re-tokenizing per pair cost ~85 ms at 393 of them
+    let said: Vec<_> = corrections
+        .iter()
+        .map(|e| breathe::tokens(e.draft.rationale.as_deref().unwrap_or_default()))
+        .collect();
     score.corrections = (
         of_kind("correction").count(),
-        corrections
-            .iter()
-            .enumerate()
-            .filter(|(at, now)| {
-                week.contains(now.at)
-                    && corrections[..*at].iter().any(|earlier| {
-                        breathe::jaccard(&said(earlier), &said(now)) >= breathe::JACCARD_SAME
+        (0..corrections.len())
+            .filter(|&at| {
+                week.contains(corrections[at].at)
+                    && said[..at].iter().any(|earlier| {
+                        breathe::jaccard(earlier, &said[at]) >= breathe::JACCARD_SAME
                     })
             })
             .count(),
