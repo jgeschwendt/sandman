@@ -643,7 +643,8 @@ pub fn list_json(breaths: &[Breath]) -> String {
 }
 
 /// Lowercase alphanumeric runs.
-fn tokens(title: &str) -> BTreeSet<String> {
+#[must_use]
+pub fn tokens(title: &str) -> BTreeSet<String> {
     title
         .split(|ch: char| !ch.is_alphanumeric())
         .filter(|token| !token.is_empty())
@@ -651,16 +652,17 @@ fn tokens(title: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// `|A ∩ B| / |A ∪ B|` over title tokens; 0 when both are empty.
+/// `|A ∩ B| / |A ∪ B|` over two [`tokens`] sets; 0 when both are empty. Sets,
+/// not strings, so a caller comparing many pairs tokenizes each text once.
 #[must_use]
-pub fn jaccard(left: &str, right: &str) -> f64 {
-    let (left, right) = (tokens(left), tokens(right));
-    let union = left.union(&right).count();
+pub fn jaccard(left: &BTreeSet<String>, right: &BTreeSet<String>) -> f64 {
+    let shared = left.intersection(right).count();
+    let union = left.len() + right.len() - shared;
     if union == 0 {
         return 0.0;
     }
     #[allow(clippy::cast_precision_loss, reason = "title token counts are tiny")]
-    let share = left.intersection(&right).count() as f64 / union as f64;
+    let share = shared as f64 / union as f64;
     share
 }
 
@@ -741,7 +743,7 @@ fn unversioned(path: &str) -> String {
 /// [`JACCARD_SAME`] with no numeric token differing. A dropped breath is
 /// matched only for its own repo, so a drop never blocks another repo.
 fn repeat_of<'a>(existing: &'a [Breath], repo: &str, url: &str, title: &str) -> Option<&'a Breath> {
-    let url = normal_url(url);
+    let (url, said) = (normal_url(url), tokens(title));
     let live = || {
         existing
             .iter()
@@ -752,7 +754,7 @@ fn repeat_of<'a>(existing: &'a [Breath], repo: &str, url: &str, title: &str) -> 
         .or_else(|| {
             live().find(|breath| {
                 breath.repo == repo
-                    && jaccard(&breath.title, title) >= JACCARD_SAME
+                    && jaccard(&tokens(&breath.title), &said) >= JACCARD_SAME
                     && same_numbers(&breath.title, title)
             })
         })
@@ -1606,12 +1608,13 @@ pub fn reweight(ctx: &Context, dry_run: bool) -> Result<(Vec<Change>, Option<tra
 mod tests {
     use super::{
         Breath, PassKind, SEED, Sources, is_breath_name, jaccard, normal_url, pass_id,
-        same_numbers, valid_repo,
+        same_numbers, tokens, valid_repo,
     };
     use crate::time::Timestamp;
 
     #[test]
     fn jaccard_counts_shared_title_tokens() {
+        let jaccard = |left, right| jaccard(&tokens(left), &tokens(right));
         assert!(
             (jaccard("Fast incremental parsing", "fast INCREMENTAL parsing!") - 1.0).abs() < 1e-9
         );
