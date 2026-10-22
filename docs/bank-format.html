@@ -954,8 +954,7 @@ instead (<code class="code">prompts/shift.md</code> rule 7).</li>
 loopback, open a pty, run <code class="code">ps</code> or read <code class="code">/dev/fd</code> (process substitution). An
 <code class="code">excludedCommands</code> entry would run with no sandbox at all — no proxy, no <code class="code">denyRead</code> —
 so exactly one command leaves: <code class="code">~/.local/bin/shift-test &lt;test command&gt;</code>, which re-enters
-its own Seatbelt profile, <code class="code">profiles/shift-test.sb</code> (both installed by hand:
-<code class="code">install -m755 profiles/shift-test ~/.local/bin/ &amp;&amp; install -m644 profiles/shift-test.sb ~/.local/share/sandman/</code>).
+its own Seatbelt profile, <code class="code">profiles/shift-test.sb</code> (both installed by the <code class="code">sandman-install</code> routine, <code class="code">docs/routines/sandman-install.md</code>, with the binary).
 It runs only from under <code class="code">~/.grove/code</code>, and from <code class="code">(allow default)</code> it subtracts: reads of
 <code class="code">~/.aws</code>, <code class="code">~/.claude</code>, <code class="code">~/.claude.json</code>, <code class="code">~/.config/gh</code>, <code class="code">~/.docker/config.json</code>,
 <code class="code">~/.gnupg</code>, <code class="code">~/.netrc</code>, <code class="code">~/.npmrc</code>, <code class="code">~/.ssh</code>, <code class="code">~/Codes</code> and <code class="code">~/Library/Keychains</code>;
@@ -998,11 +997,11 @@ unwritable) as scratch; a shift uses <code class="code">~/.sandman/shifts/&lt;id
 refuses a root the manifest does not declare; the shift falls back to <code class="code">git -C &lt;trunk&gt; worktree add ../shift-&lt;id&gt; -b shift/&lt;id&gt;</code>. A commit hook that fails EPERM in the sandbox
 (a pre-commit running <code class="code">cargo test</code>) may be skipped with <code class="code">--no-verify</code>: CI on the pull
 request is the gate, never skipped (<code class="code">prompts/shift.md</code> rule 7).</li>
-<li><strong>The runner is canonical here, installed by hand.</strong> <code class="code">docs/routines/shift.md</code> is the
-source of <code class="code">~/.routines/shift.md</code>. A shift may fix the
-installed runner in place; the owner's session reconciles this canonical copy with it.</li>
-<li><strong>Installing a binary stays the owner's act.</strong> <code class="code">~/.local/bin</code> is not writable, so a
-shift builds and tests its binary but never replaces the installed one.</li>
+<li><strong>The runner is canonical here.</strong> <code class="code">docs/routines/shift.md</code> is the
+source of <code class="code">~/.routines/shift.md</code>; the <code class="code">sandman-install</code> routine copies every <code class="code">docs/routines/*.md</code> over an installed copy that carries no local edit. A shift may fix the
+installed runner in place; the owner's session reconciles this canonical copy with it, and the routine leaves the edited copy alone until he does.</li>
+<li><strong>Installing a binary is never a shift's act.</strong> <code class="code">~/.local/bin</code> is not writable, so a
+shift builds and tests its binary but never replaces the installed one; the <code class="code">sandman-install</code> routine (<code class="code">docs/routines/sandman-install.md</code>), running as the owner every fifteen minutes, builds a clean trunk and installs it, the sandbox files and the routines, then restarts the report agent.</li>
 <li><strong>Deny rules and the mod's guards hold in every mode.</strong> No mode skips
 <code class="code">permissions.deny</code> — the profile denies <code class="code">git checkout --</code>, <code class="code">git clean</code>,
 <code class="code">git reset</code>, <code class="code">git stash</code>, force pushes and <code class="code">pkill -f</code> — nor the mod's tool-call hooks.</li>
