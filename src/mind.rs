@@ -614,10 +614,15 @@ mod tests {
             reply(r#"{"type":"result","subtype":"success"}"#),
             Err(Abstained::Unreadable(_))
         ));
-        assert!(matches!(
+        assert_eq!(
             reply(r#"{"is_error":true,"result":"refused","type":"result"}"#),
-            Err(Abstained::Failed(_))
-        ));
+            Err(Abstained::Failed("refused".to_owned()))
+        );
+        // An error with no text to carry still names itself.
+        assert_eq!(
+            reply(r#"{"is_error":true,"type":"result"}"#),
+            Err(Abstained::Failed("is_error".to_owned()))
+        );
     }
 
     #[test]
@@ -819,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn a_transcript_that_will_not_move_stays_put() {
+    fn a_transcript_that_is_absent_or_will_not_move_stays_put() {
         let temp = TempDir::new("mind-unmoved");
         let projects = temp.path().join("projects");
         let source = projects.join("-a-slug").join("s.jsonl");
@@ -830,6 +835,9 @@ mod tests {
             into: temp.path().join("kept"),
             projects,
         };
+        // A transcript that was never written leaves nothing to make room for.
+        super::relocate(&keep, "never-written");
+        assert!(!keep.into.exists());
         // A file where `into` goes, then a directory where the transcript goes.
         std::fs::write(&keep.into, "").expect("file");
         super::relocate(&keep, "s");

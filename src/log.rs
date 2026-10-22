@@ -26,6 +26,7 @@ use crate::error::{Error, Result};
 use crate::json::{self, Value};
 use crate::memory::MemoryFile;
 use crate::paths;
+use crate::slug::truncate_chars;
 use crate::time::Timestamp;
 use crate::verbs::{dream, reflect};
 
@@ -328,7 +329,7 @@ pub fn sources(data_root: &Path, day: reflect::Day) -> Vec<Source> {
 
     let mut budget = SOURCES_MAX_CHARS;
     for source in &mut found {
-        source.body = truncate_chars(&source.body, budget);
+        source.body = truncate_chars(&source.body, budget).to_owned();
         budget -= source.body.chars().count();
     }
     found
@@ -377,21 +378,16 @@ pub fn began(data_root: &Path) -> Option<String> {
 /// to on the first entry ever written.
 #[must_use]
 pub fn earliest_archive_day(data_root: &Path) -> Option<String> {
+    // Fixed-width digits sort as numbers, so the first day found is the
+    // earliest.
     let root = paths::archive_claude_dir(data_root);
-    let mut earliest: Option<String> = None;
-    for year in numeric_dirs(&root, 4) {
+    numeric_dirs(&root, 4).into_iter().find_map(|year| {
         let months = root.join(&year);
-        for month in numeric_dirs(&months, 2) {
-            let days = months.join(&month);
-            for day in numeric_dirs(&days, 2) {
-                let key = format!("{year}-{month}-{day}");
-                if earliest.as_ref().is_none_or(|held| key < *held) {
-                    earliest = Some(key);
-                }
-            }
-        }
-    }
-    earliest
+        numeric_dirs(&months, 2).into_iter().find_map(|month| {
+            let day = numeric_dirs(&months.join(&month), 2).into_iter().next()?;
+            Some(format!("{year}-{month}-{day}"))
+        })
+    })
 }
 
 /// Which day of the voyage `date` is, counting `began` as day 1. An unreadable
@@ -508,7 +504,7 @@ pub fn write_entry(data_root: &Path, entry: &Entry) -> Result<PathBuf> {
     let path = dir.join(entry.file_name());
     atomic::write(&path, &entry.render())?;
     let hint = earliest_archive_day(data_root).unwrap_or_else(|| entry.date.clone());
-    write_index(data_root, Some(&hint))?;
+    write_index(data_root, &hint)?;
     Ok(path)
 }
 
@@ -519,18 +515,15 @@ pub fn write_entry(data_root: &Path, entry: &Entry) -> Result<PathBuf> {
 /// 1 is set once and never moves, or the day numbers in every entry behind it
 /// would stop meaning anything. A file that does not parse as an entry — an
 /// old-format day page, a half-written page — is not one, and is left out.
-pub fn write_index(data_root: &Path, began_hint: Option<&str>) -> Result<PathBuf> {
+pub fn write_index(data_root: &Path, began_hint: &str) -> Result<PathBuf> {
     let dir = paths::log_dir(data_root);
     fs::create_dir_all(&dir).map_err(|source| Error::io(&dir, source))?;
     let path = dir.join(INDEX_FILE_NAME);
 
-    let held = began(data_root);
-    let mut out = String::from("---\nname: voyage log\n");
-    let _ = writeln!(out, "description: {INDEX_DESCRIPTION}");
-    if let Some(start) = held.as_deref().or(began_hint) {
-        let _ = writeln!(out, "began: {start}");
-    }
-    out.push_str("type: reference\n---\n\n");
+    let start = began(data_root).unwrap_or_else(|| began_hint.to_owned());
+    let mut out = format!(
+        "---\nname: voyage log\ndescription: {INDEX_DESCRIPTION}\nbegan: {start}\ntype: reference\n---\n\n"
+    );
     for entry in entries_on_disk(data_root) {
         let _ = writeln!(
             out,
@@ -550,7 +543,7 @@ pub fn write_index(data_root: &Path, began_hint: Option<&str>) -> Result<PathBuf
 
 /// Every bank directory under `<root>/memories/`, by key. `.recent` is the
 /// queue, not a bank; `_`-prefixed names are sandman's own.
-fn banks(data_root: &Path) -> Vec<(String, PathBuf)> {
+pub(crate) fn banks(data_root: &Path) -> Vec<(String, PathBuf)> {
     let dir = data_root.join(MEMORIES_DIR_NAME);
     let Ok(entries) = fs::read_dir(&dir) else {
         return Vec::new();
@@ -629,20 +622,13 @@ fn numeric_dirs(dir: &Path, width: usize) -> Vec<String> {
     names
 }
 
-/// The first `max` characters of `text`.
-fn truncate_chars(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_owned();
-    }
-    text.chars().take(max).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        BODY_MAX_CHARS, Entry, INDEX_FILE_NAME, Kind, Reply, Source, TAIL_MAX_CHARS, began,
-        body_with_next, day_ended, day_number, existing, fingerprint, parse_reply, position,
-        prompt, sources, tail, write_entry, write_index,
+        BODY_MAX_CHARS, Entry, INDEX_FILE_NAME, Kind, Reply, SOURCES_MAX_CHARS, Source,
+        TAIL_MAX_CHARS, began, body_with_next, day_ended, day_number, earliest_archive_day,
+        existing, fingerprint, parse_reply, position, prompt, sources, tail, write_entry,
+        write_index,
     };
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
@@ -844,6 +830,19 @@ mod tests {
             "---\ncreated: 2026-08-31T12:00:00Z\n---\n\nptr\n",
         )
         .expect("pointer");
+        // Unreadable and unparseable files, listed ahead of the real ones:
+        // each is passed over, and the scan goes on to the rest.
+        let bank_a = root.join("memories").join("bank-a");
+        fs::write(bank_a.join("a_bytes.md"), b"\xff\xfe").expect("not utf-8");
+        fs::write(bank_a.join("a_junk.md"), "no frontmatter\n").expect("junk");
+        // A body past the budget is cut to whatever the earlier sources left.
+        memory(
+            root,
+            "bank-c",
+            "big.md",
+            "created: 2026-08-31T09:00:00Z\n",
+            &"x".repeat(SOURCES_MAX_CHARS),
+        );
 
         let day = Day {
             day: 31,
@@ -857,10 +856,18 @@ mod tests {
             .collect();
         assert_eq!(
             named,
-            vec![("bank-a", "fresh.md"), ("bank-a", "reworked.md")]
+            vec![
+                ("bank-a", "fresh.md"),
+                ("bank-a", "reworked.md"),
+                ("bank-c", "big.md")
+            ]
         );
         assert_eq!(found[1].body, "the reworked body");
         assert_eq!(found[1].description, "what reworked.md says");
+        assert_eq!(
+            found[2].body.len(),
+            SOURCES_MAX_CHARS - "the fresh body".len() - "the reworked body".len()
+        );
     }
 
     #[test]
@@ -886,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn the_index_keeps_began_orders_ascending_and_ignores_a_day_page() {
+    fn the_index_keeps_began_orders_ascending_and_ignores_what_is_not_an_entry() {
         let temp = TempDir::new("log-index");
         let root = temp.path();
         let dir = root.join("log");
@@ -897,6 +904,12 @@ mod tests {
             "# 2026-08-14\n\n## takes\n\n- one\n\n## memories\n\n- two\n",
         )
         .expect("day page");
+        // A whole entry under a name that is not `yyyy-mm-dd.md`. Not an entry.
+        fs::write(
+            dir.join("2026-08-15.txt"),
+            entry("2026-08-15", 3, "Misfiled", Kind::Discovery, "Body.\n").render(),
+        )
+        .expect("misfiled entry");
 
         write_entry(
             root,
@@ -937,14 +950,14 @@ mod tests {
         );
 
         // A regeneration with a different hint leaves `began:` where it is.
-        write_index(root, Some("1999-01-01")).expect("regenerate");
+        write_index(root, "1999-01-01").expect("regenerate");
         assert_eq!(began(root).as_deref(), Some("2026-08-31"));
         assert_eq!(existing(root, "2026-08-31").map(|held| held.day), Some(19));
         assert_eq!(existing(root, "2026-08-14"), None);
     }
 
     #[test]
-    fn the_tail_keeps_the_newest_when_it_is_cut() {
+    fn the_tail_keeps_the_newest_when_it_is_cut_and_all_when_not() {
         let temp = TempDir::new("log-tail");
         let root = temp.path();
         for (index, date) in [
@@ -985,6 +998,19 @@ mod tests {
 
         let empty = TempDir::new("log-tail-empty");
         assert_eq!(tail(empty.path()), (0, "(no entries yet)".to_owned()));
+        // Under the ceiling, the tail is every block whole.
+        write_entry(
+            empty.path(),
+            &entry("2026-08-25", 1, "Title 1", Kind::Discovery, "Body.\n"),
+        )
+        .expect("write");
+        assert_eq!(
+            tail(empty.path()),
+            (
+                1,
+                "day 1 · Title 1 · discovery · 2026-08-25\nBody.".to_owned()
+            )
+        );
     }
 
     #[test]
@@ -1019,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn the_position_line_measures_the_day_against_the_banks() {
+    fn the_position_line_measures_the_day_and_the_archive_names_day_one() {
         let temp = TempDir::new("log-position");
         let root = temp.path();
         memory(
@@ -1043,6 +1069,8 @@ mod tests {
             "created: 2026-08-31T09:00:00Z\n",
             "three",
         );
+        // A bank holding only sandman's own file holds no memories.
+        memory(root, "bank-c", "_own.md", "", "own");
         let archive = root
             .join(".archive")
             .join("claude")
@@ -1053,6 +1081,13 @@ mod tests {
         for name in ["a.jsonl", "b.jsonl", "c.jsonl"] {
             fs::write(archive.join(name), "{}\n").expect("session");
         }
+        // The earliest day is the first directory found: a day-named file and
+        // a month with no days are not days, and a later day is not first.
+        let year = archive.parent().and_then(Path::parent).expect("year dir");
+        fs::write(year.join("08").join("01"), "").expect("a day-named file");
+        fs::create_dir_all(year.join("07")).expect("an empty month");
+        fs::create_dir_all(year.join("09").join("02")).expect("a later day");
+        assert_eq!(earliest_archive_day(root).as_deref(), Some("2026-08-31"));
 
         let day = Day {
             day: 31,

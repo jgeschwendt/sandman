@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::atomic;
-use crate::bank::{Bank, MEMORIES_DIR_NAME};
+use crate::bank::Bank;
 use crate::commit::{CommitRequest, archive_memory, commit_memory};
 use crate::error::{Error, Result};
 use crate::journal;
@@ -291,7 +291,7 @@ pub fn entry_step(
 /// moves, or the day numbers every entry behind it carries would stop meaning
 /// anything.
 pub fn write_index(data_root: &Path, day: Day) -> Result<PathBuf> {
-    log::write_index(data_root, Some(&began(data_root, day)))
+    log::write_index(data_root, &began(data_root, day))
 }
 
 /// Day 1 of the voyage, as the entry and the index both count from it.
@@ -325,10 +325,9 @@ fn pointers(data_root: &Path) -> Vec<Pointer> {
                 return None;
             }
             let raw = fs::read_to_string(&path).ok()?;
+            // Anything but an object has no `dreamed` stamp, so the sweep
+            // passes it over.
             let value = json::parse(raw.trim()).ok()?;
-            if !matches!(value, Value::Object(_)) {
-                return None;
-            }
             Some(Pointer { path, value })
         })
         .collect();
@@ -362,28 +361,6 @@ fn sweep(data_root: &Path, now: Timestamp) -> Result<usize> {
 }
 
 // ─── bank upkeep ──────────────────────────────────────────────────────────
-
-/// Every bank directory under `<root>/memories/`, by key.
-fn banks(data_root: &Path) -> Vec<(String, PathBuf)> {
-    let dir = data_root.join(MEMORIES_DIR_NAME);
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    let mut banks: Vec<(String, PathBuf)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            if !entry.file_type().ok()?.is_dir() {
-                return None;
-            }
-            let name = entry.file_name().to_str()?.to_owned();
-            // `.recent` is the queue, not a bank; `_`-prefixed names are
-            // sandman's own.
-            (!name.starts_with('.') && !name.starts_with('_')).then(|| (name, entry.path()))
-        })
-        .collect();
-    banks.sort();
-    banks
-}
 
 /// The per-bank due-baseline.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -454,7 +431,7 @@ fn upkeep_all(
     let mut lines = Vec::new();
     let mut applied = 0;
     let mut due = 0;
-    for (key, dir) in banks(data_root) {
+    for (key, dir) in log::banks(data_root) {
         let (note, ops, fired) = upkeep_bank(data_root, &key, &Bank::at(&dir), now, options)?;
         applied += ops;
         due += usize::from(fired);
@@ -1396,6 +1373,9 @@ mod tests {
         let unrouted = scratch.pointer("unrouted", &hours(200), None);
         // Routed but young: kept.
         let young = scratch.pointer("young", &hours(1), Some(dreamt));
+        // The same document under a name that is not a pointer's: kept.
+        let stray = gone.with_extension("txt");
+        fs::copy(&gone, &stray).expect("stray");
 
         let outcome = reflect(
             &scratch.root,
@@ -1409,6 +1389,7 @@ mod tests {
         assert!(boundary.exists());
         assert!(unrouted.exists());
         assert!(young.exists());
+        assert!(stray.exists());
     }
 
     // ─── upkeep ───────────────────────────────────────────────────────────
@@ -1439,6 +1420,14 @@ is wrong on sight — retitle it."
         for index in 0..7 {
             scratch.seed(&format!("memory {index}"), "d", "b");
         }
+        // A file beside the banks is not one.
+        fs::write(scratch.root.join("memories").join("stray.md"), "").expect("stray");
+        // A baseline whose count is not a count is no baseline: seen fresh.
+        fs::write(
+            scratch.baseline_path(),
+            "{\"at\":\"2026-08-11T08:00:00Z\",\"count\":-1}\n",
+        )
+        .expect("baseline");
         let outcome = reflect(
             &scratch.root,
             &scratch.claude,
@@ -1886,18 +1875,19 @@ is wrong on sight — retitle it."
             Some("2025-11-02T08:00:00Z")
         );
         assert_eq!(merged.body, "every fact all three made\n");
-        assert!(
-            merged
-                .frontmatter
-                .get("source")
-                .expect("source")
-                .contains(&format!(
-                    "merge of {}, {}, {}",
+        assert_eq!(
+            merged.frontmatter.get("source"),
+            Some(
+                format!(
+                    "reflect 2026-08-12T09:00:00Z · merge of {}, {}, {}",
                     members[0], members[1], members[2]
-                )),
-            "{:?}",
-            merged.frontmatter.get("source")
+                )
+                .as_str()
+            )
         );
+        // Members with no stamp to read date from the first one named.
+        let unstamped = ["project_a.md".to_owned(), "project_b.md".to_owned()];
+        assert_eq!(super::origin(&bank, &unstamped), unstamped[0]);
 
         // Every member ended in `_archive/` — the superseded one included.
         let archived: Vec<String> = fs::read_dir(bank.archive_dir())
@@ -1961,7 +1951,7 @@ is wrong on sight — retitle it."
 
     #[cfg(unix)]
     #[test]
-    fn the_merge_ask_carries_the_sources_whole() {
+    fn the_planning_ask_previews_the_memories_and_the_merge_ask_carries_them_whole() {
         let scratch = Scratch::new("reflect-merge-sources");
         make_due(&scratch);
         let long = scratch.seed(
@@ -1977,6 +1967,12 @@ is wrong on sight — retitle it."
         let reply = format!(
             "{{\"ops\":[{{\"op\":\"merge\",\"files\":[\"{long}\",\"{other}\"],\"type\":\"project\",\"name\":\"the one claim\",\"description\":\"one line\",\"body\":\"draft\"}}]}}"
         );
+        // Sandman's own file is no memory to rework.
+        fs::write(
+            scratch.bank().dir().join("_notes.md"),
+            "---\nname: notes\ndescription: d\ntype: user\n---\n\nbody\n",
+        )
+        .expect("own file");
         let (options, asked) = scratch.replies(&[&reply, r#"{"body":"both facts"}"#], "");
 
         reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
@@ -1985,12 +1981,32 @@ is wrong on sight — retitle it."
         let planning = read(&asked.join("asked-1"));
         assert!(planning.contains("> one"), "{planning}");
         assert!(!planning.contains("the fourth fact"), "{planning}");
+        assert!(!planning.contains("_notes.md"), "{planning}");
         // …and the merge ask sees the files whole, frontmatter included.
         let merge = read(&asked.join("asked-2"));
         assert!(merge.contains("the fourth fact"), "{merge}");
         assert!(merge.contains("the same claim, said elsewhere"), "{merge}");
         assert!(merge.contains("created:"), "{merge}");
         assert!(merge.contains("## The sources"), "{merge}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_upkeep_cannot_read_is_left_out_of_the_listing() {
+        let scratch = Scratch::new("reflect-listing-unreadable");
+        let files = make_due(&scratch);
+        let dir = scratch.bank().dir().to_path_buf();
+        fs::write(dir.join("project_bytes.md"), b"\xff\xfe").expect("not utf-8");
+        fs::write(dir.join("project_junk.md"), "no frontmatter\n").expect("junk");
+        let (options, asked) = scratch.replies(&[r#"{"ops":[]}"#], "");
+
+        // The pass itself fails on the bank's index; the listing it asked
+        // from had already passed both files over.
+        let _ = reflect(&scratch.root, &scratch.claude, Scratch::now(), &options);
+        let planning = read(&asked.join("asked-1"));
+        assert!(planning.contains(&files[0]), "{planning}");
+        assert!(!planning.contains("project_bytes.md"), "{planning}");
+        assert!(!planning.contains("project_junk.md"), "{planning}");
     }
 
     #[cfg(unix)]
@@ -2139,7 +2155,7 @@ is wrong on sight — retitle it."
     }
 
     #[test]
-    fn validation_reads_the_documented_shapes() {
+    fn validation_reads_the_documented_shapes_and_names_the_first_bad_field() {
         let scratch = Scratch::new("reflect-validate");
         let files = make_due(&scratch);
         let bank = scratch.bank();
@@ -2186,6 +2202,43 @@ is wrong on sight — retitle it."
         assert_eq!(
             read_ops(&seven, &bank),
             Err(format!("too-many-ops: {}", UPKEEP_MAX_OPS + 1))
+        );
+
+        // Every field an operation needs is checked, and the first missing
+        // or malformed one names the rejection.
+        let pair = format!("\"files\":[\"{}\",\"{}\"]", files[0], files[1]);
+        for (op, expected) in [
+            (r#"{"op":"merge"}"#.to_owned(), "bad-files"),
+            (format!(r#"{{"op":"merge",{pair}}}"#), "bad-body"),
+            (format!(r#"{{"op":"merge",{pair},"body":" "}}"#), "bad-body"),
+            (
+                format!(r#"{{"op":"merge",{pair},"body":"b"}}"#),
+                "bad-description",
+            ),
+            (
+                format!(r#"{{"op":"merge",{pair},"body":"b","description":"d"}}"#),
+                "bad-type",
+            ),
+            (
+                format!(r#"{{"op":"merge",{pair},"body":"b","description":"d","type":"x"}}"#),
+                "bad-type",
+            ),
+            (r#"{"op":"prune"}"#.to_owned(), "bad-file"),
+            (
+                r#"{"op":"retitle","description":"d"}"#.to_owned(),
+                "bad-file",
+            ),
+            (format!(r#"{{"file":"{}"}}"#, files[0]), "no-op"),
+        ] {
+            assert_eq!(
+                read_ops(&format!("{{\"ops\":[{op}]}}"), &bank),
+                Err(expected.to_owned()),
+                "{op}"
+            );
+        }
+        assert!(
+            read_ops(r#"{"ops":[}"#, &bank).is_err_and(|why| why.starts_with("bad-json: ")),
+            "a payload that does not parse"
         );
     }
 

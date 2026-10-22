@@ -477,22 +477,19 @@ fn unchanged(pointer: &Pointer) -> bool {
 /// Stamp the pointer routed, keeping everything else it carries — unless it
 /// was forgotten or re-taken since it was read, which re-reading right before
 /// the write narrows to the read-to-rename window.
+///
+/// What is re-read is an object (`read_pointer` yields nothing else) and,
+/// being unchanged since `pending` queued it, carries no stamp yet.
 fn mark_dreamed(pointer: &Pointer, at: Timestamp) -> Result<()> {
-    if !unchanged(pointer) {
+    let fresh = read_pointer(&pointer.path).filter(|fresh| fresh.value == pointer.value);
+    let Some(Pointer {
+        value: Value::Object(mut entries),
+        ..
+    }) = fresh
+    else {
         return Ok(());
-    }
-    let Value::Object(entries) = &pointer.value else {
-        return Err(Error::Json {
-            path: Some(pointer.path.clone()),
-            message: "pointer is not a json object".to_owned(),
-        });
     };
-    let mut entries = entries.clone();
-    let stamp = Value::string(at.iso8601());
-    match entries.iter_mut().find(|(key, _)| key == DREAMED_KEY) {
-        Some((_, value)) => *value = stamp,
-        None => entries.push((DREAMED_KEY.to_owned(), stamp)),
-    }
+    entries.push((DREAMED_KEY.to_owned(), Value::string(at.iso8601())));
     atomic::write(
         &pointer.path,
         &format!("{}\n", Value::Object(entries).render()),
@@ -1150,7 +1147,7 @@ mod tests {
     }
 
     #[test]
-    fn an_archive_with_invalid_utf8_still_reads() {
+    fn an_archive_with_invalid_utf8_still_reads_and_a_missing_one_says_so() {
         let scratch = Scratch::new("dream-lossy");
         let pointer =
             super::read_pointer(&scratch.queue(SID, "2026-08-11T12:00:00Z")).expect("pointer");
@@ -1159,6 +1156,22 @@ mod tests {
         bytes.splice(0..0, *b"\xff\n");
         fs::write(archived, bytes).expect("a stray byte");
         assert!(super::conversation(&pointer).contains("port the memory verbs"));
+        fs::remove_file(archived).expect("rm");
+        assert_eq!(
+            super::conversation(&pointer),
+            format!(
+                "(the archived transcript at {} could not be read)",
+                archived.display()
+            )
+        );
+        let unarchived = super::Pointer {
+            archived: None,
+            ..pointer
+        };
+        assert_eq!(
+            super::conversation(&unarchived),
+            "(the pointer names no archived transcript)"
+        );
     }
 
     #[cfg(unix)]
@@ -1332,7 +1345,8 @@ mod tests {
                 "claude-fable-5",
                 &reply(&bank, "the queue is a recall surface", "fable's body"),
             ),
-            ("claude-opus-5", r#"{"proposals":[]}"#),
+            // An answer whose one proposal is unusable still responds.
+            ("claude-opus-5", r#"{"proposals":[{"bank":"-elsewhere"}]}"#),
         ]);
 
         let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
@@ -1356,6 +1370,7 @@ mod tests {
         let stamped = fs::read_to_string(&pointer).expect("pointer");
         assert!(stamped.contains(DREAMED_KEY), "{stamped}");
         let log = read_log(&scratch.root);
+        assert!(log.contains("opus:ok(0,1 dropped)"), "{log}");
         assert!(log.contains("groups=1"), "{log}");
         assert!(log.contains("committed=-"), "{log}");
         assert!(log.contains(&format!("deduped={existing}")), "{log}");
@@ -1588,6 +1603,7 @@ mod tests {
         // Not pointers, and a pointer already routed.
         fs::write(recent.join("notes.txt"), "stray").expect("stray");
         fs::write(recent.join("broken.json"), "{not json").expect("broken");
+        fs::write(recent.join("list.json"), "[1]").expect("not an object");
         fs::write(
             recent.join("done.json"),
             r#"{"ended":"2026-08-01T00:00:00Z","dreamed":"2026-08-02T00:00:00Z"}"#,
@@ -1677,17 +1693,19 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_queue_is_a_successful_run() {
+    fn an_empty_queue_is_a_successful_run_and_an_unreadable_one_an_error() {
         let scratch = Scratch::new("dream-empty");
-        let options = Options {
-            binary: "/nonexistent/claude".into(),
-            minds: mind::trio(),
-            timeout: Duration::from_secs(1),
-            transcripts: None,
-        };
         assert_eq!(
-            dream(&scratch.root, &scratch.home, &options).expect("dream"),
+            dream(&scratch.root, &scratch.home, &options_that_must_not_run()).expect("dream"),
             super::Outcome::default()
         );
+        // A queue that is not a directory is not an empty queue.
+        let recent = crate::paths::recent_dir(&scratch.root);
+        fs::create_dir_all(recent.parent().expect("memories")).expect("memories");
+        fs::write(recent, "").expect("a file");
+        assert!(matches!(
+            super::depth(&scratch.root),
+            Err(crate::error::Error::Io { .. })
+        ));
     }
 }
