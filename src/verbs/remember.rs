@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn the_defaults_are_type_feedback_eight_words_and_the_first_line() {
+    fn the_defaults_are_type_feedback_eight_words_the_first_line_and_the_working_directory() {
         let temp = TempDir::new("remember-defaults");
         let outcome = remember(
             temp.path(),
@@ -142,6 +142,26 @@ mod tests {
                 .starts_with("remember 20")
         );
         assert!(file.body.starts_with("one two three"));
+
+        // No cwd at all is the process's own directory.
+        let here = crate::project::root(&std::env::current_dir().expect("cwd"));
+        let defaulted = remember(
+            temp.path(),
+            Remember {
+                body: "x".to_owned(),
+                ..Remember::default()
+            },
+        )
+        .expect("remember");
+        assert_eq!(
+            defaulted.path.parent(),
+            Some(
+                temp.path()
+                    .join("memories")
+                    .join(Bank::key_for(&here))
+                    .as_path()
+            )
+        );
     }
 
     #[test]

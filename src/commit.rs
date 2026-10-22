@@ -238,6 +238,7 @@ mod tests {
     use crate::memory::{MemoryFile, MemoryType};
     use crate::testutil::TempDir;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
     use std::path::Path;
 
     const BANK: &str = "-Users-you--code-project";
@@ -335,6 +336,13 @@ mod tests {
         repair.replaces = Some("README.md".to_owned());
         commit_memory(temp.path(), BANK, repair).expect("repair");
         assert!(bank.index_path().is_file());
+        // A bank that is a file cannot be committed into.
+        let blocked = Bank::in_data_root(temp.path(), "-blocked");
+        fs::write(blocked.dir(), "").expect("a file");
+        assert!(matches!(
+            commit_memory(temp.path(), "-blocked", request("x")),
+            Err(Error::Io { path, .. }) if path == blocked.dir()
+        ));
     }
 
     #[test]
@@ -543,6 +551,26 @@ mod tests {
                 ..
             })
         ));
+
+        // An `_archive/` that will not take the file, or that is a file, fails
+        // the move and leaves the memory in the bank.
+        let kept = commit_memory(temp.path(), BANK, request("kept")).expect("commit");
+        let archive = bank.archive_dir();
+        let chmod = |mode| fs::set_permissions(&archive, fs::Permissions::from_mode(mode));
+        chmod(0o555).expect("chmod");
+        let refused = archive_memory(temp.path(), BANK, &kept.filename);
+        chmod(0o755).expect("chmod back");
+        assert!(
+            matches!(&refused, Err(Error::Io { path, .. }) if path.parent() == Some(archive.as_path())),
+            "{refused:?}"
+        );
+        fs::remove_dir_all(&archive).expect("rm");
+        fs::write(&archive, "").expect("a file");
+        assert!(matches!(
+            archive_memory(temp.path(), BANK, &kept.filename),
+            Err(Error::Io { path, .. }) if path == archive
+        ));
+        assert!(kept.path.is_file());
     }
 
     #[test]

@@ -336,3 +336,27 @@ fn score_json_prints_the_metrics_and_week_names_a_week() {
         assert_eq!(output.status.code(), Some(2), "{bad}");
     }
 }
+
+#[test]
+fn an_empty_machine_misses_nothing_and_a_broken_store_fails_the_run() {
+    let home = Machine::new("score-empty");
+    let page = fs::read_to_string(ok(&home.run(&["score"])).trim()).expect("page");
+    assert!(
+        page.contains(
+            "## Worst three\n\n| metric | value | target |\n| --- | --- | --- |\n| none | - | - |\n"
+        ),
+        "{page}"
+    );
+    let fails = |why: &str| {
+        let output = home.run(&["score"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert!(stderr.contains(why), "{stderr}");
+    };
+    let sources = home.write(".sandman/breath/sources.toml", "nope");
+    fails("sources.toml");
+    fs::remove_file(sources).expect("rm");
+    fs::remove_dir_all(home.root().join("score")).expect("rmdir");
+    home.write(".sandman/score", "");
+    fails(".sandman/score");
+}

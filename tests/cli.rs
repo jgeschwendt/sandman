@@ -1149,6 +1149,14 @@ fn the_journal_records_what_recall_primed_a_session_with() {
         "{log}"
     );
     assert!(log.contains("silent nothing-to-recall"), "{log}");
+    // A payload naming no cwd is journalled so, and recalls for the process's own.
+    let cwdless = format!(r#"{{"hook_event_name":"SessionStart","session_id":"{started}"}}"#);
+    quiet(&machine.run_with_stdin(&["recall", "--hook"], &cwdless));
+    let log = machine.journal("recall");
+    assert!(
+        log.contains(&format!("hook session={started} cwd=none")),
+        "{log}"
+    );
 
     // With something to say, the line carries the shape and never the content.
     machine.transcript(&[

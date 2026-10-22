@@ -117,5 +117,15 @@ mod tests {
         }
         assert_eq!(std::fs::read_dir(temp.path()).expect("read dir").count(), 1);
         assert!(append_line(std::path::Path::new(""), "x").is_err());
+        // A log whose directory would sit under a file names that file.
+        let file = temp.path().join("occupied").join("file");
+        std::fs::write(&file, "").expect("file");
+        let error = append_line(&file.join("x.log"), "x").expect_err("under a file");
+        assert!(
+            error
+                .to_string()
+                .starts_with(&format!("{}: ", file.display())),
+            "{error}"
+        );
     }
 }

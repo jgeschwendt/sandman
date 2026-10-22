@@ -176,15 +176,16 @@ pub(crate) struct Answer {
 /// `Cursor`; `cli/rest.rs` hands it the locked stdin and stdout. EOF is a normal
 /// ending, and so is a `BrokenPipe`: the client hung up, and there is nobody
 /// left to read a failure about it.
-pub fn serve(ctx: &Context, input: impl BufRead, output: impl Write) -> io::Result<()> {
-    match converse(ctx, input, output) {
+pub fn serve(ctx: &Context, mut input: impl BufRead, mut output: impl Write) -> io::Result<()> {
+    match converse(ctx, &mut input, &mut output) {
         Err(source) if source.kind() == io::ErrorKind::BrokenPipe => Ok(()),
         outcome => outcome,
     }
 }
 
-/// The loop itself, with every write still able to fail.
-fn converse(ctx: &Context, input: impl BufRead, mut output: impl Write) -> io::Result<()> {
+/// The loop itself, with every write still able to fail. Over trait objects,
+/// so every stream pair runs the one copy of it.
+fn converse(ctx: &Context, input: &mut dyn BufRead, output: &mut dyn Write) -> io::Result<()> {
     note(ctx, "served start");
     let mut initialized = false;
     for line in input.lines() {
@@ -195,10 +196,7 @@ fn converse(ctx: &Context, input: impl BufRead, mut output: impl Write) -> io::R
             // end of the conversation.
             Err(source) if source.kind() == io::ErrorKind::InvalidData => {
                 note(ctx, &format!("error method={NONE} code={PARSE_ERROR}"));
-                write_line(
-                    &mut output,
-                    &rpc_error(Value::Null, PARSE_ERROR, "parse error"),
-                )?;
+                write_line(output, &rpc_error(Value::Null, PARSE_ERROR, "parse error"))?;
                 continue;
             }
             Err(source) => return Err(source),
@@ -209,7 +207,7 @@ fn converse(ctx: &Context, input: impl BufRead, mut output: impl Write) -> io::R
             continue;
         }
         if let Some(response) = respond(ctx, &mut initialized, &line) {
-            write_line(&mut output, &response)?;
+            write_line(output, &response)?;
         }
     }
     note(ctx, "served eof");
@@ -447,7 +445,7 @@ fn rpc_result(id: Value, result: Value) -> Value {
 }
 
 /// Write one response as one line, and flush it.
-fn write_line(output: &mut impl Write, response: &Value) -> io::Result<()> {
+fn write_line(output: &mut dyn Write, response: &Value) -> io::Result<()> {
     let mut line = response.render();
     line.push('\n');
     output.write_all(line.as_bytes())?;
@@ -915,7 +913,8 @@ fn remember_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        Context, McpError, PROTOCOL_VERSIONS, banks, call, is_live, recall, remember, serve, tools,
+        BUDGET_CHARS, Context, McpError, PROTOCOL_VERSIONS, banks, call, is_live, recall, remember,
+        serve, tools,
     };
     use crate::bank::Bank;
     use crate::error::Error;
@@ -989,8 +988,9 @@ mod tests {
         let (_temp, ctx) = seeded("mcp-transport");
         // A blank line, a line that is not JSON, a line that is not UTF-8, a
         // batch array, the wrong protocol version, no method at all, a request
-        // too early, a notification nobody handles, a ping, the handshake, and
-        // then the same request that was too early a moment ago.
+        // too early, a notification nobody handles, a ping, the handshake and
+        // the client's half of it, and then the same request that was too
+        // early a moment ago.
         let mut script: Vec<u8> = Vec::new();
         script.extend_from_slice(b"\n");
         script.extend_from_slice(b"{not json\n");
@@ -1009,6 +1009,8 @@ mod tests {
         script.extend_from_slice(b"\n");
         script.extend_from_slice(br#"{"jsonrpc":"2.0","id":0,"method":"initialize"}"#);
         script.extend_from_slice(b"\n");
+        script.extend_from_slice(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        script.extend_from_slice(b"\n");
         script.extend_from_slice(br#"{"jsonrpc":"2.0","id":6,"method":"tools/list"}"#);
         script.extend_from_slice(b"\n");
         script.extend_from_slice(br#"{"jsonrpc":"2.0","id":7,"method":"resources/list"}"#);
@@ -1016,7 +1018,7 @@ mod tests {
 
         let answered = conversation(&ctx, &script);
         assert_eq!(answered.len(), 10, "{answered:#?}");
-        // Neither the blank line nor the notification is a message to answer;
+        // Neither the blank line nor a notification is a message to answer;
         // the two unreadable lines are one parse error each, with a null id
         // because there is no id to be read out of them.
         let parse_error =
@@ -1060,6 +1062,10 @@ mod tests {
         assert!(journal.contains("served start"), "{journal}");
         assert!(
             journal.contains("ignored method=notifications/cancelled"),
+            "{journal}"
+        );
+        assert!(
+            journal.contains("served method=notifications/initialized"),
             "{journal}"
         );
         assert!(
@@ -1205,6 +1211,17 @@ mod tests {
     fn recall_answers_exactly_what_compose_composed() {
         let (temp, ctx) = seeded("mcp-recall");
         let cwd = temp.path();
+        // A voyage log wider than the whole budget is the section the cut drops.
+        let log = paths::log_dir(&ctx.data_root);
+        fs::create_dir_all(&log).expect("log dir");
+        fs::write(
+            log.join("INDEX.md"),
+            format!(
+                "---\nname: voyage log\n---\n\n- day 1 · [{}](2026-08-02.md) — discovery · 2026-08-02\n",
+                "t".repeat(BUDGET_CHARS)
+            ),
+        )
+        .expect("log index");
         let answer = recall(
             &ctx,
             &Value::object([("cwd", Value::string(cwd.to_string_lossy()))]),
@@ -1264,9 +1281,14 @@ mod tests {
             ),
         ]);
         assert_eq!(answer.result, expected);
+        assert_eq!(composed.trimmed.sections, ["chronological"]);
         // The shape, and never a character of the payload.
         assert!(answer.note.contains(&format!("cwd={}", cwd.display())));
-        assert!(answer.note.contains(" budget=9000 "), "{}", answer.note);
+        assert!(
+            answer.note.contains(" budget=9000 trimmed=chronological "),
+            "{}",
+            answer.note
+        );
         assert!(!answer.note.contains(SEED_BODY), "{}", answer.note);
         // A trailing separator or a `.` names the same directory, so the same bank.
         let spelled = format!("{}/./", cwd.display());

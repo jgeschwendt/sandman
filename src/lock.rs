@@ -144,10 +144,16 @@ mod tests {
     }
 
     #[test]
-    fn acquire_creates_a_missing_data_root() {
+    fn acquire_creates_a_missing_data_root_and_a_file_in_its_place_is_an_io_error() {
         let temp = TempDir::new("lock-mkdir");
         let root = temp.path().join("nested").join("root");
         let lock = CommitLock::acquire(&root).expect("acquire");
         assert!(lock.path().is_file());
+        let file = temp.path().join("file");
+        std::fs::write(&file, "").expect("a file");
+        assert!(matches!(
+            CommitLock::acquire(&file),
+            Err(Error::Io { path, .. }) if path == file
+        ));
     }
 }

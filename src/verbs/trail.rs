@@ -653,6 +653,7 @@ mod tests {
             r#"{"at":"2026-10-09T23:41:02Z","branch":"perpetual","cost_usd":0.25,"id":"e-20261009T234102Z-7f3a","kind":"change","parent":null,"refs":["t65"],"shift":"s-1"}"#
         );
         assert_eq!(Event::parse(&line).expect("parse"), event);
+        assert!(event.pretty().lines().any(|line| line == "cost_usd: 0.25"));
     }
 
     #[test]
@@ -792,6 +793,7 @@ mod tests {
             r#"{"kind":1}"#,
             r#"{"cost_usd":"x"}"#,
             r#"{"refs":"x"}"#,
+            r#"{"refs":[1]}"#,
         ] {
             assert!(Draft::from_json(bad).is_err(), "{bad}");
         }
@@ -800,6 +802,10 @@ mod tests {
             Draft::default()
         );
         assert!(Event::parse("{").is_err() && Event::parse("{}").is_err());
+        assert!(matches!(
+            Event::parse("[]"),
+            Err(Error::InvalidInput { what: "event", .. })
+        ));
     }
 
     #[test]

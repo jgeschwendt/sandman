@@ -343,7 +343,9 @@ mod tests {
         )
         .expect("manifest");
         assert_eq!(manifest_repos(&manifest), ["o/a", "p/b"]);
-        assert!(manifest_repos(&temp.path().join("absent.toml")).is_empty());
+        let absent = temp.path().join("absent.toml");
+        assert!(manifest_repos(&absent).is_empty());
+        assert!(manifest_trunks(&absent).is_empty());
         fs::write(
             &manifest,
             "[roots.\"o/a\"]\nurl = \"x\"\ntrunk = \"trunk\"\n\n[roots.\"o/a\".worktrees.dev]\ntrunk = \"no\"\n\n[roots.\"p/b\"]\n",
