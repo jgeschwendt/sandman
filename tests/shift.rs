@@ -928,13 +928,21 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
         1,
         "{meta}"
     );
+    // A meta.json planted outside shifts/ is never read or written through.
+    machine.write(".sandman/x/meta.json", r#"{"path":"/","repo":"o/r"}"#);
     for (args, want) in [
-        (&["shift", "reaped", "--shift", "../x"][..], 1),
+        (&["shift", "pick", "--shift", "../x"][..], 1),
+        (&["shift", "handoff", "--shift", "../x", "--abandoned"], 1),
+        (&["shift", "reaped", "--shift", "../x"], 1),
         (&["shift", "reaped", "--shift", "s-none"], 1),
         (&["shift", "reaped"], 2),
     ] {
         assert_eq!(code(&machine.run(now, args, &[])), want, "{args:?}");
     }
+    assert_eq!(
+        machine.read(".sandman/x/meta.json"),
+        r#"{"path":"/","repo":"o/r"}"#
+    );
     let abandoned = machine
         .trail()
         .into_iter()

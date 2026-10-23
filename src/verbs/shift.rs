@@ -667,7 +667,7 @@ pub(crate) struct Meta {
 
 /// Read a shift's `meta.json`.
 fn read_meta(data_root: &Path, shift: &str) -> Result<Meta> {
-    let path = paths::shift_dir(data_root, shift).join("meta.json");
+    let path = paths::shift_dir(data_root, checked(shift)?).join("meta.json");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
         Err(source) if source.kind() == ErrorKind::NotFound => {
@@ -2406,7 +2406,6 @@ fn checked(shift: &str) -> Result<&str> {
 /// Rewrite `shift`'s `meta.json` under the lock as `edit` makes it from the
 /// one on disk.
 fn edit_meta(ctx: &Context, shift: &str, edit: impl FnOnce(&Meta) -> Result<Value>) -> Result<()> {
-    checked(shift)?;
     let _lock = CommitLock::acquire(&ctx.data_root)?;
     let value = edit(&read_meta(&ctx.data_root, shift)?)?;
     atomic::write(
@@ -2464,11 +2463,7 @@ pub struct Landed {
 /// when the runner next looks. The runner pushes the branch and opens the
 /// pull request after the handoff; a re-land before it replaces the record.
 pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
-    let dir = PathBuf::from(
-        read_meta(&ctx.data_root, checked(shift)?)?
-            .path
-            .unwrap_or_default(),
-    );
+    let dir = PathBuf::from(read_meta(&ctx.data_root, shift)?.path.unwrap_or_default());
     let head = grove::git(
         &dir,
         &[
