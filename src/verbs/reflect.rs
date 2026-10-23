@@ -1415,6 +1415,13 @@ is wrong on sight — retitle it."
         }
         // A file beside the banks is not one.
         fs::write(scratch.root.join("memories").join("stray.md"), "").expect("stray");
+        // A bank whose baseline cannot be written fails alone.
+        fs::create_dir_all(
+            Bank::in_data_root(&scratch.root, "-Users-you-code-z")
+                .dir()
+                .join(super::BASELINE_FILE_NAME),
+        )
+        .expect("a baseline that is a directory");
         // A baseline whose count is not a count is no baseline: seen fresh.
         fs::write(
             scratch.baseline_path(),
@@ -1428,9 +1435,10 @@ is wrong on sight — retitle it."
             &Scratch::silent(),
         )
         .expect("reflect");
-        assert_eq!(outcome.banks.len(), 1);
+        assert_eq!(outcome.banks.len(), 2);
         assert!(outcome.banks[0].contains("seeded"), "{:?}", outcome.banks);
-        assert_eq!(outcome.due, 0);
+        assert!(outcome.banks[1].contains("failed("), "{:?}", outcome.banks);
+        assert_eq!((outcome.due, outcome.failed), (0, 1));
         let baseline = read_baseline(&scratch.baseline_path()).expect("baseline");
         assert_eq!(baseline.count, 7);
         assert_eq!(baseline.last_ops, 0);
@@ -1619,6 +1627,24 @@ is wrong on sight — retitle it."
         let baseline = read_baseline(&scratch.baseline_path()).expect("baseline");
         assert_eq!(baseline.at, Scratch::now());
         assert_eq!(baseline.count, 7);
+        // A baseline that cannot be recorded once the call is spent fails the
+        // bank.
+        let path = scratch.baseline_path();
+        write_baseline(
+            &path,
+            Baseline {
+                last_ops: UPKEEP_MAX_OPS,
+                ..baseline
+            },
+        )
+        .expect("a backlog");
+        let (options, _) = scratch.replies(
+            &[r#"{"ops":[]}"#],
+            &format!("rm '{0}' && mkdir '{0}'", path.display()),
+        );
+        let outcome =
+            reflect(&scratch.root, &scratch.claude, Scratch::now(), &options).expect("reflect");
+        assert_eq!((outcome.due, outcome.failed), (0, 1));
     }
 
     #[cfg(unix)]
@@ -2056,8 +2082,15 @@ is wrong on sight — retitle it."
             kind: MemoryType::Project,
             name: "taken".to_owned(),
         };
+        let retitle = Op::Retitle {
+            description: "d".to_owned(),
+            file: files[0].clone(),
+            name: "taken".to_owned(),
+        };
         let bank = scratch.bank();
-        assert!(super::apply(&scratch.root, BANK, &bank, Scratch::now(), &merge).is_err());
+        for op in [merge, retitle] {
+            assert!(super::apply(&scratch.root, BANK, &bank, Scratch::now(), &op).is_err());
+        }
         assert!(
             files.iter().all(|file| dir.join(file).is_file()),
             "{files:?}"

@@ -789,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_session_is_a_typed_error() {
+    fn an_unknown_session_and_an_unwritable_pointer_are_typed_errors() {
         let fixture = Fixture::new("take-missing");
         assert!(matches!(
             take(&fixture.root, &fixture.claude, "no-such-session", false),
@@ -801,6 +801,13 @@ mod tests {
         assert!(matches!(
             take(&fixture.root, &fixture.claude, "../escape", false),
             Err(Error::InvalidInput { .. })
+        ));
+        fixture.seed(&transcript_lines());
+        fs::create_dir_all(crate::paths::recent_dir(&fixture.root).join(format!("{SID}.json")))
+            .expect("a pointer that is a directory");
+        assert!(matches!(
+            take(&fixture.root, &fixture.claude, SID, true),
+            Err(Error::Io { .. })
         ));
     }
 

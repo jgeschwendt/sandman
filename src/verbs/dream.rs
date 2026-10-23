@@ -1146,11 +1146,8 @@ mod tests {
         // A sibling test's fork holds a copy of the descriptor until its exec
         // closes it, so the release is awaited, not assumed (5 of 33 runs).
         assert!((0..200).any(|_| {
-            let free = Lock::acquire(&scratch.root).expect("acquire").is_some();
-            if !free {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            free
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            Lock::acquire(&scratch.root).expect("acquire").is_some()
         }));
     }
 
@@ -1514,9 +1511,13 @@ mod tests {
         ]);
         scratch.queue(SID, "2026-08-11T12:00:00Z");
 
-        let outcome = dream(&scratch.root, &scratch.home, &options).expect("dream");
-        assert_eq!(outcome.dreamed, 1);
-        assert!(outcome.committed.is_empty());
+        // Routed and stamped before the run log refuses the line.
+        fs::write(crate::paths::trace_dir(&scratch.root), "").expect("trace as a file");
+        assert!(matches!(
+            dream(&scratch.root, &scratch.home, &options),
+            Err(crate::error::Error::Io { .. })
+        ));
+        assert!(pending(&scratch.root).expect("pending").is_empty());
         assert!(
             !crate::bank::Bank::in_data_root(&scratch.root, &bank)
                 .dir()
@@ -1546,6 +1547,14 @@ mod tests {
         assert_eq!(pending(&scratch.root).expect("pending").len(), 1);
         let log = read_log(&scratch.root);
         assert!(log.contains("skipped=no-quorum"), "{log}");
+        // A run log that cannot be written is the run's error.
+        let trace = crate::paths::trace_dir(&scratch.root);
+        fs::remove_dir_all(&trace).expect("drop trace");
+        fs::write(&trace, "").expect("trace as a file");
+        assert!(matches!(
+            dream(&scratch.root, &scratch.home, &options),
+            Err(crate::error::Error::Io { .. })
+        ));
     }
 
     #[cfg(unix)]

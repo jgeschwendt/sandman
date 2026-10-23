@@ -634,6 +634,7 @@ mod tests {
     use crate::time::Timestamp;
     use crate::verbs::reflect::Day;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
     /// An entry with every field filled, for the round-trip and the index.
@@ -844,12 +845,24 @@ mod tests {
             &"x".repeat(SOURCES_MAX_CHARS),
         );
 
+        // A bank that cannot be listed is passed over whole.
+        memory(
+            root,
+            "bank-0",
+            "locked.md",
+            "created: 2026-08-31T09:00:00Z\n",
+            "unlisted",
+        );
+        let locked = root.join("memories").join("bank-0");
+        let chmod = |mode| fs::set_permissions(&locked, fs::Permissions::from_mode(mode));
+        chmod(0o000).expect("chmod");
         let day = Day {
             day: 31,
             month: 8,
             year: 2026,
         };
         let found = sources(root, day);
+        chmod(0o755).expect("chmod back");
         let named: Vec<(&str, &str)> = found
             .iter()
             .map(|source| (source.bank.as_str(), source.file.as_str()))
