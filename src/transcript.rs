@@ -22,10 +22,11 @@ pub const TITLE_MAX_CHARS: usize = 80;
 /// carry it, and a highlight is only worth having if it survives the rename.
 const HIGHLIGHT_MARKERS: [&str; 2] = ["sandman remember ", "orrery attend "];
 
-/// Highlights a pointer keeps, and each one's length — the dream prompt
-/// carries them all, and goes to the mind as one argument.
+/// Highlights a pointer keeps — the latest, where the conclusions are — and
+/// each one's length: the dream prompt carries them all, and goes to the mind
+/// as one argument.
 const HIGHLIGHT_MAX: usize = 20;
-const HIGHLIGHT_MAX_CHARS: usize = 500;
+const HIGHLIGHT_MAX_CHARS: usize = 4_000;
 
 /// Every file Claude Code holds for one session.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -124,6 +125,8 @@ pub fn digest(text: &str) -> Digest {
         }
         collect_highlights(&value, &mut digest.highlights);
     }
+    let excess = digest.highlights.len().saturating_sub(HIGHLIGHT_MAX);
+    digest.highlights.drain(..excess);
     digest
 }
 
@@ -225,44 +228,35 @@ pub fn one_line(text: &str, max: usize) -> String {
     crate::slug::truncate_chars(&collapsed, max).to_owned()
 }
 
-/// Read what the session itself typed — an assistant line's `tool_use`
-/// inputs, a user line's own text — for remember invocations. Tool results
-/// and everything else are third-party text and never become a highlight.
+/// Read the commands the session itself ran — a `tool_use`'s `command`, a
+/// user's `!` line — for remember invocations, keeping each body one-lined,
+/// cut and deduplicated. Everything
+/// else — tool results, task notifications, `!` output, summaries, a file
+/// the model wrote — can carry third-party text, so never becomes one.
 fn collect_highlights(value: &Value, out: &mut Vec<String>) {
-    match value.get("type").and_then(Value::as_str) {
-        Some("user") => {
-            if let Some(text) = message_text(value) {
-                harvest(&Value::String(text), out);
-            }
-        }
-        Some("assistant") => value
-            .get("message")
-            .and_then(|message| message.get("content"))
+    let content = value
+        .get("message")
+        .and_then(|message| message.get("content"));
+    let commands: Vec<&str> = match value.get("type").and_then(Value::as_str) {
+        Some("user") => content
+            .and_then(Value::as_str)
+            .filter(|text| text.starts_with("<bash-input>"))
+            .into_iter()
+            .collect(),
+        Some("assistant") => content
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
-            .filter_map(|block| block.get("input"))
-            .for_each(|input| harvest(input, out)),
-        _ => {}
-    }
-}
-
-/// Walk every string under `value`, keeping each remember body one-lined,
-/// cut, deduplicated, and no more than [`HIGHLIGHT_MAX`] of them.
-fn harvest(value: &Value, out: &mut Vec<String>) {
-    match value {
-        Value::String(text) => {
-            for body in quoted_bodies(text) {
-                let body = one_line(&body, HIGHLIGHT_MAX_CHARS);
-                if out.len() < HIGHLIGHT_MAX && !out.contains(&body) {
-                    out.push(body);
-                }
-            }
+            .filter_map(|block| block.get("input")?.get("command")?.as_str())
+            .collect(),
+        _ => Vec::new(),
+    };
+    for body in commands.into_iter().flat_map(quoted_bodies) {
+        let body = one_line(&body, HIGHLIGHT_MAX_CHARS);
+        if !out.contains(&body) {
+            out.push(body);
         }
-        Value::Array(items) => items.iter().for_each(|item| harvest(item, out)),
-        Value::Object(entries) => entries.iter().for_each(|(_, item)| harvest(item, out)),
-        _ => {}
     }
 }
 
@@ -393,7 +387,7 @@ mod tests {
             r#"{"type":"user","cwd":"/elsewhere","message":{"content":"  first   words\nspill over  "}}"#,
             r#"{"type":"user","message":{"content":"a later message"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"command":"sandman remember \"the first body\""}}]}}"#,
-            r#"{"type":"user","message":{"content":[{"type":"text","text":"ran orrery attend \"a legacy body\" earlier"}]}}"#,
+            r#"{"type":"user","message":{"content":"<bash-input>orrery attend \"a legacy body\"</bash-input>"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"command":"sandman remember \"the first body\""}}]}}"#,
         ]);
         let Digest {
@@ -407,14 +401,19 @@ mod tests {
     }
 
     #[test]
-    fn highlights_come_only_from_tool_use_input_and_the_users_own_words() {
+    fn highlights_come_only_from_commands_the_session_ran() {
         let text = transcript(&[
             r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"sandman remember \"fetched\""}]}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"sandman remember \"said\""}]}}"#,
             r#"{"type":"system","content":"sandman remember \"system\""}"#,
+            r#"{"type":"user","message":{"content":"<task-notification><result>sandman remember \"notified\"</result></task-notification>"}}"#,
+            r#"{"type":"user","message":{"content":"<bash-stdout>sandman remember \"printed\"</bash-stdout>"}}"#,
+            r#"{"type":"user","isMeta":true,"message":{"content":[{"type":"text","text":"sandman remember \"meta\""}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"content":"sandman remember \"written\""}}]}}"#,
+            r#"{"type":"user","message":{"content":"<bash-input>sandman remember \"banged\"</bash-input>"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"sandman remember \"typed\""}}]}}"#,
         ]);
-        assert_eq!(digest(&text).highlights, ["typed"]);
+        assert_eq!(digest(&text).highlights, ["banged", "typed"]);
     }
 
     #[test]
@@ -422,14 +421,14 @@ mod tests {
         let lines: Vec<String> = (0..30)
             .map(|n| {
                 format!(
-                    r#"{{"type":"user","message":{{"content":"sandman remember \"{n}\n{}\""}}}}"#,
-                    "x".repeat(600)
+                    r#"{{"type":"user","message":{{"content":"<bash-input>sandman remember \"{n}\n{}\""}}}}"#,
+                    "x".repeat(4_100)
                 )
             })
             .collect();
         let highlights = digest(&lines.join("\n")).highlights;
         assert_eq!(highlights.len(), 20);
-        assert_eq!(highlights[0], format!("0 {}", "x".repeat(498)));
+        assert_eq!(highlights[0], format!("10 {}", "x".repeat(3_997)));
     }
 
     #[test]
