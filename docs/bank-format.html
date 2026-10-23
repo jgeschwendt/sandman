@@ -802,7 +802,7 @@ branch's — and prints the summary. A re-land before the handoff replaces it, a
 <code class="code">handoff</code> keeps it. Every earlier shift those trailers name whose landing is unsettled
 and whose landed commits this branch carries on, patch for patch (<code class="code">git cherry</code>, so a rebase still counts)
 gets <code class="code">landing.superseded_by: &lt;id&gt;</code>: a shift fixing another's red pull request branches
-from it, so its own carries the original commits on; a trailer alone supersedes nothing.</li>
+from it, so its own carries the original commits on; a trailer alone supersedes nothing, and a re-land that no longer carries a landing on takes its stamp back.</li>
 <li><strong>The runner opens it</strong> — the landing pass, every tick (<code class="code">docs/routines/shift.md</code>). For
 each <code class="code">meta.json</code> with <code class="code">ended</code>, a <code class="code">landing</code> not superseded and no <code class="code">pr</code>: push
 <code class="code">&lt;head&gt;:refs/heads/&lt;branch&gt;</code> unless <code class="code">refs/remotes/origin/&lt;branch&gt;</code> is already <code class="code">head</code> —

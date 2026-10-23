@@ -2430,12 +2430,14 @@ pub fn reaped(ctx: &Context, shift: &str) -> Result<()> {
 /// The trunk every landing is rebased onto and every pull request targets.
 const LANDING_BASE: &str = "refs/remotes/origin/main";
 
-/// `meta`'s landing while it is live: not superseded, its pull request
-/// neither merged nor closed.
-fn live_landing(meta: &Meta) -> Option<&Value> {
+/// `meta`'s landing while it is live: superseded by none but `lander`, its
+/// pull request neither merged nor closed.
+fn live_landing<'a>(meta: &'a Meta, lander: &str) -> Option<&'a Value> {
     let pr = meta.value.get("pr");
     meta.value.get("landing").filter(|landing| {
-        landing.get("superseded_by").is_none()
+        landing
+            .get("superseded_by")
+            .is_none_or(|by| by.as_str() == Some(lander))
             && pr.is_none_or(|pr| pr.get("merged").is_none() && pr.get("closed").is_none())
     })
 }
@@ -2461,7 +2463,8 @@ pub struct Landed {
 /// unmerged and whose commits the branch carries on (by patch) is stamped `superseded_by`
 /// this one — a trailer alone supersedes nothing: its pull request closes
 /// when the runner next looks. The runner pushes the branch and opens the
-/// pull request after the handoff; a re-land before it replaces the record.
+/// pull request after the handoff; a re-land before it replaces the record
+/// and takes back the stamp of a landing it no longer carries on.
 pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
     let dir = PathBuf::from(read_meta(&ctx.data_root, shift)?.path.unwrap_or_default());
     let head = grove::git(
@@ -2524,20 +2527,21 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
         ("branch", Value::string(branch)),
         ("head", Value::string(head.clone())),
     ]);
-    let superseded: Vec<String> = metas(&ctx.data_root)
-        .into_iter()
+    let metas = metas(&ctx.data_root);
+    let superseded: Vec<&String> = metas
+        .iter()
         .filter(|meta| {
             meta.shift != shift
                 && named.contains(&meta.shift)
                 // every commit it landed is here, by sha or by patch (no `+`), so a
                 // rebased carry-on counts and a bare trailer does not
-                && live_landing(meta).is_some_and(|landing| {
+                && live_landing(meta, shift).is_some_and(|landing| {
                     let at = |key| landing.get(key).and_then(Value::as_str).unwrap_or("-");
                     grove::git(&dir, &["cherry", &head, at("head"), at("base")])
                         .is_ok_and(|out| !out.contains('+'))
                 })
         })
-        .map(|meta| meta.shift)
+        .map(|meta| &meta.shift)
         .collect();
     edit_meta(ctx, shift, |meta| match &meta.ended {
         Some(ended) => Err(Error::refused(format!(
@@ -2545,13 +2549,30 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
         ))),
         None => Ok(with(&meta.value, [("landing".to_owned(), landing)])),
     })?;
-    for old in &superseded {
-        edit_meta(ctx, old, |meta| {
-            let landing = meta.value.get("landing").unwrap_or(&Value::Null);
-            let mark = [("superseded_by".to_owned(), Value::string(shift))];
+    // a re-land that no longer carries a landing on hands its stamp back
+    for old in metas.iter().filter(|meta| {
+        superseded.contains(&&meta.shift)
+            || meta
+                .value
+                .get("landing")
+                .and_then(|landing| landing.get("superseded_by"))
+                .and_then(Value::as_str)
+                == Some(shift)
+    }) {
+        edit_meta(ctx, &old.shift, |meta| {
+            let mut landing = meta
+                .value
+                .get("landing")
+                .and_then(Value::as_object)
+                .map(<[(String, Value)]>::to_vec)
+                .unwrap_or_default();
+            landing.retain(|(key, _)| key != "superseded_by");
+            let mark = superseded
+                .contains(&&old.shift)
+                .then(|| ("superseded_by".to_owned(), Value::string(shift)));
             Ok(with(
                 &meta.value,
-                [("landing".to_owned(), with(landing, mark))],
+                [("landing".to_owned(), with(&Value::Object(landing), mark))],
             ))
         })?;
     }
@@ -2559,7 +2580,7 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
         base,
         commits,
         head,
-        superseded,
+        superseded: superseded.into_iter().cloned().collect(),
     })
 }
 
@@ -2620,7 +2641,7 @@ fn open_prs(data_root: &Path, repo: &str) -> String {
             .iter()
             .filter(|meta| meta.repo.as_deref() == Some(repo))
             .filter_map(|meta| {
-                let (landing, pr) = (live_landing(meta)?, meta.value.get("pr")?);
+                let (landing, pr) = (live_landing(meta, "")?, meta.value.get("pr")?);
                 let text = |value: Option<&Value>| {
                     value.map_or("?".to_owned(), |value| {
                         value
