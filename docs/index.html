@@ -209,7 +209,7 @@
         <ul role="list">
           <li>shape: <code class="code">{archived · cwd · ended · title · highlights}</code> — enough to recall by without opening the transcript</li>
           <li>IS the short-term recall surface: <code class="code">recall</code> folds pointers younger than 72 h into session start; expiry is that read-side filter, nothing retires an unrouted pointer</li>
-          <li><code class="code">highlights</code> carries the bodies the session explicitly asked to remember, so dream starts from signal, not a cold transcript</li>
+          <li><code class="code">highlights</code> carries the bodies the session explicitly asked to remember — read only from its own <code class="code">tool_use</code> inputs and the user's typed text, never a tool result; at most 20, each one line of at most 500 characters — so dream starts from signal, not a cold transcript</li>
           <li>retirement: dream stamps <code class="code">"dreamed": "&lt;ISO&gt;"</code> once it has routed a pointer, and reflect's sweep deletes pointers that are dreamed <strong>and</strong> ended &gt; 72 h ago. Both halves are load-bearing — an undreamed pointer never expires, because the queue is the only record that the conversation happened</li>
         </ul>
       </div>
