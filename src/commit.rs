@@ -208,9 +208,13 @@ fn check_single_line(what: &'static str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// A bank key is one path component.
+/// A bank key is one path component recall reads — no leading `.` or `_`,
+/// the dot-dirs and `_archive` it skips.
 fn check_bank_key(key: &str) -> Result<()> {
-    if key.is_empty() || key == "." || key == ".." || key.contains(['/', '\\']) {
+    if key.is_empty()
+        || key.starts_with(['.', '_'])
+        || key.contains(|c: char| matches!(c, '/' | '\\') || c.is_control())
+    {
         return Err(Error::invalid("bank key", key));
     }
     Ok(())
@@ -529,6 +533,20 @@ mod tests {
             assert!(
                 matches!(got, Err(Error::InvalidInput { what: refused, .. }) if refused == what),
                 "{what}: {got:?}"
+            );
+        }
+        // recall skips a dot-dir or `_archive`, so a bank there is never read
+        for key in [".recent", "_archive", "...", "nul\0"] {
+            let got = commit_memory(temp.path(), key, request("hidden"));
+            assert!(
+                matches!(
+                    got,
+                    Err(Error::InvalidInput {
+                        what: "bank key",
+                        ..
+                    })
+                ),
+                "{key:?}: {got:?}"
             );
         }
         assert!(!temp.path().join("memories").exists());

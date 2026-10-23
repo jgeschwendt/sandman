@@ -798,13 +798,16 @@ fn optional_str<'a>(params: &'a Value, key: &str) -> Result<Option<&'a str>, Mcp
 
 /// The optional `cwd`, absolute. A bank is keyed by the path's bytes, so `~`
 /// or a relative path would commit into — or recall from — a bank no session
-/// ever reads; a trailing `/` or a `.` is [`crate::project::root`]'s to drop.
+/// ever reads, and so would a `..` it does not resolve; a trailing `/` or a
+/// `.` is [`crate::project::root`]'s to drop.
 fn optional_cwd(params: &Value) -> Result<Option<PathBuf>, McpError> {
     match optional_str(params, "cwd")?.map(PathBuf::from) {
-        Some(cwd) if !cwd.is_absolute() => Err(McpError::InvalidParams(format!(
-            "cwd must be an absolute path, got `{}`",
-            cwd.display()
-        ))),
+        Some(cwd) if !cwd.is_absolute() || cwd.components().any(|c| c.as_os_str() == "..") => {
+            Err(McpError::InvalidParams(format!(
+                "cwd must be an absolute path without `..`, got `{}`",
+                cwd.display()
+            )))
+        }
         cwd => Ok(cwd),
     }
 }
@@ -837,7 +840,7 @@ fn recall_schema() -> Value {
                 property(
                     "string",
                     concat!(
-                        "The absolute working directory to recall for; its bank and its ",
+                        "The absolute working directory, no `..`, to recall for; its bank and its ",
                         "ancestors' banks answer. Default: the home directory.",
                     ),
                 ),
@@ -873,7 +876,7 @@ fn remember_schema() -> Value {
                     property(
                         "string",
                         concat!(
-                            "The absolute working directory whose bank receives the ",
+                            "The absolute working directory, no `..`, whose bank receives the ",
                             "memory. Exclusive with bank.",
                         ),
                     ),
@@ -1408,8 +1411,8 @@ mod tests {
             recall(&ctx, &Value::object([("cwd", Value::Number(5.0))])),
             Err(McpError::InvalidParams(message)) if message.contains("cwd")
         ));
-        // A cwd that is not absolute keys a bank no session recalls.
-        for cwd in ["~", "~/proj", ".", "proj"] {
+        // A cwd that is not absolute, or climbs, keys a bank no session recalls.
+        for cwd in ["~", "~/proj", ".", "proj", "/../../tmp"] {
             let cwd = ("cwd", Value::string(cwd));
             assert!(matches!(
                 recall(&ctx, &Value::object([cwd.clone()])),

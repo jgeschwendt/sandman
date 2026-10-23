@@ -73,6 +73,7 @@ by <code class="code">-</code> (same encoding Claude Code uses for <code class="
 A linked git worktree (a <code class="code">.git</code> file pointing into <code class="code">worktrees/</code>) keys as its parent
 directory, so every branch of one repo shares one bank:
 <code class="code">~/.grove/code/o/r/main</code> → <code class="code">-Users-you--grove-code-o-r</code>.
+The commit path takes a key only as one component recall reads: never empty, no <code class="code">/</code>, <code class="code">\</code> or control character, no leading <code class="code">.</code> or <code class="code">_</code> (the dotted runtime tier and <code class="code">_archive</code>, which recall skips).
 A worktree nested in another checkout of the same repo (Claude Code's
 <code class="code">.claude/worktrees/&lt;name&gt;</code>) keys as that checkout's project; a submodule, even inside a
 worktree, is its own project; a cwd that no longer exists beside a linked worktree keys
