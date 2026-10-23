@@ -200,19 +200,15 @@ fn user_message_title(value: &Value) -> Option<String> {
         return None;
     }
     let content = value.get("message")?.get("content")?;
-    let text = if let Some(text) = content.as_str() {
-        text.to_owned()
-    } else if let Some(blocks) = content.as_array() {
-        blocks
+    let text = content.as_str().or_else(|| {
+        content
+            .as_array()?
             .iter()
-            .find(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-            .and_then(|block| block.get("text"))
-            .and_then(Value::as_str)?
-            .to_owned()
-    } else {
-        return None;
-    };
-    let title = one_line(&text, TITLE_MAX_CHARS);
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("text"))?
+            .get("text")?
+            .as_str()
+    })?;
+    let title = one_line(text, TITLE_MAX_CHARS);
     if title.is_empty() { None } else { Some(title) }
 }
 

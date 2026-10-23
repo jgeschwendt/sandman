@@ -32,6 +32,8 @@ pedantic = { level = "warn", priority = -1 }
 # Inline `#[allow]`s must carry a reason — the `noInlineConfig` discipline.
 allow_attributes_without_reason = "warn"
 # --- opt-outs (with rationale) ---
+# `assert!(x.is_empty())` states the claim; the suggested `assert_eq!(x, [] as [T; 0])` buries it.
+assert_is_empty = "allow"
 # `memory::memory_root`, `banks::banks`… repeating the module name reads fine here.
 module_name_repetitions = "allow"
 # ≈ eslint `max-lines-per-function: off`.
