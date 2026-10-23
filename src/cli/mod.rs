@@ -326,7 +326,7 @@ usage: sandman <verb> [args]
       empty one, or a handed-off shift), and stamps superseded_by on the
       unmerged landings of earlier shifts those trailers name whose commits
       the branch carries on (by patch: a rebase counts) — a re-land that no
-      longer carries one takes its stamp back; trunk is never
+      longer carries an unsettled one takes its stamp back; trunk is never
       pushed — the runner pushes the branch and opens the pull request after
       the handoff. pr is the runner's record of that pull request in
       meta.json's pr — --number/--url opens it (opened), --auto, --red,

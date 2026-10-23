@@ -2464,7 +2464,7 @@ pub struct Landed {
 /// this one — a trailer alone supersedes nothing: its pull request closes
 /// when the runner next looks. The runner pushes the branch and opens the
 /// pull request after the handoff; a re-land before it replaces the record
-/// and takes back the stamp of a landing it no longer carries on.
+/// and takes back the stamp of an unsettled landing it no longer carries on.
 pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
     let dir = PathBuf::from(read_meta(&ctx.data_root, shift)?.path.unwrap_or_default());
     let head = grove::git(
@@ -2528,20 +2528,21 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
         ("head", Value::string(head.clone())),
     ]);
     let metas = metas(&ctx.data_root);
-    let superseded: Vec<&String> = metas
+    // every other landing still live to this one: carried on (every commit it
+    // landed is here, by sha or by patch — no `+` — so a rebased carry-on counts
+    // and a bare trailer does not) it earns the stamp; stamped by an earlier
+    // land of this shift but carried no more, it takes the stamp back
+    let restamped: Vec<(&String, bool)> = metas
         .iter()
-        .filter(|meta| {
-            meta.shift != shift
-                && named.contains(&meta.shift)
-                // every commit it landed is here, by sha or by patch (no `+`), so a
-                // rebased carry-on counts and a bare trailer does not
-                && live_landing(meta, shift).is_some_and(|landing| {
-                    let at = |key| landing.get(key).and_then(Value::as_str).unwrap_or("-");
-                    grove::git(&dir, &["cherry", &head, at("head"), at("base")])
-                        .is_ok_and(|out| !out.contains('+'))
-                })
+        .filter(|meta| meta.shift != shift)
+        .filter_map(|meta| {
+            let landing = live_landing(meta, shift)?;
+            let at = |key| landing.get(key).and_then(Value::as_str).unwrap_or("-");
+            let carried = named.contains(&meta.shift)
+                && grove::git(&dir, &["cherry", &head, at("head"), at("base")])
+                    .is_ok_and(|out| !out.contains('+'));
+            (carried || landing.get("superseded_by").is_some()).then_some((&meta.shift, carried))
         })
-        .map(|meta| &meta.shift)
         .collect();
     edit_meta(ctx, shift, |meta| match &meta.ended {
         Some(ended) => Err(Error::refused(format!(
@@ -2549,17 +2550,8 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
         ))),
         None => Ok(with(&meta.value, [("landing".to_owned(), landing)])),
     })?;
-    // a re-land that no longer carries a landing on hands its stamp back
-    for old in metas.iter().filter(|meta| {
-        superseded.contains(&&meta.shift)
-            || meta
-                .value
-                .get("landing")
-                .and_then(|landing| landing.get("superseded_by"))
-                .and_then(Value::as_str)
-                == Some(shift)
-    }) {
-        edit_meta(ctx, &old.shift, |meta| {
+    for &(old, carried) in &restamped {
+        edit_meta(ctx, old, |meta| {
             let mut landing = meta
                 .value
                 .get("landing")
@@ -2567,9 +2559,7 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
                 .map(<[(String, Value)]>::to_vec)
                 .unwrap_or_default();
             landing.retain(|(key, _)| key != "superseded_by");
-            let mark = superseded
-                .contains(&&old.shift)
-                .then(|| ("superseded_by".to_owned(), Value::string(shift)));
+            let mark = carried.then(|| ("superseded_by".to_owned(), Value::string(shift)));
             Ok(with(
                 &meta.value,
                 [("landing".to_owned(), with(&Value::Object(landing), mark))],
@@ -2580,7 +2570,11 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
         base,
         commits,
         head,
-        superseded: superseded.into_iter().cloned().collect(),
+        superseded: restamped
+            .into_iter()
+            .filter(|&(_, carried)| carried)
+            .map(|(old, _)| old.clone())
+            .collect(),
     })
 }
 
