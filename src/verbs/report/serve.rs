@@ -184,9 +184,16 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
                 || status("404 Not Found", "<p>no shift began that night</p>"),
                 |(page, newest)| {
                     // the owner's eyes on the newest night are the acknowledgment;
-                    // an older night's page leaves the cursor; a cursor that will
-                    // not write still serves the page
-                    if let Some(at) = newest.filter(|_| night.is_none()) {
+                    // an older night's page, or another site's request (an
+                    // `<img>` carries no Origin), leaves the cursor; a cursor
+                    // that will not write still serves the page
+                    if let Some(at) = newest.filter(|_| {
+                        night.is_none()
+                            && matches!(
+                                header("sec-fetch-site"),
+                                None | Some("none" | "same-origin")
+                            )
+                    }) {
                         let _ = mark_read(&ctx.data_root, at);
                     }
                     ("200 OK", String::new(), page)

@@ -290,9 +290,15 @@ fn serve_shows_a_night_and_answers_proposals_through_thread() {
 
     // a shift that never started belongs to no night
     home.write(".sandman/shifts/s-20261016T0000Z/meta.json", "{}");
-    let (mut server, ask) = serve(&home, 18);
+    let (mut server, ask) = serve(&home, 19);
     let tuesday = ask("GET /?night=2026-10-13", "", "");
     assert_eq!(home.cursor(), "", "an older night's page leaves the cursor");
+    ask("GET /", "Sec-Fetch-Site: cross-site\r\n", "");
+    assert_eq!(
+        home.cursor(),
+        "",
+        "another site's request leaves the cursor"
+    );
     let page = ask("GET /", "", "");
     assert_eq!(
         home.cursor(),
