@@ -183,7 +183,7 @@ pub enum Abstained {
     Failed(String),
     /// The process could not be started at all.
     Spawn(String),
-    /// It ran past the timeout and was killed.
+    /// It ran past the timeout, or could not be waited on, and was killed.
     Timeout,
     /// The process answered, but not in the shape a reply has.
     Unreadable(String),
