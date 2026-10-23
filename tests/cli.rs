@@ -7,7 +7,7 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{Machine, bank_key, code, feed, stderr, stdout};
@@ -267,6 +267,17 @@ fn dream_and_reflect_run_on_an_empty_root() {
         journal.contains(" failed=1 swept=0 entry=quiet ms="),
         "{journal}"
     );
+
+    // A root or a lock that cannot be made is an error, not a yield.
+    let lock = machine.root().join("dream.lock");
+    fs::remove_file(&lock).expect("the last run's lock");
+    fs::create_dir(&lock).expect("a directory");
+    let file = machine.write("file", "");
+    for root in [machine.root(), file.join("root")] {
+        let root = root.display().to_string();
+        let output = machine.run_with(&["dream"], "", &[("SANDMAN_ROOT", &root)]);
+        assert_eq!(code(&output), 1, "{root}: {}", stderr(&output));
+    }
 }
 
 // ─── the voyage log ───────────────────────────────────────────────────────
@@ -887,6 +898,27 @@ fn the_hooks_read_their_payloads_from_stdin() {
             .expect("run sandman");
         assert_eq!(code(&unread), 1, "{verb}");
         assert!(stderr(&unread).contains("<stdin>: "), "{verb}");
+    }
+    // And so is a working directory deleted out from under the run.
+    let env = machine.sandman(&[]);
+    for args in [&["recall"][..], &["remember", "a body"]] {
+        let gone = Command::new("sh")
+            .args([
+                "-c",
+                "mkdir gone && cd gone && rmdir ../gone && exec \"$@\"",
+            ])
+            .args(["sh", env!("CARGO_BIN_EXE_sandman")])
+            .args(args)
+            .current_dir(&machine.home)
+            .env_clear()
+            .envs(
+                env.get_envs()
+                    .filter_map(|(key, value)| Some((key, value?))),
+            )
+            .output()
+            .expect("run sandman");
+        assert_eq!(code(&gone), 1, "{args:?}: {}", stderr(&gone));
+        assert!(stderr(&gone).contains(".: "), "{args:?}");
     }
 
     // SessionStart → recall, answered in the hook envelope.

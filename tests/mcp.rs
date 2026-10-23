@@ -278,6 +278,14 @@ fn the_verb_takes_no_arguments_and_the_usage_screen_names_it() {
     let flag = machine.run_with_stdin(&["mcp", "--nonsense"], "");
     assert_eq!(code(&flag), 2);
 
+    // A stdin that cannot be read (a directory) is an error, not an ending.
+    let unread = machine
+        .sandman(&["mcp"])
+        .stdin(fs::File::open(&machine.home).expect("open home"))
+        .output()
+        .expect("run");
+    assert_eq!(code(&unread), 1, "{}", stderr(&unread));
+
     let usage = machine.run_with_stdin(&["--help"], "");
     assert_eq!(code(&usage), 0, "{}", stderr(&usage));
     assert!(stdout(&usage).contains("  mcp\n"), "{}", stdout(&usage));

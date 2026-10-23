@@ -1143,6 +1143,11 @@ fn the_store_refuses_what_it_cannot_read_and_skips_what_it_cannot_parse() {
         2,
         "--dropped wants a count, got `many`",
     );
+    fails(
+        &[&close[..], &["0", "--cursor", "=1"]].concat(),
+        2,
+        "--cursor wants NAME=VALUE, got `=1`",
+    );
     let output = machine.run("soon", &["breathe", "list"], &[]);
     assert_eq!(code(&output), 2, "{}", stderr(&output));
     assert!(

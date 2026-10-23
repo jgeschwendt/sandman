@@ -277,6 +277,14 @@ fn clock_check_gates_on_the_night_the_window_and_usage() {
 #[test]
 fn pick_rotates_to_the_least_recently_shifted_trunk() {
     let machine = Machine::prompted("pick");
+    // An empty grove leaves no repo to shift, nor a Sabbath trunk to rest on.
+    for now in [FRIDAY, SATURDAY] {
+        assert_eq!(
+            code(&machine.run(now, &["shift", "brief"], &[])),
+            1,
+            "{now}"
+        );
+    }
     let alpha = machine.repo("jgeschwendt/alpha");
     machine.repo("jgeschwendt/beta");
     // Not a trunk, and not an owner the rotation covers.
@@ -935,6 +943,7 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
         (&["shift", "handoff", "--shift", "../x", "--abandoned"], 1),
         (&["shift", "reaped", "--shift", "../x"], 1),
         (&["shift", "reaped", "--shift", "s-none"], 1),
+        (&["shift", "attach", "--shift", "s-none", "--bg-id", "b"], 1),
         (&["shift", "reaped"], 2),
     ] {
         assert_eq!(code(&machine.run(now, args, &[])), want, "{args:?}");
