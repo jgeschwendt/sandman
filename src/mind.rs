@@ -385,9 +385,25 @@ fn command(request: &Ask, session: Option<&str>) -> Command {
 
 /// A fresh uuid-v4 for `--session-id`, which is the name the transcript is
 /// then found under. Format only — nothing here needs it to be unguessable,
-/// only unique against the other minds in the pass.
+/// only unique against the other minds in the pass, so the clock, the process
+/// and a counter are hashed into its 16 bytes.
 fn session_id() -> String {
-    uuid(entropy())
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
+    let seed = (
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos()),
+        u128::from(std::process::id()),
+        u128::from(SERIAL.fetch_add(1, Ordering::Relaxed)),
+    );
+    let mut bytes = [0_u8; 16];
+    for (half, chunk) in bytes.chunks_mut(8).enumerate() {
+        let mut hasher = DefaultHasher::new();
+        seed.hash(&mut hasher);
+        half.hash(&mut hasher);
+        chunk.copy_from_slice(&hasher.finish().to_le_bytes());
+    }
+    uuid(bytes)
 }
 
 /// 16 bytes as a uuid-v4: the version and variant nibbles are stamped in, the
@@ -405,38 +421,6 @@ fn uuid(mut bytes: [u8; 16]) -> String {
     out
 }
 
-/// 16 bytes for a session id, `/dev/urandom` first.
-fn entropy() -> [u8; 16] {
-    let mut bytes = [0_u8; 16];
-    if let Ok(mut source) = fs::File::open("/dev/urandom")
-        && source.read_exact(&mut bytes).is_ok()
-    {
-        return bytes;
-    }
-    seeded()
-}
-
-/// 16 bytes derived from the clock, the process and a counter — enough to
-/// keep the minds of one pass apart when `/dev/urandom` cannot be read.
-fn seeded() -> [u8; 16] {
-    static SERIAL: AtomicU64 = AtomicU64::new(0);
-    let seed = (
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos()),
-        u128::from(std::process::id()),
-        u128::from(SERIAL.fetch_add(1, Ordering::Relaxed)),
-    );
-    let mut bytes = [0_u8; 16];
-    for (half, chunk) in bytes.chunks_mut(8).enumerate() {
-        let mut hasher = DefaultHasher::new();
-        seed.hash(&mut hasher);
-        half.hash(&mut hasher);
-        chunk.copy_from_slice(&hasher.finish().to_le_bytes());
-    }
-    bytes
-}
-
 /// Drive a spawned mind to its reply, timeout included.
 fn run(request: &Ask, child: &mut std::process::Child) -> Result<String, Abstained> {
     // Both pipes are drained on their own threads: a child that fills one
@@ -452,30 +436,17 @@ fn run(request: &Ask, child: &mut std::process::Child) -> Result<String, Abstain
     thread::spawn(move || sender.send((1, drain(err))));
 
     let deadline = Instant::now() + request.timeout;
-    let mut status = None;
-    loop {
+    // A mind that cannot be waited on is killed like one past its deadline.
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(exit)) => {
-                status = Some(exit);
-                break;
-            }
-            Ok(None) => {}
-            Err(source) => {
+            Ok(Some(exit)) => break exit,
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
+            _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(Abstained::Spawn(source.to_string()));
+                return Err(Abstained::Timeout);
             }
         }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            break;
-        }
-        thread::sleep(POLL);
-    }
-
-    let Some(status) = status else {
-        return Err(Abstained::Timeout);
     };
     // The readers are never joined: a grandchild the mind left holding a pipe
     // keeps it open past the mind's own exit, so only the deadline bounds the
@@ -713,24 +684,23 @@ mod tests {
 
     #[test]
     fn a_session_id_is_a_uuid_v4() {
-        for id in [session_id(), super::uuid(super::seeded())] {
-            assert_eq!(id.len(), 36, "{id}");
-            let groups: Vec<&str> = id.split('-').collect();
-            assert_eq!(
-                groups.iter().map(|group| group.len()).collect::<Vec<_>>(),
-                [8, 4, 4, 4, 12],
-                "{id}"
-            );
-            assert!(
-                groups.iter().all(|group| group
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())),
-                "{id}"
-            );
-            // Version 4, variant 10xx.
-            assert_eq!(&groups[2][0..1], "4", "{id}");
-            assert!(matches!(&groups[3][0..1], "8" | "9" | "a" | "b"), "{id}");
-        }
+        let id = session_id();
+        assert_eq!(id.len(), 36, "{id}");
+        let groups: Vec<&str> = id.split('-').collect();
+        assert_eq!(
+            groups.iter().map(|group| group.len()).collect::<Vec<_>>(),
+            [8, 4, 4, 4, 12],
+            "{id}"
+        );
+        assert!(
+            groups.iter().all(|group| group
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())),
+            "{id}"
+        );
+        // Version 4, variant 10xx.
+        assert_eq!(&groups[2][0..1], "4", "{id}");
+        assert!(matches!(&groups[3][0..1], "8" | "9" | "a" | "b"), "{id}");
         assert_ne!(session_id(), session_id());
     }
 
