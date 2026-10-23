@@ -386,7 +386,7 @@ mod tests {
     use super::{markdown, page};
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
-    use crate::verbs::shift::DEFAULT_NIGHT;
+    use crate::verbs::shift::{DEFAULT_NIGHT, Rotating};
 
     #[test]
     fn page_shows_a_night_its_proposals_and_none_for_what_is_missing() {
@@ -415,7 +415,14 @@ mod tests {
             std::fs::write(root.join(path), text).expect("write");
         }
         let threads = root.join("threads");
-        let at = |night| page(root, &threads, DEFAULT_NIGHT, night, &[]).expect("a night");
+        let rotation = [false, true].map(|on| Rotating {
+            found: true,
+            frozen: on,
+            label: format!("o/{on}"),
+            last: Timestamp::parse_iso8601("2026-10-05T12:00:00Z").filter(|_| on),
+            on,
+        });
+        let at = |night| page(root, &threads, DEFAULT_NIGHT, night, &rotation).expect("a night");
         let (newest, started) = at(None);
         assert_eq!(started, Timestamp::parse_iso8601("2026-10-17T02:00:00Z"));
         for expected in [
@@ -425,6 +432,8 @@ mod tests {
             "<thead><tr><th>shift</th><th>sha</th><th>what</th></tr></thead><tbody><tr><td><a href=\"#s-20261017T0200Z\">s-20261017T0200Z</a></td><td>abc</td><td><strong>parser</strong></td></tr>",
             "<summary>s-20261017T0200Z · Ship · o/alpha · $1.25</summary><h1>Ship</h1>",
             "<nav><a href=\"/?night=2026-10-16\">2026-10-16</a><a href=\"/?night=2026-10-13\">2026-10-13</a></nav>",
+            "<p><input type=\"checkbox\" id=\"rot-o_false\" name=\"on\" value=\"o/false\"><label for=\"rot-o_false\">o/false</label><span class=\"meta\">never shifted</span></p>",
+            "<p><input type=\"checkbox\" id=\"rot-o_true\" name=\"on\" value=\"o/true\" checked><label for=\"rot-o_true\">o/true</label><span class=\"meta\">2026-10-05T12:00:00Z</span><span class=\"meta\">frozen</span></p>",
         ] {
             assert!(newest.contains(expected), "{expected} missing: {newest}");
         }

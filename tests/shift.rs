@@ -1037,14 +1037,36 @@ fn a_handoff_that_died_before_the_release_is_released_by_the_next() {
     let shift = "s-20261016T1600Z";
     machine.ok(FRIDAY, &["shift", "brief"]);
     machine.report(shift, REPORT);
+    machine.write(format!(".sandman/shifts/{shift}/handoff.md"), "# Gone\n");
+    let args = ["shift", "handoff", "--shift", shift, "--abandoned"];
+    // A meta.json that refuses `ended`, then a trail that refuses the event:
+    // each fails the handoff and leaves the lock for the next.
+    let chmod = |path: &Path, mode| fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    let refusing = |path: PathBuf, mode| {
+        chmod(&path, mode).expect("chmod");
+        let output = machine.run(FRIDAY, &args, &[]);
+        chmod(&path, 0o755).expect("chmod back");
+        assert_eq!(code(&output), 1, "{}", stderr(&output));
+        assert!(machine.root().join("shifts/current.json").exists());
+    };
+    refusing(machine.root().join("shifts").join(shift), 0o555);
     machine.write(
         format!(".sandman/shifts/{shift}/meta.json"),
         &format!(
             r#"{{"abandoned":true,"cost_usd":1.5,"ended":"2026-10-16T16:30:00Z","shift":"{shift}"}}"#
         ),
     );
-    machine.write(format!(".sandman/shifts/{shift}/handoff.md"), "# Gone\n");
-    let args = ["shift", "handoff", "--shift", shift, "--abandoned"];
+    // the brief's event made the month's directory: trail/<yyyy>/<mm>
+    let mut month = machine.root().join("trail");
+    for _ in 0..2 {
+        month = fs::read_dir(&month)
+            .expect("trail")
+            .flatten()
+            .next()
+            .expect("one")
+            .path();
+    }
+    refusing(month, 0o555);
     // the event it never appended is appended from meta.json, once
     for _ in 0..2 {
         let output = machine.run(FRIDAY, &args, &[]);
