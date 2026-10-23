@@ -1121,7 +1121,16 @@ mod tests {
         let outcome = dream(&scratch.root, &scratch.home, &options_that_must_not_run())
             .expect("an empty queue is a clean run");
         assert_eq!(outcome, Outcome::default());
-        assert!(!lock_held(&scratch.root));
+        assert!(released(&scratch.root));
+    }
+
+    /// A sibling test's fork holds a copy of the lock's descriptor until its
+    /// exec closes it, so a release is awaited, not assumed (5 of 33 runs).
+    fn released(root: &Path) -> bool {
+        (0..200).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            !lock_held(root)
+        })
     }
 
     #[test]
@@ -1143,12 +1152,7 @@ mod tests {
         assert!(lock_held(&scratch.root));
         assert!(Lock::acquire(&scratch.root).expect("acquire").is_none());
         drop(lock);
-        // A sibling test's fork holds a copy of the descriptor until its exec
-        // closes it, so the release is awaited, not assumed (5 of 33 runs).
-        assert!((0..200).any(|_| {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            Lock::acquire(&scratch.root).expect("acquire").is_some()
-        }));
+        assert!(released(&scratch.root));
     }
 
     #[test]
