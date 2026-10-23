@@ -1267,6 +1267,26 @@ fn the_store_refuses_what_it_cannot_read_and_skips_what_it_cannot_parse() {
         1,
         "not in the pass",
     );
+    fails(
+        &[
+            "breathe",
+            "close",
+            "--id",
+            "b-dead",
+            "--read",
+            "1",
+            "--filed",
+            "0",
+            "--dropped",
+            "1",
+            "--cost",
+            "0",
+            "--cursor",
+            "ghost=1\n- `forged`",
+        ],
+        1,
+        "invalid cursor: ",
+    );
     machine.ok(
         NOW,
         &[

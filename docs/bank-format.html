@@ -1248,7 +1248,7 @@ fault (exit 3) for the runner to report, never a wait. <code class="code">--dry-
 and writes nothing, marking nothing dead. <code class="code">close</code> requires <code class="code">--cost</code> (exit 2 without it —
 the session's own cost, or <code class="code">0</code> when it cannot read it, which journals a <code class="code">cost zero</code>
 note), and refuses a pass already closed or dead and a <code class="code">--cursor</code> for a source the pass
-did not list.</p>
+did not list or carrying a control character.</p>
 <h3 class="h3" id="breath-pass-prompt-and-its-slots">The pass prompt and its slots</h3>
 <p class="docs-note"><code class="code">pass</code> fills <code class="code">prompts/breathe.md</code> from the same directory as <code class="code">shift.md</code> and refuses a
 template naming a slot outside this table:</p>

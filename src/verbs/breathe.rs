@@ -1394,6 +1394,16 @@ pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event>
     if !closing.cost_usd.is_finite() || closing.cost_usd < 0.0 {
         return Err(Error::invalid("cost", closing.cost_usd.to_string()));
     }
+    // A cursor is rendered into the pass prompt's line list; a control
+    // character there would forge a line.
+    if let Some(pair) = closing
+        .cursors
+        .iter()
+        .map(|(name, cursor)| format!("{name}={cursor}"))
+        .find(|pair| pair.contains(char::is_control))
+    {
+        return Err(Error::invalid("cursor", pair));
+    }
     let kind = {
         let _lock = CommitLock::acquire(&ctx.data_root)?;
         let (path, mut entries) = read_pass(&ctx.data_root, id)?;
