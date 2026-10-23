@@ -2459,7 +2459,8 @@ pub struct Landed {
 /// branch, head}` in its `meta.json` — once it contains the local
 /// `origin/main` and every commit it adds carries `Shift:` and `Event:`
 /// trailers. Any earlier shift those trailers name whose landing is still
-/// unmerged is stamped `superseded_by` this one: its pull request closes
+/// unmerged and whose commits the branch carries on (by patch) is stamped `superseded_by`
+/// this one — a trailer alone supersedes nothing: its pull request closes
 /// when the runner next looks. The runner pushes the branch and opens the
 /// pull request after the handoff; a re-land before it replaces the record.
 pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
@@ -2531,7 +2532,15 @@ pub fn land(ctx: &Context, shift: &str, branch: &str) -> Result<Landed> {
     let superseded: Vec<String> = metas(&ctx.data_root)
         .into_iter()
         .filter(|meta| {
-            meta.shift != shift && named.contains(&meta.shift) && live_landing(meta).is_some()
+            meta.shift != shift
+                && named.contains(&meta.shift)
+                // every commit it landed is here, by sha or by patch (no `+`), so a
+                // rebased carry-on counts and a bare trailer does not
+                && live_landing(meta).is_some_and(|landing| {
+                    let at = |key| landing.get(key).and_then(Value::as_str).unwrap_or("-");
+                    grove::git(&dir, &["cherry", &head, at("head"), at("base")])
+                        .is_ok_and(|out| !out.contains('+'))
+                })
         })
         .map(|meta| meta.shift)
         .collect();

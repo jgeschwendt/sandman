@@ -2294,6 +2294,37 @@ impl Machine {
     }
 }
 
+/// A trailer naming a shift supersedes it only when the branch carries its
+/// commits on — rebased onto a trunk that moved, as land demands, still counts.
+#[test]
+fn shift_land_supersedes_only_a_landing_it_carries_on() {
+    let machine = Machine::prompted("land");
+    let (trunk, _) = remote_trunk(&machine, "alpha", "");
+    // real commits: every empty one is the same patch
+    let land = |shift: &str, from: &str, message: &str| {
+        let branch = format!("shift/{shift}");
+        git(&trunk, &["switch", "-q", "-c", &branch, from]).expect("switch");
+        fs::write(trunk.join(shift), shift).expect("work");
+        git(&trunk, &["add", shift]).expect("add");
+        git(&trunk, &["commit", "-q", "-m", message]).expect("commit");
+        git(&trunk, &["rebase", "-q", "main"]).expect("rebase");
+        git(&trunk, &["switch", "-q", "main"]).expect("back");
+        machine.working(shift, "jgeschwendt/alpha", &trunk);
+        machine.ok(
+            FRIDAY,
+            &["shift", "land", "--shift", shift, "--branch", &branch],
+        )
+    };
+    land("s-1", "main", "work\n\nShift: s-1\nEvent: e-1");
+    let forged = land("s-2", "main", "forged\n\nShift: s-2, s-1\nEvent: e-2");
+    assert!(!forged.contains("superseded"), "{forged}");
+    assert!(!machine.meta_of("s-1").contains("superseded_by"));
+    git(&trunk, &["commit", "-q", "--allow-empty", "-m", "moved"]).expect("commit");
+    git(&trunk, &["push", "-q", "origin", "main"]).expect("push");
+    let carried = land("s-3", "shift/s-1", "fix\n\nShift: s-3\nEvent: e-3");
+    assert!(carried.contains("superseded: s-1"), "{carried}");
+}
+
 /// `shift land` records a rebased, trailered branch as the open shift's
 /// landing and refuses everything else; `shift pr` marks only a landing.
 #[test]

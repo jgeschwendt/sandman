@@ -799,8 +799,9 @@ nothing to it, and one any commit of whose <code class="code">origin/main..&lt;b
 an <code class="code">Event:</code> trailer, naming the oldest such sha; else it writes <code class="code">landing: {at, base, branch, head}</code> into the shift's <code class="code">meta.json</code> — <code class="code">base</code> the <code class="code">origin/main</code> sha, <code class="code">head</code> the
 branch's — and prints the summary. A re-land before the handoff replaces it, and
 <code class="code">handoff</code> keeps it. Every earlier shift those trailers name whose landing is unsettled
+and whose landed commits this branch carries on, patch for patch (<code class="code">git cherry</code>, so a rebase still counts)
 gets <code class="code">landing.superseded_by: &lt;id&gt;</code>: a shift fixing another's red pull request branches
-from it, so its own carries the original commits on.</li>
+from it, so its own carries the original commits on; a trailer alone supersedes nothing.</li>
 <li><strong>The runner opens it</strong> — the landing pass, every tick (<code class="code">docs/routines/shift.md</code>). For
 each <code class="code">meta.json</code> with <code class="code">ended</code>, a <code class="code">landing</code> not superseded and no <code class="code">pr</code>: push
 <code class="code">&lt;head&gt;:refs/heads/&lt;branch&gt;</code> unless <code class="code">refs/remotes/origin/&lt;branch&gt;</code> is already <code class="code">head</code> —
