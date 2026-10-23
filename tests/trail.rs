@@ -139,10 +139,7 @@ fn append_and_log_round_trip_with_sorted_keys_and_a_null_parent() {
     );
     // The file is today's, and `today` names it.
     let today = machine.ok(&["trail", "today"]);
-    assert_eq!(
-        fs::read_to_string(today.trim()).expect("today's file"),
-        format!("{raw}")
-    );
+    assert_eq!(fs::read_to_string(today.trim()).expect("today's file"), raw);
 
     let human = machine.ok(&["trail", "log"]);
     let rows: Vec<&str> = human.lines().collect();

@@ -822,7 +822,7 @@ fn recent_sessions(data_root: &Path, now: Timestamp) -> Option<(String, usize)> 
     if pointers.is_empty() {
         return None;
     }
-    pointers.sort_by(|left, right| right.ended.cmp(&left.ended));
+    pointers.sort_by_key(|pointer| std::cmp::Reverse(pointer.ended));
     pointers.truncate(POINTERS_MAX);
 
     let lines: Vec<String> = pointers
