@@ -323,7 +323,8 @@ usage: sandman <verb> [args]
       commit it adds carries Shift: and Event: trailers (exit 1 naming the
       first that does not, or for an unknown branch, an unrebased one, an
       empty one, or a handed-off shift), and stamps superseded_by on the
-      unmerged landings of earlier shifts those trailers name; trunk is never
+      unmerged landings of earlier shifts those trailers name whose commits
+      the branch carries on (by patch: a rebase counts); trunk is never
       pushed — the runner pushes the branch and opens the pull request after
       the handoff. pr is the runner's record of that pull request in
       meta.json's pr — --number/--url opens it (opened), --auto, --red,
