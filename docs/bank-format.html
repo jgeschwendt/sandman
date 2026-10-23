@@ -1471,7 +1471,7 @@ newest printed report's start, never back.</p>
 <p class="docs-note" id="report-cursor"><strong>The cursor</strong> is <code class="code">.reports-read</code>, one ISO-8601 line — runtime state in the dotted tier,
 gitignored by the operator's data-root repo like <code class="code">shifts/current.json</code>, written atomic
 and outside <code class="code">.commit.lock</code> (a last-writer-wins pointer, never content). Only the owner's
-eyes move it: <code class="code">report serve</code>'s <code class="code">GET /</code> of the newest night (no <code class="code">?night=</code>) moves it to the
+eyes move it: <code class="code">report serve</code>'s <code class="code">GET /</code> of the newest night (no <code class="code">?night=</code>, no foreign <code class="code">Sec-Fetch-Site</code>) moves it to the
 newest report on that page, and <code class="code">--mark-read</code> to the newest printed; <code class="code">--hook</code> never does,
 since a hook that guessed wrong about whose session it primed would spend the owner's
 digest on a machine session (observed 2026-10-12 · s-20261012T0515Z read it before
@@ -1489,7 +1489,7 @@ fires before <code class="code">shift attach</code> writes the session id); or a
 std-only HTTP/1.1 one request at a time (<code class="code">Connection: close</code>), loopback only (any other
 <code class="code">--bind</code> exits 2); it prints <code class="code">listening on http://&lt;address&gt;</code> and serves until killed
 (<code class="code">--requests N</code> answers N, then exits — the tests' seam). <code class="code">GET /</code> is a night (§ shifts,
-The night) — the newest with a shift, which moves the cursor (above), or
+The night) — the newest with a shift, which moves the cursor (above) unless <code class="code">Sec-Fetch-Site</code> names another site (anything but <code class="code">none</code> or <code class="code">same-origin</code>: another page's <code class="code">&lt;img&gt;</code> carries no Origin), or
 <code class="code">?night=yyyy-mm-dd</code> by its anchor date, which does not, <code class="code">404</code> when no shift began in it: a header <code class="code">&lt;Day&gt;→&lt;Day&gt; night · &lt;n&gt; shifts · $&lt;cost&gt; · &lt;landed&gt; landed · &lt;proposals&gt; proposals</code> (cost summed over the shifts' <code class="code">meta.json</code> <code class="code">cost_usd</code>,
 landed the rows of their Landed tables), then <strong>Proposals awaiting you</strong> — every repo's,
 each open <code class="code">proposal:</code> thread with <code class="code">waiting: user</code>, re-asked ones included, with its

@@ -220,7 +220,8 @@ usage: sandman <verb> [args]
   report serve [--bind 127.0.0.1:1705] [--requests N]
       The report as a loopback page (a non-loopback --bind exits 2), printing
       `listening on http://<address>`: GET / shows a night — the newest with
-      a shift, which moves the read cursor to its newest report, or
+      a shift, which moves the read cursor to its newest report unless
+      Sec-Fetch-Site names another site, or
       ?night=yyyy-mm-dd, a night keyed by the day it began on —
       its header, the proposal: threads awaiting the owner each with an
       approve/revise/decline form, Worth your eye, Landed, every shift's
