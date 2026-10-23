@@ -2371,6 +2371,16 @@ fn shift_land_supersedes_only_a_landing_it_carries_on() {
     );
     relanded("shift/s-3b");
     assert!(!machine.meta_of("s-1").contains("superseded_by"));
+    // but the stamp the runner already closed a pull request on stays
+    relanded("shift/s-3");
+    for mark in [&["--number", "9", "--url", "u"][..], &["--closed"]] {
+        machine.ok(
+            FRIDAY,
+            &[&["shift", "pr", "--shift", "s-1"][..], mark].concat(),
+        );
+    }
+    relanded("shift/s-3b");
+    assert!(machine.meta_of("s-1").contains(r#""superseded_by":"s-3""#));
 }
 
 /// `shift land` records a rebased, trailered branch as the open shift's
