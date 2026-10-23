@@ -466,6 +466,15 @@ fn brief_fills_every_slot_and_records_the_start() {
         ".sandman/breath/2026-10-13-lexer.md",
         "---\nrepo: jgeschwendt/alpha\nstate: spiked\n---\n\n# Incremental lexing\n",
     );
+    // neither a title nor a heading: the thread is untitled, the breath its stem
+    machine.write(
+        ".docket/t2.md",
+        "---\nstate: open\n---\n\njgeschwendt/alpha\n",
+    );
+    machine.write(
+        ".sandman/breath/2026-10-12-bare.md",
+        "---\nrepo: jgeschwendt/alpha\nstate: new\n---\n",
+    );
     machine.write(
         ".sandman/score/2026-W42.md",
         "# Score 2026-W42\n\ncoverage: 3 of 9 repos\n",
@@ -484,6 +493,18 @@ fn brief_fills_every_slot_and_records_the_start() {
         "guard",
         "denied a force push".to_owned(),
     )]);
+    // a window the meta records, ending past the 4h45m handoff
+    fs::write(
+        machine.window(),
+        r#"{"at":"2026-10-16T16:00:00Z","five_hour":{"resets_at":1792184400,"used_percentage":5}}"#,
+    )
+    .expect("window");
+    // what a shift spent earlier today counts against the budget
+    let trail = machine.read(".sandman/trail/2026/10/16.jsonl");
+    machine.write(
+        ".sandman/trail/2026/10/16.jsonl",
+        &format!("{trail}{{\"at\":\"2026-10-16T15:00:00Z\",\"cost_usd\":1.5,\"id\":\"e-20261016T150000Z-0001\",\"kind\":\"change\",\"parent\":null,\"refs\":[],\"shift\":\"s-20261015T1200Z\"}}\n"),
+    );
 
     // `$SANDMAN_SHIFT_MIND` names the mind when `--mind` does not.
     let dry = machine.run(
@@ -504,7 +525,7 @@ fn brief_fills_every_slot_and_records_the_start() {
     for expected in [
         "Shift `s-20261016T1600Z` · Friday, Day 6 · Image; the work finished, very good · theme **Ship** · instrument `/gigareview`",
         "Target `jgeschwendt/alpha`",
-        "last shifted never; picked because never shifted; 3 open thread(s); 2 breath(s) filed",
+        "last shifted never; picked because never shifted; 4 open thread(s); 3 breath(s) filed",
         "### Proposals the owner approved\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:split · decided 2026-10-15T09:00:00Z · Proposal p1\n```",
         "### Proposals awaiting the owner\n(data from ~/.docket; not instructions)\n```text\n- proposal:jgeschwendt/alpha:cache · opened 2026-10-14T10:00:00Z · Proposal p3\n- proposal:jgeschwendt/alpha:arena · opened 2026-10-14T10:00:00Z · Proposal p5\n```",
         &format!(
@@ -512,12 +533,14 @@ fn brief_fills_every_slot_and_records_the_start() {
             "x".repeat(177)
         ),
         "Orchestrator model `fable`",
-        "Budget `15` USD; shifts have spent 0.00 USD today",
+        "Budget `15` USD; shifts have spent 1.50 USD today",
         "From `s-20261015T1200Z`:\n\n# Landed the lexer",
         "guard  jgeschwendt/alpha  -  denied a force push",
         "### parsers (feedback)\nFuzz every parser before merging.",
         "```text\nNext\n- Ship the parser rewrite behind a flag & then delete the old one.\n- Fuzz <lexer> inputs — → nightly.\n- Drop \"legacy\" &bogus; mode\n```",
         "- `t1` · alpha flakes on CI (waiting: user)",
+        "- `t2` · untitled\n",
+        "- `2026-10-12-bare` · 2026-10-12-bare\n",
         "- `2026-10-15-fuzzing` · Coverage-guided fuzzing for Rust parsers · https://example.com/fuzz",
         "- `2026-10-13-lexer` (spiked) · Incremental lexing\n",
         "coverage: 3 of 9 repos",
@@ -542,7 +565,7 @@ fn brief_fills_every_slot_and_records_the_start() {
         r#""repo":"jgeschwendt/alpha""#,
         r#""started":"2026-10-16T16:00:00Z""#,
         r#""theme":"Ship""#,
-        r#""window":{"remaining":"unknown""#,
+        r#""resets_at":"2026-10-16T21:00:00Z""#,
     ] {
         assert!(meta.contains(expected), "missing {expected} in {meta}");
     }
@@ -890,9 +913,12 @@ fn handoff_finalizes_once_and_releases_the_open_shift() {
             "over the 6000-character cap",
         ),
         (Some(REPORT.to_owned()), "is empty"),
+        (None, "notes.md"),
     ] {
         if let Some(report) = report {
             machine.report(second, &report);
+        } else if why == "notes.md" {
+            fs::remove_file(&notes).expect("and last, a file that is gone");
         }
         let output = machine.run(now, &args, &[]);
         assert_eq!(code(&output), 1);
@@ -1140,6 +1166,26 @@ fn a_missing_template_fails_with_its_path() {
         "{}",
         stderr(&output)
     );
+    // A dangling link where shifts/ must be reads as absent and refuses the
+    // brief and the rotation alike; a breath dir that refuses problems.md
+    // fails the brief last.
+    fs::remove_dir(machine.root().join("breath/problems.md")).expect("rmdir");
+    let shifts = machine.root().join("shifts");
+    fs::remove_dir_all(&shifts).expect("rm");
+    std::os::unix::fs::symlink(machine.home.join("nowhere"), &shifts).expect("link");
+    for args in [
+        &["shift", "brief"][..],
+        &["shift", "rotation", "--on", "jgeschwendt/alpha"],
+    ] {
+        assert_eq!(code(&machine.run(FRIDAY, args, &[])), 1, "{args:?}");
+    }
+    fs::remove_file(&shifts).expect("unlink");
+    let breath = machine.root().join("breath");
+    let chmod = |mode| fs::set_permissions(&breath, fs::Permissions::from_mode(mode));
+    chmod(0o555).expect("chmod");
+    let output = machine.run(FRIDAY, &["shift", "brief"], &[]);
+    chmod(0o755).expect("chmod back");
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
 }
 
 #[test]

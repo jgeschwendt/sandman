@@ -1037,6 +1037,7 @@ mod tests {
     use crate::testutil::TempDir;
     use crate::time::Timestamp;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
@@ -1383,6 +1384,19 @@ mod tests {
         assert!(unrouted.exists());
         assert!(young.exists());
         assert!(stray.exists());
+        // A pointer the sweep cannot remove fails the pass.
+        let recent = scratch.pointer("stuck", &hours(73), Some(dreamt));
+        let recent = recent.parent().expect("recent");
+        let chmod = |mode| fs::set_permissions(recent, fs::Permissions::from_mode(mode));
+        chmod(0o555).expect("chmod");
+        let stuck = reflect(
+            &scratch.root,
+            &scratch.claude,
+            Scratch::now(),
+            &Scratch::silent(),
+        );
+        chmod(0o755).expect("chmod back");
+        assert!(stuck.is_err());
     }
 
     // ─── upkeep ───────────────────────────────────────────────────────────
@@ -2063,6 +2077,30 @@ is wrong on sight — retitle it."
                 (baseline.at == Scratch::now(), baseline.last_ops),
                 (during, 0)
             );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bank_or_a_merge_source_sealed_during_the_call_rejects_or_fails_it() {
+        for (member, mode, verdict) in [
+            (None, 0o755, "rejected(unreadable-bank: "),
+            (Some(1), 0o644, "failed("),
+        ] {
+            let scratch = Scratch::new("reflect-sealed");
+            let files = make_due(&scratch);
+            let dir = scratch.bank().dir().to_path_buf();
+            let sealed = member.map_or_else(|| dir.clone(), |index| dir.join(&files[index]));
+            let reply = format!(
+                "{{\"ops\":[{{\"op\":\"merge\",\"files\":[\"{}\",\"{}\"],\"type\":\"reference\",\"name\":\"merged\",\"description\":\"one line\",\"body\":\"draft\"}}]}}",
+                files[0], files[1]
+            );
+            let (options, _) =
+                scratch.replies(&[&reply], &format!("chmod 000 '{}'", sealed.display()));
+            let outcome = reflect(&scratch.root, &scratch.claude, Scratch::now(), &options);
+            fs::set_permissions(&sealed, fs::Permissions::from_mode(mode)).expect("unseal");
+            let banks = outcome.expect("reflect").banks;
+            assert!(banks[0].contains(verdict), "{banks:?}");
         }
     }
 

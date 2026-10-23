@@ -736,8 +736,19 @@ mod tests {
             first.display()
         );
         fs::write(recent.join(format!("{SID}.json")), earlier).expect("pointer");
-        // Claude Code recreates the transcript behind the take.
-        fixture.seed(&[r#"{"type":"user","message":{"content":"stub"}}"#]);
+        // Claude Code recreates the transcript behind the take; an earlier
+        // archive that will not read fails it.
+        let stub = [r#"{"type":"user","message":{"content":"stub"}}"#];
+        fixture.seed(&stub);
+        let chmod = |mode| fs::set_permissions(&first, fs::Permissions::from_mode(mode));
+        chmod(0o000).expect("chmod");
+        let unreadable = take(&fixture.root, &fixture.claude, SID, false);
+        chmod(0o644).expect("chmod back");
+        assert!(
+            matches!(unreadable, Err(Error::Io { .. })),
+            "{unreadable:?}"
+        );
+        fixture.seed(&stub);
         let second = take(&fixture.root, &fixture.claude, SID, false).expect("retake");
         assert!(second.archived.is_file());
         let joined = fs::read_to_string(&first).expect("first archive");
@@ -790,6 +801,7 @@ mod tests {
 
     #[test]
     fn an_unknown_session_and_an_unwritable_pointer_are_typed_errors() {
+        type Step<'a> = (&'a dyn Fn(), &'a dyn Fn());
         let fixture = Fixture::new("take-missing");
         assert!(matches!(
             take(&fixture.root, &fixture.claude, "no-such-session", false),
@@ -802,13 +814,41 @@ mod tests {
             take(&fixture.root, &fixture.claude, "../escape", false),
             Err(Error::InvalidInput { .. })
         ));
-        fixture.seed(&transcript_lines());
-        fs::create_dir_all(crate::paths::recent_dir(&fixture.root).join(format!("{SID}.json")))
-            .expect("a pointer that is a directory");
-        assert!(matches!(
-            take(&fixture.root, &fixture.claude, SID, true),
-            Err(Error::Io { .. })
-        ));
+        // An unreadable transcript, a file where the archive must be, a project
+        // directory the transcript cannot leave, a file where `.recent` must
+        // be, then a directory at the pointer path: each an io error.
+        let source = fixture.seed(&transcript_lines());
+        let archive = crate::paths::archive_claude_dir(&fixture.root);
+        let recent = crate::paths::recent_dir(&fixture.root);
+        for path in [&archive, &recent] {
+            fs::create_dir_all(path.parent().expect("parent")).expect("parent");
+        }
+        let chmod = |path: &Path, mode| {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("chmod");
+        };
+        let steps: [Step; 5] = [
+            (&|| chmod(&source, 0o000), &|| chmod(&source, 0o644)),
+            (&|| fs::write(&archive, "").expect("file"), &|| {
+                fs::remove_file(&archive).expect("unblock");
+            }),
+            (&|| chmod(&fixture.project(), 0o555), &|| {
+                chmod(&fixture.project(), 0o755);
+            }),
+            (&|| fs::write(&recent, "").expect("file"), &|| {
+                fs::remove_file(&recent).expect("unblock");
+                fixture.seed(&transcript_lines());
+            }),
+            (
+                &|| fs::create_dir_all(recent.join(format!("{SID}.json"))).expect("dir"),
+                &|| (),
+            ),
+        ];
+        for (block, unblock) in steps {
+            block();
+            let result = take(&fixture.root, &fixture.claude, SID, true);
+            unblock();
+            assert!(matches!(result, Err(Error::Io { .. })), "{result:?}");
+        }
     }
 
     #[test]
@@ -1060,18 +1100,21 @@ mod tests {
         fs::write(&nameless, r#"{"job":"11112222"}"#).expect("nameless entry");
         let hostile = dir.join("cccc-3333.json");
         fs::write(&hostile, r#"{"session":"../escape"}"#).expect("hostile entry");
+        let sealed = dir.join("dddd-4444.json");
+        fs::write(&sealed, "{}").expect("sealed entry");
+        fs::set_permissions(&sealed, fs::Permissions::from_mode(0o000)).expect("seal");
         // The ledger directory carries files that are not entries.
         fs::write(dir.join("notes.txt"), "not an entry").expect("stray");
 
         let drained = drain_pending(&fixture.root, &fixture.claude);
-        assert_eq!(drained.len(), 3, "{drained:?}");
+        assert_eq!(drained.len(), 4, "{drained:?}");
         assert!(
             drained
                 .iter()
                 .all(|outcome| matches!(outcome, Drained::Unreadable { .. })),
             "{drained:?}"
         );
-        for entry in [&hostile, &malformed, &nameless] {
+        for entry in [&hostile, &malformed, &nameless, &sealed] {
             assert!(entry.is_file(), "{}", entry.display());
         }
         let journal = journal(&fixture.root);
@@ -1080,7 +1123,7 @@ mod tests {
                 .lines()
                 .filter(|line| line.contains("pending unreadable "))
                 .count(),
-            3,
+            4,
             "{journal}"
         );
         assert!(
