@@ -247,8 +247,10 @@ pub struct Ask {
 
 /// Ask one mind and read its reply text.
 ///
-/// The child is `claude -p <prompt> --model <model> --output-format json`
-/// with `CLAUDE_MEMORY_PIPELINE=1` and no stdin. What it does with its own
+/// The child is `claude -p <prompt> --model <model> --output-format json
+/// --tools "" --strict-mcp-config` with `CLAUDE_MEMORY_PIPELINE=1` and no
+/// stdin: a mind reads untrusted transcript text, so it gets no tool and no
+/// MCP server to act on it with — only its reply. What it does with its own
 /// transcript is [`Ask::keep`]'s business, and there are exactly two answers:
 ///
 /// - `Some` — the run is pinned to a generated session id and to
@@ -360,7 +362,8 @@ fn command(request: &Ask, session: Option<&str>) -> Command {
         .arg("--model")
         .arg(&request.model)
         .arg("--output-format")
-        .arg("json");
+        .arg("json")
+        .args(["--tools", "", "--strict-mcp-config"]);
     match (session, request.keep.as_ref()) {
         (Some(session), Some(keep)) => {
             command
@@ -670,7 +673,7 @@ mod tests {
         let stub = crate::testutil::stub_script(
             temp.path(),
             "echo",
-            "printf '%s' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"hello from '\"$4\"'\"}'\n",
+            "printf '%s' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"hello from '\"$4 $7=[$8] $9\"'\"}'\n",
         );
         let request = Ask {
             binary: stub.into(),
@@ -679,7 +682,10 @@ mod tests {
             prompt: "hello".to_owned(),
             timeout: Duration::from_secs(30),
         };
-        assert_eq!(ask(&request), Ok("hello from claude-fable-5".to_owned()));
+        assert_eq!(
+            ask(&request),
+            Ok("hello from claude-fable-5 --tools=[] --strict-mcp-config".to_owned())
+        );
     }
 
     #[cfg(unix)]
