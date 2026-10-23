@@ -826,6 +826,7 @@ mod tests {
         let chmod = |path: &Path, mode| {
             fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("chmod");
         };
+        let memories = recent.parent().expect("memories");
         let steps: [Step; 5] = [
             (&|| chmod(&source, 0o000), &|| chmod(&source, 0o644)),
             (&|| fs::write(&archive, "").expect("file"), &|| {
@@ -834,8 +835,8 @@ mod tests {
             (&|| chmod(&fixture.project(), 0o555), &|| {
                 chmod(&fixture.project(), 0o755);
             }),
-            (&|| fs::write(&recent, "").expect("file"), &|| {
-                fs::remove_file(&recent).expect("unblock");
+            (&|| chmod(memories, 0o555), &|| {
+                chmod(memories, 0o755);
                 fixture.seed(&transcript_lines());
             }),
             (
