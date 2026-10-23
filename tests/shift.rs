@@ -2353,6 +2353,24 @@ fn shift_land_supersedes_only_a_landing_it_carries_on() {
     git(&trunk, &["push", "-q", "origin", "main"]).expect("push");
     let carried = land("s-3", "shift/s-1", "fix\n\nShift: s-3\nEvent: e-3");
     assert!(carried.contains("superseded: s-1"), "{carried}");
+    let relanded = |branch: &str| {
+        machine.ok(
+            FRIDAY,
+            &["shift", "land", "--shift", "s-3", "--branch", branch],
+        )
+    };
+    // landing again on the same branch still carries s-1 on
+    assert!(relanded("shift/s-3").contains("superseded: s-1"));
+    assert!(machine.meta_of("s-1").contains(r#""superseded_by":"s-3""#));
+    // a re-land that dropped s-1's commits hands its landing back
+    shift_branch(
+        &trunk,
+        "s-3b",
+        "main",
+        &["fix\n\nShift: s-3, s-1\nEvent: e-3"],
+    );
+    relanded("shift/s-3b");
+    assert!(!machine.meta_of("s-1").contains("superseded_by"));
 }
 
 /// `shift land` records a rebased, trailered branch as the open shift's
