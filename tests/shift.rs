@@ -2218,6 +2218,21 @@ fn a_short_recent_shift_cools_its_repo_off_promotion() {
 }
 
 #[test]
+fn a_sunday_no_sabbath_planned_keeps_the_current_weeks_freeze() {
+    let machine = Machine::prompted("thaw");
+    for slug in ["alpha", "beta"] {
+        machine.repo(&format!("jgeschwendt/{slug}"));
+    }
+    machine.write(
+        ".sandman/score/2026-W42-targets.md",
+        "## jgeschwendt/alpha\nFrozen for new work\n",
+    );
+    let output = machine.run("2026-10-18T16:00:00Z", &["shift", "pick"], &[]);
+    assert_eq!(stdout(&output), "jgeschwendt/beta\n");
+    assert_eq!(stderr(&output), "skipped: jgeschwendt/alpha (frozen)\n");
+}
+
+#[test]
 fn the_owner_switches_repos_off_the_rotation_and_pick_passes_them_over() {
     let machine = Machine::prompted("rotation");
     for slug in ["alpha", "beta", "gamma"] {
