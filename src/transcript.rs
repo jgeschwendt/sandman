@@ -254,9 +254,8 @@ fn collect_highlights(value: &Value, out: &mut Vec<String>) {
     };
     for body in commands.into_iter().flat_map(quoted_bodies) {
         let body = one_line(&body, HIGHLIGHT_MAX_CHARS);
-        if !out.contains(&body) {
-            out.push(body);
-        }
+        out.retain(|held| *held != body);
+        out.push(body);
     }
 }
 
@@ -397,7 +396,8 @@ mod tests {
         } = digest(&text);
         assert_eq!(cwd.as_deref(), Some("/Users/you/code"));
         assert_eq!(title.as_deref(), Some("first words spill over"));
-        assert_eq!(highlights, ["the first body", "a legacy body"]);
+        // A body remembered again counts as its latest, so the cap keeps it.
+        assert_eq!(highlights, ["a legacy body", "the first body"]);
     }
 
     #[test]
