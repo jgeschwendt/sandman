@@ -45,7 +45,8 @@ impl Week {
     /// the Hebrew week's first day — reads the plan the Sabbath before it wrote.
     #[must_use]
     pub fn targets(at: Timestamp) -> Self {
-        Self::of(Timestamp::from_unix_seconds(at.unix_seconds() + 86_400))
+        let (year, month, day) = Local::at(at).date;
+        Self::of_day(days_from_civil(year, month, day) + 1)
     }
 
     /// The week holding the date `days` since the epoch.
@@ -837,6 +838,10 @@ mod tests {
         // A Sunday plans by the next day's week; a Saturday by its own.
         assert_eq!(Week::targets(at("2026-10-11T16:00:00Z")).name(), "2026-W42");
         assert_eq!(Week::targets(at("2026-10-10T16:00:00Z")).name(), "2026-W41");
+        // The next day is a calendar day, not 24 hours: 00:30 EDT the Sunday
+        // the clocks go back, and 23:30 EST the Saturday they go forward.
+        assert_eq!(Week::targets(at("2026-11-01T04:30:00Z")).name(), "2026-W45");
+        assert_eq!(Week::targets(at("2026-03-08T04:30:00Z")).name(), "2026-W10");
         for bad in [
             "2026-W00", "2027-W53", "2026-42", "26-W42", "2026-W4x", "+026-W42",
         ] {
