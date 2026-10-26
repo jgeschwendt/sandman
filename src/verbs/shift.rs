@@ -1019,11 +1019,24 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
         .collect()
 }
 
+/// The targets file a night reads, by name and path: the planned week's
+/// ([`Week::targets`]), else the current week's — a Sabbath that wrote none
+/// must not thaw what the last one froze.
+fn targets(ctx: &Context) -> (String, PathBuf) {
+    let scores = paths::score_dir(&ctx.data_root);
+    let names = [Week::targets(ctx.now), Week::of(ctx.now)]
+        .map(|week| format!("{}-targets.md", week.name()));
+    let name = names
+        .iter()
+        .find(|name| scores.join(name).is_file())
+        .unwrap_or(&names[0]);
+    (name.clone(), scores.join(name))
+}
+
 /// Whether the owner froze a repo: the week's targets line says `freeze`,
 /// `frozen` or `on ice`, or his answer on a `proposal:` thread says `on ice`.
 fn frozen(ctx: &Context) -> impl Fn(&str) -> bool {
-    let targets = paths::score_dir(&ctx.data_root)
-        .join(format!("{}-targets.md", Week::targets(ctx.now).name()));
+    let (_, targets) = targets(ctx);
     let threads = front_files(&ctx.docket);
     let says = |text: &str, words: &[&str]| {
         let text = text.to_lowercase();
@@ -1861,8 +1874,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
     let entries = trail::read(&ctx.data_root, None)?;
     let threads = open_threads(ctx, &target.label, false);
     let scores = paths::score_dir(&ctx.data_root);
-    let targets_name = format!("{}-targets.md", Week::targets(ctx.now).name());
-    let targets = scores.join(&targets_name);
+    let (targets_name, targets) = targets(ctx);
     let mut labels: BTreeMap<&'static str, String> = CONTEXT_SOURCES
         .iter()
         .map(|(name, source)| (*name, (*source).to_owned()))
