@@ -1125,11 +1125,20 @@ mod tests {
     }
 
     /// A sibling test's fork holds a copy of the lock's descriptor until its
-    /// exec closes it, so a release is awaited, not assumed (5 of 33 runs).
+    /// exec closes it, so a release is awaited, not assumed (5 of 33 runs) —
+    /// and so is an acquire after a probe, which itself takes the lock for an
+    /// instant (1 of 10 runs).
     fn released(root: &Path) -> bool {
         (0..200).any(|_| {
             std::thread::sleep(std::time::Duration::from_millis(10));
             !lock_held(root)
+        })
+    }
+
+    fn acquired(root: &Path) -> Option<Lock> {
+        (0..200).find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            Lock::acquire(root).expect("acquire")
         })
     }
 
@@ -1140,9 +1149,7 @@ mod tests {
         // A run killed mid-pointer leaves its file behind, held by nobody.
         fs::write(lock_path(&scratch.root), "72156").expect("a dead run's file");
         assert!(!lock_held(&scratch.root));
-        let lock = Lock::acquire(&scratch.root)
-            .expect("acquire")
-            .expect("taken over");
+        let lock = acquired(&scratch.root).expect("taken over");
         // A live holder past any age still holds: nothing sweeps its file.
         fs::File::options()
             .write(true)
