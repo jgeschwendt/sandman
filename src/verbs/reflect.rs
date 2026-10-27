@@ -1,10 +1,15 @@
 //! `reflect` — the 24 h pass: the voyage entry, the log index, the pointer
-//! sweep and the gated bank upkeep.
+//! sweep, the gated bank upkeep and the backfill.
 //!
 //! The entry is the pass's one derivative of memory, and it is written for the
-//! UTC day that *ended* rather than the day the pass is running in: a 03:30
-//! pass rendering its own date would cover three hours and never see anything
-//! stamped after it. The window is closed before it is read.
+//! UTC day that *ended* rather than the day the pass is running in: a 23:30
+//! New York pass rendering its own UTC date would cover its first hours and
+//! never see anything stamped after them. The window is closed before it is
+//! read.
+//!
+//! Only that day is the pass's own, so a day whose mind abstained, or one no
+//! pass covered (the Mac asleep through the night), would never be asked
+//! again; the backfill asks the recent days that still have no entry file.
 //!
 //! It is independent of the dream. The step reads the banks, not the queue, so
 //! a memory the operator committed by hand counts exactly as much as a dreamt
@@ -77,6 +82,11 @@ pub const UPKEEP_HOURS: i64 = 20;
 /// all plainly left work behind, and that backlog keeps the bank due on its
 /// own until a pass comes in under the ceiling.
 pub const UPKEEP_MAX_OPS: usize = 6;
+/// The most log-mind calls one backfill spends — a written or abstained day;
+/// a quiet day costs none, so quiet days never crowd out real gaps.
+pub const BACKFILL_CALLS: usize = 3;
+/// How many days back the backfill looks, the day that just ended excluded.
+pub const BACKFILL_DAYS: i64 = 14;
 /// The per-bank due-baseline.
 pub const BASELINE_FILE_NAME: &str = "_reflect.json";
 
@@ -148,7 +158,7 @@ pub fn reflect(
     options: &Options,
 ) -> Result<Outcome> {
     take::drain_pending(data_root, claude_root);
-    let day = log::day_ended(now);
+    let day = log::day_ended(now, 1);
     let (entry, entry_status) = entry_step(data_root, day, options)?;
     let swept = sweep(data_root, now)?;
     let (banks, due, failed) = upkeep_all(data_root, now, options)?;
@@ -285,6 +295,27 @@ pub fn entry_step(
         ),
     );
     Ok((Some(path), "written"))
+}
+
+/// Hand `render` the days two to [`BACKFILL_DAYS`] back from `now` with no
+/// entry file, newest first, until [`BACKFILL_CALLS`] of them come back
+/// `written` or `abstained` — the statuses a log-mind call returns. `render`
+/// answers `None` for a day that failed, which costs no slot either.
+pub fn backfill(
+    data_root: &Path,
+    now: Timestamp,
+    mut render: impl FnMut(Day) -> Option<&'static str>,
+) {
+    (2..=BACKFILL_DAYS)
+        .map(|back| log::day_ended(now, back))
+        .filter(|day| {
+            !paths::log_dir(data_root)
+                .join(format!("{}.md", day.key()))
+                .is_file()
+        })
+        .filter(|day| matches!(render(*day), Some("written" | "abstained")))
+        .take(BACKFILL_CALLS)
+        .for_each(drop);
 }
 
 /// Regenerate `log/INDEX.md`, fixing `began:` if this is the first write.

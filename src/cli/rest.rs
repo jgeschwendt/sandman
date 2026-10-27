@@ -96,23 +96,22 @@ pub(super) fn reflect_verb(args: &[String]) -> Result<(), Failure> {
     }
 }
 
-/// The whole 24 h pass.
+/// The whole 24 h pass, then the backfill behind it.
 fn reflect_pass() -> Result<(), Failure> {
     // The pass already writes one line per bank. What it had no line for is
     // the run: a nightly tick that died halfway through left a log ending in
     // an ordinary bank line, indistinguishable from one that finished.
-    let journal = paths::data_root().ok();
     let started = Instant::now();
-    let outcome = match reflect::reflect(
-        &paths::data_root()?,
-        &paths::claude_root()?,
+    let (data_root, now, options) = (
+        paths::data_root()?,
         Timestamp::now()?,
-        &reflect::Options::from_env(),
-    ) {
+        reflect::Options::from_env(),
+    );
+    let outcome = match reflect::reflect(&data_root, &paths::claude_root()?, now, &options) {
         Ok(outcome) => outcome,
         Err(error) => {
             note(
-                journal.as_deref(),
+                Some(&data_root),
                 "reflect",
                 &format!(
                     "reflect error ms={}: {error}",
@@ -123,7 +122,7 @@ fn reflect_pass() -> Result<(), Failure> {
         }
     };
     note(
-        journal.as_deref(),
+        Some(&data_root),
         "reflect",
         &format!(
             "reflect done banks={} due={} failed={} swept={} entry={} ms={}",
@@ -145,29 +144,45 @@ fn reflect_pass() -> Result<(), Failure> {
         outcome.swept,
         outcome.banks.len()
     );
-    match outcome.failed {
-        0 => Ok(()),
-        failed => Err(Error::refused(format!(
-            "{failed} bank(s) failed upkeep: see their failed(…) lines in the reflect run log"
+    // A day that fails is passed like a bank that does: the rest still run,
+    // and the exit counts it.
+    let mut lost = 0;
+    reflect::backfill(&data_root, now, |day| {
+        reflect_day(&data_root, day, &options)
+            .inspect_err(|_| lost += 1)
+            .ok()
+    });
+    match (outcome.failed, lost) {
+        (0, 0) => Ok(()),
+        (banks, days) => Err(Error::refused(format!(
+            "{banks} bank(s) failed upkeep, {days} backfill day(s) failed: see their lines in the reflect run log"
         ))
         .into()),
     }
 }
 
-/// One past day's entry and the index behind it, and nothing else — the
-/// backfill hand-hold: no drain, no sweep, no upkeep.
+/// One past day's entry and the index behind it, and nothing else: no drain,
+/// no sweep, no upkeep, no backfill.
 fn reflect_one_day(day: reflect::Day) -> Result<(), Failure> {
-    let journal = paths::data_root().ok();
+    reflect_day(&paths::data_root()?, day, &reflect::Options::from_env())?;
+    Ok(())
+}
+
+/// Render `day`'s entry and the index behind it, journal the run line and
+/// print the entry line — `--day`'s whole work, and the backfill's per day.
+fn reflect_day(
+    data_root: &Path,
+    day: reflect::Day,
+    options: &reflect::Options,
+) -> Result<&'static str, Error> {
     let started = Instant::now();
-    let data_root = paths::data_root()?;
-    let options = reflect::Options::from_env();
-    let rendered = reflect::entry_step(&data_root, day, &options)
-        .and_then(|rendered| reflect::write_index(&data_root, day).map(|_| rendered));
+    let rendered = reflect::entry_step(data_root, day, options)
+        .and_then(|rendered| reflect::write_index(data_root, day).map(|_| rendered));
     let (entry, status) = match rendered {
         Ok(rendered) => rendered,
         Err(error) => {
             note(
-                journal.as_deref(),
+                Some(data_root),
                 "reflect",
                 &format!(
                     "reflect error day={} ms={}: {error}",
@@ -175,11 +190,11 @@ fn reflect_one_day(day: reflect::Day) -> Result<(), Failure> {
                     started.elapsed().as_millis()
                 ),
             );
-            return Err(Failure::Error(error));
+            return Err(error);
         }
     };
     note(
-        journal.as_deref(),
+        Some(data_root),
         "reflect",
         &format!(
             "reflect done day={} entry={status} ms={}",
@@ -188,7 +203,7 @@ fn reflect_one_day(day: reflect::Day) -> Result<(), Failure> {
         ),
     );
     println!("{}", entry_line(entry.as_deref(), status));
-    Ok(())
+    Ok(status)
 }
 
 /// What the entry step has to show for itself: the path when it wrote one,
@@ -218,7 +233,7 @@ pub(super) fn mcp_verb(args: &[String]) -> Result<(), Failure> {
         .map_err(|source| Failure::Error(Error::io("<stdout>", source)))
 }
 
-/// `plist install|report`: a launchd agent from `launchd/`, rendered for this
+/// `plist install|reflect|report`: a launchd agent from `launchd/`, rendered for this
 /// home, carrying `$SANDMAN_SHIFT_NIGHT` into the report agent when it is set.
 pub(super) fn plist_verb(args: &[String]) -> Result<(), Failure> {
     let template = match Args::parse(args, "plist", &[], &[], 1)?
@@ -226,10 +241,11 @@ pub(super) fn plist_verb(args: &[String]) -> Result<(), Failure> {
         .as_str()
     {
         "install" => include_str!("../../launchd/dev.gigantic.sandman.install.plist"),
+        "reflect" => include_str!("../../launchd/dev.gigantic.sandman.reflect.plist"),
         "report" => include_str!("../../launchd/dev.gigantic.sandman.report.plist"),
         other => {
             return Err(Failure::Usage(format!(
-                "plist wants install or report, got `{other}`"
+                "plist wants install, reflect or report, got `{other}`"
             )));
         }
     };

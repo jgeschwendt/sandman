@@ -263,6 +263,16 @@ that finds the sources changed. A day the operator wants marked is marked by wha
 <code class="code">remember</code> puts in the banks that day.</li>
 <li><strong>A quiet day gets no file.</strong> No sources, no entry — the index shows the gap. A filler
 entry would be prose about nothing, and every reader of the log pays for it in context.</li>
+<li><strong>Backfilled by the pass.</strong> The pass owns only the UTC day that ended, so after it
+<code class="code">sandman reflect</code> walks the days two to fourteen back, newest first, and renders each with no
+<code class="code">&lt;date&gt;.md</code> exactly as <code class="code">--day</code> does (its own <code class="code">reflect done day=…</code> line and stdout line) until three
+of them have cost a log-mind call — <code class="code">written</code> or <code class="code">abstained</code>. A quiet day costs none, so quiet days
+never crowd out real gaps; a day that fails is journaled, the rest still run, and the pass exits 1
+counting it. <code class="code">--day</code> alone never backfills.</li>
+<li><strong>Run nightly by launchd.</strong> The agent <code class="code">launchd/dev.gigantic.sandman.reflect.plist</code>
+runs <code class="code">sandman reflect</code> at 23:30 local — after the UTC day ended in either season (log
+<code class="code">~/Library/Logs/dev.gigantic.sandman.reflect.log</code>); it replaces the <code class="code">sandman-reflect</code> routine. Install it with
+<code class="code">sandman plist reflect &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.reflect.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.reflect.plist</code>.</li>
 </ul>
 </div>
 </section>
@@ -1537,7 +1547,9 @@ agent's environment (the label was <code class="code">io.jlg.sandman-report</cod
 <div class="stack">
 <p class="docs-note">All bank, trail, shift, breath and score writes happen under <code class="code">.commit.lock</code> at the data root, and every writer waits
 alike — up to five seconds for a holder to finish — before it reports the lock held; every file write is atomic (tmp →
-rename in the same directory).</p>
+rename in the same directory). A lock that stays held names its writer's pid: live (<code class="code">ps -p &lt;pid&gt;</code>), a writer is
+mid-commit and the retry passes; dead, the writer was killed mid-commit (sandman traps no signals) and the file is
+removed by hand — until then every write fails.</p>
 </div>
 </section>
 

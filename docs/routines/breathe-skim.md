@@ -26,7 +26,7 @@ A pass runs in `dontAsk` inside Claude Code's strict Bash sandbox with the profi
 
 ## Repair
 
-- `unknown verb` (exit 2): the installed `~/.local/bin/sandman` predates `breathe`; install a trunk build as `sandman-reflect.md` describes.
+- `unknown verb` (exit 2): the installed `~/.local/bin/sandman` predates `breathe`; the install agent `dev.gigantic.sandman.install` brings it to a clean trunk within fifteen minutes; its log is `~/Library/Logs/dev.gigantic.sandman.install.log`.
 - `dispatch` answering `{"error": …}`: the pass record stays without session ids and without `ended`; nothing else to undo. The next tick starts a fresh pass.
 - A second pass of the same kind while one is in flight is refused by `breathe pass` (exit 1, `pass in flight`) until the first closes or outlives its timeout, at which point it is marked dead and charged `SANDMAN_BREATH_DEAD_COST_USD` (default 2) against the day; a skim and a deep pass may run together.
 
