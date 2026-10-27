@@ -1108,8 +1108,8 @@ boolean, a date, a multi-line value, an unknown key — is refused with its line
 <p class="docs-note">The first five are required. Every verb that rewrites the file — <code class="code">file --source</code>,
 <code class="code">adopt</code>, <code class="code">drop</code>, <code class="code">close</code>, <code class="code">reweight</code> — sorts the tables by name, writes the keys in the order above with the
 state keys only when set, and drops comments.</p>
-<p class="docs-note">A source is <strong>due</strong> for a skim when its <code class="code">last_read</code> is absent or at least an hour old;
-a deep pass reads every source.</p>
+<p class="docs-note">A source is <strong>due</strong> for a skim when its <code class="code">last_read</code> is absent or at least 55 minutes old —
+an hour less the hourly tick's jitter, since passes start anywhere in :17–:18; a deep pass reads every source.</p>
 <h3 class="h3" id="breath-a-breath">A breath</h3>
 <p class="docs-note"><code class="code">&lt;yyyy-mm-dd&gt;-&lt;slug&gt;.md</code> — the UTC date <code class="code">file</code> ran, the title slugged with dashes (cut
 at 60 characters, <code class="code">breath</code> when nothing is left), <code class="code">-2</code>, <code class="code">-3</code>, … on a collision.

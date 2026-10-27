@@ -45,8 +45,9 @@ pub const DEFAULT_DEAD_COST_USD: f64 = 2.0;
 pub const JACCARD_SAME: f64 = 0.6;
 /// The problems slot's ceiling.
 const PROBLEMS_CHARS: usize = 6_000;
-/// A skim reads a source again once its `last_read` is this old.
-const SKIM_SECONDS: i64 = 3_600;
+/// A skim reads a source again once its `last_read` is this old: an hour,
+/// less the launchd tick's jitter (passes start anywhere in :17–:18).
+const SKIM_SECONDS: i64 = 3_300;
 /// `silent_since` older than this lowers a source.
 const SILENCE_SECONDS: i64 = 30 * 86_400;
 /// What one breath name's slug is cut to.
@@ -121,7 +122,7 @@ const SOURCE_KEYS: [&str; 10] = [
 
 impl Source {
     /// Whether a pass of `kind` reads it at `now`: a deep pass reads every
-    /// source, a skim those unread for an hour.
+    /// source, a skim those unread for 55 minutes.
     #[must_use]
     pub fn due(&self, kind: PassKind, now: Timestamp) -> bool {
         kind == PassKind::Deep

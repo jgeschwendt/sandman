@@ -669,13 +669,16 @@ fn pass_fills_every_slot_and_close_advances_last_read() {
     assert_eq!(code(&output), 1, "a pass closes once");
 
     // Everything was read as of 16:00, though closed at 16:40: a skim has
-    // nothing due at 16:59, and everything at 17:00.
-    machine.ok(
-        "2026-10-16T17:00:00Z",
+    // nothing due at 16:54:59, and everything at 16:55 — an hour less the tick's jitter.
+    let due = machine.ok(
+        "2026-10-16T16:55:00Z",
         &["breathe", "pass", "--kind", "skim", "--dry-run"],
     );
+    for source in &sources.sources {
+        assert!(due.contains(&format!("- `{}` · ", source.name)), "{due}");
+    }
     let output = machine.run(
-        "2026-10-16T16:59:00Z",
+        "2026-10-16T16:54:59Z",
         &["breathe", "pass", "--kind", "skim"],
         &[],
     );
@@ -714,7 +717,7 @@ fn sources_due_respects_the_hourly_cadence() {
     let machine = Machine::prompted("due");
     machine.write(
         ".sandman/breath/sources.toml",
-        "[fresh]\nkind = \"rss\"\nurl = \"https://a\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\nlast_read = \"2026-10-16T15:01:00Z\"\n\n[never]\nkind = \"rss\"\nurl = \"https://b\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\n\n[stale]\nkind = \"rss\"\nurl = \"https://c\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\nlast_read = \"2026-10-16T15:00:00Z\"\n",
+        "[fresh]\nkind = \"rss\"\nurl = \"https://a\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\nlast_read = \"2026-10-16T15:05:01Z\"\n\n[never]\nkind = \"rss\"\nurl = \"https://b\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\n\n[stale]\nkind = \"rss\"\nurl = \"https://c\"\nweight = 1.0\nbudget = 5\nbears_on = [\"*\"]\nlast_read = \"2026-10-16T15:05:00Z\"\n",
     );
     let names = |args: &[&str]| -> Vec<String> {
         machine
@@ -734,7 +737,7 @@ fn sources_due_respects_the_hourly_cadence() {
             .ok(NOW, &["breathe", "sources", "--due"])
             .lines()
             .last(),
-        Some("stale  weight=1.0  budget=5  cursor=-  last_read=2026-10-16T15:00:00Z")
+        Some("stale  weight=1.0  budget=5  cursor=-  last_read=2026-10-16T15:05:00Z")
     );
     let json = machine.ok(NOW, &["breathe", "sources", "--due", "--json"]);
     assert!(
@@ -939,7 +942,7 @@ fn pass_tells_a_wait_from_a_fault_and_close_needs_a_cost() {
     assert_eq!(code(&close(Some("3"))), 0);
 
     // Everything was just read: a skim has nothing due, a wait.
-    let output = machine.run("2026-10-16T16:59:00Z", &skim, &[]);
+    let output = machine.run("2026-10-16T16:54:59Z", &skim, &[]);
     assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains("nothing due"),
@@ -1514,7 +1517,7 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
         "answers/list",
         r#"{"sessions":[{"id":"bg8","name":"breath deep b-d","state":"working"}]}"#,
     );
-    let (status, err, sent) = tick("2026-10-16T16:59:00Z", &[]);
+    let (status, err, sent) = tick("2026-10-16T16:54:59Z", &[]);
     assert_eq!((status, err.as_str()), (0, ""));
     assert_eq!(actions(&sent), ["list", "stop bg8", "rm bg8"]);
     machine.write("answers/list", r#"{"sessions":[]}"#);
