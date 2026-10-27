@@ -5,7 +5,7 @@
   <key>Label</key><string>dev.gigantic.sandman.report</string>
   <!-- `sandman report serve` on 127.0.0.1:1705: the nights' reports and the
        proposals awaiting an answer (docs/bank-format.html#report). launchd
-       expands no `~`, so this is a template: `sandman report plist` renders
+       expands no `~`, so this is a template: `sandman plist report` renders
        it with the home spelled out and $SANDMAN_SHIFT_NIGHT carried over. -->
   <key>ProgramArguments</key>
   <array>

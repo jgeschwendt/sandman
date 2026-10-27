@@ -1,0 +1,28 @@
+#!/bin/sh
+# dev.gigantic.sandman.install's script, installed to ~/.local/share/sandman/install so it
+# follows trunk too: a clean trunk at a new commit is built under its pinned toolchain and
+# installed with the shift-test wrapper, its Seatbelt profile, this script and every routine
+# whose installed copy carries no local edit; the report agent restarts onto the new build.
+# A dirty trunk is skipped — a binary stamped -dirty would carry the owner's half-written
+# change into every hook and shift. launchd has no mise shims, so mise is an absolute path;
+# `install` replaces by unlink and create, so a shift mid-run keeps the binary it started on.
+set -e
+trunk="$HOME/.grove/code/jgeschwendt/sandman/main"
+sm="$HOME/.local/bin/sandman"
+want=$(git -C "$trunk" rev-parse --short HEAD)
+have=$("$sm" version 2>/dev/null | sed 's/.*-//')
+if [ -n "$(git -C "$trunk" status --porcelain)" ]; then echo "dirty: trunk at $want, installed $have — skipped"; exit 0; fi
+if [ "$have" = "$want" ]; then echo "current: $want"; exit 0; fi
+"$HOME/.local/bin/mise" x -C "$trunk" -- cargo build --release --quiet
+install -m755 "$trunk/target/release/sandman" "$sm"
+install -m755 "$trunk/profiles/shift-test" "$HOME/.local/bin/shift-test"
+install -d "$HOME/.local/share/sandman"
+install -m644 "$trunk/profiles/shift-test" "$trunk/profiles/shift-test.sb" "$HOME/.local/share/sandman/"
+install -m755 "$trunk/launchd/install" "$HOME/.local/share/sandman/install"
+for doc in "$trunk"/docs/routines/*.md; do
+  name=$(basename "$doc")
+  if [ -n "$(git -C "$HOME/.routines" status --porcelain -- "$name")" ]; then echo "edited: ~/.routines/$name — left alone"; continue; fi
+  cmp -s "$doc" "$HOME/.routines/$name" || install -m644 "$doc" "$HOME/.routines/$name"
+done
+launchctl kickstart -k "gui/$(id -u)/dev.gigantic.sandman.report"
+echo "installed: $have → $("$sm" version)"
