@@ -1433,8 +1433,9 @@ fn claude(action: &str, fields: Vec<(&str, Value)>) -> Value {
 /// One tick of the ruach, what its launchd agent runs hourly: close, then
 /// open. Close removes from Claude Code's listing every session named
 /// `breath <kind> <pass-id>` whose pass has `ended`, stopping a working or
-/// blocked one first — except one whose pass was marked dead under 24 h after
-/// it started, an overrunning session that is spared; its failures are
+/// blocked one first — except a deep one whose pass was marked dead, an
+/// overrunning `/gigaresearch` that is spared until 24 h after it started or
+/// a newer deep pass starts; its failures are
 /// `say`d and passed. Open, unless `shifts/PAUSE` exists, composes a skim
 /// pass and — once per New York day, from 06:00 there — a deep one, starts
 /// each pass's session through dispatch and attaches it. A pass's waits are
@@ -1442,6 +1443,21 @@ fn claude(action: &str, fields: Vec<(&str, Value)>) -> Value {
 /// both kinds are tried — the first error wins. `say(line, failed)` hears
 /// every decision.
 pub fn tick(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Result<()> {
+    let started = |pass: &Value| {
+        pass.get("started")
+            .and_then(Value::as_str)
+            .and_then(Timestamp::parse_iso8601)
+            .map(Timestamp::unix_seconds)
+    };
+    let deep_starts: Vec<i64> = fs::read_dir(paths::breath_passes(&ctx.data_root))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| read_pass(&ctx.data_root, &entry.file_name().to_string_lossy()).ok())
+        .map(|(_, entries)| Value::Object(entries))
+        .filter(|pass| pass.get("kind").and_then(Value::as_str) == Some("deep"))
+        .filter_map(|pass| started(&pass))
+        .collect();
     match ask(&tick.dispatch, &claude("list", vec![])) {
         Err(why) => say(&format!("tick list failed: {why}"), true),
         Ok(answer) => {
@@ -1463,12 +1479,15 @@ pub fn tick(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Resu
                         row.get("state").and_then(Value::as_str),
                         Some("working" | "blocked")
                     );
-                    let young = pass
-                        .get("started")
-                        .and_then(Value::as_str)
-                        .and_then(Timestamp::parse_iso8601)
-                        .is_some_and(|at| ctx.now.unix_seconds() - at.unix_seconds() < 86_400);
-                    if working && young && pass.get("dead").and_then(Value::as_bool) == Some(true) {
+                    let current = started(&pass).is_some_and(|at| {
+                        ctx.now.unix_seconds() - at < 86_400
+                            && deep_starts.iter().all(|other| *other <= at)
+                    });
+                    if working
+                        && current
+                        && pass.get("kind").and_then(Value::as_str) == Some("deep")
+                        && pass.get("dead").and_then(Value::as_bool) == Some(true)
+                    {
                         say(
                             &format!(
                                 "tick spare {bg} ({name}): dead pass still working, under 24 h"
@@ -1513,20 +1532,9 @@ pub fn tick(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Resu
     })?;
     let local = |at: Timestamp| shift::local_seconds(at).div_euclid(3_600);
     let (today, hour) = (local(ctx.now).div_euclid(24), local(ctx.now).rem_euclid(24));
-    let deep_today = fs::read_dir(paths::breath_passes(&ctx.data_root))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| read_pass(&ctx.data_root, &entry.file_name().to_string_lossy()).ok())
-        .map(|(_, entries)| Value::Object(entries))
-        .any(|pass| {
-            pass.get("kind").and_then(Value::as_str) == Some("deep")
-                && pass
-                    .get("started")
-                    .and_then(Value::as_str)
-                    .and_then(Timestamp::parse_iso8601)
-                    .is_some_and(|started| local(started).div_euclid(24) == today)
-        });
+    let deep_today = deep_starts
+        .iter()
+        .any(|at| local(Timestamp::from_unix_seconds(*at)).div_euclid(24) == today);
     let mut outcome = Ok(());
     for kind in [PassKind::Skim, PassKind::Deep] {
         if kind == PassKind::Deep && (hour < 6 || deep_today) {

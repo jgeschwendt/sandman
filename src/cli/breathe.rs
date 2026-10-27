@@ -8,6 +8,7 @@ use crate::atomic;
 use crate::error::Error;
 use crate::json::Value;
 use crate::paths;
+use crate::time::Timestamp;
 use crate::verbs::{breathe, shift};
 
 use super::{Args, EMPTY, Failure, knob, note, pinned_now, usd_env};
@@ -395,10 +396,12 @@ fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
 
 /// `breathe tick`, its whole run — knobs included — recorded in
 /// `breath/ticks.jsonl` with the exit it takes; a line it cannot append is
-/// journalled and the exit stands.
+/// journalled and the exit stands. The instant is taken once, before the run:
+/// one that will not parse exits 2 unrecorded.
 fn breathe_tick(args: &[String]) -> Result<(), Failure> {
-    let result = breathe_tick_run(args);
-    if let (Ok(root), Ok(started)) = (paths::data_root(), pinned_now()) {
+    let started = pinned_now()?;
+    let result = breathe_tick_run(args, started);
+    if let Ok(root) = paths::data_root() {
         let exit = result.as_ref().err().map_or(0, Failure::code);
         let line = Value::object([
             ("started", Value::string(started.iso8601())),
@@ -413,7 +416,7 @@ fn breathe_tick(args: &[String]) -> Result<(), Failure> {
 
 /// The ruach's agent: close the ended passes' sessions, then open what is
 /// due through `$SANDMAN_DISPATCH_BIN`, else `~/.local/bin/dispatch`.
-fn breathe_tick_run(args: &[String]) -> Result<(), Failure> {
+fn breathe_tick_run(args: &[String], now: Timestamp) -> Result<(), Failure> {
     Args::parse(args, "breathe tick", &[], &[], 0)?;
     let tick = breathe::Tick {
         budget_usd: usd_env("SANDMAN_BREATH_BUDGET_USD", breathe::DEFAULT_BUDGET_USD)?,
@@ -436,7 +439,10 @@ fn breathe_tick_run(args: &[String]) -> Result<(), Failure> {
             |text| text.parse().ok(),
         )?),
     };
-    let ctx = breathe_context()?;
+    let ctx = breathe::Context {
+        now,
+        ..breathe_context()?
+    };
     let result = breathe::tick(&ctx, &tick, &mut |line, failed| {
         note(Some(&ctx.data_root), "breathe", line);
         if failed {
