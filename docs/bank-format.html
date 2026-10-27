@@ -1273,20 +1273,25 @@ carrying <code class="code">error</code> is a failure. A tick, in order:</p>
 <code class="code">breath &lt;kind&gt; &lt;pass-id&gt;</code> whose <code class="code">pass.json</code> has <code class="code">ended</code> — closed, or marked dead — stopping it first
 when <code class="code">working</code> or <code class="code">blocked</code> and then waiting <code class="code">$SANDMAN_BREATH_SETTLE_MS</code> (default 3000: a stopped
 session's <code class="code">SessionEnd</code> hook races the removal of its job dir), then removing it from the listing, where a
-finished session otherwise stays forever. Each failure is a stderr line; the tick goes on.</li>
+finished session otherwise stays forever. One exception: a <code class="code">working</code> or <code class="code">blocked</code> session whose pass
+<code class="code">pass</code> marked <code class="code">dead</code> is an overrunning run, not a finished one — a long <code class="code">/gigaresearch</code>
+outlives the deep pass's hour — so it is spared (a <code class="code">tick spare …</code> line) until 24 h after the pass
+<code class="code">started</code>, then stopped and removed. Each failure is a stderr line; the tick goes on.</li>
 <li><strong>Open</strong>, unless <code class="code">shifts/PAUSE</code> exists: a skim, then — once per New York calendar day,
-from 06:00 there — a deep pass, each composed as <code class="code">pass</code> composes it. Its waits are skips; its faults fail
-the tick. Each session is started with <code class="code">$SANDMAN_BREATH_MIND</code> (default <code class="code">opus</code>; a deep pass may spawn
+from 06:00 there — a deep pass, each composed as <code class="code">pass</code> composes it. Its waits are skips. Both kinds are
+always tried; a fault, a refused start or a failed attach fails the tick with the first error once both have run. A
+profile that is not JSON fails it before either pass is written. Each session is started with <code class="code">$SANDMAN_BREATH_MIND</code> (default <code class="code">opus</code>; a deep pass may spawn
 pinned opus readers, never an unpinned agent), <code class="code">dontAsk</code> inside the strict Bash sandbox
 <code class="code">shift profile --kind breath</code> prints — the shift's boundary (<a href="#shifts-sandbox">§ shifts, the sandbox</a>) —,
 cwd <code class="code">breath/</code>, then attached. A start answered without an <code class="code">id</code> fails the tick naming the pass; the pass
 stays without session ids or <code class="code">ended</code>, and is marked dead and charged at its timeout — nothing else to undo.
 A skim and a deep pass may run together.</li>
 </ul>
-<p class="docs-note">Every decision is a <code class="code">tick …</code> line in the breathe journal, and every tick —
-failed too — appends <code class="code">{"started": &lt;iso&gt;, "exit": 0|1}</code> to <code class="code">breath/ticks.jsonl</code>, a routine's
-<code class="code">runs.jsonl</code> shape, which <code class="code">score</code> counts (§ score); a line it cannot append is journalled
-(<code class="code">tick unrecorded</code>) and the exit stands. Install with
+<p class="docs-note">Every decision is a <code class="code">tick …</code> line in the breathe journal, and every run of the verb —
+a refused knob included — appends <code class="code">{"started": &lt;iso&gt;, "exit": &lt;its exit code&gt;}</code> to
+<code class="code">breath/ticks.jsonl</code>, a routine's <code class="code">runs.jsonl</code> shape, which <code class="code">score</code> counts (§ score); a line it
+cannot append is journalled (<code class="code">tick unrecorded</code>) and the exit stands, and a binary that predates the
+verb records nothing. Install with
 <code class="code">sandman plist breathe &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.breathe.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.breathe.plist</code>,
 removing <code class="code">~/.routines/breathe-{skim,deep}.md</code> in the same step — the install agent only copies routines, never
 deletes them, and both would open passes. An installed binary without <code class="code">breathe tick</code> exits 2; the install

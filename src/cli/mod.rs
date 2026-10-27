@@ -156,15 +156,17 @@ usage: sandman <verb> [args]
       hourly agent: through dispatch run ($SANDMAN_DISPATCH_BIN, else
       ~/.local/bin/dispatch), it stops (a working or blocked one, then waits
       $SANDMAN_BREATH_SETTLE_MS, default 3000) and removes every session named
-      breath <kind> <pass-id> whose pass has ended; then, unless
+      breath <kind> <pass-id> whose pass has ended — sparing a working one
+      whose pass was marked dead until 24 h after it started; then, unless
       <root>/shifts/PAUSE exists, composes a skim pass and — once a New York
       day, from 06:00 there — a deep one as pass does, starts each session
       ($SANDMAN_BREATH_MIND, default opus, dontAsk, the shift profile --kind
       breath settings, cwd breath/) and attaches it. A close failure is a
       stderr line; pass's waits are skips; a pass fault or a refused start
-      exits 1. Every decision is journalled, and every tick appends
-      a started + exit line to breath/ticks.jsonl for score (a line it cannot
-      append is journalled; the exit stands). $SANDMAN_NOW pins the instant.
+      exits 1 once both kinds are tried. Every decision is journalled, and
+      every run appends a started + exit-code line to breath/ticks.jsonl for
+      score (a line it cannot append is journalled; the exit stands).
+      $SANDMAN_NOW pins the instant.
 
   dream [--now]
       Route the queue: for each undreamed pointer, three minds (sonnet, opus,
@@ -399,25 +401,15 @@ Logs: <root>/.trace/<verb>-<date>.log.";
 #[must_use]
 pub fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    match run(&args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(Failure::Error(error)) => {
-            eprintln!("sandman: {error}");
-            ExitCode::from(EXIT_ERROR)
-        }
-        Err(Failure::Fault(error)) => {
-            eprintln!("sandman: {error}");
-            ExitCode::from(EXIT_FAULT)
-        }
-        Err(Failure::Help) => {
-            println!("{USAGE}");
-            ExitCode::SUCCESS
-        }
-        Err(Failure::Usage(message)) => {
-            eprintln!("sandman: {message}\n\n{USAGE}");
-            ExitCode::from(EXIT_USAGE)
-        }
+    let Err(failure) = run(&args) else {
+        return ExitCode::SUCCESS;
+    };
+    match &failure {
+        Failure::Error(error) | Failure::Fault(error) => eprintln!("sandman: {error}"),
+        Failure::Help => println!("{USAGE}"),
+        Failure::Usage(message) => eprintln!("sandman: {message}\n\n{USAGE}"),
     }
+    ExitCode::from(failure.code())
 }
 
 /// Why a verb stopped short of running.
@@ -431,6 +423,18 @@ enum Failure {
     Help,
     /// The command line itself is wrong.
     Usage(String),
+}
+
+impl Failure {
+    /// The process's exit code for it.
+    fn code(&self) -> u8 {
+        match self {
+            Self::Error(_) => EXIT_ERROR,
+            Self::Fault(_) => EXIT_FAULT,
+            Self::Help => 0,
+            Self::Usage(_) => EXIT_USAGE,
+        }
+    }
 }
 
 impl From<Error> for Failure {

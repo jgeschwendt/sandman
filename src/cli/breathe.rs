@@ -4,7 +4,9 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::atomic;
 use crate::error::Error;
+use crate::json::Value;
 use crate::paths;
 use crate::verbs::{breathe, shift};
 
@@ -391,9 +393,27 @@ fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `breathe tick`: the ruach's agent — close the ended passes' sessions, then
-/// open what is due through `$SANDMAN_DISPATCH_BIN`, else `~/.local/bin/dispatch`.
+/// `breathe tick`, its whole run — knobs included — recorded in
+/// `breath/ticks.jsonl` with the exit it takes; a line it cannot append is
+/// journalled and the exit stands.
 fn breathe_tick(args: &[String]) -> Result<(), Failure> {
+    let result = breathe_tick_run(args);
+    if let (Ok(root), Ok(started)) = (paths::data_root(), pinned_now()) {
+        let exit = result.as_ref().err().map_or(0, Failure::code);
+        let line = Value::object([
+            ("started", Value::string(started.iso8601())),
+            ("exit", Value::count(exit.into())),
+        ]);
+        if let Err(error) = atomic::append_line(&paths::breath_ticks(&root), &line.render()) {
+            note(Some(&root), "breathe", &format!("tick unrecorded: {error}"));
+        }
+    }
+    result
+}
+
+/// The ruach's agent: close the ended passes' sessions, then open what is
+/// due through `$SANDMAN_DISPATCH_BIN`, else `~/.local/bin/dispatch`.
+fn breathe_tick_run(args: &[String]) -> Result<(), Failure> {
     Args::parse(args, "breathe tick", &[], &[], 0)?;
     let tick = breathe::Tick {
         budget_usd: usd_env("SANDMAN_BREATH_BUDGET_USD", breathe::DEFAULT_BUDGET_USD)?,
