@@ -221,7 +221,9 @@ usage: sandman <verb> [args]
       origin, fails), in a scratch worktree, with the repo's hooks off; hits
       trunk does not reach are reported off trunk. A conflict ends that repo,
       and so does a trailered merge: the machine merges by rebase only,
-      so merges are never reverted but left to the operator. Appends one
+      so merges are never reverted but left to the operator. A repo with a
+      revert prints its push and gh pr create line, the owner's to run;
+      the machine never pushes a reconcile. Appends one
       reconcile event — none when nothing new was reverted — and lists the
       memories whose source: names a revoked event, for reflect to retire;
       exits 1 when any repo ended in a conflict or a failure. --dry-run

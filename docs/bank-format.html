@@ -419,7 +419,9 @@ pass ends. The repo's commit hooks are switched off (<code class="code">core.hoo
 suite neither blocks nor slows it. Each revert commit carries <code class="code">Shift: reconcile</code> and
 <code class="code">Event: &lt;the reconcile event's id&gt;</code>. A conflicting revert is aborted and ends that
 repo's pass; a <code class="code">reconcile/&lt;id&gt;</code> branch the pass cut and reverted nothing onto — a
-first revert that conflicts — is deleted again. History is never reset or forced.</li>
+first revert that conflicts — is deleted again. History is never reset or forced.
+For each repo with a revert the report prints the pull request line — <code class="code">cd &lt;checkout&gt; &amp;&amp; git push -u origin &lt;branch&gt; &amp;&amp; gh pr create --base &lt;trunk&gt; --head &lt;branch&gt; --fill</code> —
+the owner's to run: the machine never pushes or merges its own reconcile.</li>
 <li>Reconcile then appends one <code class="code">reconcile</code> event — <code class="code">parent: &lt;id&gt;</code>, <code class="code">shift: reconcile</code>,
 <code class="code">refs</code> every reverted commit as <code class="code">repo@sha</code>, <code class="code">rationale</code> the count and every conflict —
 and lists the memories under <code class="code">memories/</code> whose <code class="code">source:</code> names a revoked event, for
