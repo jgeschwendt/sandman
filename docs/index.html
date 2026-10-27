@@ -477,7 +477,6 @@ Sources ──▶ Read ──▶ Judge ──▶ File ──▶ Spike ──▶ 
     <li>Record shift cost; <code class="code">meta.json</code> says $0.</li>
     <li>Compile: emit <code class="code">promote</code> and <code class="code">decay</code> events instead of proposing them by hand.</li>
     <li>Let the research engine rewrite <code class="code">sources.toml</code> and <code class="code">breathe.md</code> from its score.</li>
-    <li>Land reconcile by pull request: <code class="code">reconcile/&lt;id&gt;</code> prints the <code class="code">gh pr create</code> line.</li>
     <li>Bump rust 1.94.0 → 1.99.1 in <code class="code">mise.toml</code> and <code class="code">ci.yaml</code>; the crate is lint-clean on it, but the host needs <code class="code">rustup toolchain install 1.99.1 -c llvm-tools-preview</code> first, since a shift cannot write <code class="code">~/.rustup</code>.</li>
     <li>Move the machine to a Mac mini with its own deploy keys.</li>
     <li>Give pty this page's pattern: one page, a <code class="code">#next</code> list, one canvas.</li>
