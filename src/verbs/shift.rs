@@ -1019,18 +1019,21 @@ fn breaths(ctx: &Context, slug: &str) -> Vec<String> {
         .collect()
 }
 
-/// The targets file a night reads, by name and path: the planned week's
-/// ([`Week::targets`]), else the current week's — a Sabbath that wrote none
-/// must not thaw what the last one froze.
+/// The targets file a night reads, by name and path: the newest at or before
+/// the planned week ([`Week::targets`]) — a Sabbath that wrote none, or a
+/// host asleep through several, must not thaw what the last one froze.
 fn targets(ctx: &Context) -> (String, PathBuf) {
     let scores = paths::score_dir(&ctx.data_root);
-    let names = [Week::targets(ctx.now), Week::of(ctx.now)]
-        .map(|week| format!("{}-targets.md", week.name()));
-    let name = names
-        .iter()
-        .find(|name| scores.join(name).is_file())
-        .unwrap_or(&names[0]);
-    (name.clone(), scores.join(name))
+    let planned = format!("{}-targets.md", Week::targets(ctx.now).name());
+    let name = fs::read_dir(&scores)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.ends_with("-targets.md") && *name <= planned)
+        .max()
+        .unwrap_or(planned);
+    let path = scores.join(&name);
+    (name, path)
 }
 
 /// Whether the owner froze a repo: the week's targets line says `freeze`,

@@ -2218,7 +2218,7 @@ fn a_short_recent_shift_cools_its_repo_off_promotion() {
 }
 
 #[test]
-fn a_sunday_no_sabbath_planned_keeps_the_current_weeks_freeze() {
+fn a_week_no_sabbath_planned_keeps_the_last_freeze() {
     let machine = Machine::prompted("thaw");
     for slug in ["alpha", "beta"] {
         machine.repo(&format!("jgeschwendt/{slug}"));
@@ -2227,9 +2227,21 @@ fn a_sunday_no_sabbath_planned_keeps_the_current_weeks_freeze() {
         ".sandman/score/2026-W42-targets.md",
         "## jgeschwendt/alpha\nFrozen for new work\n",
     );
-    let output = machine.run("2026-10-18T16:00:00Z", &["shift", "pick"], &[]);
-    assert_eq!(stdout(&output), "jgeschwendt/beta\n");
-    assert_eq!(stderr(&output), "skipped: jgeschwendt/alpha (frozen)\n");
+    // A week ahead of the planned one is never read.
+    machine.write(
+        ".sandman/score/2026-W45-targets.md",
+        "## jgeschwendt/beta\nFrozen for new work\n",
+    );
+    // Sunday plans W43, Monday is in it: neither has a file, so W42 holds.
+    for now in ["2026-10-18T16:00:00Z", "2026-10-19T16:00:00Z"] {
+        let output = machine.run(now, &["shift", "pick"], &[]);
+        assert_eq!(stdout(&output), "jgeschwendt/beta\n", "{now}");
+        assert_eq!(
+            stderr(&output),
+            "skipped: jgeschwendt/alpha (frozen)\n",
+            "{now}"
+        );
+    }
 }
 
 #[test]
