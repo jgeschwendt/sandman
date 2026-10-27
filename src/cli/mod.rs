@@ -126,7 +126,7 @@ usage: sandman <verb> [args]
   breathe tick
       The ruach's store under <root>/breath/; only tick reaches past it. init makes breath/, ledger/ and passes/ and seeds sources.toml.
       sources lists the feeds; --due (or --kind) only those a pass reads now —
-      a skim those unread for an hour, a deep pass all. file writes
+      a skim those unread for 55 minutes, a deep pass all. file writes
       breath/<date>-<slug>.md (state new, or spiked with --spike), counts it
       on its --source and appends a breath event — unless the normalized URL,
       or within the same repo a title with token Jaccard >= 0.6 and the same
