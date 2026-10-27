@@ -266,12 +266,13 @@ entry would be prose about nothing, and every reader of the log pays for it in c
 <li><strong>Backfilled by the pass.</strong> The pass owns only the UTC day that ended, so after it
 <code class="code">sandman reflect</code> walks the days two to fourteen back, newest first, and renders each with no
 <code class="code">&lt;date&gt;.md</code> exactly as <code class="code">--day</code> does (its own <code class="code">reflect done day=…</code> line and stdout line) until three
-of them have cost a log-mind call — <code class="code">written</code> or <code class="code">abstained</code>. A quiet day costs none, so quiet days
-never crowd out real gaps; a day that fails is journaled, the rest still run, and the pass exits 1
-counting it. <code class="code">--day</code> alone never backfills.</li>
+of them have cost a log-mind call — any day but a quiet one, which costs none, so quiet days never crowd out
+real gaps. A day that fails takes its slot too (nearly every failure comes after the call), is journaled, the
+rest still run, and the pass exits 1 counting it. <code class="code">--day</code> alone never backfills.</li>
 <li><strong>Run nightly by launchd.</strong> The agent <code class="code">launchd/dev.gigantic.sandman.reflect.plist</code>
 runs <code class="code">sandman reflect</code> at 23:30 local — after the UTC day ended in either season (log
-<code class="code">~/Library/Logs/dev.gigantic.sandman.reflect.log</code>); it replaces the <code class="code">sandman-reflect</code> routine. Install it with
+<code class="code">~/Library/Logs/dev.gigantic.sandman.reflect.log</code>); it replaces the <code class="code">sandman-reflect</code> routine, which is removed from <code class="code">~/.routines</code> in the same step — under EDT
+both fire at 03:30 UTC and would pay every call twice. Install it with
 <code class="code">sandman plist reflect &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.reflect.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.reflect.plist</code>.</li>
 </ul>
 </div>

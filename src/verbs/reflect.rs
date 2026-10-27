@@ -82,8 +82,8 @@ pub const UPKEEP_HOURS: i64 = 20;
 /// all plainly left work behind, and that backlog keeps the bank due on its
 /// own until a pass comes in under the ceiling.
 pub const UPKEEP_MAX_OPS: usize = 6;
-/// The most log-mind calls one backfill spends — a written or abstained day;
-/// a quiet day costs none, so quiet days never crowd out real gaps.
+/// The most log-mind calls one backfill spends — any day but a quiet one,
+/// which costs none, so quiet days never crowd out real gaps.
 pub const BACKFILL_CALLS: usize = 3;
 /// How many days back the backfill looks, the day that just ended excluded.
 pub const BACKFILL_DAYS: i64 = 14;
@@ -299,8 +299,9 @@ pub fn entry_step(
 
 /// Hand `render` the days two to [`BACKFILL_DAYS`] back from `now` with no
 /// entry file, newest first, until [`BACKFILL_CALLS`] of them come back
-/// `written` or `abstained` — the statuses a log-mind call returns. `render`
-/// answers `None` for a day that failed, which costs no slot either.
+/// anything but `quiet`, the one status that never asks the log mind. `render`
+/// answers `None` for a day that failed, and that takes a slot too: nearly
+/// every failure comes after the call was paid for.
 pub fn backfill(
     data_root: &Path,
     now: Timestamp,
@@ -313,7 +314,7 @@ pub fn backfill(
                 .join(format!("{}.md", day.key()))
                 .is_file()
         })
-        .filter(|day| matches!(render(*day), Some("written" | "abstained")))
+        .filter(|day| render(*day) != Some("quiet"))
         .take(BACKFILL_CALLS)
         .for_each(drop);
 }
