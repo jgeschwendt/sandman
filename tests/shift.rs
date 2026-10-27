@@ -150,7 +150,6 @@ fn profile_prints_the_session_settings_for_either_kind() {
     // builds write the toolchain caches shift-test.sb allows, never their bins
     for needed in [
         "\"api.anthropic.com\",",
-        "\"Bash(shift-test *)\"\n",
         &format!(
             "\"excludedCommands\": [\n      \"{home}/.local/bin/shift-test *\",\n      \"git fetch *\",\n      \"git pull *\",\n      \"git push *\",\n      \"grove sync *\",\n      \"~/.local/bin/shift-test *\"\n    ],"
         ),
@@ -159,6 +158,9 @@ fn profile_prints_the_session_settings_for_either_kind() {
     ] {
         assert!(text.contains(needed), "{needed}: {text}");
     }
+    // a `Bash(shift-test *)` deny matches every spelling and denied the excluded call
+    // outright (2.1.311); a bare one stays sandboxed, where the wrapper exits 71
+    assert!(!text.contains("Bash(shift-test"), "{text}");
     assert_eq!(
         machine.ok(now, &["shift", "profile", "--kind", "shift"]),
         shift

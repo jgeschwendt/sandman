@@ -33,8 +33,7 @@
       "Bash(git push -f*)",
       "Bash(git reset*)",
       "Bash(git stash*)",
-      "Bash(pkill -f*)",
-      "Bash(shift-test *)"
+      "Bash(pkill -f*)"
     ]
   },
   "sandbox": {
