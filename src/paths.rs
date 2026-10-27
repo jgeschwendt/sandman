@@ -269,6 +269,13 @@ pub fn breath_passes(data_root: &Path) -> PathBuf {
     breath_dir(data_root).join("passes")
 }
 
+/// `<root>/breath/ticks.jsonl` — one `{"started", "exit"}` line per
+/// `breathe tick`, the shape of a routine's `runs.jsonl`.
+#[must_use]
+pub fn breath_ticks(data_root: &Path) -> PathBuf {
+    breath_dir(data_root).join("ticks.jsonl")
+}
+
 /// `<root>/breath/passes/<id>` — a pass's `pass.json` and `prompt.md`.
 #[must_use]
 pub fn breath_pass(data_root: &Path, id: &str) -> PathBuf {

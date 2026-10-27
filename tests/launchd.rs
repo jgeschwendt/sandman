@@ -30,7 +30,8 @@ fn parses(text: &str) -> bool {
 #[test]
 fn plist_renders_each_agent_under_this_home() {
     let home = Machine::new("plist");
-    let (install, reflect, report) = (
+    let (breathe, install, reflect, report) = (
+        plist(&home, &["breathe"], "", 0),
         plist(&home, &["install"], "", 0),
         plist(&home, &["reflect"], "", 0),
         plist(&home, &["report"], "", 0),
@@ -44,10 +45,16 @@ fn plist_renders_each_agent_under_this_home() {
         home.home.display()
     );
     assert!(
-        parses(&install)
+        parses(&breathe)
+            && parses(&install)
             && parses(&reflect)
             && parses(&report)
-            && !format!("{install}{reflect}{report}").contains("{{")
+            && !format!("{breathe}{install}{reflect}{report}").contains("{{")
+            && breathe.contains(&format!(
+                "{sandman}\n    <string>breathe</string>\n    <string>tick</string>"
+            ))
+            && breathe.contains("<key>Minute</key><integer>17</integer>")
+            && !breathe.contains("RunAtLoad")
             && install.contains("<string>dev.gigantic.sandman.install</string>")
             && install.contains(&script)
             && reflect.contains(&format!("{sandman}\n    <string>reflect</string>"))
@@ -56,7 +63,7 @@ fn plist_renders_each_agent_under_this_home() {
             && report.contains("<string>dev.gigantic.sandman.report</string>")
             && !report.contains("<key>SANDMAN_SHIFT_NIGHT")
             && report.contains(&sandman),
-        "{install}{reflect}{report}"
+        "{breathe}{install}{reflect}{report}"
     );
     assert_eq!(plist(&home, &["install"], "07-06", 0), install);
     assert_eq!(
@@ -70,7 +77,8 @@ fn plist_renders_each_agent_under_this_home() {
     assert_eq!(common::code(&homeless), 1, "{}", stderr(&homeless));
     let unknown = feed(&mut home.sandman(&["plist", "dream"]), "");
     assert!(
-        common::code(&unknown) == 2 && stderr(&unknown).contains("install, reflect or report"),
+        common::code(&unknown) == 2
+            && stderr(&unknown).contains("breathe, install, reflect or report"),
         "{}",
         stderr(&unknown)
     );

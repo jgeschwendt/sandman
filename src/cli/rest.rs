@@ -233,19 +233,20 @@ pub(super) fn mcp_verb(args: &[String]) -> Result<(), Failure> {
         .map_err(|source| Failure::Error(Error::io("<stdout>", source)))
 }
 
-/// `plist install|reflect|report`: a launchd agent from `launchd/`, rendered for this
+/// `plist breathe|install|reflect|report`: a launchd agent from `launchd/`, rendered for this
 /// home, carrying `$SANDMAN_SHIFT_NIGHT` into the report agent when it is set.
 pub(super) fn plist_verb(args: &[String]) -> Result<(), Failure> {
     let template = match Args::parse(args, "plist", &[], &[], 1)?
         .positional("a job")?
         .as_str()
     {
+        "breathe" => include_str!("../../launchd/dev.gigantic.sandman.breathe.plist"),
         "install" => include_str!("../../launchd/dev.gigantic.sandman.install.plist"),
         "reflect" => include_str!("../../launchd/dev.gigantic.sandman.reflect.plist"),
         "report" => include_str!("../../launchd/dev.gigantic.sandman.report.plist"),
         other => {
             return Err(Failure::Usage(format!(
-                "plist wants install, reflect or report, got `{other}`"
+                "plist wants breathe, install, reflect or report, got `{other}`"
             )));
         }
     };

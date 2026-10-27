@@ -364,7 +364,7 @@ pub fn score(ctx: &shift::Context, routines: &Path, week: Week) -> Result<Score>
             }));
         }
     }
-    score.routines = routine_runs(routines, week);
+    score.routines = routine_runs(routines, &paths::breath_ticks(&ctx.data_root), week);
     Ok(score)
 }
 
@@ -388,20 +388,26 @@ fn previous_day(ymd: &str) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
-/// The `shift` and `breathe-*` routines' ticks and failures in `week`.
-fn routine_runs(dir: &Path, week: Week) -> Vec<(String, usize, usize)> {
-    let mut names: Vec<String> = fs::read_dir(dir)
+/// The `shift` and legacy `breathe-*` routines' ticks and failures in
+/// `week`, and the `breathe tick` agent's from `ticks`, when it exists.
+fn routine_runs(dir: &Path, ticks: &Path, week: Week) -> Vec<(String, usize, usize)> {
+    let mut runs: Vec<(String, PathBuf)> = fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|entry| entry.file_name().to_str().map(ToOwned::to_owned))
         .filter(|name| name == "shift" || name.starts_with("breathe-"))
+        .map(|name| (name.clone(), dir.join(name).join("runs.jsonl")))
+        .chain(
+            ticks
+                .exists()
+                .then(|| ("breathe tick".to_owned(), ticks.to_owned())),
+        )
         .collect();
-    names.sort();
-    names
-        .into_iter()
-        .map(|name| {
-            let text = fs::read_to_string(dir.join(&name).join("runs.jsonl")).unwrap_or_default();
+    runs.sort();
+    runs.into_iter()
+        .map(|(name, path)| {
+            let text = fs::read_to_string(path).unwrap_or_default();
             let runs: Vec<Value> = text
                 .lines()
                 .filter_map(|line| json::parse(line).ok())

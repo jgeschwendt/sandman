@@ -277,7 +277,7 @@ fn weekday(days: i64) -> i64 {
 }
 
 /// `at` on New York's wall clock, in seconds since the epoch.
-fn local_seconds(at: Timestamp) -> i64 {
+pub(crate) fn local_seconds(at: Timestamp) -> i64 {
     at.unix_seconds() + new_york_offset_hours(at) * 3600
 }
 

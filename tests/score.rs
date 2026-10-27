@@ -233,6 +233,15 @@ fn fixture() -> Machine {
         &run("2026-10-14T13:17:00Z", 0),
     );
     home.write(
+        ".sandman/breath/ticks.jsonl",
+        &[
+            run("2026-10-09T13:17:00Z", 1),
+            run("2026-10-14T13:17:00Z", 0),
+            run("2026-10-14T14:17:00Z", 1),
+        ]
+        .join("\n"),
+    );
+    home.write(
         "state/heartbeat/runs.jsonl",
         &run("2026-10-14T13:00:00Z", 1),
     );
@@ -280,7 +289,7 @@ fn score_writes_the_weeks_page_worst_three_first() {
         "| filed | spiked | adopted | dropped |\n| --- | --- | --- | --- |\n| 1 | 0 | 1 | 1 |",
         "| arxiv | 1.20 | 3 | 1 |",
         "| decision | 1 |\n| problem | 1 |\n| from shifts | 1 |",
-        "| breathe-skim | 1 | 0 |\n| shift | 3 | 1 |",
+        "| breathe tick | 2 | 1 |\n| breathe-skim | 1 | 0 |\n| shift | 3 | 1 |",
     ] {
         assert!(page.contains(row), "missing {row:?} in:\n{page}");
     }
@@ -303,7 +312,7 @@ fn score_json_prints_the_metrics_and_week_names_a_week() {
         r#""corrections":{"recurring":1,"total":2}"#,
         r#""coverage":{"jgeschwendt/alpha":3,"jgeschwendt/beta":0,"jgeschwendt/gamma":0}"#,
         r#""numbers":{"jgeschwendt/alpha":{"line":"tests 3→4 | coverage 90→95 %","shift":"s-20261015T1400Z"}}"#,
-        r#""routines":{"breathe-skim":{"failed":0,"ticks":1},"shift":{"failed":1,"ticks":3}}"#,
+        r#""routines":{"breathe tick":{"failed":1,"ticks":2},"breathe-skim":{"failed":0,"ticks":1},"shift":{"failed":1,"ticks":3}}"#,
         r#""shifts":{"abandoned":1,"cost_per_shift":1.5,"handed_off":1,"mean_minutes":150,"opened":2}"#,
         r#""threads":{"by_kind":{"decision":1,"problem":1},"from_shifts":1}"#,
         r#""changes_with_sha":1,"cost_unrecorded":2,"cost_usd":5,"events":12"#,
