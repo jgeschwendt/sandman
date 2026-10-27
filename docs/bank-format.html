@@ -1035,8 +1035,8 @@ briefed again.</p>
 <div class="stack">
 <p class="docs-note">Not a bank. The ruach is the research engine beside the shifts: a Claude session reads
 the feeds against the open problems and files what bears on a repo as a <strong>breath</strong>.
-<code class="code">sandman breathe</code> is the store and the prompt composer; it never calls a model or the
-network.</p>
+<code class="code">sandman breathe</code> is the store, the prompt composer and, in <code class="code">tick</code>, the runner
+(<a href="#breath-tick">§ the tick</a>); it never calls a model or the network itself.</p>
 <pre class="snippet"><code>breath/
   sources.toml                    # the feeds and their learned state
   problems.md                     # written by `shift brief` (§ shifts); read-only here
@@ -1044,6 +1044,7 @@ network.</p>
   ledger/                         # /gigaresearch's claim ledger
   passes/&lt;pass-id&gt;/pass.json      # one record per pass
   passes/&lt;pass-id&gt;/prompt.md      # the prompt the pass's session got
+  ticks.jsonl                     # one {"started","exit"} line per `breathe tick`
 </code></pre>
 <p class="docs-note"><code class="code">breathe init</code> creates <code class="code">breath/</code>, <code class="code">ledger/</code> and <code class="code">passes/</code> and copies the seed — the
 repo's <code class="code">breath/sources.toml</code>, compiled into the binary — when <code class="code">sources.toml</code> is absent.</p>
@@ -1261,6 +1262,35 @@ and writes nothing, marking nothing dead. <code class="code">close</code> requir
 the session's own cost, or <code class="code">0</code> when it cannot read it, which journals a <code class="code">cost zero</code>
 note), and refuses a pass already closed or dead and a <code class="code">--cursor</code> for a source the pass
 did not list or carrying a control character.</p>
+<h3 class="h3" id="breath-tick">The tick</h3>
+<p class="docs-note">The launchd agent <code class="code">launchd/dev.gigantic.sandman.breathe.plist</code> runs
+<code class="code">sandman breathe tick</code> hourly at :17 (log <code class="code">~/Library/Logs/dev.gigantic.sandman.breathe.log</code>).
+Every <code class="code">dispatch</code> call is one JSON request on the stdin of <code class="code">dispatch run</code>
+(<code class="code">$SANDMAN_DISPATCH_BIN</code>, else <code class="code">~/.local/bin/dispatch</code>); a failed spawn or exit, an empty answer or one
+carrying <code class="code">error</code> is a failure. A tick, in order:</p>
+<ul class="stack" role="list">
+<li><strong>Close.</strong> It lists Claude Code's sessions and takes every one named exactly
+<code class="code">breath &lt;kind&gt; &lt;pass-id&gt;</code> whose <code class="code">pass.json</code> has <code class="code">ended</code> — closed, or marked dead — stopping it first
+when <code class="code">working</code> or <code class="code">blocked</code> and then waiting <code class="code">$SANDMAN_BREATH_SETTLE_MS</code> (default 3000: a stopped
+session's <code class="code">SessionEnd</code> hook races the removal of its job dir), then removing it from the listing, where a
+finished session otherwise stays forever. Each failure is a stderr line; the tick goes on.</li>
+<li><strong>Open</strong>, unless <code class="code">shifts/PAUSE</code> exists: a skim, then — once per New York calendar day,
+from 06:00 there — a deep pass, each composed as <code class="code">pass</code> composes it. Its waits are skips; its faults fail
+the tick. Each session is started with <code class="code">$SANDMAN_BREATH_MIND</code> (default <code class="code">opus</code>; a deep pass may spawn
+pinned opus readers, never an unpinned agent), <code class="code">dontAsk</code> inside the strict Bash sandbox
+<code class="code">shift profile --kind breath</code> prints — the shift's boundary (<a href="#shifts-sandbox">§ shifts, the sandbox</a>) —,
+cwd <code class="code">breath/</code>, then attached. A start answered without an <code class="code">id</code> fails the tick naming the pass; the pass
+stays without session ids or <code class="code">ended</code>, and is marked dead and charged at its timeout — nothing else to undo.
+A skim and a deep pass may run together.</li>
+</ul>
+<p class="docs-note">Every decision is a <code class="code">tick …</code> line in the breathe journal, and every tick —
+failed too — appends <code class="code">{"started": &lt;iso&gt;, "exit": 0|1}</code> to <code class="code">breath/ticks.jsonl</code>, a routine's
+<code class="code">runs.jsonl</code> shape, which <code class="code">score</code> counts (§ score); a line it cannot append is journalled
+(<code class="code">tick unrecorded</code>) and the exit stands. Install with
+<code class="code">sandman plist breathe &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.breathe.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.breathe.plist</code>,
+removing <code class="code">~/.routines/breathe-{skim,deep}.md</code> in the same step — the install agent only copies routines, never
+deletes them, and both would open passes. An installed binary without <code class="code">breathe tick</code> exits 2; the install
+agent brings it to a clean trunk within fifteen minutes.</p>
 <h3 class="h3" id="breath-pass-prompt-and-its-slots">The pass prompt and its slots</h3>
 <p class="docs-note"><code class="code">pass</code> fills <code class="code">prompts/breathe.md</code> from the same directory as <code class="code">shift.md</code> and refuses a
 template naming a slot outside this table:</p>
@@ -1420,7 +1450,7 @@ year does not have exits 2. A rerun at the same instant writes the same bytes.</
 </tr>
 <tr>
 <td>Routines</td>
-<td><code class="code">shift/</code> and <code class="code">breathe-*/</code> <code class="code">runs.jsonl</code> under <code class="code">~/.routines/.state</code> (<code class="code">$SANDMAN_ROUTINES_STATE</code>)</td>
+<td><code class="code">shift/</code> and legacy <code class="code">breathe-*/</code> <code class="code">runs.jsonl</code> under <code class="code">~/.routines/.state</code> (<code class="code">$SANDMAN_ROUTINES_STATE</code>), and <code class="code">breath/ticks.jsonl</code> as the row <code class="code">breathe tick</code> (<a href="#breath-tick">§ the tick</a>)</td>
 <td>ticks this week (by <code class="code">started</code>) and non-zero exits</td>
 </tr>
 </tbody></table>

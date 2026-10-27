@@ -1,14 +1,16 @@
 //! The `breathe` verbs: the ruach's store, its passes and their ledger.
 
 use std::env;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::error::Error;
 use crate::paths;
-use crate::verbs::breathe;
+use crate::verbs::{breathe, shift};
 
-use super::{Args, EMPTY, Failure, note, pinned_now, usd_env};
+use super::{Args, EMPTY, Failure, knob, note, pinned_now, usd_env};
 
-/// `breathe <init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight> …`.
+/// `breathe <init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight|tick> …`.
 pub(super) fn breathe_verb(args: &[String]) -> Result<(), Failure> {
     let Some(sub) = args.first() else {
         return Err(Failure::Usage("breathe needs a subcommand".to_owned()));
@@ -31,6 +33,7 @@ pub(super) fn breathe_verb(args: &[String]) -> Result<(), Failure> {
         "reweight" => breathe_reweight(rest),
         "sources" => breathe_sources(rest),
         "spike" => breathe_transition(rest, breathe::Transition::Spike),
+        "tick" => breathe_tick(rest),
         other => Err(Failure::Usage(format!(
             "unknown breathe subcommand `{other}`"
         ))),
@@ -386,4 +389,39 @@ fn breathe_reweight(args: &[String]) -> Result<(), Failure> {
         );
     }
     Ok(())
+}
+
+/// `breathe tick`: the ruach's agent — close the ended passes' sessions, then
+/// open what is due through `$SANDMAN_DISPATCH_BIN`, else `~/.local/bin/dispatch`.
+fn breathe_tick(args: &[String]) -> Result<(), Failure> {
+    Args::parse(args, "breathe tick", &[], &[], 0)?;
+    let tick = breathe::Tick {
+        budget_usd: usd_env("SANDMAN_BREATH_BUDGET_USD", breathe::DEFAULT_BUDGET_USD)?,
+        dead_cost_usd: usd_env(
+            "SANDMAN_BREATH_DEAD_COST_USD",
+            breathe::DEFAULT_DEAD_COST_USD,
+        )?,
+        dispatch: env::var_os("SANDMAN_DISPATCH_BIN")
+            .filter(|bin| !bin.is_empty())
+            .map_or(paths::home()?.join(".local/bin/dispatch"), PathBuf::from),
+        mind: env::var("SANDMAN_BREATH_MIND")
+            .ok()
+            .filter(|mind| !mind.is_empty())
+            .unwrap_or_else(|| "opus".to_owned()),
+        settings: paths::render(shift::profile("breath").unwrap_or_default())?,
+        settle: Duration::from_millis(knob(
+            "SANDMAN_BREATH_SETTLE_MS",
+            "milliseconds",
+            3_000,
+            |text| text.parse().ok(),
+        )?),
+    };
+    let ctx = breathe_context()?;
+    let result = breathe::tick(&ctx, &tick, &mut |line, failed| {
+        note(Some(&ctx.data_root), "breathe", line);
+        if failed {
+            eprintln!("sandman: {line}");
+        }
+    });
+    breathe_journal(&ctx, "tick", result)
 }

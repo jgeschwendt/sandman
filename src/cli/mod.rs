@@ -123,8 +123,8 @@ usage: sandman <verb> [args]
   breathe close --id ID --read N --filed M --dropped K --cost USD
                 [--cursor NAME=VALUE]...
   breathe reweight [--dry-run]
-      The ruach's store under <root>/breath/; never calls a model or the
-      network. init makes breath/, ledger/ and passes/ and seeds sources.toml.
+  breathe tick
+      The ruach's store under <root>/breath/; only tick reaches past it. init makes breath/, ledger/ and passes/ and seeds sources.toml.
       sources lists the feeds; --due (or --kind) only those a pass reads now —
       a skim those unread for an hour, a deep pass all. file writes
       breath/<date>-<slug>.md (state new, or spiked with --spike), counts it
@@ -152,7 +152,19 @@ usage: sandman <verb> [args]
       reweight moves each weight +0.1 per breath whose adopted: stamp is
       after the last reweight (cap 2.0) and -0.1 after 30 days of silence (floor 0.2),
       rewrites sources.toml (every rewrite drops its comments) and appends a
-      breath event; --dry-run prints the table only. $SANDMAN_NOW pins the instant.
+      breath event; --dry-run prints the table only. tick is the ruach's
+      hourly agent: through dispatch run ($SANDMAN_DISPATCH_BIN, else
+      ~/.local/bin/dispatch), it stops (a working or blocked one, then waits
+      $SANDMAN_BREATH_SETTLE_MS, default 3000) and removes every session named
+      breath <kind> <pass-id> whose pass has ended; then, unless
+      <root>/shifts/PAUSE exists, composes a skim pass and — once a New York
+      day, from 06:00 there — a deep one as pass does, starts each session
+      ($SANDMAN_BREATH_MIND, default opus, dontAsk, the shift profile --kind
+      breath settings, cwd breath/) and attaches it. A close failure is a
+      stderr line; pass's waits are skips; a pass fault or a refused start
+      exits 1. Every decision is journalled, and every tick appends
+      a started + exit line to breath/ticks.jsonl for score (a line it cannot
+      append is journalled; the exit stands). $SANDMAN_NOW pins the instant.
 
   dream [--now]
       Route the queue: for each undreamed pointer, three minds (sonnet, opus,
@@ -183,14 +195,14 @@ usage: sandman <verb> [args]
       verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
       Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
 
-  plist install|reflect|report
+  plist breathe|install|reflect|report
       A launchd agent, launchd/dev.gigantic.sandman.<job>.plist, rendered on
-      stdout: {{HOME}} spelled out as $HOME (launchd expands no ~). install
-      runs launchd/install every fifteen minutes, keeping the installed
-      binary, sandbox files and routines at a clean trunk; reflect runs
-      reflect nightly at 23:30 local; report keeps report serve up, with
-      $SANDMAN_SHIFT_NIGHT added to its environment when set. Another job
-      exits 2. Install: sandman plist <job> >
+      stdout: {{HOME}} spelled out as $HOME (launchd expands no ~). breathe
+      runs breathe tick hourly at :17; install runs launchd/install every
+      fifteen minutes, keeping the installed binary, sandbox files and
+      routines at a clean trunk; reflect runs reflect nightly at 23:30 local;
+      report keeps report serve up, with $SANDMAN_SHIFT_NIGHT added to its
+      environment when set. Another job exits 2. Install: sandman plist <job> >
       ~/Library/LaunchAgents/dev.gigantic.sandman.<job>.plist.
 
   reconcile <event-id|shift-id> [--dry-run]
@@ -245,8 +257,9 @@ usage: sandman <verb> [args]
 
   score [--week yyyy-Www] [--json]
       The week's numbers from the trail, shifts/*/meta.json and report.md,
-      the breath store, ~/.docket ($SANDMAN_DOCKET) and the shift and
-      breathe-* runs.jsonl under ~/.routines/.state ($SANDMAN_ROUTINES_STATE):
+      the breath store, ~/.docket ($SANDMAN_DOCKET), the shift and legacy
+      breathe-* runs.jsonl under ~/.routines/.state ($SANDMAN_ROUTINES_STATE)
+      and breath/ticks.jsonl, the breathe tick row:
       repo coverage, each repo's newest report Numbers line, shift outcomes,
       events by kind/repo/model, cost, recurring corrections, fresh context,
       breaths, open threads, routine ticks. The

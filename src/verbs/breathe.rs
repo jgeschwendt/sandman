@@ -5,7 +5,8 @@
 //! shift engine keeps in `breath/problems.md`, and files what bears on a repo
 //! as a **breath** — `breath/<date>-<slug>.md`, an idea with provenance and a
 //! state (`new`, `spiked`, `adopted`, `dropped`). This module is the store and
-//! the prompt composer only: it never calls a model or the network. `pass`
+//! the prompt composer, and `tick` its runner, which calls no model or
+//! network itself but starts sessions through `dispatch`. `pass`
 //! fills `prompts/breathe.md` for the session the runner starts; `file`,
 //! `spike`, `adopt` and `drop` are what that session and the shifts call;
 //! `close` and `reweight` feed what happened back into the sources.
@@ -16,8 +17,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use crate::atomic;
 use crate::error::{Error, Result};
@@ -1369,6 +1373,219 @@ pub fn reaped(ctx: &Context, id: &str) -> Result<()> {
     let (path, mut entries) = read_pass(&ctx.data_root, id)?;
     set(&mut entries, "reaped", Value::string(ctx.now.iso8601()));
     write_pass(&path, entries)
+}
+
+// ─── the tick ────────────────────────────────────────────────────────────
+
+/// What one `breathe tick` reads beyond its context, resolved by the caller.
+#[derive(Clone, Debug)]
+pub struct Tick {
+    /// `$SANDMAN_BREATH_BUDGET_USD`.
+    pub budget_usd: f64,
+    /// `$SANDMAN_BREATH_DEAD_COST_USD`.
+    pub dead_cost_usd: f64,
+    /// The `dispatch` binary.
+    pub dispatch: PathBuf,
+    /// `$SANDMAN_BREATH_MIND`: the pass model.
+    pub mind: String,
+    /// The `shift profile --kind breath` settings, rendered.
+    pub settings: String,
+    /// The wait after a stop, before the removal: a stopped session's
+    /// `SessionEnd` hook races the removal of its job dir.
+    pub settle: Duration,
+}
+
+/// One `dispatch run` request: its one answer line, or why there is none — a
+/// failed spawn or exit, an empty or unparsable answer, or one with `error`.
+fn ask(dispatch: &Path, request: &Value) -> std::result::Result<Value, String> {
+    let mut child = Command::new(dispatch)
+        .arg("run")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{}: {error}", dispatch.display()))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = writeln!(stdin, "{}", request.render());
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    let line = String::from_utf8_lossy(&output.stdout);
+    let line = line.lines().next().unwrap_or_default();
+    json::parse(line)
+        .ok()
+        .filter(|answer| output.status.success() && answer.get("error").is_none())
+        .ok_or_else(|| format!("answered `{line}` ({})", output.status))
+}
+
+/// A `claude` request to dispatch.
+fn claude(action: &str, fields: Vec<(&str, Value)>) -> Value {
+    Value::object(
+        [
+            ("verb", Value::string("claude")),
+            ("action", Value::string(action)),
+        ]
+        .into_iter()
+        .chain(fields),
+    )
+}
+
+/// One tick of the ruach, what its launchd agent runs hourly: close, then
+/// open. Close removes from Claude Code's listing every session named
+/// `breath <kind> <pass-id>` whose pass has `ended`, stopping a working or
+/// blocked one first; its failures are `say`d and passed. Open, unless
+/// `shifts/PAUSE` exists, composes a skim pass and — once per New York day,
+/// from 06:00 there — a deep one, starts each pass's session through
+/// dispatch and attaches it. A pass's waits are `say`d skips; its faults, and
+/// a start dispatch refuses, fail the tick. `say(line, failed)` hears every
+/// decision. Every tick, failed or not, appends `{"started","exit"}` to
+/// `breath/ticks.jsonl` for `score`; a line it cannot append is only `say`d.
+pub fn tick(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Result<()> {
+    let result = tick_once(ctx, tick, say);
+    let line = Value::object([
+        ("started", Value::string(ctx.now.iso8601())),
+        ("exit", Value::count(usize::from(result.is_err()))),
+    ]);
+    if let Err(error) = atomic::append_line(&paths::breath_ticks(&ctx.data_root), &line.render()) {
+        say(&format!("tick unrecorded: {error}"), false);
+    }
+    result
+}
+
+/// [`tick`]'s work, before its line is appended.
+fn tick_once(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Result<()> {
+    match ask(&tick.dispatch, &claude("list", vec![])) {
+        Err(why) => say(&format!("tick list failed: {why}"), true),
+        Ok(answer) => {
+            let ended: Vec<(&str, &str, bool)> = answer
+                .get("sessions")
+                .and_then(Value::as_array)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|row| {
+                    let name = row.get("name")?.as_str()?;
+                    let ["breath", "skim" | "deep", id] = name.split(' ').collect::<Vec<_>>()[..]
+                    else {
+                        return None;
+                    };
+                    Value::Object(read_pass(&ctx.data_root, id).ok()?.1)
+                        .get("ended")?
+                        .as_str()?;
+                    let state = row.get("state").and_then(Value::as_str);
+                    Some((
+                        row.get("id")?.as_str()?,
+                        name,
+                        matches!(state, Some("working" | "blocked")),
+                    ))
+                })
+                .collect();
+            let mut act = |action: &str, bg: &str, name: &str| {
+                let done = ask(
+                    &tick.dispatch,
+                    &claude(action, vec![("id", Value::string(bg))]),
+                );
+                let why = done.as_ref().err().map_or("ok", String::as_str);
+                say(
+                    &format!("tick {action} {bg} ({name}): {why}"),
+                    done.is_err(),
+                );
+            };
+            let working: Vec<_> = ended.iter().filter(|session| session.2).collect();
+            for (bg, name, _) in &working {
+                act("stop", bg, name);
+            }
+            if !working.is_empty() {
+                thread::sleep(tick.settle);
+            }
+            for (bg, name, _) in &ended {
+                act("rm", bg, name);
+            }
+        }
+    }
+    if paths::shifts_dir(&ctx.data_root).join("PAUSE").exists() {
+        say("tick skip: shifts/PAUSE", false);
+        return Ok(());
+    }
+    let local = |at: Timestamp| shift::local_seconds(at).div_euclid(3_600);
+    let (today, hour) = (local(ctx.now).div_euclid(24), local(ctx.now).rem_euclid(24));
+    let deep_today = fs::read_dir(paths::breath_passes(&ctx.data_root))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| read_pass(&ctx.data_root, &entry.file_name().to_string_lossy()).ok())
+        .map(|(_, entries)| Value::Object(entries))
+        .any(|pass| {
+            pass.get("kind").and_then(Value::as_str) == Some("deep")
+                && pass
+                    .get("started")
+                    .and_then(Value::as_str)
+                    .and_then(Timestamp::parse_iso8601)
+                    .is_some_and(|started| local(started).div_euclid(24) == today)
+        });
+    for kind in [PassKind::Skim, PassKind::Deep] {
+        if kind == PassKind::Deep && (hour < 6 || deep_today) {
+            say("tick skip deep: once a New York day, from 06:00", false);
+            continue;
+        }
+        let composed = match pass(ctx, kind, tick.budget_usd, tick.dead_cost_usd, false) {
+            Ok(composed) => composed,
+            Err(error @ (Error::Refused { .. } | Error::LockHeld { .. })) => {
+                say(&format!("tick skip {}: {error}", kind.name()), false);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let request = claude(
+            "start",
+            vec![
+                ("prompt", Value::string(composed.text)),
+                (
+                    "cwd",
+                    Value::string(paths::breath_dir(&ctx.data_root).to_string_lossy()),
+                ),
+                ("model", Value::string(tick.mind.clone())),
+                ("permission_mode", Value::string("dontAsk")),
+                (
+                    "settings",
+                    json::parse(&tick.settings).map_err(|error| Error::Json {
+                        path: None,
+                        message: error.to_string(),
+                    })?,
+                ),
+                (
+                    "name",
+                    Value::string(format!("breath {} {}", kind.name(), composed.id)),
+                ),
+            ],
+        );
+        let answer = ask(&tick.dispatch, &request)
+            .and_then(|answer| {
+                answer
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some()
+                    .then_some(answer)
+                    .ok_or_else(|| "answered no id".to_owned())
+            })
+            .map_err(|why| {
+                Error::refused(format!(
+                    "dispatch start failed for pass {}: {why}",
+                    composed.id
+                ))
+            })?;
+        let field = |key| answer.get(key).and_then(Value::as_str);
+        attach(ctx, &composed.id, field("id"), field("session_id"))?;
+        say(
+            &format!(
+                "tick opened {} bg={} session={}",
+                composed.id,
+                field("id").unwrap_or_default(),
+                field("session_id").unwrap_or_default()
+            ),
+            false,
+        );
+    }
+    Ok(())
 }
 
 /// What `close` records.
