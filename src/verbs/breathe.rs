@@ -1624,7 +1624,7 @@ pub struct Closing {
     pub read: u64,
 }
 
-/// Close pass `id`: its counters and `ended`, `last_read` (and any cursor) on
+/// Close pass `id`: its counters and `ended`, `last_read` (its `started`) and any cursor on
 /// the sources it listed, and a `breath` event. A pass marked dead still
 /// closes — an overrunning session's real cost and counters replace the
 /// dead charge — but a pass closed by its session closes once.
@@ -1679,10 +1679,17 @@ pub fn close(ctx: &Context, id: &str, closing: &Closing) -> Result<trail::Event>
                 name.clone(),
             ));
         }
+        // read as of the pass's start: stamped at close, a minute after the
+        // hourly tick, the next tick's skim would find nothing due
+        let started = field("started")
+            .as_ref()
+            .and_then(Value::as_str)
+            .and_then(Timestamp::parse_iso8601)
+            .unwrap_or(ctx.now);
         let mut sources = Sources::read(&ctx.data_root)?;
         for name in &listed {
             if let Some(source) = sources.get_mut(name) {
-                source.last_read = Some(ctx.now);
+                source.last_read = Some(started);
                 if let Some((_, cursor)) = closing
                     .cursors
                     .iter()
