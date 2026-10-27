@@ -11,7 +11,7 @@ purpose: the Claude Code settings `session.json` that shift and breath sessions 
   session only through a rebuilt, installed binary.
 - Keys sorted at every depth; `src/verbs/shift.rs`'s unit test holds the file to that.
 - `shift-test` and `shift-test.sb` are not compiled in: they reach a session only when the
-  owner reinstalls them (`docs/bank-format.html#shifts-sandbox`), and `tests/shift_test.rs`
+  install agent reinstalls them (`docs/bank-format.html#shifts-sandbox`), and `tests/shift_test.rs`
   drives the repo's copy.
 - A tool missing from `permissions.allow` is denied without asking under `dontAsk`, so a
   shift that needs a new tool needs it listed here first.

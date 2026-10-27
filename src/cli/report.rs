@@ -12,12 +12,10 @@ use crate::verbs::{report, score};
 
 use super::{Args, Failure, note, shift_context, stdin};
 
-/// `report [--since T | --week W | --all] [--mark-read] | --hook | plist | serve …`.
+/// `report [--since T | --week W | --all] [--mark-read] | --hook | serve …`.
 pub(super) fn report_verb(args: &[String]) -> Result<(), Failure> {
-    match args.first().map(String::as_str) {
-        Some("plist") => return report_plist(&args[1..]),
-        Some("serve") => return report_serve(&args[1..]),
-        _ => {}
+    if args.first().is_some_and(|verb| verb == "serve") {
+        return report_serve(&args[1..]);
     }
     let parsed = Args::parse(
         args,
@@ -84,26 +82,6 @@ pub(super) fn report_verb(args: &[String]) -> Result<(), Failure> {
     {
         report::mark_read(&data_root, newest)?;
     }
-    Ok(())
-}
-
-/// `report plist`: the launchd agent that keeps `report serve` up, rendered
-/// for this home, carrying `$SANDMAN_SHIFT_NIGHT` when it is set.
-fn report_plist(args: &[String]) -> Result<(), Failure> {
-    Args::parse(args, "report plist", &[], &[], 0)?;
-    let night = env::var("SANDMAN_SHIFT_NIGHT")
-        .ok()
-        .filter(|night| !night.is_empty())
-        .map_or_else(String::new, |night| {
-            format!("\n    <key>SANDMAN_SHIFT_NIGHT</key><string>{night}</string>")
-        });
-    print!(
-        "{}",
-        paths::render(include_str!(
-            "../../launchd/dev.gigantic.sandman.report.plist"
-        ))?
-        .replace("{{EXTRA_ENV}}", &night)
-    );
     Ok(())
 }
 

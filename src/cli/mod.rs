@@ -33,7 +33,9 @@ use crate::verbs::{self, reflect};
 use breathe::breathe_verb;
 use recall::recall_verb;
 use report::{report_verb, score_verb};
-use rest::{dream_verb, forget_verb, mcp_verb, reflect_verb, remember_verb, version_verb};
+use rest::{
+    dream_verb, forget_verb, mcp_verb, plist_verb, reflect_verb, remember_verb, version_verb,
+};
 use shift::shift_verb;
 use take::take_verb;
 use trail::{reconcile_verb, trail_verb};
@@ -178,6 +180,15 @@ usage: sandman <verb> [args]
       verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
       Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
 
+  plist install|report
+      A launchd agent, launchd/dev.gigantic.sandman.<job>.plist, rendered on
+      stdout: {{HOME}} spelled out as $HOME (launchd expands no ~). install
+      runs launchd/install every fifteen minutes, keeping the installed
+      binary, sandbox files and routines at a clean trunk; report keeps
+      report serve up, with $SANDMAN_SHIFT_NIGHT added to its environment
+      when set. Another job exits 2. Install: sandman plist <job> >
+      ~/Library/LaunchAgents/dev.gigantic.sandman.<job>.plist.
+
   reconcile <event-id|shift-id> [--dry-run]
       Walk the trail back past a wrong turn: the event and every event whose
       parent chain reaches it are revoked — for a shift id, every event of the
@@ -209,13 +220,6 @@ usage: sandman <verb> [args]
       moves the cursor; silent when nothing is unread and for the machine's
       own sessions — the open shift's session_id, a cwd that is its path, or
       a cwd under the data root.
-
-  report plist
-      The launchd agent launchd/dev.gigantic.sandman.report.plist, which keeps
-      report serve up, rendered on stdout: {{HOME}} spelled out as $HOME
-      (launchd expands no ~), and $SANDMAN_SHIFT_NIGHT added to its
-      environment when set. Install: sandman report plist >
-      ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist.
 
   report serve [--bind 127.0.0.1:1705] [--requests N]
       The report as a loopback page (a non-loopback --bind exits 2), printing
@@ -430,6 +434,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "dream" => dream_verb(rest),
         "forget" => forget_verb(rest),
         "mcp" => mcp_verb(rest),
+        "plist" => plist_verb(rest),
         "recall" => recall_verb(rest),
         "reconcile" => reconcile_verb(rest),
         "reflect" => reflect_verb(rest),

@@ -527,37 +527,3 @@ fn serve_keeps_off_a_repo_whose_trunk_is_missing() {
     );
     assert!(server.wait().expect("exit").success());
 }
-
-#[test]
-fn plist_renders_the_launchd_agent_under_this_home() {
-    let home = Machine::new("report-plist");
-    let plist = home.out(&["plist"], "", 0);
-    let homeless = feed(home.command(&["report", "plist"]).env_remove("HOME"), "");
-    assert_eq!(common::code(&homeless), 1, "{}", stderr(&homeless));
-    let night = stdout(&feed(
-        home.command(&["report", "plist"])
-            .env("SANDMAN_SHIFT_NIGHT", "07-06"),
-        "",
-    ));
-    assert!(
-        !plist.contains("{{")
-            && !plist.contains("<key>SANDMAN_SHIFT_NIGHT")
-            && plist.contains("<string>dev.gigantic.sandman.report</string>"),
-        "{plist}"
-    );
-    assert!(
-        plist.contains(&format!(
-            "<string>{}/.local/bin/sandman</string>",
-            home.home.display()
-        )),
-        "{plist}"
-    );
-    assert_eq!(
-        night,
-        plist.replace(
-            "</string>\n  </dict>",
-            "</string>\n    <key>SANDMAN_SHIFT_NIGHT</key><string>07-06</string>\n  </dict>"
-        )
-    );
-    home.out(&["plist", "--bogus"], "", 2);
-}
