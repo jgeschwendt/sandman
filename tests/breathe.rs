@@ -1385,19 +1385,28 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
     pass("b-a", r#""2026-10-01T00:10:00Z""#);
     pass("b-b", r#""2026-10-01T00:10:00Z""#);
     pass("b-c", "null");
+    machine.write(
+        ".sandman/breath/passes/b-d/pass.json",
+        r#"{"dead":true,"ended":"2026-10-16T04:00:00Z","kind":"deep","started":"2026-10-16T03:00:00Z"}"#,
+    );
     let (log, answers) = (
         machine.home.join("dispatch.log"),
         machine.home.join("answers"),
     );
     machine.write(
         "answers/list",
-        r#"{"sessions":[{"id":"bg1","name":"breath skim b-a","state":"working"},{"id":"bg2","name":"breath deep b-b","state":"idle"},{"id":"bg3","name":"breath skim b-c"},{"id":"bg4","name":"shift b-a"},{"id":"bg5","name":"breath skim b-a x"},{"id":"bg6","name":"breath skim ../b-a"},{"id":"bg7"}]}"#,
+        r#"{"sessions":[{"id":"bg1","name":"breath skim b-a","state":"working"},{"id":"bg2","name":"breath deep b-b","state":"idle"},{"id":"bg3","name":"breath skim b-c"},{"id":"bg4","name":"shift b-a"},{"id":"bg5","name":"breath skim b-a x"},{"id":"bg6","name":"breath skim ../b-a"},{"id":"bg7"},{"id":"bg8","name":"breath deep b-d","state":"working"}]}"#,
     );
-    machine.write("answers/start", r#"{"id":"bg9","session_id":"s9"}"#);
+    for answer in ["skim", "start"] {
+        machine.write(
+            format!("answers/{answer}"),
+            r#"{"id":"bg9","session_id":"s9"}"#,
+        );
+    }
     let dispatch = machine.script(
         "dispatch",
         &format!(
-            "read -r req\nprintf '%s\\n' \"$req\" >> {log}\ncase \"$req\" in\n  *'\"action\":\"list\"'*) cat {a}/list ;;\n  *'\"action\":\"start\"'*) cat {a}/start ;;\n  *'\"id\":\"bg2\"'*) echo '{{\"error\":\"gone\"}}' ;;\n  *) echo '{{\"ok\":true}}' ;;\nesac\n",
+            "read -r req\nprintf '%s\\n' \"$req\" >> {log}\ncase \"$req\" in\n  *'\"action\":\"list\"'*) cat {a}/list ;;\n  *'\"name\":\"breath skim'*) cat {a}/skim ;;\n  *'\"action\":\"start\"'*) cat {a}/start ;;\n  *'\"id\":\"bg2\"'*) echo '{{\"error\":\"gone\"}}' ;;\n  *) echo '{{\"ok\":true}}' ;;\nesac\n",
             log = log.display(),
             a = answers.display()
         ),
@@ -1424,13 +1433,16 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
             .collect::<Vec<_>>()
     };
 
+    // Refused knobs exit 2 and are recorded; an unreadable instant cannot be.
     for knob in ["SANDMAN_BREATH_DEAD_COST_USD", "SANDMAN_BREATH_SETTLE_MS"] {
         assert_eq!(tick(NOW, &[(knob, "x")]).0, 2, "{knob}");
     }
+    assert_eq!(tick("x", &[]).0, 2);
 
     // Noon in New York: the ended working session is stopped then removed,
-    // the idle one removed (its failure a stderr line), the rest left; a skim
-    // and the day's deep pass open and attach.
+    // the idle one removed (its failure a stderr line), a dead pass's working
+    // session spared 13 h in, the rest left; a skim and the day's deep pass
+    // open and attach.
     let (status, err, sent) = tick(NOW, &[]);
     assert_eq!(status, 0, "{err}");
     assert!(
@@ -1478,7 +1490,10 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
             "1",
         ],
     );
-    machine.write("answers/list", r#"{"sessions":[]}"#);
+    machine.write(
+        "answers/list",
+        r#"{"sessions":[{"id":"bg8","name":"breath deep b-d","state":"working"}]}"#,
+    );
     let (status, err, sent) = tick("2026-10-16T17:00:00Z", &[]);
     assert_eq!(
         (status, err.as_str(), actions(&sent)),
@@ -1487,6 +1502,7 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
     let journal = machine.journal("breathe");
     for expected in [
         "tick skip skim: nothing due",
+        "tick spare bg8 (breath deep b-d)",
         "tick skip deep",
         "tick opened b-20261016T160000Z-deep bg=bg9 session=s9",
     ] {
@@ -1496,11 +1512,13 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
         );
     }
 
-    // The next New York day: 05:00 there opens a skim only, 06:00 the deep.
+    // The next New York day: 05:00 there opens a skim only — and, 24 h on,
+    // stops the dead pass's session — 06:00 the deep.
     assert_eq!(
         actions(&tick("2026-10-17T09:00:00Z", &[]).2),
-        ["list", "start"]
+        ["list", "stop bg8", "rm bg8", "start"]
     );
+    machine.write("answers/list", r#"{"sessions":[]}"#);
     let (_, err, sent) = tick("2026-10-17T10:00:00Z", &[]);
     assert!(
         sent.contains("breath deep b-20261017T100000Z-deep"),
@@ -1525,13 +1543,18 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
     fs::rename(machine.home.join("ticks"), &ticks).expect("back");
     fs::remove_file(machine.root().join("shifts/PAUSE")).expect("unpause");
 
-    // A start answered without an id fails the tick naming the pass.
-    machine.write("answers/start", r#"{"ok":true}"#);
-    let (status, err, _) = tick("2026-10-18T12:00:00Z", &[]);
+    // A skim start answered without an id fails the tick naming the pass,
+    // once the deep pass has started too.
+    machine.write("answers/skim", r#"{"ok":true}"#);
+    let (status, err, sent) = tick("2026-10-18T12:00:00Z", &[]);
     assert!(
         status == 1
             && err
-                .contains("dispatch start failed for pass b-20261018T120000Z-skim: answered no id"),
+                .contains("dispatch start failed for pass b-20261018T120000Z-skim: answered no id")
+            && actions(&sent) == ["list", "start", "start"]
+            && machine
+                .read(".sandman/breath/passes/b-20261018T120000Z-deep/pass.json")
+                .contains(r#""bg_id":"bg9","#),
         "{err}"
     );
     // A dispatch that will not spawn only costs the list a line; a profile
@@ -1539,20 +1562,24 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
     fs::remove_file(&dispatch).expect("dispatch");
     let (status, err, _) = tick("2026-10-19T12:00:00Z", &[("HOME", "/no\"where")]);
     assert!(
-        status == 1 && err.contains("tick list failed") && err.contains("json"),
+        status == 1
+            && err.contains("tick list failed")
+            && err.contains("json")
+            && !machine
+                .root()
+                .join("breath/passes/b-20261019T120000Z-skim")
+                .exists(),
         "{err}"
     );
     fs::remove_file(machine.home.join("prompts/breathe.md")).expect("template");
     let (status, err, _) = tick("2026-10-20T12:00:00Z", &[]);
     assert!(status == 1 && err.contains("breathe.md"), "{err}");
 
-    // Score counts the week's ticks, the failed one too.
-    let score = machine.ok(
-        "2026-10-21T12:00:00Z",
-        &["score", "--week", "2026-W43", "--json"],
-    );
+    // Score counts the week's ticks with their real exits — the knob
+    // refusals' 2s, the failed start's 1 — but not the unrecorded one.
+    let score = machine.ok(NOW, &["score", "--week", "2026-W42", "--json"]);
     assert!(
-        score.contains(r#""breathe tick":{"failed":2,"ticks":2}"#),
+        score.contains(r#""breathe tick":{"failed":3,"ticks":7}"#),
         "{score}"
     );
 }

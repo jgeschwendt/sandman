@@ -1433,27 +1433,15 @@ fn claude(action: &str, fields: Vec<(&str, Value)>) -> Value {
 /// One tick of the ruach, what its launchd agent runs hourly: close, then
 /// open. Close removes from Claude Code's listing every session named
 /// `breath <kind> <pass-id>` whose pass has `ended`, stopping a working or
-/// blocked one first; its failures are `say`d and passed. Open, unless
-/// `shifts/PAUSE` exists, composes a skim pass and — once per New York day,
-/// from 06:00 there — a deep one, starts each pass's session through
-/// dispatch and attaches it. A pass's waits are `say`d skips; its faults, and
-/// a start dispatch refuses, fail the tick. `say(line, failed)` hears every
-/// decision. Every tick, failed or not, appends `{"started","exit"}` to
-/// `breath/ticks.jsonl` for `score`; a line it cannot append is only `say`d.
+/// blocked one first — except one whose pass was marked dead under 24 h after
+/// it started, an overrunning session that is spared; its failures are
+/// `say`d and passed. Open, unless `shifts/PAUSE` exists, composes a skim
+/// pass and — once per New York day, from 06:00 there — a deep one, starts
+/// each pass's session through dispatch and attaches it. A pass's waits are
+/// `say`d skips; its faults, and a start dispatch refuses, fail the tick after
+/// both kinds are tried — the first error wins. `say(line, failed)` hears
+/// every decision.
 pub fn tick(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Result<()> {
-    let result = tick_once(ctx, tick, say);
-    let line = Value::object([
-        ("started", Value::string(ctx.now.iso8601())),
-        ("exit", Value::count(usize::from(result.is_err()))),
-    ]);
-    if let Err(error) = atomic::append_line(&paths::breath_ticks(&ctx.data_root), &line.render()) {
-        say(&format!("tick unrecorded: {error}"), false);
-    }
-    result
-}
-
-/// [`tick`]'s work, before its line is appended.
-fn tick_once(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Result<()> {
     match ask(&tick.dispatch, &claude("list", vec![])) {
         Err(why) => say(&format!("tick list failed: {why}"), true),
         Ok(answer) => {
@@ -1468,15 +1456,28 @@ fn tick_once(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Res
                     else {
                         return None;
                     };
-                    Value::Object(read_pass(&ctx.data_root, id).ok()?.1)
-                        .get("ended")?
-                        .as_str()?;
-                    let state = row.get("state").and_then(Value::as_str);
-                    Some((
-                        row.get("id")?.as_str()?,
-                        name,
-                        matches!(state, Some("working" | "blocked")),
-                    ))
+                    let pass = Value::Object(read_pass(&ctx.data_root, id).ok()?.1);
+                    pass.get("ended")?.as_str()?;
+                    let bg = row.get("id")?.as_str()?;
+                    let working = matches!(
+                        row.get("state").and_then(Value::as_str),
+                        Some("working" | "blocked")
+                    );
+                    let young = pass
+                        .get("started")
+                        .and_then(Value::as_str)
+                        .and_then(Timestamp::parse_iso8601)
+                        .is_some_and(|at| ctx.now.unix_seconds() - at.unix_seconds() < 86_400);
+                    if working && young && pass.get("dead").and_then(Value::as_bool) == Some(true) {
+                        say(
+                            &format!(
+                                "tick spare {bg} ({name}): dead pass still working, under 24 h"
+                            ),
+                            false,
+                        );
+                        return None;
+                    }
+                    Some((bg, name, working))
                 })
                 .collect();
             let mut act = |action: &str, bg: &str, name: &str| {
@@ -1506,6 +1507,10 @@ fn tick_once(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Res
         say("tick skip: shifts/PAUSE", false);
         return Ok(());
     }
+    let settings = json::parse(&tick.settings).map_err(|error| Error::Json {
+        path: None,
+        message: error.to_string(),
+    })?;
     let local = |at: Timestamp| shift::local_seconds(at).div_euclid(3_600);
     let (today, hour) = (local(ctx.now).div_euclid(24), local(ctx.now).rem_euclid(24));
     let deep_today = fs::read_dir(paths::breath_passes(&ctx.data_root))
@@ -1522,69 +1527,77 @@ fn tick_once(ctx: &Context, tick: &Tick, say: &mut dyn FnMut(&str, bool)) -> Res
                     .and_then(Timestamp::parse_iso8601)
                     .is_some_and(|started| local(started).div_euclid(24) == today)
         });
+    let mut outcome = Ok(());
     for kind in [PassKind::Skim, PassKind::Deep] {
         if kind == PassKind::Deep && (hour < 6 || deep_today) {
             say("tick skip deep: once a New York day, from 06:00", false);
-            continue;
+        } else {
+            outcome = outcome.and(open(ctx, tick, kind, &settings, say));
         }
-        let composed = match pass(ctx, kind, tick.budget_usd, tick.dead_cost_usd, false) {
-            Ok(composed) => composed,
-            Err(error @ (Error::Refused { .. } | Error::LockHeld { .. })) => {
-                say(&format!("tick skip {}: {error}", kind.name()), false);
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
-        let request = claude(
-            "start",
-            vec![
-                ("prompt", Value::string(composed.text)),
-                (
-                    "cwd",
-                    Value::string(paths::breath_dir(&ctx.data_root).to_string_lossy()),
-                ),
-                ("model", Value::string(tick.mind.clone())),
-                ("permission_mode", Value::string("dontAsk")),
-                (
-                    "settings",
-                    json::parse(&tick.settings).map_err(|error| Error::Json {
-                        path: None,
-                        message: error.to_string(),
-                    })?,
-                ),
-                (
-                    "name",
-                    Value::string(format!("breath {} {}", kind.name(), composed.id)),
-                ),
-            ],
-        );
-        let answer = ask(&tick.dispatch, &request)
-            .and_then(|answer| {
-                answer
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .is_some()
-                    .then_some(answer)
-                    .ok_or_else(|| "answered no id".to_owned())
-            })
-            .map_err(|why| {
-                Error::refused(format!(
-                    "dispatch start failed for pass {}: {why}",
-                    composed.id
-                ))
-            })?;
-        let field = |key| answer.get(key).and_then(Value::as_str);
-        attach(ctx, &composed.id, field("id"), field("session_id"))?;
-        say(
-            &format!(
-                "tick opened {} bg={} session={}",
-                composed.id,
-                field("id").unwrap_or_default(),
-                field("session_id").unwrap_or_default()
-            ),
-            false,
-        );
     }
+    outcome
+}
+
+/// Compose a `kind` pass, start its session and attach it; a wait is a
+/// `say`d skip.
+fn open(
+    ctx: &Context,
+    tick: &Tick,
+    kind: PassKind,
+    settings: &Value,
+    say: &mut dyn FnMut(&str, bool),
+) -> Result<()> {
+    let composed = match pass(ctx, kind, tick.budget_usd, tick.dead_cost_usd, false) {
+        Ok(composed) => composed,
+        Err(error @ (Error::Refused { .. } | Error::LockHeld { .. })) => {
+            say(&format!("tick skip {}: {error}", kind.name()), false);
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    let request = claude(
+        "start",
+        vec![
+            ("prompt", Value::string(composed.text)),
+            (
+                "cwd",
+                Value::string(paths::breath_dir(&ctx.data_root).to_string_lossy()),
+            ),
+            ("model", Value::string(tick.mind.clone())),
+            ("permission_mode", Value::string("dontAsk")),
+            ("settings", settings.clone()),
+            (
+                "name",
+                Value::string(format!("breath {} {}", kind.name(), composed.id)),
+            ),
+        ],
+    );
+    let answer = ask(&tick.dispatch, &request)
+        .and_then(|answer| {
+            answer
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some()
+                .then_some(answer)
+                .ok_or_else(|| "answered no id".to_owned())
+        })
+        .map_err(|why| {
+            Error::refused(format!(
+                "dispatch start failed for pass {}: {why}",
+                composed.id
+            ))
+        })?;
+    let field = |key| answer.get(key).and_then(Value::as_str);
+    attach(ctx, &composed.id, field("id"), field("session_id"))?;
+    say(
+        &format!(
+            "tick opened {} bg={} session={}",
+            composed.id,
+            field("id").unwrap_or_default(),
+            field("session_id").unwrap_or_default()
+        ),
+        false,
+    );
     Ok(())
 }
 
