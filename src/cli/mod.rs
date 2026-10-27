@@ -156,8 +156,9 @@ usage: sandman <verb> [args]
       hourly agent: through dispatch run ($SANDMAN_DISPATCH_BIN, else
       ~/.local/bin/dispatch), it stops (a working or blocked one, then waits
       $SANDMAN_BREATH_SETTLE_MS, default 3000) and removes every session named
-      breath <kind> <pass-id> whose pass has ended — sparing a working one
-      whose pass was marked dead until 24 h after it started; then, unless
+      breath <kind> <pass-id> whose pass has ended — sparing a working deep
+      one whose pass was marked dead until 24 h after it started or a newer
+      deep pass starts; then, unless
       <root>/shifts/PAUSE exists, composes a skim pass and — once a New York
       day, from 06:00 there — a deep one as pass does, starts each session
       ($SANDMAN_BREATH_MIND, default opus, dontAsk, the shift profile --kind

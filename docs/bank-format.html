@@ -1273,10 +1273,11 @@ carrying <code class="code">error</code> is a failure. A tick, in order:</p>
 <code class="code">breath &lt;kind&gt; &lt;pass-id&gt;</code> whose <code class="code">pass.json</code> has <code class="code">ended</code> — closed, or marked dead — stopping it first
 when <code class="code">working</code> or <code class="code">blocked</code> and then waiting <code class="code">$SANDMAN_BREATH_SETTLE_MS</code> (default 3000: a stopped
 session's <code class="code">SessionEnd</code> hook races the removal of its job dir), then removing it from the listing, where a
-finished session otherwise stays forever. One exception: a <code class="code">working</code> or <code class="code">blocked</code> session whose pass
+finished session otherwise stays forever. One exception: a <code class="code">working</code> or <code class="code">blocked</code> session of a deep pass
 <code class="code">pass</code> marked <code class="code">dead</code> is an overrunning run, not a finished one — a long <code class="code">/gigaresearch</code>
 outlives the deep pass's hour — so it is spared (a <code class="code">tick spare …</code> line) until 24 h after the pass
-<code class="code">started</code>, then stopped and removed. Each failure is a stderr line; the tick goes on.</li>
+<code class="code">started</code> or until a newer deep pass has started, whichever comes first, then stopped and removed:
+at most one tick of overlap. A dead skim is stopped and removed at once, since it no longer holds back the next. Each failure is a stderr line; the tick goes on.</li>
 <li><strong>Open</strong>, unless <code class="code">shifts/PAUSE</code> exists: a skim, then — once per New York calendar day,
 from 06:00 there — a deep pass, each composed as <code class="code">pass</code> composes it. Its waits are skips. Both kinds are
 always tried; a fault, a refused start or a failed attach fails the tick with the first error once both have run. A

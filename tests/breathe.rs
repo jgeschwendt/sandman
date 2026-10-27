@@ -1385,17 +1385,25 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
     pass("b-a", r#""2026-10-01T00:10:00Z""#);
     pass("b-b", r#""2026-10-01T00:10:00Z""#);
     pass("b-c", "null");
-    machine.write(
-        ".sandman/breath/passes/b-d/pass.json",
-        r#"{"dead":true,"ended":"2026-10-16T04:00:00Z","kind":"deep","started":"2026-10-16T03:00:00Z"}"#,
-    );
+    for (id, kind, started) in [
+        ("b-d", "deep", "2026-10-16T03:00:00Z"),
+        ("b-e", "skim", "2026-10-16T15:00:00Z"),
+        ("b-f", "deep", "2026-10-15T12:00:00Z"),
+    ] {
+        machine.write(
+            format!(".sandman/breath/passes/{id}/pass.json"),
+            &format!(
+                r#"{{"dead":true,"ended":"{started}","kind":"{kind}","started":"{started}"}}"#
+            ),
+        );
+    }
     let (log, answers) = (
         machine.home.join("dispatch.log"),
         machine.home.join("answers"),
     );
     machine.write(
         "answers/list",
-        r#"{"sessions":[{"id":"bg1","name":"breath skim b-a","state":"working"},{"id":"bg2","name":"breath deep b-b","state":"idle"},{"id":"bg3","name":"breath skim b-c"},{"id":"bg4","name":"shift b-a"},{"id":"bg5","name":"breath skim b-a x"},{"id":"bg6","name":"breath skim ../b-a"},{"id":"bg7"},{"id":"bg8","name":"breath deep b-d","state":"working"}]}"#,
+        r#"{"sessions":[{"id":"bg1","name":"breath skim b-a","state":"working"},{"id":"bg2","name":"breath deep b-b","state":"idle"},{"id":"bg3","name":"breath skim b-c"},{"id":"bg4","name":"shift b-a"},{"id":"bg5","name":"breath skim b-a x"},{"id":"bg6","name":"breath skim ../b-a"},{"id":"bg7"},{"id":"bg8","name":"breath deep b-d","state":"working"},{"id":"bg0","name":"breath skim b-e","state":"working"},{"id":"bgf","name":"breath deep b-f","state":"blocked"}]}"#,
     );
     for answer in ["skim", "start"] {
         machine.write(
@@ -1433,16 +1441,18 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
             .collect::<Vec<_>>()
     };
 
-    // Refused knobs exit 2 and are recorded; an unreadable instant cannot be.
+    // Refused knobs exit 2 and are recorded; an unreadable instant or a
+    // homeless root cannot be.
     for knob in ["SANDMAN_BREATH_DEAD_COST_USD", "SANDMAN_BREATH_SETTLE_MS"] {
         assert_eq!(tick(NOW, &[(knob, "x")]).0, 2, "{knob}");
     }
     assert_eq!(tick("x", &[]).0, 2);
+    assert_eq!(tick(NOW, &[("HOME", ""), ("SANDMAN_ROOT", "")]).0, 1);
 
-    // Noon in New York: the ended working session is stopped then removed,
-    // the idle one removed (its failure a stderr line), a dead pass's working
-    // session spared 13 h in, the rest left; a skim and the day's deep pass
-    // open and attach.
+    // Noon in New York: the ended working sessions are stopped then removed
+    // — a dead skim's too, and a dead deep pass's past 24 h — the idle one
+    // removed (its failure a stderr line), a dead deep pass's working session
+    // spared 13 h in, the rest left; a skim and the day's deep pass open.
     let (status, err, sent) = tick(NOW, &[]);
     assert_eq!(status, 0, "{err}");
     assert!(
@@ -1451,7 +1461,10 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
     );
     assert_eq!(
         actions(&sent),
-        ["list", "stop bg1", "rm bg1", "rm bg2", "start", "start"]
+        [
+            "list", "stop bg1", "stop bg0", "stop bgf", "rm bg1", "rm bg2", "rm bg0", "rm bgf",
+            "start", "start"
+        ]
     );
     for expected in [
         r#""name":"breath skim b-20261016T160000Z-skim""#,
@@ -1472,7 +1485,7 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
     }
 
     // Closed, the skim has nothing due within the hour — a quiet skip — and
-    // the deep pass already started today.
+    // the deep pass already started today: a newer deep pass ends the spare.
     machine.ok(
         "2026-10-16T16:30:00Z",
         &[
@@ -1495,10 +1508,9 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
         r#"{"sessions":[{"id":"bg8","name":"breath deep b-d","state":"working"}]}"#,
     );
     let (status, err, sent) = tick("2026-10-16T17:00:00Z", &[]);
-    assert_eq!(
-        (status, err.as_str(), actions(&sent)),
-        (0, "", vec!["list".to_owned()])
-    );
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(actions(&sent), ["list", "stop bg8", "rm bg8"]);
+    machine.write("answers/list", r#"{"sessions":[]}"#);
     let journal = machine.journal("breathe");
     for expected in [
         "tick skip skim: nothing due",
@@ -1512,13 +1524,11 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
         );
     }
 
-    // The next New York day: 05:00 there opens a skim only — and, 24 h on,
-    // stops the dead pass's session — 06:00 the deep.
+    // The next New York day: 05:00 there opens a skim only, 06:00 the deep.
     assert_eq!(
         actions(&tick("2026-10-17T09:00:00Z", &[]).2),
-        ["list", "stop bg8", "rm bg8", "start"]
+        ["list", "start"]
     );
-    machine.write("answers/list", r#"{"sessions":[]}"#);
     let (_, err, sent) = tick("2026-10-17T10:00:00Z", &[]);
     assert!(
         sent.contains("breath deep b-20261017T100000Z-deep"),
