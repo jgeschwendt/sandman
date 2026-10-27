@@ -146,7 +146,8 @@ usage: sandman <verb> [args]
       nothing. attach records the pass's session; reaped stamps reaped: <now>
       once the runner has removed it and taken its transcript; close requires --cost (0
       journals a cost zero note), records its counters,
-      advances last_read (and each --cursor) on the sources it listed, and
+      advances last_read to the pass's start (and each --cursor) on the
+      sources it listed, and
       appends a breath event; it lands on a pass marked dead, its --cost
       replacing the charge, and refuses one already closed.
       reweight moves each weight +0.1 per breath whose adopted: stamp is

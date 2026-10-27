@@ -620,11 +620,13 @@ fn pass_fills_every_slot_and_close_advances_last_read() {
         pass.contains(r#""reaped":"2026-10-16T16:40:00Z","#),
         "{pass}"
     );
+    // last_read is the pass's start, not its close: a close a minute after
+    // the :17 tick would leave the next tick's skim 59 minutes short of due
     let sources = machine.sources();
     for source in &sources.sources {
         assert_eq!(
             source.last_read.map(sandman::Timestamp::iso8601).as_deref(),
-            Some(close_at),
+            Some(NOW),
             "{}",
             source.name
         );
@@ -666,9 +668,14 @@ fn pass_fills_every_slot_and_close_advances_last_read() {
     );
     assert_eq!(code(&output), 1, "a pass closes once");
 
-    // Everything was read at 16:40: nothing is due for a skim at 17:00.
-    let output = machine.run(
+    // Everything was read as of 16:00, though closed at 16:40: a skim has
+    // nothing due at 16:59, and everything at 17:00.
+    machine.ok(
         "2026-10-16T17:00:00Z",
+        &["breathe", "pass", "--kind", "skim", "--dry-run"],
+    );
+    let output = machine.run(
+        "2026-10-16T16:59:00Z",
         &["breathe", "pass", "--kind", "skim"],
         &[],
     );
@@ -932,7 +939,7 @@ fn pass_tells_a_wait_from_a_fault_and_close_needs_a_cost() {
     assert_eq!(code(&close(Some("3"))), 0);
 
     // Everything was just read: a skim has nothing due, a wait.
-    let output = machine.run("2026-10-16T17:00:00Z", &skim, &[]);
+    let output = machine.run("2026-10-16T16:59:00Z", &skim, &[]);
     assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains("nothing due"),
@@ -1507,7 +1514,7 @@ fn tick_closes_ended_sessions_and_opens_skim_hourly_and_deep_once_a_new_york_day
         "answers/list",
         r#"{"sessions":[{"id":"bg8","name":"breath deep b-d","state":"working"}]}"#,
     );
-    let (status, err, sent) = tick("2026-10-16T17:00:00Z", &[]);
+    let (status, err, sent) = tick("2026-10-16T16:59:00Z", &[]);
     assert_eq!((status, err.as_str()), (0, ""));
     assert_eq!(actions(&sent), ["list", "stop bg8", "rm bg8"]);
     machine.write("answers/list", r#"{"sessions":[]}"#);
