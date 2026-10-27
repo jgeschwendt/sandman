@@ -583,8 +583,8 @@ fn the_whole_pass_writes_the_day_that_ended_then_backfills_three_gaps() {
     assert_eq!(code(&one), 0, "{}", stderr(&one));
     assert_eq!(log_files(&machine), vec![entry(2), log.join("INDEX.md")]);
 
-    // Day 4's entry cannot be written: its call is spent but takes no slot,
-    // and the pass runs on — 5, 6 and 7 fill the three, so 8 is never asked.
+    // Day 4's entry cannot be written: its call is spent and takes a slot,
+    // and the pass runs on — 5 and 6 fill the three, so 7 is never asked.
     fs::create_dir_all(entry(4)).expect("a directory where day 4 goes");
     let output = machine.run_with(&["reflect"], "", &[("SANDMAN_CLAUDE_BIN", &claude)]);
     assert_eq!(code(&output), 1, "{}", stderr(&output));
@@ -597,16 +597,15 @@ fn the_whole_pass_writes_the_day_that_ended_then_backfills_three_gaps() {
     assert_eq!(
         stdout(&output),
         format!(
-            "{}\n{}\nquiet\n{}\n{}\n{}\n",
+            "{}\n{}\nquiet\n{}\n{}\n",
             shown(1),
             log.join("INDEX.md").display(),
             shown(5),
-            shown(6),
-            shown(7)
+            shown(6)
         )
     );
-    assert_eq!(calls(&counter), 6, "--day, yesterday, then 4 to 7");
-    assert!(!entry(8).exists() && !entry(0).exists());
+    assert_eq!(calls(&counter), 5, "--day, yesterday, then 4 to 6");
+    assert!(!entry(7).exists() && !entry(0).exists());
     let text = fs::read_to_string(entry(1)).expect("the entry");
     assert!(text.contains("\ntitle: Yesterday closed\n"), "{text}");
     let journal = machine.journal("reflect");
@@ -615,7 +614,7 @@ fn the_whole_pass_writes_the_day_that_ended_then_backfills_three_gaps() {
         "entry=written ms=".to_owned(),
         format!("reflect done day={} entry=quiet", utc_day(3)),
         format!("reflect error day={}", utc_day(4)),
-        format!("reflect done day={} entry=written", utc_day(7)),
+        format!("reflect done day={} entry=written", utc_day(6)),
     ] {
         assert!(journal.contains(&line), "{line}: {journal}");
     }

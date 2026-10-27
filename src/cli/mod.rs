@@ -171,7 +171,8 @@ usage: sandman <verb> [args]
       that fails is logged and passed; the pass still prints its entry and
       index and journals its run line (failed=N). Then the backfill: the days
       2–14 back with no entry file, newest first, each run as --day runs it,
-      until 3 have cost a log-mind call (written or abstained; quiet is free).
+      until 3 have cost a log-mind call (any day but a quiet one, failed
+      included).
       A failed bank or backfill day exits 1 naming the counts. --day renders
       that day's entry only — no drain, sweep, upkeep or backfill.
 
