@@ -299,8 +299,8 @@ usage: sandman <verb> [args]
       prompts/sabbath.md instead and works jgeschwendt/sandman's trunk, once
       (exit 1, `sabbath kept: <id> handed off at <time>`, after the night's); a
       repo whose docs/index.html #next names nothing takes its line from the
-      Sabbath's score/<week>-targets.md (the current week's when the Sabbath
-      wrote none; freezes read it too). pick is the rotation — the least
+      Sabbath's score/<week>-targets.md (the newest earlier one when the
+      Sabbath wrote none; freezes read it too). pick is the rotation — the least
       recently shifted trunk of the grove's $SANDMAN_SHIFT_OWNERS repos
       (default jgeschwendt), Saturday shifts aside — never ~, ~/.routines or
       the data root — ties broken by a failing stele check (mise x -C <trunk>
