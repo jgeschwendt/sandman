@@ -30,9 +30,14 @@ fn parses(text: &str) -> bool {
 #[test]
 fn plist_renders_each_agent_under_this_home() {
     let home = Machine::new("plist");
-    let (install, report) = (
+    let (install, reflect, report) = (
         plist(&home, &["install"], "", 0),
+        plist(&home, &["reflect"], "", 0),
         plist(&home, &["report"], "", 0),
+    );
+    let sandman = format!(
+        "<string>{}/.local/bin/sandman</string>",
+        home.home.display()
     );
     let script = format!(
         "<string>{}/.local/share/sandman/install</string>",
@@ -40,17 +45,18 @@ fn plist_renders_each_agent_under_this_home() {
     );
     assert!(
         parses(&install)
+            && parses(&reflect)
             && parses(&report)
-            && !format!("{install}{report}").contains("{{")
+            && !format!("{install}{reflect}{report}").contains("{{")
             && install.contains("<string>dev.gigantic.sandman.install</string>")
             && install.contains(&script)
+            && reflect.contains(&format!("{sandman}\n    <string>reflect</string>"))
+            && reflect.contains("<key>Hour</key><integer>23</integer>")
+            && !reflect.contains("RunAtLoad")
             && report.contains("<string>dev.gigantic.sandman.report</string>")
             && !report.contains("<key>SANDMAN_SHIFT_NIGHT")
-            && report.contains(&format!(
-                "<string>{}/.local/bin/sandman</string>",
-                home.home.display()
-            )),
-        "{install}{report}"
+            && report.contains(&sandman),
+        "{install}{reflect}{report}"
     );
     assert_eq!(plist(&home, &["install"], "07-06", 0), install);
     assert_eq!(
@@ -64,7 +70,7 @@ fn plist_renders_each_agent_under_this_home() {
     assert_eq!(common::code(&homeless), 1, "{}", stderr(&homeless));
     let unknown = feed(&mut home.sandman(&["plist", "dream"]), "");
     assert!(
-        common::code(&unknown) == 2 && stderr(&unknown).contains("install or report"),
+        common::code(&unknown) == 2 && stderr(&unknown).contains("install, reflect or report"),
         "{}",
         stderr(&unknown)
     );

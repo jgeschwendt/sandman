@@ -50,7 +50,7 @@ A shift runs in `dontAsk` — no prompts, no classifier, anything that would hav
 
 ## Repair
 
-- `unknown verb` from `sandman shift` (exit 2): the installed `~/.local/bin/sandman` predates the shift verbs. Install a binary built from sandman's trunk at a clean commit, as `sandman-reflect.md` describes; never build from a live checkout.
+- `unknown verb` from `sandman shift` (exit 2): the installed `~/.local/bin/sandman` predates the shift verbs. The install agent `dev.gigantic.sandman.install` brings it to a clean trunk within fifteen minutes (log `~/Library/Logs/dev.gigantic.sandman.install.log`; a dirty trunk is skipped and named there); never build from a live checkout.
 - `dispatch` missing or answering `{"error": …}` in the close block: leave `current.json` alone and exit non-zero; the next tick retries. A session cannot be judged finished from an error.
 - A wedged lock — `current.json` naming a `bg_id` the listing no longer shows — is exactly what the close block releases; run it by hand (`routine run shift`) rather than editing state.
 - A shift stopped for running past `handoff_by` is abandoned with that reason on the trail; its branch and worktree stay for the next shift on that repo, whose brief carries the abandonment in the trail slot.

@@ -269,15 +269,16 @@ pub fn parse_reply(text: &str) -> Option<Reply> {
 
 // ─── the day and its sources ──────────────────────────────────────────────
 
-/// The UTC day that just ended.
+/// The UTC day that ended `back` days ago — `1` is the one that just ended.
 ///
-/// The pass runs at 03:30 UTC, so `Day::of(now)` would render the day it is
-/// *in* — a page covering its own first three hours and nothing after them.
-/// Every entry is written a day behind instead, when the day is whole.
+/// The pass runs at 23:30 New York time, already the next UTC day, so
+/// `Day::of(now)` would render the day it is *in* — a page covering its own
+/// first hours and nothing after them. Every entry is written a day behind
+/// instead, when the day is whole.
 #[must_use]
-pub fn day_ended(now: Timestamp) -> reflect::Day {
+pub fn day_ended(now: Timestamp, back: i64) -> reflect::Day {
     reflect::Day::of(Timestamp::from_unix_seconds(
-        now.unix_seconds() - SECONDS_PER_DAY,
+        now.unix_seconds() - back * SECONDS_PER_DAY,
     ))
 }
 
@@ -766,9 +767,9 @@ mod tests {
     #[test]
     fn the_day_that_ended_crosses_a_month_boundary() {
         let now = Timestamp::parse_iso8601("2026-09-01T03:30:12Z").expect("parses");
-        assert_eq!(day_ended(now).key(), "2026-08-31");
+        assert_eq!(day_ended(now, 1).key(), "2026-08-31");
         let mid = Timestamp::parse_iso8601("2026-09-01T23:59:59Z").expect("parses");
-        assert_eq!(day_ended(mid).key(), "2026-08-31");
+        assert_eq!(day_ended(mid, 1).key(), "2026-08-31");
         assert_eq!(
             Day::of(now).key(),
             "2026-09-01",

@@ -169,9 +169,11 @@ usage: sandman <verb> [args]
       the log index, the pointer sweep (dreamt and older than 72 h), and one
       gated opus upkeep call per grown bank ($SANDMAN_MIND_UPKEEP). A bank
       that fails is logged and passed; the pass still prints its entry and
-      index and journals its run line (failed=N), then exits 1 naming the
-      count. --day renders that day's entry only — no drain, no sweep, no
-      upkeep.
+      index and journals its run line (failed=N). Then the backfill: the days
+      2–14 back with no entry file, newest first, each run as --day runs it,
+      until 3 have cost a log-mind call (written or abstained; quiet is free).
+      A failed bank or backfill day exits 1 naming the counts. --day renders
+      that day's entry only — no drain, sweep, upkeep or backfill.
 
   mcp
       Serve the banks over MCP on stdio: JSON-RPC 2.0, one message per line,
@@ -180,13 +182,14 @@ usage: sandman <verb> [args]
       verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
       Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
 
-  plist install|report
+  plist install|reflect|report
       A launchd agent, launchd/dev.gigantic.sandman.<job>.plist, rendered on
       stdout: {{HOME}} spelled out as $HOME (launchd expands no ~). install
       runs launchd/install every fifteen minutes, keeping the installed
-      binary, sandbox files and routines at a clean trunk; report keeps
-      report serve up, with $SANDMAN_SHIFT_NIGHT added to its environment
-      when set. Another job exits 2. Install: sandman plist <job> >
+      binary, sandbox files and routines at a clean trunk; reflect runs
+      reflect nightly at 23:30 local; report keeps report serve up, with
+      $SANDMAN_SHIFT_NIGHT added to its environment when set. Another job
+      exits 2. Install: sandman plist <job> >
       ~/Library/LaunchAgents/dev.gigantic.sandman.<job>.plist.
 
   reconcile <event-id|shift-id> [--dry-run]

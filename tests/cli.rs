@@ -226,10 +226,11 @@ fn dream_and_reflect_run_on_an_empty_root() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let printed = stdout(&output);
     let written: Vec<&str> = printed.lines().collect();
-    assert_eq!(written.len(), 2, "{written:?}");
+    assert_eq!(written.len(), 15, "{written:?}");
     // Nothing landed yesterday, so there is no entry to write — only the word
-    // that says so, and the index that has nothing to list.
-    assert_eq!(written[0], "quiet");
+    // that says so, the index that has nothing to list, and the backfill's
+    // thirteen days, each as quiet.
+    assert_eq!([&written[..1], &written[2..]].concat(), vec!["quiet"; 14]);
     assert_eq!(
         PathBuf::from(written[1]),
         machine.root().join("log").join("INDEX.md")
@@ -552,7 +553,7 @@ fn a_day_that_is_not_a_date_is_a_usage_error() {
 }
 
 #[test]
-fn the_whole_pass_writes_the_entry_for_the_day_that_ended() {
+fn the_whole_pass_writes_the_day_that_ended_then_backfills_three_gaps() {
     let machine = Machine::new("log-pass");
     let counter = machine.home.join("calls.txt");
     let stub = entry_stub(
@@ -561,53 +562,62 @@ fn the_whole_pass_writes_the_entry_for_the_day_that_ended() {
         "Yesterday closed",
         "The operator landed one memory yesterday.",
     );
-    let yesterday = utc_day(1);
-    machine.memory(
-        "reference_yesterdays_claim.md",
-        &format!("{yesterday}T11:00:00Z"),
-        "yesterday's body",
-    );
+    let claude = stub.display().to_string();
+    // Day 3 is quiet; every other day of the last eight landed a memory.
+    for back in [1, 2, 4, 5, 6, 7, 8] {
+        machine.memory(
+            &format!("reference_claim_{back}.md"),
+            &format!("{}T11:00:00Z", utc_day(back)),
+            "the day's body",
+        );
+    }
+    let log = machine.root().join("log");
+    let entry = |back: i64| log.join(format!("{}.md", utc_day(back)));
 
-    let output = machine.run_with(
-        &["reflect"],
+    // --day renders its day and backfills nothing.
+    let one = machine.run_with(
+        &["reflect", "--day", &utc_day(2)],
         "",
-        &[("SANDMAN_CLAUDE_BIN", &stub.display().to_string())],
+        &[("SANDMAN_CLAUDE_BIN", &claude)],
     );
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let printed = stdout(&output);
-    let lines: Vec<&str> = printed.lines().collect();
-    assert_eq!(lines.len(), 2, "{lines:?}");
-    let path = machine.root().join("log").join(format!("{yesterday}.md"));
-    assert_eq!(PathBuf::from(lines[0]), path);
-    assert_eq!(
-        PathBuf::from(lines[1]),
-        machine.root().join("log").join("INDEX.md")
-    );
-    assert_eq!(
-        calls(&counter),
-        1,
-        "one call, and upkeep only seeds the bank"
-    );
-    let entry = fs::read_to_string(&path).expect("the entry");
-    assert!(entry.contains(&format!("\ndate: {yesterday}\n")), "{entry}");
-    assert!(entry.contains("\ntitle: Yesterday closed\n"), "{entry}");
-    // …and today's date is never the day a pass renders.
+    assert_eq!(code(&one), 0, "{}", stderr(&one));
+    assert_eq!(log_files(&machine), vec![entry(2), log.join("INDEX.md")]);
+
+    // Day 4's entry cannot be written: its call is spent but takes no slot,
+    // and the pass runs on — 5, 6 and 7 fill the three, so 8 is never asked.
+    fs::create_dir_all(entry(4)).expect("a directory where day 4 goes");
+    let output = machine.run_with(&["reflect"], "", &[("SANDMAN_CLAUDE_BIN", &claude)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
     assert!(
-        !machine
-            .root()
-            .join("log")
-            .join(format!("{}.md", utc_day(0)))
-            .exists()
+        stderr(&output).contains("0 bank(s) failed upkeep, 1 backfill day(s) failed"),
+        "{}",
+        stderr(&output)
     );
+    let shown = |back: i64| entry(back).display().to_string();
+    assert_eq!(
+        stdout(&output),
+        format!(
+            "{}\n{}\nquiet\n{}\n{}\n{}\n",
+            shown(1),
+            log.join("INDEX.md").display(),
+            shown(5),
+            shown(6),
+            shown(7)
+        )
+    );
+    assert_eq!(calls(&counter), 6, "--day, yesterday, then 4 to 7");
+    assert!(!entry(8).exists() && !entry(0).exists());
+    let text = fs::read_to_string(entry(1)).expect("the entry");
+    assert!(text.contains("\ntitle: Yesterday closed\n"), "{text}");
     let journal = machine.journal("reflect");
-    assert!(
-        journal.contains(&format!("reflect entry date={yesterday}")),
-        "{journal}"
-    );
-    assert!(journal.contains("entry=written ms="), "{journal}");
-    for file in log_files(&machine) {
-        let text = fs::read_to_string(&file).expect("a log file");
-        assert!(!text.contains("## takes"), "{}: {text}", file.display());
+    for line in [
+        format!("reflect entry date={}", utc_day(1)),
+        "entry=written ms=".to_owned(),
+        format!("reflect done day={} entry=quiet", utc_day(3)),
+        format!("reflect error day={}", utc_day(4)),
+        format!("reflect done day={} entry=written", utc_day(7)),
+    ] {
+        assert!(journal.contains(&line), "{line}: {journal}");
     }
 }
 
