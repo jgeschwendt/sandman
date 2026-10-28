@@ -13,7 +13,7 @@ use crate::time::Timestamp;
 use crate::verbs::{dream, forget, mcp, reflect, remember};
 use crate::version::VERSION;
 
-use super::{Args, Failure, NONE, calendar_day, note};
+use super::{Args, Failure, NONE, calendar_day, knobs, note};
 
 /// Claude Code names the running session here.
 const SESSION_ENV: &str = "CLAUDE_SESSION_ID";
@@ -69,7 +69,13 @@ pub(super) fn dream_verb(args: &[String]) -> Result<(), Failure> {
     // The flag is documentation: dream always routes what is queued.
     Args::parse(args, "dream", &[], &["--now"], 0)?;
     let data_root = paths::data_root()?;
-    let options = dream::Options::from_env(&data_root, &paths::claude_root()?);
+    let mut options = dream::Options::from_env(&data_root, &paths::claude_root()?);
+    let models = knobs(&data_root)?.dream;
+    for mind in &mut options.minds {
+        if let Some(model) = models.get(mind.tier.as_str()) {
+            mind.model.clone_from(model);
+        }
+    }
     let outcome = dream::dream(&data_root, &paths::home()?, &options)?;
     for path in &outcome.committed {
         println!("{}", path.display());

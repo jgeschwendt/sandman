@@ -33,12 +33,14 @@ Local time, America/New_York; Sunday is Day 1, Saturday the Sabbath. The owner w
 
 These reach `sandman shift brief` through this routine's environment (the tick's launchd agent); nothing reaches the session itself, which `--bg` starts from Claude Code's daemon.
 
-- `SANDMAN_SHIFT_MIND` — orchestrator model, default `opus`. Fable takes the Sabbath self-pass and Friday's verdicts while quota allows.
+- `SANDMAN_SHIFT_MIND` — orchestrator model, default `opus`, under `~/.sandman/shifts/rotation.toml`'s `[mind]` (per theme, else `default`). Fable takes the Sabbath self-pass and Friday's verdicts while quota allows.
 - `SANDMAN_SHIFT_BUDGET_USD` — per-shift cost cap the brief states, default `15`.
 - `SANDMAN_SHIFT_SKIP` — colon-separated repo slugs the rotation passes over.
 - `SANDMAN_SHIFT_GRACE_MIN` — minutes past `handoff_by` before a still-working shift is stopped, default `20`.
 - `SANDMAN_SHIFT_MIN_WINDOW_MIN` — the least window, and the least night, a shift may open with, default `60`; `handoff_by` is the reset minus fifteen, never past dawn, so a shift always has at least 45 minutes.
-- `SANDMAN_SHIFT_NIGHT` — the night, New York hours `HH-HH`, default `21-07`; set it on `dev.gigantic.sandman.report` too, whose pages are keyed by the same nights: export it in the shell that runs `sandman plist report`, which carries it into the rendered agent, or edit the installed copy.
+- `SANDMAN_SHIFT_NIGHT` — the night, New York hours `HH-HH`, default `21-07`, under `rotation.toml`'s `night`, which every verb and the report server (per request) read, so a night set there needs no agent restart.
+
+`rotation.toml` is the owner's one knob file — `night`, `off`, `rounds`, `skim_minutes`, `[mind]`, `[dream]`; the contract is sandman's `docs/bank-format.html#shifts-rotations-file`. `pick` exiting 1 and `brief` 3 with `every rotation repo is spent` means each repo has had its `rounds` this night: idle until the next.
 
 ## The sandbox
 
@@ -307,25 +309,30 @@ rc=0
 [ "$rc" -ne 1 ] || exit 0   # day, dawn near, or the window nearly spent: wait
 [ "$rc" -eq 0 ] || exit "$rc"   # 3: the clock file is unreadable — a fault, not a wait
 rc=0
-id=$("$sm" shift brief) || rc=$?
+err=$(mktemp)
+id=$("$sm" shift brief 2>"$err") || rc=$?
+cat "$err" >&2
+spent=$(grep -c '^sandman: every rotation repo is spent' "$err" || :)
+rm -f "$err"
 [ "$rc" -ne 1 ] || exit 0   # brief refused: the Sabbath is kept for today, or nothing to do — wait
-[ "$rc" -eq 0 ] || exit "$rc"   # 2 or 3: a fault — template, trust, window file
+[ "$spent" -eq 0 ] || exit 0   # every repo has had its rounds this night — wait for the next
+[ "$rc" -eq 0 ] || exit "$rc"   # 2 or 3: a fault — template, trust, window file, rotation.toml
 cwd=$("$sm" shift pick --path --shift "$id")
 profile=$("$sm" shift profile)
 req=$(python3 -I -c '
 import json, sys
-brief, cwd, mind, shift, profile = sys.argv[1:6]
+brief, cwd, meta, shift, profile = sys.argv[1:6]
 print(json.dumps({
     "verb": "claude",
     "action": "start",
     "prompt": open(brief).read(),
     "cwd": cwd,
-    "model": mind,
+    "model": json.load(open(meta))["mind"],
     "permission_mode": "dontAsk",
     "settings": json.loads(profile),
     "name": "shift " + shift,
 }))
-' "$root/shifts/$id/brief.md" "$cwd" "${SANDMAN_SHIFT_MIND:-opus}" "$id" "$profile")
+' "$root/shifts/$id/brief.md" "$cwd" "$root/shifts/$id/meta.json" "$id" "$profile")
 answer=$(printf '%s\n' "$req" | "$sp" run)
 ids=$(printf '%s' "$answer" | python3 -I -c '
 import json, sys

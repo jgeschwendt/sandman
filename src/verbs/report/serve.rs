@@ -144,13 +144,6 @@ fn form(text: &str) -> Vec<(String, String)> {
 
 /// The answer to one request.
 fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
-    let ctx = &shift::Context {
-        now: Timestamp::now()
-            .ok()
-            .filter(|_| !server.pinned)
-            .unwrap_or(server.ctx.now),
-        ..server.ctx.clone()
-    };
     let Some((method, target, headers, body)) = read(stream) else {
         return status("400 Bad Request", "");
     };
@@ -165,18 +158,27 @@ fn respond(server: &Server, bound: &str, stream: &TcpStream) -> Response {
     {
         return status("403 Forbidden", "");
     }
+    // rotation.toml per request, so a night or off list he edits needs no restart
+    let ctx = &match shift::knobs(&server.ctx.data_root) {
+        Ok(knobs) => shift::Context {
+            knobs,
+            now: Timestamp::now()
+                .ok()
+                .filter(|_| !server.pinned)
+                .unwrap_or(server.ctx.now),
+            ..server.ctx.clone()
+        },
+        Err(error) => return failed(&error),
+    };
     let (path, query) = target.split_once('?').unwrap_or((&target, ""));
     match (method.as_str(), path) {
         ("GET", "/") => {
             let night = form(query).into_iter().find(|(key, _)| key == "night");
-            let rotation = match shift::rotation(ctx) {
-                Ok(rotation) => rotation,
-                Err(error) => return failed(&error),
-            };
+            let rotation = shift::rotation(ctx);
             html::page(
                 &ctx.data_root,
                 &ctx.docket,
-                ctx.night,
+                ctx.night(),
                 night.as_ref().map(|(_, night)| night.as_str()),
                 &rotation,
             )
@@ -271,18 +273,16 @@ fn rotation(ctx: &shift::Context, fields: &[(String, String)]) -> Response {
             .filter(|label| !on.iter().any(|(_, repo)| repo == label))
     };
     seen(
-        shift::rotation(ctx)
-            .and_then(|rows| shift::set_off(ctx, off(rows)))
-            .and_then(|line| {
-                trail::append(
-                    &ctx.data_root,
-                    trail::Draft {
-                        kind: "guard".to_owned(),
-                        rationale: Some(format!("owner set the rotation: {line}")),
-                        ..trail::Draft::default()
-                    },
-                )
-            }),
+        shift::set_off(ctx, off(shift::rotation(ctx))).and_then(|line| {
+            trail::append(
+                &ctx.data_root,
+                trail::Draft {
+                    kind: "guard".to_owned(),
+                    rationale: Some(format!("owner set the rotation: {line}")),
+                    ..trail::Draft::default()
+                },
+            )
+        }),
     )
 }
 

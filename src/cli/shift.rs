@@ -126,12 +126,18 @@ fn shift_attach(args: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// What a brief is composed for: `--mind`, else `$SANDMAN_SHIFT_MIND`, else
-/// opus, and `$SANDMAN_SHIFT_BUDGET_USD`, else 15.
-fn brief_options(parsed: &Args, dry_run: bool) -> Result<shift::BriefOptions, Failure> {
+/// What a brief is composed for: `--mind`, else rotation.toml's `[mind]` for
+/// the night's theme, else `$SANDMAN_SHIFT_MIND`, else opus, and
+/// `$SANDMAN_SHIFT_BUDGET_USD`, else 15.
+fn brief_options(
+    ctx: &shift::Context,
+    parsed: &Args,
+    dry_run: bool,
+) -> Result<shift::BriefOptions, Failure> {
     let budget_usd = usd_env("SANDMAN_SHIFT_BUDGET_USD", 15.0)?;
     let mind = parsed
         .flag("--mind")
+        .or_else(|| ctx.knobs.mind(ctx.night().anchor(ctx.now).day().theme))
         .or_else(|| {
             env::var("SANDMAN_SHIFT_MIND")
                 .ok()
@@ -149,7 +155,7 @@ fn brief_options(parsed: &Args, dry_run: bool) -> Result<shift::BriefOptions, Fa
 fn shift_brief(args: &[String]) -> Result<(), Failure> {
     let parsed = Args::parse(args, "shift brief", &["--mind"], &["--dry-run"], 0)?;
     let ctx = shift_context()?;
-    let options = brief_options(&parsed, parsed.set("--dry-run"))?;
+    let options = brief_options(&ctx, &parsed, parsed.set("--dry-run"))?;
     let briefed = shift::brief(&ctx, &options);
     let briefed = match briefed {
         Ok(briefed) => briefed,
@@ -160,7 +166,7 @@ fn shift_brief(args: &[String]) -> Result<(), Failure> {
                 &format!("brief error: {error}"),
             );
             return Err(match error {
-                Error::Untrusted(_) => Failure::Fault(error),
+                Error::Spent(_) | Error::Untrusted(_) => Failure::Fault(error),
                 error => error.into(),
             });
         }
@@ -327,7 +333,7 @@ fn shift_profile(args: &[String]) -> Result<(), Failure> {
 fn shift_rotation(args: &[String]) -> Result<(), Failure> {
     let parsed = Args::parse(args, "shift rotation", &["--off", "--on"], &[], 0)?;
     let ctx = shift_context()?;
-    let mut rows = shift::rotation(&ctx)?;
+    let mut rows = shift::rotation(&ctx);
     for (flag, on) in [("--off", false), ("--on", true)] {
         for repo in parsed.all(flag) {
             rows.iter_mut()
