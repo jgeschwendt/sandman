@@ -687,6 +687,11 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
         ),
     );
 
+    // rotation.toml's [dream] wins over $SANDMAN_MIND_FABLE.
+    machine.write(
+        ".sandman/shifts/rotation.toml",
+        "[dream]\nfable = \"mind-fable\"\n",
+    );
     let output = machine.run_with(
         &["dream"],
         "",
@@ -694,7 +699,7 @@ fn dream_runs_the_configured_minds_and_commits_on_agreement() {
             ("SANDMAN_CLAUDE_BIN", stub.to_str().expect("stub path")),
             ("SANDMAN_MIND_SONNET", "mind-sonnet"),
             ("SANDMAN_MIND_OPUS", "mind-opus"),
-            ("SANDMAN_MIND_FABLE", "mind-fable"),
+            ("SANDMAN_MIND_FABLE", "env-fable"),
         ],
     );
     assert_eq!(code(&output), 0, "{}", stderr(&output));

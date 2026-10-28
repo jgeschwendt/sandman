@@ -11,7 +11,7 @@ use crate::paths;
 use crate::time::Timestamp;
 use crate::verbs::{breathe, shift};
 
-use super::{Args, EMPTY, Failure, knob, note, pinned_now, usd_env};
+use super::{Args, EMPTY, Failure, knob, knobs, note, pinned_now, usd_env};
 
 /// `breathe <init|sources|file|list|spike|adopt|drop|pass|attach|close|reweight|tick> …`.
 pub(super) fn breathe_verb(args: &[String]) -> Result<(), Failure> {
@@ -45,13 +45,18 @@ pub(super) fn breathe_verb(args: &[String]) -> Result<(), Failure> {
 
 /// Everything the breathe verbs read from the environment, resolved once.
 fn breathe_context() -> Result<breathe::Context, Failure> {
+    let data_root = paths::data_root()?;
     Ok(breathe::Context {
-        data_root: paths::data_root()?,
         now: pinned_now()?,
         prompts: paths::prompts_dir()?,
         shift: env::var("SANDMAN_SHIFT")
             .ok()
             .filter(|shift| !shift.is_empty()),
+        skim_seconds: knobs(&data_root)?
+            .skim_minutes
+            .unwrap_or(breathe::DEFAULT_SKIM_MINUTES)
+            * 60,
+        data_root,
     })
 }
 

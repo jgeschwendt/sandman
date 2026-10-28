@@ -306,8 +306,8 @@ pub fn shift_current(data_root: &Path) -> PathBuf {
     shifts_dir(data_root).join("current.json")
 }
 
-/// `<root>/shifts/rotation.toml` — the owner's rotation: `off = [...]`, the
-/// repos `shift pick` passes over; absent, every repo is on.
+/// `<root>/shifts/rotation.toml` — the owner's knobs (`shift::knobs`): the
+/// night, the off list, rounds, minds, the skim window; absent, all defaults.
 #[must_use]
 pub fn shift_rotation(data_root: &Path) -> PathBuf {
     shifts_dir(data_root).join("rotation.toml")

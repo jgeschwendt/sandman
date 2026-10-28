@@ -5,7 +5,8 @@
 //! operator has to fix in the command line itself, unbuilt verbs included, and
 //! 3 for a fault a runner must tell apart from a refusal — `shift clock`
 //! finding its window file there but unreadable, `breathe pass` without a
-//! template or a valid `sources.toml`, `shift brief` with no trusted trunk.
+//! template or a valid `sources.toml`, `shift brief` with no trusted trunk or
+//! every repo spent, any verb reading an invalid `shifts/rotation.toml`.
 //!
 //! This is the only place that resolves the real roots (`crate::paths`); every
 //! verb below it takes them as arguments.
@@ -47,7 +48,8 @@ const EXIT_ERROR: u8 = 1;
 const EXIT_USAGE: u8 = 2;
 
 /// A fault a runner reports rather than waits on: a clock that cannot read
-/// its window file, a pass that cannot read its template or sources.
+/// its window file, a pass that cannot read its template or sources, a
+/// rotation.toml that will not read.
 const EXIT_FAULT: u8 = 3;
 
 /// Set by the dream pass on the minds it spawns. A memory-blind run recalls
@@ -126,7 +128,8 @@ usage: sandman <verb> [args]
   breathe tick
       The ruach's store under <root>/breath/; only tick reaches past it. init makes breath/, ledger/ and passes/ and seeds sources.toml.
       sources lists the feeds; --due (or --kind) only those a pass reads now —
-      a skim those unread for 55 minutes, a deep pass all. file writes
+      a skim those unread for <root>/shifts/rotation.toml's skim_minutes
+      (default 55), a deep pass all. file writes
       breath/<date>-<slug>.md (state new, or spiked with --spike), counts it
       on its --source and appends a breath event — unless the normalized URL,
       or within the same repo a title with token Jaccard >= 0.6 and the same
@@ -175,6 +178,7 @@ usage: sandman <verb> [args]
       fable) read the archived conversation in parallel and propose memories;
       a memory commits on 2-of-3 agreement. Take spawns this at queue depth
       10; --now is documentation, both forms behave the same. Models move with
+      <root>/shifts/rotation.toml's [dream] sonnet/opus/fable, else
       $SANDMAN_MIND_SONNET / _OPUS / _FABLE, the binary with
       $SANDMAN_CLAUDE_BIN. Each mind's own transcript is kept at
       <root>/.dream/<claude project>/<session-id>/<mind session-id>.jsonl.
@@ -310,7 +314,9 @@ usage: sandman <verb> [args]
       -- stele check), open threads and breaths, none of them for a repo whose
       last shift began under 6 h ago and lasted under 15 min (`skipped
       promotion: <repo> (cooled: last shift <m>m)` on stderr); it skips the open shift's repo, $SANDMAN_SHIFT_SKIP (colon-separated slugs),
-      a repo the owner switched off (<root>/shifts/rotation.toml's off = [...];
+      a repo picked rounds times this night (`skipped: <repo> (rounds: <n>
+      this night)`; every repo spent exits 1 and brief 3), a repo the owner
+      switched off (<root>/shifts/rotation.toml's off = [...];
       `skipped: <repo> (off)` on stderr), one he froze (`freeze`, `frozen` or
       `on ice` in its targets line,
       `on ice` in his answer on a proposal: thread; `skipped: <repo> (frozen)` on
@@ -320,9 +326,13 @@ usage: sandman <verb> [args]
       shift was briefed on. rotation prints every trunk · on/off · last
       shifted · frozen, and each off repo whose trunk is not found as
       <repo> · off · not found, after --off/--on (repeatable; a repo in
-      neither exits 2) rewrite the off list. Shifts run by night — $SANDMAN_SHIFT_NIGHT, New
-      York hours HH-HH (default 21-07) — and a night carries the theme of the
-      day it began on. clock reads the window
+      neither exits 2) rewrite the off line, keeping the file's other keys and
+      comments. rotation.toml is the owner's knob file, read on every run:
+      night, off, rounds, skim_minutes, [mind] (a lowercase theme or default)
+      and [dream] (sonnet, opus, fable); an unknown key is journaled and
+      ignored, a bad value exits 3 naming it. Shifts run by night —
+      rotation.toml's night, else $SANDMAN_SHIFT_NIGHT, New York hours HH-HH
+      (default 21-07) — and a night carries the theme of the day it began on. clock reads the window
       file ($CLAUDE_WINDOW_FILE, else $XDG_STATE_HOME/claude/window.json, else
       ~/.local/state/claude/window.json); --check exits 1 by day (`day: the
       night opens at <instant>`), under $SANDMAN_SHIFT_MIN_WINDOW_MIN (default
@@ -365,8 +375,10 @@ usage: sandman <verb> [args]
       when unknown), never past the night's end.
       profile prints the Claude Code settings a shift or breath session runs
       under (profiles/session.json, compiled in; one profile for both kinds).
-      $SANDMAN_NOW (ISO-8601) fixes the instant; $SANDMAN_SHIFT_MIND (default
-      opus) and $SANDMAN_SHIFT_BUDGET_USD (default 15) fill the brief.
+      $SANDMAN_NOW (ISO-8601) fixes the instant; the mind is --mind, else
+      rotation.toml's [mind] for the theme or default, else
+      $SANDMAN_SHIFT_MIND (default opus); $SANDMAN_SHIFT_BUDGET_USD (default
+      15) fills the brief's budget.
       On a Redesign night pick puts approved proposals first.
 
   trail append --kind K [--shift S] [--repo R] [--branch B] [--sha SHA]
@@ -526,11 +538,12 @@ fn shift_context() -> Result<verbs::shift::Context, Failure> {
             },
         )
     };
-    let home = paths::home()?;
+    let (data_root, home) = (paths::data_root()?, paths::home()?);
     Ok(verbs::shift::Context {
         claude_json: paths::claude_json()?,
-        data_root: paths::data_root()?,
         docket: paths::docket_dir(&home),
+        knobs: knobs(&data_root)?,
+        data_root,
         now,
         min_window_seconds: knob(
             "SANDMAN_SHIFT_MIN_WINDOW_MIN",
@@ -550,6 +563,11 @@ fn shift_context() -> Result<verbs::shift::Context, Failure> {
         window: paths::claude_window_file()?,
         home,
     })
+}
+
+/// `shifts/rotation.toml`, a file that will not read a runner's fault.
+fn knobs(data_root: &Path) -> Result<verbs::shift::Knobs, Failure> {
+    verbs::shift::knobs(data_root).map_err(Failure::Fault)
 }
 
 /// `$SANDMAN_SHIFT_NIGHT`, else 21–07.

@@ -45,9 +45,10 @@ pub const DEFAULT_DEAD_COST_USD: f64 = 2.0;
 pub const JACCARD_SAME: f64 = 0.6;
 /// The problems slot's ceiling.
 const PROBLEMS_CHARS: usize = 6_000;
-/// A skim reads a source again once its `last_read` is this old: an hour,
-/// less the launchd tick's jitter (passes start anywhere in :17–:18).
-const SKIM_SECONDS: i64 = 3_300;
+/// `skim_minutes`' default: a skim reads a source again once its `last_read`
+/// is this old — an hour, less the launchd tick's jitter (passes start
+/// anywhere in :17–:18).
+pub const DEFAULT_SKIM_MINUTES: i64 = 55;
 /// `silent_since` older than this lowers a source.
 const SILENCE_SECONDS: i64 = 30 * 86_400;
 /// What one breath name's slug is cut to.
@@ -75,6 +76,9 @@ pub struct Context {
     pub prompts: PathBuf,
     /// `$SANDMAN_SHIFT` — the shift a transition is made in, if any.
     pub shift: Option<String>,
+    /// rotation.toml's `skim_minutes` in seconds: how old a source's
+    /// `last_read` must be before a skim reads it again.
+    pub skim_seconds: i64,
 }
 
 // ─── the sources ─────────────────────────────────────────────────────────
@@ -122,13 +126,13 @@ const SOURCE_KEYS: [&str; 10] = [
 
 impl Source {
     /// Whether a pass of `kind` reads it at `now`: a deep pass reads every
-    /// source, a skim those unread for 55 minutes.
+    /// source, a skim those unread for `skim_seconds`.
     #[must_use]
-    pub fn due(&self, kind: PassKind, now: Timestamp) -> bool {
+    pub fn due(&self, kind: PassKind, now: Timestamp, skim_seconds: i64) -> bool {
         kind == PassKind::Deep
             || self
                 .last_read
-                .is_none_or(|at| now.unix_seconds() - at.unix_seconds() >= SKIM_SECONDS)
+                .is_none_or(|at| now.unix_seconds() - at.unix_seconds() >= skim_seconds)
     }
 
     /// The `sources --json` object.
@@ -408,7 +412,7 @@ pub fn sources(ctx: &Context, due: Option<PassKind>) -> Result<Vec<Source>> {
     Ok(Sources::read(&ctx.data_root)?
         .sources
         .into_iter()
-        .filter(|source| due.is_none_or(|kind| source.due(kind, ctx.now)))
+        .filter(|source| due.is_none_or(|kind| source.due(kind, ctx.now, ctx.skim_seconds)))
         .collect())
 }
 

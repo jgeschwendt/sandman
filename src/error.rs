@@ -86,6 +86,8 @@ pub enum Error {
         /// The one line the operator gets.
         message: String,
     },
+    /// Every rotation repo has had its `rounds` this night.
+    Spent(String),
     /// `replaces` named a file that is not in the bank.
     ReplacesMissing {
         /// The path the replaced file was expected at.
@@ -159,7 +161,9 @@ impl fmt::Display for Error {
             }
             Self::NotFound { what, value } => write!(f, "no {what} for {value}"),
             Self::Parse { path, source } => write!(f, "{}: {source}", path.display()),
-            Self::Git(message) | Self::Refused { message } => write!(f, "{message}"),
+            Self::Git(message) | Self::Refused { message } | Self::Spent(message) => {
+                write!(f, "{message}")
+            }
             Self::ReplacesMissing { path } => {
                 write!(f, "replaces target not in bank: {}", path.display())
             }
@@ -238,6 +242,7 @@ mod tests {
                 Error::ReplacesMissing { path: path() },
                 "replaces target not in bank: /b/x.md",
             ),
+            (Error::Spent("spent".to_owned()), "spent"),
             (
                 Error::TooManyCollisions {
                     filename: "x.md".to_owned(),

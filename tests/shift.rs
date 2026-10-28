@@ -274,6 +274,131 @@ fn clock_check_gates_on_the_night_the_window_and_usage() {
     }
     assert_eq!(check("2026-10-09T15:00:00Z", &nine_to_five).0, 0);
     assert_eq!(check(now, &[("SANDMAN_SHIFT_NIGHT", "21-21")]).0, 2);
+    // rotation.toml's night wins over $SANDMAN_SHIFT_NIGHT.
+    machine.write(".sandman/shifts/rotation.toml", "night = \"09-17\"\n");
+    let (code_, _, err) = check("2026-10-09T23:00:00Z", &[("SANDMAN_SHIFT_NIGHT", "21-07")]);
+    assert_eq!(code_, 1, "{err}");
+    assert!(
+        err.contains("day: the night opens at 2026-10-10T13:00:00Z"),
+        "{err}"
+    );
+}
+
+#[test]
+fn rounds_cap_a_repo_per_night_and_a_spent_rotation_idles() {
+    let machine = Machine::prompted("rounds");
+    for slug in ["alpha", "beta", "gamma"] {
+        machine.repo(&format!("jgeschwendt/{slug}"));
+    }
+    // Friday 23:00 in New York: the night opened at 01:00Z, so gamma's 23:00Z
+    // shift was the evening before it and counts for nothing.
+    let now = "2026-10-17T03:00:00Z";
+    for (shift, repo, started) in [
+        (
+            "s-20261016T2300Z",
+            "jgeschwendt/gamma",
+            "2026-10-16T23:00:00Z",
+        ),
+        (
+            "s-20261017T0130Z",
+            "jgeschwendt/alpha",
+            "2026-10-17T01:30:00Z",
+        ),
+        (
+            "s-20261017T0200Z",
+            "jgeschwendt/beta",
+            "2026-10-17T02:00:00Z",
+        ),
+        (
+            "s-20261017T0230Z",
+            "jgeschwendt/alpha",
+            "2026-10-17T02:30:00Z",
+        ),
+    ] {
+        machine.meta(shift, repo, started);
+    }
+    let rotation = ".sandman/shifts/rotation.toml";
+    let pick = |rounds: &str| {
+        machine.write(rotation, &format!("rounds = {rounds}\n"));
+        let output = machine.run(now, &["shift", "pick"], &[]);
+        (code(&output), stdout(&output), stderr(&output))
+    };
+    assert_eq!(
+        pick("1"),
+        (
+            0,
+            "jgeschwendt/gamma\n".to_owned(),
+            "skipped: jgeschwendt/alpha (rounds: 2 this night)\nskipped: jgeschwendt/beta (rounds: 1 this night)\n".to_owned()
+        )
+    );
+    assert_eq!(
+        pick("2"),
+        (
+            0,
+            "jgeschwendt/gamma\n".to_owned(),
+            "skipped: jgeschwendt/alpha (rounds: 2 this night)\n".to_owned()
+        )
+    );
+    // Every repo spent: pick says so, and brief is a runner's fault — it idles.
+    machine.meta(
+        "s-20261017T0245Z",
+        "jgeschwendt/gamma",
+        "2026-10-17T02:45:00Z",
+    );
+    let (status, _, err) = pick("1");
+    assert_eq!(status, 1, "{err}");
+    assert!(
+        err.ends_with("sandman: every rotation repo is spent: rounds = 1 this night; the next opens at 2026-10-18T01:00:00Z\n"),
+        "{err}"
+    );
+    assert_eq!(code(&machine.run(now, &["shift", "brief"], &[])), 3);
+}
+
+#[test]
+fn rotation_toml_names_the_shift_mind_by_theme() {
+    let machine = Machine::prompted("mind");
+    machine.repo("jgeschwendt/alpha");
+    // Friday's theme is Ship.
+    for (file, args, env, mind) in [
+        ("", &[][..], &[][..], "opus"),
+        ("", &[], &[("SANDMAN_SHIFT_MIND", "fable")][..], "fable"),
+        (
+            "[mind]\nhunt = \"sonnet\"\n",
+            &[],
+            &[("SANDMAN_SHIFT_MIND", "fable")],
+            "fable",
+        ),
+        (
+            "[mind]\ndefault = \"opus\"\nhunt = \"sonnet\"\n",
+            &[],
+            &[("SANDMAN_SHIFT_MIND", "fable")],
+            "opus",
+        ),
+        (
+            "[mind]\ndefault = \"opus\"\nship = \"sonnet\"\n",
+            &[],
+            &[("SANDMAN_SHIFT_MIND", "fable")],
+            "sonnet",
+        ),
+        (
+            "[mind]\nship = \"sonnet\"\n",
+            &["--mind", "haiku"],
+            &[],
+            "haiku",
+        ),
+    ] {
+        machine.write(".sandman/shifts/rotation.toml", file);
+        let output = machine.run(
+            FRIDAY,
+            &[&["shift", "brief", "--dry-run"][..], args].concat(),
+            env,
+        );
+        assert!(
+            stdout(&output).contains(&format!("Orchestrator model `{mind}`")),
+            "{file} {args:?} {env:?}: {}",
+            stderr(&output)
+        );
+    }
 }
 
 #[test]
@@ -2295,17 +2420,55 @@ fn the_owner_switches_repos_off_the_rotation_and_pick_passes_them_over() {
     );
     assert_eq!(code(&output), 2, "{}", stderr(&output));
     assert_eq!(machine.read(file), "off = [\"jgeschwendt/gamma\"]\n");
-    // By hand: an empty file leaves all on; any other shape fails the read.
-    for (text, status) in [
-        ("", 0),
-        ("off = 1\n", 1),
-        ("on = []\n", 1),
-        ("off = [\n", 1),
+    // By hand: an empty file leaves all on, an unknown key or table is journaled
+    // and ignored, and a value its key refuses is a runner's fault naming the key.
+    for (text, status, said) in [
+        ("", 0, ""),
+        (
+            "on = []\n[mind]\ntuesday = \"x\"\n[dream]\nhaiku = \"x\"\n[x]\n",
+            0,
+            "",
+        ),
+        ("off = 1\n", 3, "off wants"),
+        ("off = [\n", 3, "line 1"),
+        ("night = \"21-21\"\n", 3, "night wants"),
+        ("rounds = 0\n", 3, "rounds wants"),
+        ("skim_minutes = 1441\n", 3, "skim_minutes wants"),
+        ("[mind]\nhunt = 1\n", 3, "mind.hunt wants"),
+        ("[dream]\nfable = \" \"\n", 3, "dream.fable wants"),
     ] {
         machine.write(file, text);
         let output = machine.run(FRIDAY, &["shift", "pick"], &[]);
         assert_eq!(code(&output), status, "{text}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains(said),
+            "{text}: {}",
+            stderr(&output)
+        );
     }
+    let journal = machine.journal("shift");
+    for key in ["`on`", "`mind.tuesday`", "`dream.haiku`", "`[x]`"] {
+        assert!(
+            journal.contains(&format!("unknown key {key} ignored")),
+            "{journal}"
+        );
+    }
+    // A rewrite touches the off line alone, every other key and comment kept;
+    // a file without one gains it on top.
+    let mind = "\n[mind]\ndefault = \"opus\"\n";
+    let kept = format!("# tonight\nnight = \"21-01\" # late\n{mind}");
+    machine.write(file, &kept);
+    machine.ok(FRIDAY, &off[..4]);
+    assert_eq!(
+        machine.read(file),
+        format!("off = [\"jgeschwendt/gamma\"]\n{kept}")
+    );
+    machine.write(file, &format!("night = \"21-01\"\noff = []\n{mind}"));
+    machine.ok(FRIDAY, &[&off[..3], &["jgeschwendt/beta"]].concat());
+    assert_eq!(
+        machine.read(file),
+        format!("night = \"21-01\"\noff = [\"jgeschwendt/beta\"]\n{mind}")
+    );
     fs::remove_file(machine.home.join(file)).expect("rm");
     // A shifts directory that refuses the write, then a file that will not read.
     let shifts = machine.root().join("shifts");
@@ -2315,7 +2478,7 @@ fn the_owner_switches_repos_off_the_rotation_and_pick_passes_them_over() {
     assert_eq!(code(&machine.run(FRIDAY, &off[..4], &[])), 1);
     mode(0o755);
     fs::create_dir(machine.home.join(file)).expect("a directory in its place");
-    assert_eq!(code(&machine.run(FRIDAY, &["shift", "rotation"], &[])), 1);
+    assert_eq!(code(&machine.run(FRIDAY, &["shift", "rotation"], &[])), 3);
 }
 
 #[test]
@@ -2875,4 +3038,48 @@ fn the_close_block_abandons_a_session_that_never_started() {
         assert_eq!(code(&output), 0, "{}", stderr(&output));
         assert_eq!(machine.read("calls"), calls);
     }
+}
+
+/// The routine's open block, cut from `docs/routines/shift.md`: a spent rotation
+/// idles, any other brief fault fails the tick, and a session starts on the
+/// mind the brief recorded in `meta.json`.
+#[test]
+fn the_open_block_idles_when_spent_and_starts_the_briefed_mind() {
+    let doc = include_str!("../docs/routines/shift.md");
+    let at = doc.find("# open:").expect("the open block");
+    let open = &doc[at..at + doc[at..].find("```").expect("the fence")];
+    let machine = Machine::new("open");
+    machine.write(".sandman/shifts/s-9/meta.json", r#"{"mind":"sonnet"}"#);
+    machine.write(".sandman/shifts/s-9/brief.md", "the brief");
+    machine.script(
+        ".local/bin/dispatch",
+        "cat >> \"$HOME/requests\"\necho '{\"id\":\"b1\",\"session_id\":\"u1\"}'\n",
+    );
+    for (brief, status) in [
+        (
+            "echo 'sandman: every rotation repo is spent: rounds = 1' >&2; exit 3",
+            0,
+        ),
+        ("echo 'sandman: no trusted target' >&2; exit 3", 3),
+        ("echo s-9", 0),
+    ] {
+        machine.script(
+            ".local/bin/sandman",
+            &format!(
+                "case \"$2\" in brief) {brief} ;; pick) echo /w ;; profile) echo '{{}}' ;; esac\n"
+            ),
+        );
+        let output = std::process::Command::new("/bin/bash")
+            .args(["-e", "-c", open])
+            .env_clear()
+            .env("HOME", &machine.home)
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .output()
+            .expect("bash");
+        assert_eq!(code(&output), status, "{brief}: {}", stderr(&output));
+    }
+    // one start only: neither fault reached dispatch
+    let requests = machine.read("requests");
+    assert_eq!(requests.lines().count(), 1, "{requests}");
+    assert!(requests.contains(r#""model": "sonnet""#), "{requests}");
 }

@@ -31,6 +31,7 @@ use crate::grove;
 use crate::journal;
 use crate::json::{self, Value};
 use crate::lock::CommitLock;
+use crate::mind::Tier;
 use crate::paths;
 use crate::slug::truncate_chars;
 use crate::time::{Timestamp, civil_from_days, days_from_civil};
@@ -230,12 +231,14 @@ pub struct Context {
     pub docket: PathBuf,
     /// `$HOME`.
     pub home: PathBuf,
+    /// `shifts/rotation.toml`, read when the verb began.
+    pub knobs: Knobs,
     /// The instant the verb acts at.
     pub now: Timestamp,
     /// `$SANDMAN_SHIFT_MIN_WINDOW_MIN` in seconds: the least window
     /// `clock --check` lets a shift open into.
     pub min_window_seconds: i64,
-    /// `$SANDMAN_SHIFT_NIGHT`: the hours the machine works.
+    /// `$SANDMAN_SHIFT_NIGHT`, else 21–07: the night when `knobs` names none.
     pub night: Night,
     /// The grove owners whose repos rotate; the extras never do.
     pub owners: Vec<String>,
@@ -247,6 +250,14 @@ pub struct Context {
     pub skip: Vec<String>,
     /// The five-hour window file.
     pub window: PathBuf,
+}
+
+impl Context {
+    /// The hours the machine works: `knobs`' night, else `night`.
+    #[must_use]
+    pub fn night(&self) -> Night {
+        self.knobs.night.unwrap_or(self.night)
+    }
 }
 
 // ─── the calendar ────────────────────────────────────────────────────────
@@ -357,8 +368,20 @@ impl Night {
     /// Sunday's — the plain local date otherwise.
     #[must_use]
     pub fn anchor(self, at: Timestamp) -> Local {
+        Local::of_days(self.anchor_days(at))
+    }
+
+    /// [`Self::anchor`] in days since the epoch.
+    fn anchor_days(self, at: Timestamp) -> i64 {
         let back = if self.start > self.end { self.end } else { 0 };
-        Local::of_days((local_seconds(at) - back * 3600).div_euclid(86_400))
+        (local_seconds(at) - back * 3600).div_euclid(86_400)
+    }
+
+    /// When the night `at` is in opened: `start` on its anchor day — by day,
+    /// the night still to come.
+    #[must_use]
+    pub fn opened(self, at: Timestamp) -> Timestamp {
+        utc(self.anchor_days(at) * 86_400 + self.start * 3600)
     }
 
     /// When the night `at` is in ends — the next one's end, by day.
@@ -393,6 +416,11 @@ fn next(at: Timestamp, hour: i64) -> Timestamp {
     if wall <= local {
         wall += 86_400;
     }
+    utc(wall)
+}
+
+/// The instant New York's clock reads `wall`, in local seconds since the epoch.
+fn utc(wall: i64) -> Timestamp {
     // read as standard time first; the offset there says which it is
     let offset = new_york_offset_hours(Timestamp::from_unix_seconds(wall + 5 * 3600));
     Timestamp::from_unix_seconds(wall - offset * 3600)
@@ -616,7 +644,7 @@ impl Clock {
 #[must_use]
 pub fn clock(ctx: &Context) -> Clock {
     Clock {
-        night: ctx.night,
+        night: ctx.night(),
         now: ctx.now,
         window: Window::load(&ctx.window, ctx.now).ok().flatten(),
     }
@@ -627,7 +655,7 @@ pub fn clock(ctx: &Context) -> Clock {
 /// fault from a wait.
 pub fn read_clock(ctx: &Context) -> Result<Clock> {
     Ok(Clock {
-        night: ctx.night,
+        night: ctx.night(),
         now: ctx.now,
         window: Window::load(&ctx.window, ctx.now)?,
     })
@@ -724,7 +752,7 @@ fn last_shifted(ctx: &Context) -> BTreeMap<String, Timestamp> {
     let mut last: BTreeMap<String, Timestamp> = BTreeMap::new();
     for meta in metas(&ctx.data_root) {
         if let (Some(repo), Some(started)) = (meta.repo, meta.started)
-            && !ctx.night.sabbath(started)
+            && !ctx.night().sabbath(started)
         {
             let entry = last.entry(repo).or_insert(started);
             *entry = (*entry).max(started);
@@ -1059,27 +1087,127 @@ fn frozen(ctx: &Context) -> impl Fn(&str) -> bool {
     }
 }
 
-/// The repos `shifts/rotation.toml` switches off; none when it is absent.
-fn off(data_root: &Path) -> Result<Vec<String>> {
+/// The owner's knobs, `shifts/rotation.toml` — every key optional, a missing
+/// file all defaults.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Knobs {
+    /// `[dream]`: the model a dream mind runs, by tier.
+    pub dream: BTreeMap<String, String>,
+    /// `[mind]`: the shift mind, by lowercase theme, `default` for the rest.
+    pub mind: BTreeMap<String, String>,
+    /// `night`: the hours the machine works, over `$SANDMAN_SHIFT_NIGHT`.
+    pub night: Option<Night>,
+    /// `off`: the repos `pick` passes over.
+    pub off: Vec<String>,
+    /// `rounds`: how often one repo may be picked in a night.
+    pub rounds: Option<usize>,
+    /// `skim_minutes`: how old a source's `last_read` must be for a skim.
+    pub skim_minutes: Option<i64>,
+}
+
+impl Knobs {
+    /// The shift mind for `theme`: its `[mind]` key, else `default`.
+    #[must_use]
+    pub fn mind(&self, theme: &str) -> Option<String> {
+        self.mind
+            .get(&theme.to_lowercase())
+            .or_else(|| self.mind.get("default"))
+            .cloned()
+    }
+}
+
+/// Read `shifts/rotation.toml`: an unknown key or table is journaled and
+/// ignored, a value its key refuses fails naming the key.
+pub fn knobs(data_root: &Path) -> Result<Knobs> {
     let path = paths::shift_rotation(data_root);
+    // a root that is no directory is the verb's to fail, not the file's
     let text = match fs::read_to_string(&path) {
-        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source)
+            if matches!(
+                source.kind(),
+                ErrorKind::NotFound | ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(Knobs::default());
+        }
         read => read.map_err(|source| Error::io(&path, source))?,
     };
-    toml::parse(&text)
-        .ok()
-        .and_then(|document| match &document.root[..] {
-            [] => Some(Vec::new()),
-            [(key, value)] if key == "off" => value.as_strings().map(<[String]>::to_vec),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            let file = path.display();
-            Error::invalid(
-                "rotation",
-                format!("{file}: want one key, off = [\"owner/repo\", …]"),
-            )
-        })
+    let file = path.display();
+    let bad = |what: String| Error::invalid("rotation", format!("{file}: {what}"));
+    let want = |key: &str, want: &str| bad(format!("{key} wants {want}"));
+    let ignore = |key: &str| {
+        journal::note(
+            data_root,
+            "shift",
+            &format!("{file}: unknown key `{key}` ignored"),
+        );
+    };
+    let document = toml::parse(&text).map_err(|error| bad(error.to_string()))?;
+    let mut knobs = Knobs::default();
+    for (key, value) in &document.root {
+        match key.as_str() {
+            "night" => {
+                knobs.night =
+                    Some(value.as_str().and_then(Night::parse).ok_or_else(|| {
+                        want(key, "\"HH-HH\", two different New York hours 0–23")
+                    })?);
+            }
+            "off" => {
+                knobs.off = value
+                    .as_strings()
+                    .ok_or_else(|| want(key, "[\"owner/repo\", …]"))?
+                    .to_vec();
+            }
+            "rounds" => {
+                knobs.rounds = Some(
+                    value
+                        .as_i64()
+                        .and_then(|rounds| usize::try_from(rounds).ok())
+                        .filter(|rounds| *rounds > 0)
+                        .ok_or_else(|| want(key, "a count of 1 or more"))?,
+                );
+            }
+            "skim_minutes" => {
+                knobs.skim_minutes = Some(
+                    value
+                        .as_i64()
+                        .filter(|minutes| (1..=1440).contains(minutes))
+                        .ok_or_else(|| want(key, "minutes 1–1440"))?,
+                );
+            }
+            _ => ignore(key),
+        }
+    }
+    for table in &document.tables {
+        let (keys, models): (Vec<String>, _) = match table.name.as_str() {
+            "dream" => (
+                Tier::ALL.map(|tier| tier.as_str().to_owned()).to_vec(),
+                &mut knobs.dream,
+            ),
+            "mind" => (
+                WEEK.iter()
+                    .map(|day| day.theme.to_lowercase())
+                    .chain(["default".to_owned()])
+                    .collect(),
+                &mut knobs.mind,
+            ),
+            name => {
+                ignore(&format!("[{name}]"));
+                continue;
+            }
+        };
+        for (key, value) in &table.entries {
+            let name = format!("{}.{key}", table.name);
+            if !keys.contains(key) {
+                ignore(&name);
+            } else if let Some(model) = value.as_str().filter(|model| !model.trim().is_empty()) {
+                models.insert(key.clone(), model.to_owned());
+            } else {
+                return Err(want(&name, "a model name"));
+            }
+        }
+    }
+    Ok(knobs)
 }
 
 /// One repo of the rotation, as the owner sees it.
@@ -1098,11 +1226,12 @@ pub struct Rotating {
 }
 
 /// Every rotation trunk and every repo the off list names, by name.
-pub fn rotation(ctx: &Context) -> Result<Vec<Rotating>> {
-    let (off, last, frozen) = (off(&ctx.data_root)?, last_shifted(ctx), frozen(ctx));
+#[must_use]
+pub fn rotation(ctx: &Context) -> Vec<Rotating> {
+    let (off, last, frozen) = (&ctx.knobs.off, last_shifted(ctx), frozen(ctx));
     let found: BTreeSet<String> = trunks(ctx).into_iter().map(|(label, _)| label).collect();
-    let labels: BTreeSet<&String> = found.iter().chain(&off).collect();
-    Ok(labels
+    let labels: BTreeSet<&String> = found.iter().chain(off).collect();
+    labels
         .into_iter()
         .map(|label| Rotating {
             found: found.contains(label),
@@ -1111,11 +1240,11 @@ pub fn rotation(ctx: &Context) -> Result<Vec<Rotating>> {
             on: !off.contains(label),
             label: label.clone(),
         })
-        .collect())
+        .collect()
 }
 
-/// Write `shifts/rotation.toml` with `off` sorted and deduped, and hand back
-/// its line.
+/// Rewrite `shifts/rotation.toml`'s `off` line, sorted and deduped, leaving
+/// every other line as it was, and hand back the line.
 pub fn set_off(ctx: &Context, off: impl IntoIterator<Item = String>) -> Result<String> {
     let off: BTreeSet<String> = off.into_iter().collect();
     let _lock = CommitLock::acquire(&ctx.data_root)?;
@@ -1127,11 +1256,28 @@ pub fn set_off(ctx: &Context, off: impl IntoIterator<Item = String>) -> Result<S
         tables: Vec::new(),
     }
     .render();
+    let line = line.trim_end();
     let path = paths::shift_rotation(&ctx.data_root);
+    let text = match fs::read_to_string(&path) {
+        Err(source) if source.kind() == ErrorKind::NotFound => String::new(),
+        read => read.map_err(|source| Error::io(&path, source))?,
+    };
+    let mut lines: Vec<&str> = text.lines().collect();
+    let root = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+    match lines[..root].iter().position(|line| {
+        line.split_once('=')
+            .is_some_and(|(key, _)| key.trim() == "off")
+    }) {
+        Some(at) => lines[at] = line,
+        None => lines.insert(0, line),
+    }
     fs::create_dir_all(paths::shifts_dir(&ctx.data_root))
         .map_err(|source| Error::io(&path, source))?;
-    atomic::write(&path, &line)?;
-    Ok(line.trim_end().to_owned())
+    atomic::write(&path, &format!("{}\n", lines.join("\n")))?;
+    Ok(line.to_owned())
 }
 
 /// The rotation's choice: the least recently shifted trunk, ties broken by the
@@ -1140,13 +1286,14 @@ pub fn set_off(ctx: &Context, off: impl IntoIterator<Item = String>) -> Result<S
 /// with an approved `proposal:` thread waiting on the agent come before the
 /// rest. A cooled repo ([`COOL_DOWN_SECONDS`]) gets neither that promotion nor
 /// the signals, and is named on stderr. Repos the open
-/// shift names, `skip`, repos the owner switched off (`shifts/rotation.toml`),
+/// shift names, `skip`, repos already picked `rounds` times this night (all
+/// of them spent is [`Error::Spent`]), repos the owner switched off (`off`),
 /// repos he froze (the week's targets line says
 /// `freeze`, `frozen` or `on ice`, or his answer on a `proposal:` thread says
 /// `on ice` — each named on stderr) and untrusted trunks are passed over; when only untrusted ones remain, that is the error. On the
 /// Sabbath the choice is [`SABBATH_REPO`]'s trunk, rotation aside.
 pub fn pick(ctx: &Context) -> Result<Option<Target>> {
-    if ctx.night.sabbath(ctx.now) {
+    if ctx.night().sabbath(ctx.now) {
         let (label, path) = trunks(ctx)
             .into_iter()
             .find(|(label, _)| label == SABBATH_REPO)
@@ -1172,16 +1319,31 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
         .collect();
     let last = last_shifted(ctx);
     let trust = trusted(ctx);
-    let weighted = ctx.night.anchor(ctx.now).weekday == 1;
-    let (off, frozen, cooled) = (off(&ctx.data_root)?, frozen(ctx), cooled(ctx));
+    let weighted = ctx.night().anchor(ctx.now).weekday == 1;
+    let (off, frozen, cooled) = (&ctx.knobs.off, frozen(ctx), cooled(ctx));
+    // this night's picks per repo, kept only once they reach `rounds`
+    let opened = ctx.night().opened(ctx.now);
+    let mut rounds: BTreeMap<String, usize> = BTreeMap::new();
+    for meta in metas(&ctx.data_root) {
+        if let (Some(repo), Some(started)) = (meta.repo, meta.started)
+            && started >= opened
+        {
+            *rounds.entry(repo).or_default() += 1;
+        }
+    }
+    rounds.retain(|_, picked| ctx.knobs.rounds.is_some_and(|limit| *picked >= limit));
+    let mut spent = false;
     let (mut candidates, untrusted): (Vec<_>, Vec<_>) = trunks(ctx)
         .into_iter()
         .filter(|(label, _)| !busy.contains(label) && !ctx.skip.contains(label))
         .filter(|(label, _)| {
             let why = if off.contains(label) {
-                "off"
+                "off".to_owned()
             } else if frozen(label) {
-                "frozen"
+                "frozen".to_owned()
+            } else if let Some(picked) = rounds.get(label) {
+                spent = true;
+                format!("rounds: {picked} this night")
             } else {
                 return true;
             };
@@ -1207,7 +1369,15 @@ pub fn pick(ctx: &Context) -> Result<Option<Target>> {
     }
     candidates.sort();
     let Some((Reverse(approved), front)) = candidates.first().map(|(rank, ..)| *rank) else {
-        return Ok(None);
+        return if spent {
+            Err(Error::Spent(format!(
+                "every rotation repo is spent: rounds = {} this night; the next opens at {}",
+                ctx.knobs.rounds.unwrap_or_default(),
+                ctx.night().opens(ctx.now).iso8601()
+            )))
+        } else {
+            Ok(None)
+        };
     };
     // Signals cost a process per repo, so only the front's tie pays for them.
     let mut tied: Vec<(Signals, String, PathBuf)> = candidates
@@ -1839,7 +2009,7 @@ fn trim_slot(
 /// the Sabbath, `shift.md` otherwise; unless `dry_run`, write the shift's
 /// files, take `current.json` and append `shift.start`.
 pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
-    let local = ctx.night.anchor(ctx.now);
+    let local = ctx.night().anchor(ctx.now);
     let rest = local.weekday == 6;
     let template_path = ctx
         .prompts
@@ -1862,7 +2032,7 @@ pub fn brief(ctx: &Context, options: &BriefOptions) -> Result<Briefed> {
             let rested = meta.value.get("theme").and_then(Value::as_str) == Some("Rest")
                 && meta
                     .started
-                    .is_some_and(|at| ctx.night.anchor(at).ymd() == today);
+                    .is_some_and(|at| ctx.night().anchor(at).ymd() == today);
             Some((meta.shift, meta.ended.filter(|_| rested)?))
         }) {
             return Err(Error::refused(format!(

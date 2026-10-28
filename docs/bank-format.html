@@ -449,7 +449,7 @@ makes carries that id in its <code class="code">Shift:</code> trailer.</p>
 <pre class="snippet"><code>shifts/
   current.json            # the open shift; absent between shifts
   PAUSE                   # the owner's off switch — the runner starts nothing while it exists
-  rotation.toml           # the owner's rotation: the repos `pick` leaves off
+  rotation.toml           # the owner's knobs: the night, the off list, rounds, minds, the skim window
   s-20261016T1600Z/
     brief.md              # the composed prompt the session started from
     handoff.md            # what the shift left the next one
@@ -510,8 +510,8 @@ has reaped the session. <code class="code">shift land</code> adds <code class="c
 <code class="code">pr</code> (§ Landing). The rotation reads <code class="code">repo</code> and <code class="code">started</code>
 from every <code class="code">meta.json</code> to know which repo has rested longest.</p>
 <h3 class="h3" id="shifts-night">The night</h3>
-<p class="docs-note">The owner works by day; the machine works nights. A night is <code class="code">$SANDMAN_SHIFT_NIGHT</code>
-(<code class="code">HH-HH</code>, New York hours 0–23, two different ones; default <code class="code">21-07</code>): from the first
+<p class="docs-note">The owner works by day; the machine works nights. A night is <code class="code">shifts/rotation.toml</code>'s
+<code class="code">night</code>, else <code class="code">$SANDMAN_SHIFT_NIGHT</code> (<code class="code">HH-HH</code>, New York hours 0–23, two different ones; default <code class="code">21-07</code>): from the first
 hour until the second, across midnight when the first is the later. Both shifts of a
 night carry the theme of the day it began on — its <strong>anchor</strong>, the New York date
 <code class="code">end</code> hours before the instant when the night wraps midnight (Monday 02:00 and Sunday
@@ -545,7 +545,11 @@ shift (<code class="code">meta.json</code>) started under 6 h ago and lasted und
 <code class="code">ended</code>: it gets neither that promotion nor the tie-break signals and competes on recency
 alone, named on stderr, <code class="code">skipped promotion: &lt;repo&gt; (cooled: last shift &lt;m&gt;m)</code> — a signal its
 shifts cannot clear must not win it the night over and over. The open shift's repo and
-<code class="code">$SANDMAN_SHIFT_SKIP</code> (colon-separated slugs) are passed over, and so is a repo the owner
+<code class="code">$SANDMAN_SHIFT_SKIP</code> (colon-separated slugs) are passed over, and so is a repo already
+picked <code class="code">rounds</code> times in this night — a shift whose <code class="code">started</code> is at or after the night opened,
+named on stderr, <code class="code">skipped: &lt;repo&gt; (rounds: &lt;n&gt; this night)</code>; with every rotation repo spent
+<code class="code">pick</code> exits 1, <code class="code">every rotation repo is spent: rounds = &lt;n&gt; this night; the next opens at
+&lt;instant&gt;</code>, and <code class="code">brief</code> exits 3, so the runner idles until the next night — and so is a repo the owner
 switched off — <code class="code">shifts/rotation.toml</code>, versioned content, flat TOML (below) — each named once on stderr, <code class="code">skipped: &lt;repo&gt; (off)</code>, before a repo he
 froze: its section of the week's targets file (§ The brief and its slots) says <code class="code">freeze</code>,
 <code class="code">frozen</code> or <code class="code">on ice</code>, or his answer on any <code class="code">proposal:&lt;repo&gt;:*</code> thread — open or resolved,
@@ -553,12 +557,24 @@ text under a <code class="code">## user</code> heading — says <code class="cod
 (and <code class="code">brief</code>'s) stderr, <code class="code">skipped: &lt;repo&gt; (frozen)</code>. A shift started in Saturday's
 night never counts as a repo's last: the Sabbath works sandman whatever the rotation
 says, and must not stand in for its turn.</p>
-<p class="docs-note" id="shifts-rotations-file"><strong>The rotation's file.</strong> <code class="code">shifts/rotation.toml</code> holds one root key, <code class="code">off = ["owner/repo", …]</code>, sorted and deduped; absent or empty, every repo is on; any other
-key, or <code class="code">off</code> not an array of strings, fails <code class="code">pick</code>, <code class="code">brief</code> and <code class="code">rotation</code> (exit 1)
-rather than turn an off repo back on. <code class="code">sandman shift rotation [--off &lt;repo&gt;]… [--on &lt;repo&gt;]…</code> prints each rotation trunk as <code class="code">&lt;repo&gt; · on|off · &lt;last shifted, or never shifted&gt;[ · frozen]</code> — the owner's week's word, as above — and each off repo whose
+<p class="docs-note" id="shifts-rotations-file"><strong>The rotation's file.</strong> <code class="code">shifts/rotation.toml</code> is the owner's one knob file, read afresh by every
+verb run (every request, for <code class="code">report serve</code>); every key is optional and a missing file is all
+defaults. Root keys: <code class="code">night = "HH-HH"</code>, the night above, over <code class="code">$SANDMAN_SHIFT_NIGHT</code>;
+<code class="code">off = ["owner/repo", …]</code>, sorted and deduped, the repos <code class="code">pick</code> passes over (absent or empty,
+every repo is on); <code class="code">rounds = &lt;n ≥ 1&gt;</code>, how often <code class="code">pick</code> may choose one repo in a night
+(absent, unlimited); <code class="code">skim_minutes = &lt;1–1440&gt;</code>, the skim window (§ breath, default 55). Tables:
+<code class="code">[mind]</code>, the shift mind — a lowercase theme key (<code class="code">hunt</code>, <code class="code">redesign</code>, <code class="code">refactor</code>,
+<code class="code">measure</code>, <code class="code">harden</code>, <code class="code">ship</code>, <code class="code">rest</code>) for its night, else <code class="code">default</code>, both over
+<code class="code">$SANDMAN_SHIFT_MIND</code> and under <code class="code">--mind</code>; <code class="code">[dream]</code>, the model each dream mind runs —
+<code class="code">sonnet</code>, <code class="code">opus</code>, <code class="code">fable</code> — over <code class="code">$SANDMAN_MIND_SONNET</code> / <code class="code">_OPUS</code> /
+<code class="code">_FABLE</code>. An unknown key or table is journaled (<code class="code">.trace/shift-&lt;date&gt;.log</code>, <code class="code">unknown key
+`&lt;key&gt;` ignored</code>) and ignored; a file outside the TOML subset, or a value its key refuses, fails every
+verb that reads it — <code class="code">shift</code>, <code class="code">report</code>, <code class="code">score</code>, <code class="code">breathe</code>, <code class="code">dream</code> — with exit 3 naming the key, rather
+than turn an off repo back on or run a night unthrottled. <code class="code">sandman shift rotation [--off &lt;repo&gt;]… [--on &lt;repo&gt;]…</code> prints each rotation trunk as <code class="code">&lt;repo&gt; · on|off · &lt;last shifted, or never shifted&gt;[ · frozen]</code> — the owner's week's word, as above — and each off repo whose
 trunk is not found now as <code class="code">&lt;repo&gt; · off · not found</code>, after the flags rewrite the list
 (<code class="code">--on</code> applied last, and clears such a repo; a repo in neither exits 2 and writes
-nothing); the page's Rotation form (§ report) writes the same file. Every write holds
+nothing); the page's Rotation form (§ report) writes the same file. A rewrite replaces the
+<code class="code">off</code> line alone — adding it on top when absent — so every other key and comment stays. Every write holds
 <code class="code">.commit.lock</code>, tmp → rename. The Sabbath's pick ignores the list.</p>
 <p class="docs-note" id="shifts-sabbaths-pick"><strong>The Sabbath's pick.</strong> In Saturday's night <code class="code">shift pick</code> returns <code class="code">jgeschwendt/sandman</code>'s
 trunk — the machine's own repo, where the self-pass branch <code class="code">sabbath/&lt;yyyy-Www&gt;</code> lives —
@@ -672,7 +688,7 @@ computed); <code class="code">$SANDMAN_NOW</code> pins the instant.</p>
 </tr>
 <tr>
 <td><code class="code">shift.mind</code></td>
-<td><code class="code">--mind</code>, else <code class="code">$SANDMAN_SHIFT_MIND</code>, else <code class="code">opus</code></td>
+<td><code class="code">--mind</code>, else <code class="code">rotation.toml</code>'s <code class="code">[mind]</code> for the night's theme or <code class="code">default</code>, else <code class="code">$SANDMAN_SHIFT_MIND</code>, else <code class="code">opus</code></td>
 </tr>
 <tr>
 <td><code class="code">shift.start_event</code></td>
@@ -1108,8 +1124,9 @@ boolean, a date, a multi-line value, an unknown key — is refused with its line
 <p class="docs-note">The first five are required. Every verb that rewrites the file — <code class="code">file --source</code>,
 <code class="code">adopt</code>, <code class="code">drop</code>, <code class="code">close</code>, <code class="code">reweight</code> — sorts the tables by name, writes the keys in the order above with the
 state keys only when set, and drops comments.</p>
-<p class="docs-note">A source is <strong>due</strong> for a skim when its <code class="code">last_read</code> is absent or at least 55 minutes old —
-an hour less the hourly tick's jitter, since passes start anywhere in :17–:18; a deep pass reads every source.</p>
+<p class="docs-note">A source is <strong>due</strong> for a skim when its <code class="code">last_read</code> is absent or at least
+<code class="code">shifts/rotation.toml</code>'s <code class="code">skim_minutes</code> old, default 55 — an hour less the hourly tick's jitter, since
+passes start anywhere in :17–:18, so a window of <em>n</em> hours skims every <em>n</em> to <em>n</em> + 1; a deep pass reads every source.</p>
 <h3 class="h3" id="breath-a-breath">A breath</h3>
 <p class="docs-note"><code class="code">&lt;yyyy-mm-dd&gt;-&lt;slug&gt;.md</code> — the UTC date <code class="code">file</code> ran, the title slugged with dashes (cut
 at 60 characters, <code class="code">breath</code> when nothing is left), <code class="code">-2</code>, <code class="code">-3</code>, … on a collision.
@@ -1573,7 +1590,7 @@ agent <code class="code">launchd/dev.gigantic.sandman.report.plist</code> keeps 
 <code class="code">~/Library/Logs/dev.gigantic.sandman.report.log</code>). launchd expands no <code class="code">~</code>, so the file is a
 template: <code class="code">sandman plist report</code> prints it with <code class="code">{{HOME}}</code> spelled out as
 <code class="code">$HOME</code>, and <code class="code">$SANDMAN_SHIFT_NIGHT</code>, when set in the rendering shell, added to the
-agent's environment (the label was <code class="code">io.jlg.sandman-report</code> until 2026-10-20; the first two commands retire it):</p>
+agent's environment — a fallback only, under <code class="code">rotation.toml</code>'s <code class="code">night</code>, which the server reads per request (the label was <code class="code">io.jlg.sandman-report</code> until 2026-10-20; the first two commands retire it):</p>
 <pre class="snippet"><code data-lang="sh">launchctl bootout gui/$(id -u)/io.jlg.sandman-report 2&gt;/dev/null; rm -f ~/Library/LaunchAgents/io.jlg.sandman-report.plist; sandman plist report &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist
 </code></pre>
 </div>

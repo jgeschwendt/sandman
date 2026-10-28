@@ -739,6 +739,15 @@ fn sources_due_respects_the_hourly_cadence() {
             .last(),
         Some("stale  weight=1.0  budget=5  cursor=-  last_read=2026-10-16T15:05:00Z")
     );
+    // rotation.toml's skim_minutes moves the window: four hours leaves only the
+    // unread source due, a deep pass still reads all.
+    machine.write(".sandman/shifts/rotation.toml", "skim_minutes = 240\n");
+    assert_eq!(names(&["breathe", "sources", "--due"]), ["never"]);
+    assert_eq!(
+        names(&["breathe", "sources", "--due", "--kind", "deep"]),
+        ["fresh", "never", "stale"]
+    );
+    machine.write(".sandman/shifts/rotation.toml", "");
     let json = machine.ok(NOW, &["breathe", "sources", "--due", "--json"]);
     assert!(
         json.starts_with(r#"[{"adopted":0,"bears_on":["*"]"#),
