@@ -313,6 +313,14 @@ pub fn shift_rotation(data_root: &Path) -> PathBuf {
     shifts_dir(data_root).join("rotation.toml")
 }
 
+/// `<root>/paused` when it exists — the owner's switch: while it does, nothing
+/// starts a Claude process (take spawns no dream; dream, reflect, breathe tick
+/// and shift brief exit 0 at once).
+#[must_use]
+pub fn paused(data_root: &Path) -> Option<PathBuf> {
+    Some(data_root.join("paused")).filter(|marker| marker.exists())
+}
+
 /// `<root>/.reports-read` — `report`'s read cursor, runtime state in the
 /// dotted tier: one ISO-8601 line, the start of the newest report shown.
 #[must_use]

@@ -207,7 +207,12 @@ fn take_run(
         let queue = outcome.queue_depth;
         // A held lock means a run is already draining the queue — starting
         // another would only fork a process to watch it yield.
-        let (line, said) = if dream::lock_held(&data_root) {
+        let (line, said) = if let Some(marker) = paths::paused(&data_root) {
+            (
+                format!("dream paused queue={queue}"),
+                format!("paused ({})", marker.display()),
+            )
+        } else if dream::lock_held(&data_root) {
             (
                 format!("dream held queue={queue}"),
                 "a dream is already running".to_owned(),

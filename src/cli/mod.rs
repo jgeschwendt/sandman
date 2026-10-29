@@ -410,6 +410,10 @@ declined can still be explained afterwards. forget alone is silent,
 deliberately: a line naming the session it destroyed would be the trace it
 promises not to leave.
 
+While <root>/paused exists nothing starts a Claude process: take archives
+but spawns no dream (`dream paused queue=<n>`), and dream, reflect, breathe
+tick and shift brief print `paused: <root>/paused exists` and exit 0.
+
 Data root: $SANDMAN_ROOT, else ~/.sandman. Transcripts: ~/.claude/projects/.
 Logs: <root>/.trace/<verb>-<date>.log.";
 
@@ -465,6 +469,17 @@ fn run(args: &[String]) -> Result<(), Failure> {
         return Err(Failure::Usage("no verb".to_owned()));
     };
     let rest = &args[1..];
+    // The owner's switch: no verb that starts a Claude process runs past it.
+    if matches!(
+        (verb.as_str(), rest.first().map(String::as_str)),
+        ("breathe", Some("tick")) | ("dream" | "reflect", _) | ("shift", Some("brief"))
+    ) && let Some(marker) = paths::data_root()
+        .ok()
+        .and_then(|root| paths::paused(&root))
+    {
+        println!("paused: {} exists", marker.display());
+        return Ok(());
+    }
     match verb.as_str() {
         "-h" | "--help" | "help" => Err(Failure::Help),
         "breathe" => breathe_verb(rest),
