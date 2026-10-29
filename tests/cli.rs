@@ -1608,6 +1608,44 @@ fn a_full_queue_spawns_a_detached_dream() {
 }
 
 #[test]
+fn the_paused_marker_keeps_every_mind_spawn_quiet() {
+    let machine = Machine::new("paused");
+    machine.nine_queued();
+    machine.transcript(SAID);
+    let marker = machine.write(".sandman/paused", "");
+    let spawned = machine.home.join("spawned");
+    let stub = machine.script("claude", &format!("touch '{}'\n", spawned.display()));
+    let stub = [("SANDMAN_CLAUDE_BIN", stub.to_str().expect("stub path"))];
+    let taken = machine.run_with(&["take", SID], "", &stub);
+    took(&taken);
+    assert_eq!(
+        stderr(&taken),
+        format!("queue at 10 — paused ({})\n", marker.display())
+    );
+    assert!(machine.journal("take").contains("dream paused queue=10"));
+    for args in [
+        &["breathe", "tick"][..],
+        &["dream"],
+        &["reflect"],
+        &["shift", "brief"],
+    ] {
+        let output = machine.run_with(args, "", &stub);
+        assert_eq!(code(&output), 0, "{args:?}");
+        assert_eq!(
+            stdout(&output),
+            format!("paused: {} exists\n", marker.display())
+        );
+    }
+    let traces: Vec<_> = fs::read_dir(machine.root().join(".trace"))
+        .expect("trace")
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect();
+    assert_eq!(traces.len(), 1, "{traces:?}");
+    assert!(!spawned.exists() && !machine.root().join("breath").exists());
+}
+
+#[test]
 fn bad_flags_are_usage_failures_and_write_nothing() {
     let machine = Machine::new("bad-flags");
     for args in [
