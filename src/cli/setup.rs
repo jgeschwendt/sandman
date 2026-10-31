@@ -61,7 +61,9 @@ const ROUTINES: [(&str, &str); 1] = [("shift.md", include_str!("../../docs/routi
 
 /// `setup [--remove]`: link `~/.local/bin/sandman` to mise's shim, install the sandbox files and
 /// routines, write and bootstrap every agent, retire the install agent; `--remove` undoes it all
-/// and forgets hotswap's record, leaving the data root alone.
+/// and forgets hotswap's record, leaving the data root alone. An agent launchctl holds disabled
+/// gets its plist and a hint, never a bootstrap or bootout; a failed bootstrap fails the run only
+/// after every other agent is loaded.
 pub(super) fn setup_verb(args: &[String]) -> Result<(), Failure> {
     let remove = Args::parse(args, "setup", &[], &["--remove"], 0)?.set("--remove");
     let home = paths::home()?;
@@ -77,6 +79,12 @@ pub(super) fn setup_verb(args: &[String]) -> Result<(), Failure> {
             .output()
             .is_ok_and(|o| o.status.success())
     };
+    let disabled = Command::new("launchctl")
+        .args(["print-disabled", &gui])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let held = |label: &str| disabled.contains(&format!("\"{label}\" => disabled"));
     let agents = home.join("Library/LaunchAgents");
     let gone = |path: &Path| {
         if fs::remove_file(path).is_ok() {
@@ -111,7 +119,7 @@ pub(super) fn setup_verb(args: &[String]) -> Result<(), Failure> {
     let labels = AGENTS.iter().map(|(label, _)| *label).chain([UPGRADE]);
     if remove {
         for label in labels {
-            if launchctl(&["bootout", &format!("{gui}/{label}")]) {
+            if !held(label) && launchctl(&["bootout", &format!("{gui}/{label}")]) {
                 println!("booted out {label}");
             }
             gone(&agents.join(format!("{label}.plist")));
@@ -161,6 +169,7 @@ pub(super) fn setup_verb(args: &[String]) -> Result<(), Failure> {
         .map_or_else(String::new, |night| {
             format!("\n    <key>SANDMAN_SHIFT_NIGHT</key><string>{night}</string>")
         });
+    let mut failed = Vec::new();
     for (label, template) in AGENTS.into_iter().chain([(UPGRADE, "")]) {
         let text = if label == UPGRADE {
             hotswap::agent_plist("sandman", "sandman")
@@ -171,6 +180,12 @@ pub(super) fn setup_verb(args: &[String]) -> Result<(), Failure> {
         let fresh = fs::read_to_string(&path).ok() != Some(text.clone());
         put(&path, &text, 0o644)?;
         let target = format!("{gui}/{label}");
+        if held(label) {
+            eprintln!(
+                "{label}: disabled by launchctl; launchctl enable {target} && sandman setup loads it"
+            );
+            continue;
+        }
         let loaded = launchctl(&["print", &target]);
         // a changed plist reaches launchd only through a reload — never the upgrade agent's,
         // whose bootout would kill the very swap that runs this setup
@@ -179,7 +194,8 @@ pub(super) fn setup_verb(args: &[String]) -> Result<(), Failure> {
             launchctl(&["bootout", &target]);
         }
         if (!loaded || reload) && !launchctl(&["bootstrap", &gui, &path.to_string_lossy()]) {
-            return Err(Error::refused(format!("launchctl bootstrap {label} failed")).into());
+            failed.push(label);
+            continue;
         }
         let state = match (loaded, reload) {
             (false, _) => "loaded",
@@ -188,7 +204,10 @@ pub(super) fn setup_verb(args: &[String]) -> Result<(), Failure> {
         };
         println!("{state} {label}");
     }
-    Ok(())
+    if failed.is_empty() {
+        return Ok(());
+    }
+    Err(Error::refused(format!("launchctl bootstrap {} failed", failed.join(", "))).into())
 }
 
 /// `upgrade [--check | --back | --retry]`: hotswap's swap under sandman's manifest. No drain:

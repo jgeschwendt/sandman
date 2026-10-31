@@ -15,10 +15,11 @@ fn setup_installs_every_agent_upgrade_swaps_and_remove_undoes_it() {
     let home = Machine::new("setup");
     let h = home.home.display().to_string();
     let agents = format!("{h}/Library/LaunchAgents");
-    // `print` answers loaded while `loaded` exists; `fail` fails `bootstrap`
+    // `print` answers loaded while `loaded` exists; `print-disabled` prints `disabled`; `fail`
+    // fails the bootstrap of the agent it names
     home.script(
         "stub/launchctl",
-        "echo \"$*\" >> \"$HOME/launchctl.log\"\n[ \"$1\" = print ] && { [ -e \"$HOME/loaded\" ]; exit; }\n[ \"$1\" = bootstrap ] && [ -e \"$HOME/fail\" ] && exit 5\nexit 0",
+        "echo \"$*\" >> \"$HOME/launchctl.log\"\n[ \"$1\" = print ] && { [ -e \"$HOME/loaded\" ]; exit; }\n[ \"$1\" = print-disabled ] && { cat \"$HOME/disabled\"; exit 0; }\n[ \"$1\" = bootstrap ] && [ -e \"$HOME/fail\" ] && case $3 in *$(cat \"$HOME/fail\")*) exit 5 ;; esac\nexit 0",
     );
     home.script(
         "stub/mise",
@@ -70,7 +71,7 @@ fn setup_installs_every_agent_upgrade_swaps_and_remove_undoes_it() {
             each(states, &|label, state| format!("{state} {label}\n"))
         )
     };
-    let retire = format!("bootout {gui}/dev.gigantic.sandman.install\n");
+    let retire = format!("print-disabled {gui}\nbootout {gui}/dev.gigantic.sandman.install\n");
 
     let xdg = feed(
         home.sandman(&["setup"])
@@ -153,13 +154,36 @@ fn setup_installs_every_agent_upgrade_swaps_and_remove_undoes_it() {
         run(&["setup"], "", 0),
         format!("{}{retire}{log}", loads(reloads))
     );
-    home.write("fail", "");
+    // a failed bootstrap fails the run, every other agent still loaded
+    home.write("fail", "reflect");
     fs::remove_file(home.home.join("loaded")).expect("unload");
+    let failed = run(&["setup"], "", 1);
     assert!(
-        run(&["setup"], "", 1)
-            .contains("sandman: launchctl bootstrap dev.gigantic.sandman.breathe failed\n")
+        failed.contains(&format!("loaded dev.gigantic.sandman.upgrade\nsandman: launchctl bootstrap dev.gigantic.sandman.reflect failed\n{retire}{boot}")),
+        "{failed}"
     );
     fs::remove_file(home.home.join("fail")).expect("unfail");
+
+    // a disabled agent is held: its plist and a hint, no bootstrap, and setup is green
+    home.write(
+        "disabled",
+        "\t\t\"dev.gigantic.sandman.breathe\" => disabled\n\t\t\"dev.gigantic.sandman.reflect\" => disabled\n\t\t\"dev.gigantic.sandman.report\" => enabled\n",
+    );
+    let hint = |job: &str| {
+        format!(
+            "dev.gigantic.sandman.{job}: disabled by launchctl; launchctl enable {gui}/dev.gigantic.sandman.{job} && sandman setup loads it\n"
+        )
+    };
+    let held = run(&["setup"], "", 0);
+    assert!(
+        held.contains(&format!(
+            "loaded dev.gigantic.sandman.report\nloaded dev.gigantic.sandman.upgrade\n{}{}{retire}{}",
+            hint("breathe"),
+            hint("reflect"),
+            &boot[boot.find(&format!("print {gui}/dev.gigantic.sandman.report")).expect("report")..]
+        )),
+        "{held}"
+    );
 
     // the swap: setup, the report agent's kickstart and both probes run the shim's binary
     let swapped = run(&["upgrade"], "", 0);
@@ -171,8 +195,14 @@ fn setup_installs_every_agent_upgrade_swaps_and_remove_undoes_it() {
     assert!(home.home.join(".local/state/hotswap/sandman.json").exists());
 
     home.write("loaded", "");
-    let out = each([""; 4], &|label, _| {
-        format!("booted out {label}\nremoved {agents}/{label}.plist\n")
+    // a held agent is never booted out
+    let out = each(["held", "held", "", ""], &|label, state| {
+        let booted = if state.is_empty() {
+            format!("booted out {label}\n")
+        } else {
+            String::new()
+        };
+        format!("{booted}removed {agents}/{label}.plist\n")
     });
     let files = format!(
         "removed {h}/.local/bin/shift-test\nremoved {h}/.local/share/sandman/shift-test\nremoved {h}/.local/share/sandman/shift-test.sb\nremoved {h}/.local/bin/sandman\n"
