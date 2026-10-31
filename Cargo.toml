@@ -19,6 +19,7 @@ name = "sandman"
 path = "src/main.rs"
 
 [dependencies]
+hotswap = { git = "https://github.com/jgeschwendt/hotswap", rev = "1a0bc70a3bf07f0d36337f28bc08db23135d5227" }
 
 # Maximalist opt-out (the house lint discipline, verbatim): turn on the whole
 # strict, *stable* set (clippy::pedantic), then opt out the few we disagree

@@ -27,12 +27,12 @@ hazards:
 | --- | --- |
 | `atomic.rs` `lock.rs` | tmp→rename writes, log appends; the data root's `.commit.lock` |
 | `bank.rs` `commit.rs` `memory.rs` `slug.rs` | the format authority — bank keys, index regen, frontmatter, naming |
-| `cli/` | the dispatcher: `mod.rs` holds parsing, exit codes (0 ran · 1 failed · 2 command line · 3 a runner's fault: `shift clock`'s window file, `breathe pass`'s template or `sources.toml`, an invalid `shifts/rotation.toml`, `shift brief` with every repo spent) and the usage screen; one file per verb family — `breathe.rs` `recall.rs` `report.rs` `rest.rs` `shift.rs` `take.rs` `trail.rs` — take's detached dream spawn in `take.rs` |
+| `cli/` | the dispatcher: `mod.rs` holds parsing, exit codes (0 ran · 1 failed · 2 command line · 3 a runner's fault: `shift clock`'s window file, `breathe pass`'s template or `sources.toml`, an invalid `shifts/rotation.toml`, `shift brief` with every repo spent) and the usage screen; one file per verb family — `breathe.rs` `recall.rs` `report.rs` `rest.rs` `setup.rs` `shift.rs` `take.rs` `trail.rs` — take's detached dream spawn in `take.rs` |
 | `consensus.rs` | 2-of-3 — deterministic claim grouping: connected components of a name-and-description-slug Jaccard; no model, no wording rewrite |
 | `error.rs` `time.rs` | typed errors; UTC timestamps, both directions |
 | `grove.rs` | the repos the machine commits into — grove checkouts (manifest roots plus the tree) and the extras; scrubbed-env git calls; `Event:` and `Shift:` trailer scans, one pass per repository |
 | `hook.rs` `transcript.rs` | SessionStart/SessionEnd payloads; locating session files, digesting a transcript, extracting the conversation a mind reads |
-| `json.rs` (private) | JSON for our own shapes only — pointers, hook payloads, model replies; why `[dependencies]` is empty |
+| `json.rs` (private) | JSON for our own shapes only — pointers, hook payloads, model replies; serde arrives only through hotswap |
 | `log.rs` | the voyage log's format — the day's sources and their fingerprint, entry parse/render, the prompt, `began:` and the index; who calls the mind and when is reflect's |
 | `mind.rs` | the runner seam — one `claude -p … --output-format json --tools "" --strict-mcp-config` process per mind (no tool, no MCP server), killed at the timeout, every failure an abstention; `Ask::keep` decides whether the run's own transcript is kept or never written |
 | `paths.rs` | the single config point — `$SANDMAN_ROOT` else `~/.sandman`, `~/.claude`, the window file, the prompt templates, `~/.docket`, the routines' run state and report's read cursor `.reports-read`, and the tier split the leading dot marks: raw and gitignored (`.archive/` `.dream/` `.trace/`) against versioned content (`breath/` `log/` `memories/` `pending-takes/` `score/` `shifts/` `trail/`) |

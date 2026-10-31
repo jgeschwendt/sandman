@@ -7,7 +7,7 @@
        has ended in every season: the 24 h pass and its backfill
        (docs/bank-format.html#log-rules). PATH carries ~/.local/bin, where the
        log and upkeep minds' `claude` lives. A template like the others:
-       `sandman plist reflect` renders it with the home spelled out. -->
+       `sandman setup` renders it with the home spelled out. -->
   <key>ProgramArguments</key>
   <array>
     <string>{{HOME}}/.local/bin/sandman</string>

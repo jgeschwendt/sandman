@@ -2,9 +2,26 @@
 # against the pedantic set, and a newer clippy carries lints the pinned one
 # doesn't — an unpinned toolchain turns every rust release into lint breakage.
 [tools]
+"cargo:cargo-llvm-cov" = "0.9.1"
 # hk runs the pre-push gate (hk.pkl); `hk install --mise` wires it.
 hk = "2.5.0"
 rust = "1.94.0"
+
+[tasks.check]
+description = "the whole gate: fmt, clippy, the suite under coverage, stele"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets -- -D warnings",
+  { task = "cover" },
+  "stele check",
+  "stele emit --check",
+]
+
+[tasks.cover]
+# a floor below 100 %: 36 lines of timing and fault paths outside setup and upgrade are
+# uncovered; raise it as they close
+description = "the suite under llvm-cov; under the floor of lines fails"
+run = "cargo llvm-cov --fail-under-lines 99.8"
 
 [tasks.figures]
 description = "render every board of the Claude Design canvas in docs/figures/project/ to its PNG and its -dark PNG (agent-browser, 2×)"

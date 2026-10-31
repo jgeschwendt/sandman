@@ -1,0 +1,55 @@
+# A GitHub Release per merge to main, YYYY.M.N (N counts the month's releases from 0), signed by
+# packslip: what `mise use -g packslip:jgeschwendt/sandman` installs and `sandman upgrade` swaps in
+# (https://gigantic.dev/hotswap/ § release).
+concurrency:
+  # N counts the tags already cut, so two releases never race for one
+  group: release
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # every tag, for N; build.rs stamps the commit
+          fetch-depth: 0
+      # mise.toml's rust pin alone: hk and cargo-llvm-cov are the gate's, not the build's
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: rust
+      # releases stay off shared compiler caches: local, never restored or saved
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          backend: local
+      - run: cargo build --release --locked
+      - id: version
+        run: |
+          set -euo pipefail
+          month=$(date -u +%Y.%-m)
+          echo "version=$month.$(git tag -l "v$month.*" | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir artifacts
+          tar -czf artifacts/sandman-aarch64-apple-darwin.tar.gz -C target/release sandman
+          gh release create "v$VERSION" artifacts/sandman-aarch64-apple-darwin.tar.gz \
+            --generate-notes --target "$GITHUB_SHA" --title "v$VERSION"
+      - uses: jdx/packslip@v1
+        with:
+          artifacts: artifacts/sandman-aarch64-apple-darwin.tar.gz
+          bin: sandman
+          tag: v${{ steps.version.outputs.version }}
+          version: ${{ steps.version.outputs.version }}
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  attestations: write # packslip attests the archive
+  contents: write # the tag, the release and its assets
+  id-token: write # keyless sigstore, the workflow identity

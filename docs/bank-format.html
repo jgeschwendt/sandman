@@ -272,8 +272,8 @@ rest still run, and the pass exits 1 counting it. <code class="code">--day</code
 <li><strong>Run nightly by launchd.</strong> The agent <code class="code">launchd/dev.gigantic.sandman.reflect.plist</code>
 runs <code class="code">sandman reflect</code> at 23:30 local — after the UTC day ended in either season (log
 <code class="code">~/Library/Logs/dev.gigantic.sandman.reflect.log</code>); it replaces the <code class="code">sandman-reflect</code> routine, which is removed from <code class="code">~/.routines</code> in the same step — under EDT
-both fire at 03:30 UTC and would pay every call twice. Install it with
-<code class="code">sandman plist reflect &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.reflect.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.reflect.plist</code>.</li>
+both fire at 03:30 UTC and would pay every call twice. Installed by
+<code class="code">sandman setup</code> (<a href="index.html#install">install and upgrade</a>).</li>
 </ul>
 </div>
 </section>
@@ -986,7 +986,7 @@ instead (<code class="code">prompts/shift.md</code> rule 7).</li>
 loopback, open a pty, run <code class="code">ps</code> or read <code class="code">/dev/fd</code> (process substitution). An
 <code class="code">excludedCommands</code> entry would run with no sandbox at all — no proxy, no <code class="code">denyRead</code> —
 so exactly one command leaves: <code class="code">~/.local/bin/shift-test &lt;test command&gt;</code>, which re-enters
-its own Seatbelt profile, <code class="code">profiles/shift-test.sb</code> (both installed with the binary by the install agent, <code class="code">dev.gigantic.sandman.install</code>).
+its own Seatbelt profile, <code class="code">profiles/shift-test.sb</code> (both compiled in and installed by <code class="code">sandman setup</code>, which every upgrade runs).
 It runs only from under <code class="code">~/.grove/code</code>, and from <code class="code">(allow default)</code> it subtracts: reads of
 <code class="code">~/.aws</code>, <code class="code">~/.claude</code>, <code class="code">~/.claude.json</code>, <code class="code">~/.config/gh</code>, <code class="code">~/.docker/config.json</code>,
 <code class="code">~/.gnupg</code>, <code class="code">~/.netrc</code>, <code class="code">~/.npmrc</code>, <code class="code">~/.ssh</code>, <code class="code">~/Codes</code> and <code class="code">~/Library/Keychains</code>;
@@ -1030,10 +1030,10 @@ refuses a root the manifest does not declare; the shift falls back to <code clas
 (a pre-commit running <code class="code">cargo test</code>) may be skipped with <code class="code">--no-verify</code>: CI on the pull
 request is the gate, never skipped (<code class="code">prompts/shift.md</code> rule 7).</li>
 <li><strong>The runner is canonical here.</strong> <code class="code">docs/routines/shift.md</code> is the
-source of <code class="code">~/.routines/shift.md</code>; the install agent, <code class="code">dev.gigantic.sandman.install</code>, copies every <code class="code">docs/routines/*.md</code> over an installed copy that carries no local edit. A shift may fix the
-installed runner in place; the owner's session reconciles this canonical copy with it, and the agent leaves the edited copy alone until he does.</li>
+source of <code class="code">~/.routines/shift.md</code>; <code class="code">sandman setup</code> copies every <code class="code">docs/routines/*.md</code>, compiled in, over an installed copy that carries no local edit. A shift may fix the
+installed runner in place; the owner's session reconciles this canonical copy with it, and setup leaves the edited copy alone until he does.</li>
 <li><strong>Installing a binary is never a shift's act.</strong> <code class="code">~/.local/bin</code> is not writable, so a
-shift builds and tests its binary but never replaces the installed one; the launchd agent <code class="code">dev.gigantic.sandman.install</code> (<code class="code">launchd/install</code>), running as the owner every fifteen minutes, builds a clean trunk and installs it, the sandbox files, the routines and its own script, then restarts the report agent; a dirty trunk is skipped and named. Install it with <code class="code">sandman plist install &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.install.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.install.plist</code>.</li>
+shift builds and tests its binary but never replaces the installed one; a merge to main is a release, and the upgrade agent <code class="code">dev.gigantic.sandman.upgrade</code>, running as the owner every 900 s, swaps it in through mise (<a href="index.html#install">install and upgrade</a>). </li>
 <li><strong>Deny rules and the mod's guards hold in every mode.</strong> No mode skips
 <code class="code">permissions.deny</code> — the profile denies <code class="code">git checkout --</code>, <code class="code">git clean</code>,
 <code class="code">git reset</code>, <code class="code">git stash</code>, force pushes and <code class="code">pkill -f</code> — nor the mod's tool-call hooks.</li>
@@ -1311,11 +1311,9 @@ A skim and a deep pass may run together.</li>
 a refused knob included — appends <code class="code">{"started": &lt;iso&gt;, "exit": &lt;its exit code&gt;}</code> to
 <code class="code">breath/ticks.jsonl</code>, a routine's <code class="code">runs.jsonl</code> shape, which <code class="code">score</code> counts (§ score); a line it
 cannot append is journalled (<code class="code">tick unrecorded</code>) and the exit stands, and a binary that predates the
-verb records nothing. Install with
-<code class="code">sandman plist breathe &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.breathe.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.breathe.plist</code>,
-removing <code class="code">~/.routines/breathe-{skim,deep}.md</code> in the same step — the install agent only copies routines, never
-deletes them, and both would open passes. An installed binary without <code class="code">breathe tick</code> exits 2; the install
-agent brings it to a clean trunk within fifteen minutes.</p>
+verb records nothing. Installed by
+<code class="code">sandman setup</code>, which only copies routines, never deletes one: a <code class="code">~/.routines/breathe-{skim,deep}.md</code>
+left on a machine would open passes too, so it goes by hand.</p>
 <h3 class="h3" id="breath-pass-prompt-and-its-slots">The pass prompt and its slots</h3>
 <p class="docs-note"><code class="code">pass</code> fills <code class="code">prompts/breathe.md</code> from the same directory as <code class="code">shift.md</code> and refuses a
 template naming a slot outside this table:</p>
@@ -1588,11 +1586,9 @@ foreign form reaches it; other paths <code class="code">404</code>, other method
 <code class="code">http://127.0.0.1:1705</code>, never <code class="code">localhost</code>, which the Host check refuses. The launchd
 agent <code class="code">launchd/dev.gigantic.sandman.report.plist</code> keeps it up (log
 <code class="code">~/Library/Logs/dev.gigantic.sandman.report.log</code>). launchd expands no <code class="code">~</code>, so the file is a
-template: <code class="code">sandman plist report</code> prints it with <code class="code">{{HOME}}</code> spelled out as
+template: <code class="code">sandman setup</code> writes it with <code class="code">{{HOME}}</code> spelled out as
 <code class="code">$HOME</code>, and <code class="code">$SANDMAN_SHIFT_NIGHT</code>, when set in the rendering shell, added to the
-agent's environment — a fallback only, under <code class="code">rotation.toml</code>'s <code class="code">night</code>, which the server reads per request (the label was <code class="code">io.jlg.sandman-report</code> until 2026-10-20; the first two commands retire it):</p>
-<pre class="snippet"><code data-lang="sh">launchctl bootout gui/$(id -u)/io.jlg.sandman-report 2&gt;/dev/null; rm -f ~/Library/LaunchAgents/io.jlg.sandman-report.plist; sandman plist report &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist &amp;&amp; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.report.plist
-</code></pre>
+agent's environment — a fallback only, under <code class="code">rotation.toml</code>'s <code class="code">night</code>, which the server reads per request. Every upgrade kickstarts it onto the new version.</p>
 </div>
 </section>
 

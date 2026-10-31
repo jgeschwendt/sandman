@@ -7,7 +7,7 @@
        then open a skim and, once a New York day from 06:00, a deep pass
        (docs/bank-format.html#breath). PATH carries ~/.local/bin, where
        `dispatch` and `claude` live. A template like the others:
-       `sandman plist breathe` renders it with the home spelled out. -->
+       `sandman setup` renders it with the home spelled out. -->
   <key>ProgramArguments</key>
   <array>
     <string>{{HOME}}/.local/bin/sandman</string>
