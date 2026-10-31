@@ -20,11 +20,19 @@ jobs:
           # Must match mise.toml's pin: clippy runs the pedantic set under
           # -D warnings, and a drifting toolchain drifts the lint set with it.
           toolchain: 1.94.0
-          components: clippy, rustfmt
+          components: clippy, llvm-tools-preview, rustfmt
+      # mise.toml's pin: a drifting llvm-cov drifts what the floor counts.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      # PATH only: AGENTS.md's `commands:` say `mise run …`, and stele's liveness
+      # check needs `mise` resolvable; the toolchain comes from the steps above.
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+        with:
+          install: false
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
-      - run: cargo build
+      - run: cargo llvm-cov --fail-under-lines 99.8
       # stele graph gate (recommended order: check → emit --check). NEVER run
       # `stele build` in CI: build is the sole writer of .stele/graph.lock, so
       # running it here would overwrite the committed lock and make check's
