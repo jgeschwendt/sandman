@@ -30,7 +30,7 @@
           "text": "single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen",
           "verified": {
             "digest": "08ffd34819365da145ab6536764117600151de2829cd6bf0649d21b860fe5c54",
-            "sha": "1a2efa66b2c128977890d6ac3ac9a256185a9cb3"
+            "sha": "7b11adf76708906a771b987a0a5268728febb1e6"
           }
         },
         {
@@ -42,11 +42,12 @@
           "text": "one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it",
           "verified": {
             "digest": null,
-            "sha": "1a2efa66b2c128977890d6ac3ac9a256185a9cb3"
+            "sha": "7b11adf76708906a771b987a0a5268728febb1e6"
           }
         }
       ],
       "commands": {
+        "check": "mise run check",
         "lint": "cargo clippy --all-targets -- -D warnings && cargo fmt --check",
         "test": "cargo test"
       },
@@ -67,7 +68,7 @@
       },
       "id": "/",
       "kind": "system",
-      "purpose": "sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes, an MCP tool server); a zero-dependency Rust CLI driven by Claude Code hooks and a nightly tick."
+      "purpose": "sandman — memory engine for Claude sessions (banks, archiving, dream and reflect, an MCP server); a Rust CLI on Claude Code hooks, released by packslip and swapped in by hotswap."
     },
     "breath": {
       "budget": null,
@@ -132,7 +133,7 @@
           "text": "dream owns what \"queued\" means — every reader of the queue goes through `dream::depth` / `dream::pending`, which count only undreamed pointers; nothing counts `.recent/*.json` off disk for itself. Take's dream trigger drifted from the run this way: spent pointers inflated the depth, so every ending past the tenth spawned a dream with nothing to route",
           "verified": {
             "digest": "4eafe897ac57350cea644152f5814d6f3aa2a2ded413528fb02e5b870b06d7f1",
-            "sha": "1a2efa66b2c128977890d6ac3ac9a256185a9cb3"
+            "sha": "7b11adf76708906a771b987a0a5268728febb1e6"
           }
         },
         {
@@ -144,7 +145,7 @@
           "text": "a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive",
           "verified": {
             "digest": "7f42a4e141a3ed8a5130d3e83eac0fafe09c33a1e5c4271e386fcea6d99ebec8",
-            "sha": "1a2efa66b2c128977890d6ac3ac9a256185a9cb3"
+            "sha": "7b11adf76708906a771b987a0a5268728febb1e6"
           }
         }
       ],

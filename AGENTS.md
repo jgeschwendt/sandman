@@ -2,8 +2,9 @@
 
 ```stele
 kind: system
-purpose: sandman — memory engine for Claude sessions (banks, session archiving, the dream and reflect passes, an MCP tool server); a zero-dependency Rust CLI driven by Claude Code hooks and a nightly tick.
+purpose: sandman — memory engine for Claude sessions (banks, archiving, dream and reflect, an MCP server); a Rust CLI on Claude Code hooks, released by packslip and swapped in by hotswap.
 commands:
+  check: mise run check
   lint: cargo clippy --all-targets -- -D warnings && cargo fmt --check
   test: cargo test
 invariants:
@@ -19,10 +20,10 @@ invariants:
 | --- | --- |
 | breath/ | `sources.toml`, the seed feed list `sandman breathe init` copies into the data root — compiled into the binary; the schema is `docs/bank-format.html#breath` |
 | docs/ | the design — `index.html`, a ui-styled page and the only design source, the perpetual-shift plan included (GitHub Pages serves this directory; stylesheets linked from https://gigantic.dev/ui/ — `ui.css` + the shared `docs.css` shell; `page.css` holds only what is sandman's); `docs/serve.py` (:7875); `figures/` holds the page's figure PNGs, each with a `-dark` twin, and `figures/project/` the Claude Design canvas source (https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL, `sandman figures`) with the design-system tokens read back under `project/ds/`; `figures/export.sh` (`mise run figures`) renders every board to its PNG, then its `-dark.png` through `darken.py` (light token hexes → dark values; prints any hex that is not a token); the contracts are the pages `bank-format.html` and `mcp.html`, and `routines/` |
-| launchd/ | the launchd agents, `{{HOME}}` templates rendered by `sandman plist <job>`: `dev.gigantic.sandman.breathe.plist` runs `sandman breathe tick` hourly at :17 (`docs/bank-format.html#breath-tick`); `dev.gigantic.sandman.install.plist` runs `install` every fifteen minutes, keeping the installed binary, sandbox files and routines at a clean trunk (`docs/bank-format.html#shifts-sandbox`); `dev.gigantic.sandman.report.plist` keeps `sandman report serve` up on 127.0.0.1:1705 (`docs/bank-format.html#report`); `dev.gigantic.sandman.reflect.plist` runs `sandman reflect` nightly at 23:30 local (`docs/bank-format.html#log-rules`) |
-| profiles/ | `session.json`, the Claude Code settings shift and breath sessions run under — the strict Bash sandbox and deny rules `sandman shift profile` prints, compiled into the binary; `shift-test` + `shift-test.sb`, the wrapper and Seatbelt profile a shift's tests run under, installed by the install agent; the contract is `docs/bank-format.html#shifts-sandbox` |
+| launchd/ | the launchd agents, `{{HOME}}` templates `sandman setup` renders and bootstraps beside hotswap's `dev.gigantic.sandman.upgrade` (`docs/index.html#install`): `dev.gigantic.sandman.breathe.plist` runs `sandman breathe tick` hourly at :17 (`docs/bank-format.html#breath-tick`); `dev.gigantic.sandman.report.plist` keeps `sandman report serve` up on 127.0.0.1:1705 (`docs/bank-format.html#report`); `dev.gigantic.sandman.reflect.plist` runs `sandman reflect` nightly at 23:30 local (`docs/bank-format.html#log-rules`) |
+| profiles/ | `session.json`, the Claude Code settings shift and breath sessions run under — the strict Bash sandbox and deny rules `sandman shift profile` prints, compiled into the binary; `shift-test` + `shift-test.sb`, the wrapper and Seatbelt profile a shift's tests run under, compiled in and installed by `sandman setup`; the contract is `docs/bank-format.html#shifts-sandbox` |
 | prompts/ | the machine's prompt templates — `shift.md` is the dynamic shift prompt `sandman shift brief` fills, `sabbath.md` the one it fills on Saturday, and `breathe.md` the ruach's pass prompt `sandman breathe pass` fills; their slot names are the contract in `docs/bank-format.html#shifts` and `docs/bank-format.html#breath` |
-| src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep, the MCP tool server (recall · remember · banks over stdio), the trail and reconcile, the shift engine (every landing a pull request), the ruach's store, the week's score |
+| src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep, the MCP tool server (recall · remember · banks over stdio), `setup` and `upgrade` (`cli/setup.rs`), the trail and reconcile, the shift engine (every landing a pull request), the ruach's store, the week's score |
 
 The design is `docs/index.html`; the on-disk format is `docs/bank-format.html`.
 
@@ -30,7 +31,7 @@ The design is `docs/index.html`; the on-disk format is `docs/bank-format.html`.
 
 - Data root is `$SANDMAN_ROOT`, else `~/.sandman` — one config point (`src/paths.rs`); nothing else names it.
 - Never call a model from a test — `$SANDMAN_CLAUDE_BIN` (and the `Options` structs it feeds) is the seam, and the stubs are shell scripts in a temp dir.
-- Std only — `[dependencies]` is empty and stays that way until a verb needs otherwise.
+- One dependency — `hotswap` (git-pinned), for `upgrade`; it brings serde, which sandman's own JSON never uses (`src/json.rs`). Add another only when a verb needs it.
 
 <!-- @stele -->
 

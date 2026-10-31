@@ -15,6 +15,7 @@ mod breathe;
 mod recall;
 mod report;
 mod rest;
+mod setup;
 mod shift;
 mod take;
 mod trail;
@@ -34,9 +35,8 @@ use crate::verbs::{self, reflect};
 use breathe::breathe_verb;
 use recall::recall_verb;
 use report::{report_verb, score_verb};
-use rest::{
-    dream_verb, forget_verb, mcp_verb, plist_verb, reflect_verb, remember_verb, version_verb,
-};
+use rest::{dream_verb, forget_verb, mcp_verb, reflect_verb, remember_verb, version_verb};
+use setup::{setup_verb, upgrade_verb};
 use shift::shift_verb;
 use take::take_verb;
 use trail::{reconcile_verb, trail_verb};
@@ -203,16 +203,6 @@ usage: sandman <verb> [args]
       verbs use. Journals to <root>/.trace/mcp-<date>.log. Exits 0 on EOF.
       Register: claude mcp add --scope user sandman -- ~/.local/bin/sandman mcp
 
-  plist breathe|install|reflect|report
-      A launchd agent, launchd/dev.gigantic.sandman.<job>.plist, rendered on
-      stdout: {{HOME}} spelled out as $HOME (launchd expands no ~). breathe
-      runs breathe tick hourly at :17; install runs launchd/install every
-      fifteen minutes, keeping the installed binary, sandbox files and
-      routines at a clean trunk; reflect runs reflect nightly at 23:30 local;
-      report keeps report serve up, with $SANDMAN_SHIFT_NIGHT added to its
-      environment when set. Another job exits 2. Install: sandman plist <job> >
-      ~/Library/LaunchAgents/dev.gigantic.sandman.<job>.plist.
-
   reconcile <event-id|shift-id> [--dry-run]
       Walk the trail back past a wrong turn: the event and every event whose
       parent chain reaches it are revoked — for a shift id, every event of the
@@ -277,6 +267,22 @@ usage: sandman <verb> [args]
       ($SANDMAN_NOW pins it). Rewrites <root>/score/<yyyy>-W<ww>.md —
       frontmatter, the worst three, a table per section — and prints its
       path; --json prints the metrics object instead. No model, no git.
+
+  setup [--remove]
+      The install duties, run once mise has installed sandman (mise use -g
+      packslip:jgeschwendt/sandman) and again after every upgrade; idempotent.
+      Links ~/.local/bin/sandman to mise's shim (exit 1 when there is none),
+      writes the sandbox files (~/.local/bin/shift-test,
+      ~/.local/share/sandman/shift-test{,.sb}) and every docs/routines doc into
+      ~/.routines unless its installed copy carries an edit, then writes each
+      agent to ~/Library/LaunchAgents and bootstraps it: breathe (breathe tick
+      hourly at :17), reflect (nightly at 23:30 local), report (report serve,
+      $SANDMAN_SHIFT_NIGHT carried into its environment when set) and upgrade
+      (sandman upgrade every 900 s); a loaded agent whose plist changed is
+      reloaded, except upgrade, which may be the caller. It boots out and
+      deletes the retired install agent. --remove boots every agent out and
+      deletes what setup wrote (an edited routine aside) and hotswap's record;
+      the data root stays.
 
   shift attach --shift ID [--bg-id X] [--session-id S]
   shift brief [--mind M] [--dry-run]
@@ -399,6 +405,14 @@ usage: sandman <verb> [args]
       guard promote reconcile revoke shift.handoff shift.start — append
       refuses decision (exit 2), the owner's answer, which report serve writes.
 
+  upgrade [--check | --back | --retry]
+      hotswap's swap (https://gigantic.dev/hotswap/): mise upgrade --bump, then
+      setup, a kickstart of the report agent and the smoke probes (version,
+      shift status); red rolls back to the previous version. --check reports
+      what would run, --back rolls back on purpose, --retry passes a red
+      hold. The record is ~/.local/state/hotswap/sandman.json. Exits 0 green
+      or settled, 1 red, 2 unable to try.
+
   version
       The crate version and the commit it was built from — the same stamp
       every journal line carries as v=, so a line can be read against the
@@ -471,16 +485,17 @@ fn run(args: &[String]) -> Result<(), Failure> {
         "dream" => dream_verb(rest),
         "forget" => forget_verb(rest),
         "mcp" => mcp_verb(rest),
-        "plist" => plist_verb(rest),
         "recall" => recall_verb(rest),
         "reconcile" => reconcile_verb(rest),
         "reflect" => reflect_verb(rest),
         "remember" => remember_verb(rest),
         "report" => report_verb(rest),
         "score" => score_verb(rest),
+        "setup" => setup_verb(rest),
         "shift" => shift_verb(rest),
         "take" => take_verb(rest),
         "trail" => trail_verb(rest),
+        "upgrade" => upgrade_verb(rest),
         "version" => version_verb(rest),
         other => Err(Failure::Usage(format!("unknown verb `{other}`"))),
     }

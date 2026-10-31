@@ -8,8 +8,7 @@
 # or that root) gets a copy of stdout and stderr, so the call needs no
 # pipe or redirect — either keeps it inside Claude Code's sandbox, where Seatbelt cannot nest;
 # `-C <dir>` runs it from <dir>, so the call needs no `cd` either and works from any cwd.
-# Install: install -m755 profiles/shift-test ~/.local/bin/ &&
-#   install -m644 profiles/shift-test.sb ~/.local/share/sandman/
+# Installed by `sandman setup`, which compiles both files in.
 usage() { echo "shift-test: usage: shift-test [-C <dir>] [--log <path>] <test command> [args…]" >&2; exit 2; }
 log=
 [ "$1" != -C ] || { [ $# -gt 2 ] || usage; cd "$2" || exit 2; shift 2; }
