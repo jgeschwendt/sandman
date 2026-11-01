@@ -269,11 +269,10 @@ entry would be prose about nothing, and every reader of the log pays for it in c
 of them have cost a log-mind call — any day but a quiet one, which costs none, so quiet days never crowd out
 real gaps. A day that fails takes its slot too (nearly every failure comes after the call), is journaled, the
 rest still run, and the pass exits 1 counting it. <code class="code">--day</code> alone never backfills.</li>
-<li><strong>Run nightly by launchd.</strong> The agent <code class="code">launchd/dev.gigantic.sandman.reflect.plist</code>
+<li><strong>Scheduled by launchd.</strong> The agent <code class="code">launchd/dev.gigantic.sandman.reflect.plist</code>
 runs <code class="code">sandman reflect</code> at 23:30 local — after the UTC day ended in either season (log
-<code class="code">~/Library/Logs/dev.gigantic.sandman.reflect.log</code>); it replaces the <code class="code">sandman-reflect</code> routine, which is removed from <code class="code">~/.routines</code> in the same step — under EDT
-both fire at 03:30 UTC and would pay every call twice. Installed by
-<code class="code">sandman setup</code> (<a href="index.html#install">install and upgrade</a>).</li>
+<code class="code">~/Library/Logs/dev.gigantic.sandman.reflect.log</code>), installed by
+<code class="code">sandman setup</code> (<a href="index.html#install">install and upgrade</a>); held launchctl-disabled by the owner today.</li>
 </ul>
 </div>
 </section>
@@ -1283,7 +1282,7 @@ note), and refuses a pass already closed or dead and a <code class="code">--curs
 did not list or carrying a control character.</p>
 <h3 class="h3" id="breath-tick">The tick</h3>
 <p class="docs-note">The launchd agent <code class="code">launchd/dev.gigantic.sandman.breathe.plist</code> runs
-<code class="code">sandman breathe tick</code> hourly at :17 (log <code class="code">~/Library/Logs/dev.gigantic.sandman.breathe.log</code>).
+<code class="code">sandman breathe tick</code> hourly at :17 (log <code class="code">~/Library/Logs/dev.gigantic.sandman.breathe.log</code>); held launchctl-disabled by the owner today.
 Every <code class="code">dispatch</code> call is one JSON request on the stdin of <code class="code">dispatch run</code>
 (<code class="code">$SANDMAN_DISPATCH_BIN</code>, else <code class="code">~/.local/bin/dispatch</code>); a failed spawn or exit, an empty answer or one
 carrying <code class="code">error</code> is a failure. A tick, in order:</p>
