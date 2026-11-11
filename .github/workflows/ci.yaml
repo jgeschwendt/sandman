@@ -1,42 +1,26 @@
 name: ci
 
+# Public repo: Actions minutes are free, so the gate runs here as well as in hk's pre-push.
 on:
+  merge_group:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
-  merge_group:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        # Full history: stele's freshness class walks verified.sha..HEAD; a shallow
-        # clone prunes the watermark commit and makes churn uncountable.
-        with:
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
-          # Must match mise.toml's pin: clippy runs the pedantic set under
-          # -D warnings, and a drifting toolchain drifts the lint set with it.
-          toolchain: 1.94.0
           components: clippy, llvm-tools-preview, rustfmt
-      # mise.toml's pin: a drifting llvm-cov drifts what the floor counts.
+          # Must match mise.toml's pin: lints.toml enumerates this toolchain's lints.
+          toolchain: 1.94.0
+      # mise.toml's pin: a drifting llvm-cov drifts what the 100 % counts.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.9.1
-      # PATH only: AGENTS.md's `commands:` say `mise run …`, and stele's liveness
-      # check needs `mise` resolvable; the toolchain comes from the steps above.
-      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
-        with:
-          install: false
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo llvm-cov --fail-under-lines 99.8
-      # stele graph gate (recommended order: check → emit --check). NEVER run
-      # `stele build` in CI: build is the sole writer of .stele/graph.lock, so
-      # running it here would overwrite the committed lock and make check's
-      # byte-compare trivially pass, defeating the stale-lock gate.
-      - run: curl -fsSL https://raw.githubusercontent.com/jgeschwendt/stele/main/scripts/install.sh | bash -s v0.3.0
-      - run: ~/.local/bin/stele check
-      - run: ~/.local/bin/stele emit --check
+      - run: cargo llvm-cov --fail-under-lines 100

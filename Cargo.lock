@@ -3,15 +3,6 @@
 version = 4
 
 [[package]]
-name = "hotswap"
-version = "0.1.0"
-source = "git+https://github.com/jgeschwendt/hotswap?rev=1a0bc70a3bf07f0d36337f28bc08db23135d5227#1a0bc70a3bf07f0d36337f28bc08db23135d5227"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -42,10 +33,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "sandman-cli"
+name = "sandman"
 version = "0.1.0"
 dependencies = [
- "hotswap",
+ "serde_json",
 ]
 
 [[package]]
@@ -55,7 +46,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
- "serde_derive",
 ]
 
 [[package]]
