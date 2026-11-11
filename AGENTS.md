@@ -56,6 +56,6 @@ Stdout, one compact object, keys alphabetical; reads the root, writes nothing bu
  "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}]}
 ```
 
-- `active` — per session in `marks/*/*/*.jsonl`: `start`/`end` the `at` of its latest start/end mark; `cwd`, `machine` from the start mark, else the end mark. By `start` (null first), then session.
+- `active` — per session in `marks/*/*/*.jsonl`: `start` the `at` of its earliest start mark (a reload re-fires it), `end` of its latest end mark; `cwd`, `machine` from that start mark, else the end mark. By `start` (null first), then session.
 - `taken` — per file `<root>/.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` directly in a day dir; the latest per session wins. `taken` = that date and time as UTC, `bytes` = size; `title`, `cwd`, `highlights` (count, 0 without), `dreamed` from `<root>/memories/.recent/<session>.json` when it parses as an object. `state`: `waiting` pointer without `dreamed`, `dreamed` with it, `archived` no pointer. `memories` = memory entries naming the session. By `taken`, then session.
 - `memories` — per `<root>/memories/<bank>/<file>.md`, banks and files starting `.` or `_` and `MEMORY.md` skipped. Frontmatter: `key: value` lines between `---` fences; `name` (else the stem), `type` (else ""), `created`, `source` → `dream`/`reflect`/`remember` by its first word, else `other`; a dream's `session` is the uuid in `dream <ISO> · <uuid> · minds=…`. By bank, then file.

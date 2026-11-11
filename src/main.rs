@@ -153,7 +153,10 @@ fn main() -> ExitCode {
                         } else {
                             &mut pair.0
                         };
-                        if mark["at"].as_str() >= slot["at"].as_str() {
+                        // the earliest start (a reload re-fires it), the latest end
+                        if slot.is_null()
+                            || (mark["at"].as_str() < slot["at"].as_str()) == (kind != "end")
+                        {
                             *slot = mark;
                         }
                     }

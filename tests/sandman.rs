@@ -93,10 +93,10 @@ mod tests {
                 "studio",
             ),
             mark(
-                "2026-11-09T07:58:00Z",
+                "2026-11-09T08:40:00Z",
                 "start",
                 "a",
-                "/work/stale",
+                "/work/reload",
                 "studio",
             ),
             mark("2026-11-09T09:30:00Z", "end", "a", "/work/alpha", "studio"),
