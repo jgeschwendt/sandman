@@ -2,56 +2,60 @@
 
 ```stele
 kind: system
-purpose: sandman — memory engine for Claude sessions (banks, archiving, dream and reflect, an MCP server); a Rust CLI on Claude Code hooks, released by packslip and swapped in by hotswap.
+purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's marks file, `chart` prints what the data root holds as one JSON object. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
 commands:
   check: mise run check
-  lint: cargo clippy --all-targets -- -D warnings && cargo fmt --check
+  cover: mise run cover
+  install: mise run install
   test: cargo test
-invariants:
-  - claim: single format authority — every bank write goes through this crate's commit path; every consumer uses the CLI contract and never re-implements slugging, `replaces` archiving, lineage, collision suffixes, or index regen
-    anchor: ※ format-authority
-  - claim: one config point — the data root is `$SANDMAN_ROOT`, else `~/.sandman`; nothing outside `src/paths.rs` names it
-    anchor: README.md#sandman
 ```
 
 ## Map
 
-| where | what |
-| --- | --- |
-| breath/ | `sources.toml`, the seed feed list `sandman breathe init` copies into the data root — compiled into the binary; the schema is `docs/bank-format.html#breath` |
-| docs/ | the design — `index.html`, the only design source, the perpetual-shift plan included, served by GitHub Pages with stylesheets from https://gigantic.dev/ui/ (`ui.css`, `docs.css`; `page.css` holds only sandman's); the contracts `bank-format.html` and `mcp.html`; `routines/`; `serve.py` (:7875); `figures/` — each board's PNG and its `-dark` twin, the Claude Design canvas source in `figures/project/` (https://claude.ai/artifact/MKRUSNkEimZQHvWmZ4VASL, `sandman figures`; tokens under `project/ds/`), and `export.sh` (`mise run figures`), which renders every board, then its `-dark.png` through `darken.py` (light token hexes → dark; prints any hex that is not a token) |
-| launchd/ | the `{{HOME}}` plist templates `sandman setup` renders and bootstraps beside hotswap's `dev.gigantic.sandman.upgrade` (`docs/index.html#install`): `dev.gigantic.sandman.breathe` runs `sandman breathe tick` hourly at :17 (`docs/bank-format.html#breath-tick`) and `dev.gigantic.sandman.reflect` runs `sandman reflect` at 23:30 local (`docs/bank-format.html#log-rules`), both held launchctl-disabled by the owner today; `dev.gigantic.sandman.report` keeps `sandman report serve` up on 127.0.0.1:1705 (`docs/bank-format.html#report`) |
-| profiles/ | `session.json`, the Claude Code settings shift and breath sessions run under — the strict Bash sandbox and deny rules `sandman shift profile` prints, compiled into the binary; `shift-test` + `shift-test.sb`, the wrapper and Seatbelt profile a shift's tests run under, compiled in and installed by `sandman setup`; the contract is `docs/bank-format.html#shifts-sandbox` |
-| prompts/ | the machine's prompt templates — `shift.md` is the dynamic shift prompt `sandman shift brief` fills, `sabbath.md` the one it fills on Saturday, and `breathe.md` the ruach's pass prompt `sandman breathe pass` fills; their slot names are the contract in `docs/bank-format.html#shifts` and `docs/bank-format.html#breath` |
-| src/ | crate — the commit path + bank format, the dispatcher and session-edge verbs, dream's mind runner and 2-of-3 consensus, reflect's voyage entry, sweep and bank upkeep, the MCP tool server (recall · remember · banks over stdio), `setup` and `upgrade` (`cli/setup.rs`), the trail and reconcile, the shift engine (every landing a pull request), the ruach's store, the week's score |
+| path                     | what                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `chart`                                |
+| `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots via `SANDMAN_ROOT`, `SANDMAN_MACHINE`   |
+| `docs/index.html`        | the page: data root, `mark`, `chart`, next; two d3 charts              |
+| `docs/charts/*.js`       | one ES module per chart over `lib.js`'s chrome; d3 7.9.0 is the page's global              |
+| `docs/data/chart.json`   | the timeline's sample: `tests/sandman.rs` `chart` fails unless it is the verb's output     |
+| `docs/data/flow.json`    | the data-flow chart's nodes and edges, ①–⑤ marking the order a session passes them        |
+| `Cargo.toml`             | the rust base's `lints.toml` verbatim; the one opt-out carries its reason                   |
 
-## Working here
+The gate is `mise run check` (fmt, clippy `-D warnings`, `cover` at 100 % of lines), run by hk's pre-push (`hk install --mise` once per clone) and by CI. `lints check` from jgeschwendt/rust holds `Cargo.toml` to the base. Tests never touch `~/.sandman`; a child keeps the parent env (llvm-cov's `LLVM_PROFILE_FILE`), with `HOME` and `SANDMAN_*` replaced.
 
-- Never call a model from a test — `$SANDMAN_CLAUDE_BIN` (and the `Options` structs it feeds) is the seam, and the stubs are shell scripts in a temp dir.
-- One dependency — `hotswap` (git-pinned), for `upgrade`; it brings serde, which sandman's own JSON never uses (`src/json.rs`). Add another only when a verb needs it.
+## Contracts
 
-<!-- @stele -->
+Root: `$SANDMAN_ROOT`, else `$HOME/.sandman`. Machine id: `$SANDMAN_MACHINE`, else `<root>/machine` (one line, 32 lowercase hex from `/dev/urandom`), minted on first use by a hard link from a temp file so racing first runs agree. `sandman` with no or another verb: two-line usage on stderr, exit 2.
 
-## Hazards (1 active)
+### `sandman mark`
 
-- ⚠ `src`: a `SessionEnd` carrying reason `resume` is a beginning, not an ending — Claude Code fires it on the session it is adopting, so `take --hook` declines it. Forcing there moves the transcript out from under the turn about to append to it; Claude Code recreates the file, the next ending takes that live fragment too, and `.recent/<sid>.json` is overwritten to name the stub while the whole conversation sits orphaned in the archive (→ ※ resume-is-not-an-ending)
+Stdin, one object; `kind` and `session` (36 chars, hex and `-`) required, anything else missing is null:
 
-## Map
+```
+{"kind":"start"|"end","session":"<uuid>","cwd":"<path>"?,"surface":"<str>"?,"interactive":bool?,"reason":"<str>"?,"resume":"<str>"?}
+```
 
-| node     | kind      | purpose                                                                                                                                                                                               | unfold                                                 |
-| -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| breath   | container | the ruach's seed — `sources.toml`, the feed list `sandman breathe init` copies to `<root>/breath/` when absent; its schema is `docs/bank-format.html#breath`                                          | `stele unfold breath` · or read `breath/AGENTS.md`     |
-| profiles | container | the Claude Code settings `session.json` that shift and breath sessions run under, and `shift-test` + `shift-test.sb`, the Seatbelt their tests get; contract `docs/bank-format.html#shifts-sandbox`   | `stele unfold profiles` · or read `profiles/AGENTS.md` |
-| prompts  | container | the machine's prompts — `shift.md`, `sabbath.md`, `breathe.md`, whose slot names are the contract (docs/bank-format.html#shifts, docs/bank-format.html#breath)                                        | `stele unfold prompts` · or read `prompts/AGENTS.md`   |
-| src      | container | crate source — lib + `sandman` bin; `commit.rs` is the format authority (lock, `_archive`, collisions, index regen), landmark in lib.rs; `cli/` dispatches `verbs/`; `mind.rs` is the only model call | `stele unfold src` · or read `src/AGENTS.md`           |
-| tests    | container | integration tests — `breathe` `cli` `launchd` `mcp` `report` `score` `shift` `trail` drive the binary on a temp $HOME and fixtures; `real_banks` live banks (`--ignored`), `shift_test` real Seatbelt | `stele unfold tests` · or read `tests/AGENTS.md`       |
+Appends with `O_APPEND` to `<root>/marks/<yyyy>/<mm>/<dd>.jsonl` (UTC), compact, keys alphabetical:
 
-## Indexes
+```
+{"at":"<RFC 3339 UTC, seconds, Z>","cwd":…,"interactive":…,"kind":…,"machine":…,"reason":…,"resume":…,"session":…,"surface":…}
+```
 
-All invariants: `.stele/index/invariants.md` · all hazards: `.stele/index/hazards.md`
+Exit 0 silent; 2 on bad stdin, one stderr line, nothing written; 1 when the line cannot be written. Runs inside a 1.5 s hook budget.
 
-## Engine
+### `sandman chart`
 
-`stele` CLI available → `stele root | unfold <id> | invariants --touching <path> | hazards | nodes --kind <k>`. MCP: `stele serve`.
-No engine → everything above is complete; nested AGENTS.md files carry the detail (nearest file wins).
-<!-- @end -->
+Stdout, one compact object, keys alphabetical; reads the root, writes nothing but a missing `machine`; every absence is an empty list or a skipped item; a closed stdout ends it quietly (exit 0):
+
+```
+{"active":[{"cwd":str|null,"end":str|null,"machine":str,"session":str,"start":str|null}],
+ "at":"<now, RFC 3339 UTC>",
+ "machine":"<this machine's id>",
+ "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"dream"|"reflect"|"remember"|"other","type":str}],
+ "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}]}
+```
+
+- `active` — per session in `marks/*/*/*.jsonl`: `start`/`end` the `at` of its latest start/end mark; `cwd`, `machine` from the start mark, else the end mark. By `start` (null first), then session.
+- `taken` — per file `<root>/.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` directly in a day dir; the latest per session wins. `taken` = that date and time as UTC, `bytes` = size; `title`, `cwd`, `highlights` (count, 0 without), `dreamed` from `<root>/memories/.recent/<session>.json` when it parses as an object. `state`: `waiting` pointer without `dreamed`, `dreamed` with it, `archived` no pointer. `memories` = memory entries naming the session. By `taken`, then session.
+- `memories` — per `<root>/memories/<bank>/<file>.md`, banks and files starting `.` or `_` and `MEMORY.md` skipped. Frontmatter: `key: value` lines between `---` fences; `name` (else the stem), `type` (else ""), `created`, `source` → `dream`/`reflect`/`remember` by its first word, else `other`; a dream's `session` is the uuid in `dream <ISO> · <uuid> · minds=…`. By bank, then file.

@@ -1,6 +1,1 @@
-.shift-test.log
-.visor/
-node_modules/
-target/
-Claude outputs/
-*.profraw
+/target

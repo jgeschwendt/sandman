@@ -1,0 +1,24 @@
+{
+  "active": [
+    {"cwd": "/work/gamma", "end": "2026-11-10T06:00:00Z", "machine": "laptop", "session": "5a000000-0000-4000-8000-00000000000e", "start": null},
+    {"cwd": "/work/alpha", "end": "2026-11-09T09:30:00Z", "machine": "studio", "session": "5a000000-0000-4000-8000-00000000000a", "start": "2026-11-09T08:05:00Z"},
+    {"cwd": "/work/beta", "end": "2026-11-09T12:40:00Z", "machine": "studio", "session": "5a000000-0000-4000-8000-00000000000b", "start": "2026-11-09T10:15:00Z"},
+    {"cwd": "/work/alpha", "end": "2026-11-09T15:10:00Z", "machine": "laptop", "session": "5a000000-0000-4000-8000-00000000000c", "start": "2026-11-09T14:00:00Z"},
+    {"cwd": "/work/beta", "end": null, "machine": "studio", "session": "5a000000-0000-4000-8000-00000000000d", "start": "2026-11-10T07:45:00Z"}
+  ],
+  "at": "2026-11-10T12:00:00Z",
+  "machine": "studio",
+  "memories": [
+    {"bank": "-work-alpha", "created": "2026-11-09T22:00:00Z", "file": "feedback_parser_spans.md", "name": "Parser errors carry spans", "session": "5a000000-0000-4000-8000-00000000000a", "source": "dream", "type": "feedback"},
+    {"bank": "-work-alpha", "created": "2026-11-09T08:40:00Z", "file": "reference_grammar.md", "name": "The grammar lives in one file", "session": null, "source": "remember", "type": "reference"},
+    {"bank": "-work-beta", "created": null, "file": "loose.md", "name": "loose", "session": null, "source": "other", "type": ""},
+    {"bank": "-work-beta", "created": "2026-11-10T03:00:00Z", "file": "project_release.md", "name": "Release notes are cut weekly", "session": null, "source": "reflect", "type": "project"},
+    {"bank": "-work-gamma", "created": "2026-11-10T09:00:00Z", "file": "feedback_clean_tree.md", "name": "The gamma suite needs a clean tree", "session": "5a000000-0000-4000-8000-00000000000e", "source": "dream", "type": "feedback"}
+  ],
+  "taken": [
+    {"bytes": 4800, "cwd": "/work/alpha", "dreamed": "2026-11-09T22:00:00Z", "highlights": 3, "memories": 1, "session": "5a000000-0000-4000-8000-00000000000a", "state": "dreamed", "taken": "2026-11-09T09:30:05Z", "title": "sample: tighten the parser"},
+    {"bytes": 2600, "cwd": "/work/beta", "dreamed": null, "highlights": 1, "memories": 0, "session": "5a000000-0000-4000-8000-00000000000b", "state": "waiting", "taken": "2026-11-09T12:40:02Z", "title": "sample: draft the release notes"},
+    {"bytes": 1500, "cwd": null, "dreamed": null, "highlights": 0, "memories": 0, "session": "5a000000-0000-4000-8000-00000000000c", "state": "archived", "taken": "2026-11-09T15:10:04Z", "title": null},
+    {"bytes": 700, "cwd": "/work/gamma", "dreamed": "2026-11-10T09:00:00Z", "highlights": 0, "memories": 1, "session": "5a000000-0000-4000-8000-00000000000e", "state": "dreamed", "taken": "2026-11-10T06:00:01Z", "title": "sample: green the gamma suite"}
+  ]
+}

@@ -1,6 +1,4 @@
-# Pinned, not "stable": clippy runs with `-D warnings`
-# against the pedantic set, and a newer clippy carries lints the pinned one
-# doesn't — an unpinned toolchain turns every rust release into lint breakage.
+# Pinned to the rust base (jgeschwendt/rust): its lints.toml enumerates this toolchain's lints.
 [tools]
 "cargo:cargo-llvm-cov" = "0.9.1"
 # hk runs the pre-push gate (hk.pkl); `hk install --mise` wires it.
@@ -8,21 +6,17 @@ hk = "2.5.0"
 rust = "1.94.0"
 
 [tasks.check]
-description = "the whole gate: fmt, clippy, the suite under coverage, stele"
+description = "the gate hk's pre-push runs: fmt, clippy, 100 % line coverage"
 run = [
   "cargo fmt --check",
   "cargo clippy --all-targets -- -D warnings",
   { task = "cover" },
-  "stele check",
-  "stele emit --check",
 ]
 
 [tasks.cover]
-# a floor below 100 %: 36 lines of timing and fault paths outside setup and upgrade are
-# uncovered; raise it as they close
-description = "the suite under llvm-cov; under the floor of lines fails"
-run = "cargo llvm-cov --fail-under-lines 99.8"
+description = "the end-to-end suite under llvm-cov; anything under 100 % of lines fails"
+run = "cargo llvm-cov --fail-under-lines 100"
 
-[tasks.figures]
-description = "render every board of the Claude Design canvas in docs/figures/project/ to its PNG and its -dark PNG (agent-browser, 2×)"
-run = "sh docs/figures/export.sh"
+[tasks.install]
+description = "release build to ~/.local/bin/sandman-next, beside the live sandman"
+run = "cargo build --release && install -m 755 target/release/sandman ~/.local/bin/sandman-next"
