@@ -164,9 +164,9 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
  "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}]}</pre>
   <ul class="stack claims" role="list">
     <li><strong>active</strong> — one per session in the marks files: <code class="code">start</code>
-      and <code class="code">end</code> the <code class="code">at</code> of its latest start and end
-      marks, <code class="code">cwd</code> and <code class="code">machine</code> from the start mark,
-      else the end mark. By <code class="code">start</code>, then session.</li>
+      the <code class="code">at</code> of its earliest start mark (a reload re-fires it),
+      <code class="code">end</code> of its latest end mark; <code class="code">cwd</code> and
+      <code class="code">machine</code> from that start mark, else the end mark. By <code class="code">start</code>, then session.</li>
     <li><strong>taken</strong> — one per archived transcript, a file directly in a day dir named
       <code class="code">&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code>; the latest wins when a session
       has several. <code class="code">taken</code> is that day and time in UTC,
