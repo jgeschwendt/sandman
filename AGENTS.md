@@ -76,7 +76,7 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}
 
 ### `sandman setup`
 
-Prints the launchd plist for `dev.gigantic.sandman` on stdout and writes nothing: `ProgramArguments` this executable and `serve`, `EnvironmentVariables` the root it ran with, `KeepAlive`, `RunAtLoad`, `ThrottleInterval` 10, `ExitTimeOut` 2, `StandardErrorPath` `<root>/run/launchd.err` for failures before the log. Install, then swap after each `mise run install`:
+Prints the launchd plist for `dev.gigantic.sandman` on stdout and writes nothing: `ProgramArguments` this executable and `serve`, `EnvironmentVariables` the root it ran with, `KeepAlive`, `RunAtLoad`, `ThrottleInterval` 10, `ExitTimeOut` 2, `StandardErrorPath` `<root>/serve.err` for failures before the log (outside `run/`, which launchd would otherwise create 0744). Install, then swap after each `mise run install`:
 
 ```
 sandman-next setup > ~/Library/LaunchAgents/dev.gigantic.sandman.plist
