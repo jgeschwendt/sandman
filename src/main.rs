@@ -1,4 +1,4 @@
-//! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's marks
+//! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's ledger
 //! file, `chart` prints what the data root holds as one JSON object, `serve` is the daemon,
 //! `status` asks it for its health, `setup` prints its launchd plist.
 
@@ -132,7 +132,7 @@ fn main() -> ExitCode {
                 "resume": field("resume"), "session": field("session"), "surface": field("surface"),
             });
             let day = root.join(format!(
-                "marks/{}.jsonl",
+                "ledger/{}.jsonl",
                 at.get(..10).unwrap_or_default().replace('-', "/")
             ));
             match day
@@ -150,7 +150,7 @@ fn main() -> ExitCode {
         }
         Some("chart") => {
             let mut marks: BTreeMap<String, (Value, Value)> = BTreeMap::new();
-            for file in tree(&root.join("marks"), 3) {
+            for file in tree(&root.join("ledger"), 3) {
                 for mark in fs::read_to_string(file)
                     .unwrap_or_default()
                     .lines()

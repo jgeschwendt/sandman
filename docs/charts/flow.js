@@ -1,5 +1,5 @@
 // The data flow, ①–⑤ marking the order a session passes it: a session timeline down the left edge, broken before the
-// later dream pass; its moments (① ② start and end) → mark → the marks files, and → the earlier sandman's take and dream
+// later dream pass; its moments (① ② start and end) → mark → the ledger files, and → the earlier sandman's take and dream
 // → the archive, the pointers and the bank files (③ ④ ⑤); all of them → chart → its consumer. Nodes and edges from
 // docs/data/flow.json, each node at its column and row; a moment is a dot on the timeline, every other node a box.
 import { d3, hover, load, mount, redraw } from "./lib.js";
