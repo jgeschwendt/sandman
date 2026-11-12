@@ -592,7 +592,7 @@ mod tests {
   <key>RunAtLoad</key>
   <true/>
   <key>StandardErrorPath</key>
-  <string>{root}/run/launchd.err</string>
+  <string>{root}/serve.err</string>
   <key>ThrottleInterval</key>
   <integer>10</integer>
 </dict>

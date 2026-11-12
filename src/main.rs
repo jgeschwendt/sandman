@@ -425,7 +425,8 @@ fn main() -> ExitCode {
 "#,
                 root.display(),
                 exe.display(),
-                root.join("run/launchd.err").display()
+                // beside run/, not in it: launchd creates the parent of this path 0744, which serve refuses
+                root.join("serve.err").display()
             );
             ExitCode::SUCCESS
         }

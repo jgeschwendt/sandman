@@ -139,7 +139,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
       <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>session marks, one per line, by UTC day</td></tr>
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
-      <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>, launchd's <code class="code">launchd.err</code>; see <a class="link" href="#serve">serve</a></td></tr>
+      <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>; see <a class="link" href="#serve">serve</a></td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
     </tbody>
   </table>
@@ -269,7 +269,7 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       <code class="code">{"code":"down","ok":false}</code>, exit 1.</li>
     <li><strong>setup</strong> — prints the plist and writes nothing: this executable and
       <code class="code">serve</code>, the root it ran with, KeepAlive, RunAtLoad, ThrottleInterval 10,
-      ExitTimeOut 2, stderr to <code class="code">run/launchd.err</code> for failures before the log.</li>
+      ExitTimeOut 2, stderr to <code class="code">serve.err</code> beside <code class="code">run/</code> for failures before the log.</li>
   </ul>
   <pre class="snippet">sandman-next setup &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.plist
