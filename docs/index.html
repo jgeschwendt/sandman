@@ -36,6 +36,9 @@
 .chart-frame svg { display: block; max-width: none; font-family: var(--ui-font-mono); font-size: 12px; }
 .chart-links path { fill: none; stroke: var(--ui-fg-faint); stroke-opacity: 0.55; stroke-width: 2; }
 #flow marker path { fill: var(--ui-fg-muted); }
+.chart-time path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 2; }
+.chart-time text { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); }
+.chart-node:focus-visible .chart-dot { stroke: var(--ui-accent); }
 .chart-heads text { fill: var(--ui-fg-faint); font-family: var(--ui-font-sans); font-size: 11px; letter-spacing: var(--ui-tracking-caps); text-transform: uppercase; }
 .chart-node { cursor: default; outline: none; }
 .chart-node rect:first-child { fill: var(--ui-surface-raised); stroke: var(--ui-border-strong); }
@@ -112,7 +115,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   </header>
   <figure class="figure">
     <div class="chart" id="flow"><noscript><p class="docs-note">The data flow needs JavaScript; its data is <a class="link" href="data/flow.json">docs/data/flow.json</a>.</p></noscript></div>
-    <figcaption>The data flow: who writes each file under the root, in the order a session passes them, and what <code class="code">chart</code> reads back. Data: <a href="data/flow.json">docs/data/flow.json</a>.</figcaption>
+    <figcaption>The data flow, from a session's timeline down the left edge: the moments that start each writer, the file each writes under the root, and what <code class="code">chart</code> reads back. Data: <a href="data/flow.json">docs/data/flow.json</a>.</figcaption>
   </figure>
   <div class="table-wrap">
   <table data-table>

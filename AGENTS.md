@@ -19,7 +19,7 @@ commands:
 | `docs/index.html`        | the page: data root, `mark`, `chart`, next; two d3 charts              |
 | `docs/charts/*.js`       | one ES module per chart over `lib.js`'s chrome; d3 7.9.0 is the page's global              |
 | `docs/data/chart.json`   | the timeline's sample: `tests/sandman.rs` `chart` fails unless it is the verb's output     |
-| `docs/data/flow.json`    | the data-flow chart's nodes and edges, ①–⑤ marking the order a session passes them        |
+| `docs/data/flow.json`    | the data-flow chart's moments, nodes and edges, ①–⑤ marking the order a session passes them |
 | `Cargo.toml`             | the rust base's `lints.toml` verbatim; the one opt-out carries its reason                   |
 
 The gate is `mise run check` (fmt, clippy `-D warnings`, `cover` at 100 % of lines), run by hk's pre-push (`hk install --mise` once per clone) and by CI. `lints check` from jgeschwendt/rust holds `Cargo.toml` to the base. Tests never touch `~/.sandman`; a child keeps the parent env (llvm-cov's `LLVM_PROFILE_FILE`), with `HOME` and `SANDMAN_*` replaced.
