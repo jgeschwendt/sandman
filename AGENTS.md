@@ -2,7 +2,7 @@
 
 ```stele
 kind: system
-purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's marks file, `chart` prints what the data root holds as one JSON object, `serve` is the daemon under launchd, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
+purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `chart` prints what the data root holds as one JSON object, `serve` is the daemon under launchd, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
 commands:
   check: mise run check
   cover: mise run cover
@@ -36,7 +36,7 @@ Stdin, one object; `kind` and `session` (36 chars, hex and `-`) required, anythi
 {"kind":"start"|"end","session":"<uuid>","cwd":"<path>"?,"surface":"<str>"?,"interactive":bool?,"reason":"<str>"?,"resume":"<str>"?}
 ```
 
-Appends with `O_APPEND` to `<root>/marks/<yyyy>/<mm>/<dd>.jsonl` (UTC), compact, keys alphabetical:
+Appends with `O_APPEND` to `<root>/ledger/<yyyy>/<mm>/<dd>.jsonl` (UTC), compact, keys alphabetical:
 
 ```
 {"at":"<RFC 3339 UTC, seconds, Z>","cwd":…,"interactive":…,"kind":…,"machine":…,"reason":…,"resume":…,"session":…,"surface":…}
@@ -56,7 +56,7 @@ Stdout, one compact object, keys alphabetical; reads the root, writes nothing bu
  "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}]}
 ```
 
-- `active` — per session in `marks/*/*/*.jsonl`: `start` the `at` of its earliest start mark (a reload re-fires it), `end` of its latest end mark; `cwd`, `machine` from that start mark, else the end mark. By `start` (null first), then session.
+- `active` — per session in `ledger/*/*/*.jsonl`: `start` the `at` of its earliest start mark (a reload re-fires it), `end` of its latest end mark; `cwd`, `machine` from that start mark, else the end mark. By `start` (null first), then session.
 - `taken` — per file `<root>/.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` directly in a day dir; the latest per session wins. `taken` = that date and time as UTC, `bytes` = size; `title`, `cwd`, `highlights` (count, 0 without), `dreamed` from `<root>/memories/.recent/<session>.json` when it parses as an object. `state`: `waiting` pointer without `dreamed`, `dreamed` with it, `archived` no pointer. `memories` = memory entries naming the session. By `taken`, then session.
 - `memories` — per `<root>/memories/<bank>/<file>.md`, banks and files starting `.` or `_` and `MEMORY.md` skipped. Frontmatter: `key: value` lines between `---` fences; `name` (else the stem), `type` (else ""), `created`, `source` → `dream`/`reflect`/`remember` by its first word, else `other`; a dream's `session` is the uuid in `dream <ISO> · <uuid> · minds=…`. By bank, then file.
 

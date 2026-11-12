@@ -161,9 +161,9 @@ mod tests {
             r#"{"kind":"start"}"#.to_owned(),
         ];
         let files = [
-            ("marks/2026/11/09.jsonl", marks.join("\n")),
+            ("ledger/2026/11/09.jsonl", marks.join("\n")),
             (
-                "marks/2026/11/10.jsonl",
+                "ledger/2026/11/10.jsonl",
                 [
                     mark("2026-11-10T06:00:00Z", "end", "e", "/work/gamma", "laptop"),
                     mark("2026-11-10T07:45:00Z", "start", "d", "/work/beta", "studio"),
@@ -377,7 +377,7 @@ mod tests {
         )?;
         let after = clock()?;
         let lines = fs::read_to_string(format!(
-            "{root}/marks/{}.jsonl",
+            "{root}/ledger/{}.jsonl",
             before.get(..10).ok_or("date")?.replace('-', "/")
         ))?;
         let stamps = lines
