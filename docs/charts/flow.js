@@ -7,7 +7,7 @@ import { d3, hover, load, mount, redraw } from "./lib.js";
 const root = document.getElementById("flow");
 const data = await load("flow.json");
 
-const COLS = [180, 120, 290, 120, 150];
+const COLS = [180, 170, 290, 120, 150];
 const H = 32;
 const STEP = 48;
 const KIND = { earlier: "var(--kind-5)", file: "var(--kind-7)", moment: "var(--kind-1)", sink: "var(--kind-4)", verb: "var(--kind-3)" };
