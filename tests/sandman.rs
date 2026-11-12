@@ -1,19 +1,57 @@
 //! End to end: the built binary over temp data roots. The `chart` fixture's output is
-//! `docs/data/chart.json`, the sample the docs page draws.
+//! `docs/data/chart.json`, the sample the docs page draws; every daemon a test starts is killed
+//! when its guard drops.
+
+// the binary's dependency, unused by the suite
+use signal_hook as _;
 
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
     use std::error::Error;
-    use std::io::{self, Write as _};
+    use std::fs::Permissions;
+    use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _};
+    use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
-    use std::process::{Command, Stdio, id};
-    use std::{env, fs};
+    use std::process::{Child, Command, Stdio, id};
+    use std::{env, fs, thread};
 
     /// Session ids for the fixture: `5a000000-0000-4000-8000-00000000000<letter>`.
     const ID: &str = "5a000000-0000-4000-8000-00000000000";
     /// A test's fallible outcome.
     type Outcome = Result<(), Box<dyn Error>>;
+
+    /// A running `sandman serve`, killed and reaped when it drops.
+    struct Daemon(Child);
+
+    impl Drop for Daemon {
+        fn drop(&mut self) {
+            drop(self.0.kill());
+            drop(self.0.wait());
+        }
+    }
+
+    /// `request` to the daemon over `root`, and its whole reply.
+    fn ask(root: &str, request: &str) -> io::Result<String> {
+        let mut stream = UnixStream::connect(format!("{root}/run/serve.sock"))?;
+        stream.write_all(request.as_bytes())?;
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply).map(|_| reply)
+    }
+
+    /// `sandman args` with `envs` in place of `HOME` and the `SANDMAN_*` vars.
+    fn command(envs: &[(&str, &str)], args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_sandman"));
+        let _: &mut Command = command
+            .args(args)
+            // not env_clear: llvm-cov reaches the child through LLVM_PROFILE_FILE
+            .env_remove("HOME")
+            .env_remove("SANDMAN_MACHINE")
+            .env_remove("SANDMAN_ROOT")
+            .envs(envs.iter().copied());
+        command
+    }
 
     /// `Err` showing both sides unless `got == want`.
     fn same(got: &str, want: &str) -> Outcome {
@@ -24,20 +62,14 @@ mod tests {
         }
     }
 
-    /// `sandman args` with `envs` in place of `HOME` and the `SANDMAN_*` vars, `stdin` piped in: its exit code, a newline, its
-    /// stdout, then its stderr.
+    /// `command(envs, args)`, `stdin` piped in: its exit code, a newline, its stdout, then its
+    /// stderr.
     fn sandman(
         envs: &[(&str, &str)],
         args: &[&str],
         stdin: &str,
     ) -> Result<String, Box<dyn Error>> {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_sandman"))
-            .args(args)
-            // not env_clear: llvm-cov reaches the child through LLVM_PROFILE_FILE
-            .env_remove("HOME")
-            .env_remove("SANDMAN_MACHINE")
-            .env_remove("SANDMAN_ROOT")
-            .envs(envs.iter().copied())
+        let mut child = command(envs, args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -54,6 +86,21 @@ mod tests {
             String::from_utf8(out.stdout)?,
             String::from_utf8(out.stderr)?
         ))
+    }
+
+    /// `sandman serve` over `root` with `SANDMAN_LOG_CAP` at `cap`, and the health line it prints
+    /// once ready.
+    fn serve(root: &str, cap: &str) -> Result<(Daemon, String), Box<dyn Error>> {
+        let envs = [
+            ("SANDMAN_LOG_CAP", cap),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root),
+        ];
+        let mut daemon = Daemon(command(&envs, &["serve"]).stdout(Stdio::piped()).spawn()?);
+        let mut ready = String::new();
+        let _: usize =
+            BufReader::new(daemon.0.stdout.take().ok_or("stdout")?).read_line(&mut ready)?;
+        Ok((daemon, ready))
     }
 
     /// A fresh temp dir named for the test, as a string for `SANDMAN_ROOT`.
@@ -371,6 +418,214 @@ mod tests {
             &start,
         )?;
         same(out.get(..16).unwrap_or_default(), "1\nsandman mark: ")
+    }
+
+    /// A daemon killed with SIGKILL leaves its pid file and socket, which read as down; the next
+    /// start replaces them, and a shutdown request answers, refuses the next connect and exits 0.
+    #[test]
+    fn recover() -> Outcome {
+        let root = temp("recover")?;
+        let envs = [("SANDMAN_ROOT", root.as_str())];
+        let down = "1\n{\"code\":\"down\",\"ok\":false}\n";
+        // the guard's drop is the SIGKILL
+        drop(serve(&root, "")?);
+        let stale = ["pid", "sock"].map(|kind| fs::exists(format!("{root}/run/serve.{kind}")));
+        same(&format!("{stale:?}"), "[Ok(true), Ok(true)]")?;
+        same(&sandman(&envs, &["status"], "")?, down)?;
+        let (mut daemon, ready) = serve(&root, "")?;
+        same(&ask(&root, "{\"op\":\"health\"}\n")?, &ready)?;
+        same(&ask(&root, "{\"op\":\"shutdown\"}\n")?, "{\"ok\":true}\n")?;
+        same(&sandman(&envs, &["status"], "")?, down)?;
+        same(&format!("{:?}", daemon.0.wait()?.code()), "Some(0)")?;
+        let log = fs::read_to_string(format!("{root}/run/serve.log"))?;
+        same(
+            log.lines()
+                .last()
+                .and_then(|line| line.get(28..))
+                .unwrap_or_default(),
+            r#","event":"exit","reason":"shutdown request"}"#,
+        )
+    }
+
+    /// `serve` refuses a socket path over 103 bytes and a `run/` others can reach; a panic (here
+    /// the ready line into a closed stdout) is logged before the process dies.
+    #[test]
+    fn refuse() -> Outcome {
+        let root = temp("refuse")?;
+        let deep = format!("{root}/{}", "x".repeat(80));
+        same(
+            &sandman(&[("SANDMAN_ROOT", &deep)], &["serve"], "")?,
+            &format!(
+                "1\nsandman serve: {deep}/run/serve.sock is over a unix socket's 103 bytes; shorten SANDMAN_ROOT\n"
+            ),
+        )?;
+        let run = format!("{root}/run");
+        fs::create_dir_all(&run)?;
+        fs::set_permissions(&run, Permissions::from_mode(0o755))?;
+        same(
+            &sandman(&[("SANDMAN_ROOT", &root)], &["serve"], "")?,
+            &format!("1\nsandman serve: {run} must be this user's, mode 0700\n"),
+        )?;
+        fs::set_permissions(&run, Permissions::from_mode(0o700))?;
+        let (reader, writer) = io::pipe()?;
+        drop(reader);
+        let out = command(
+            &[("SANDMAN_MACHINE", "studio"), ("SANDMAN_ROOT", &root)],
+            &["serve"],
+        )
+        .stdout(writer)
+        .output()?;
+        let log = fs::read_to_string(format!("{run}/serve.log"))?;
+        same(
+            &format!(
+                "{:?} {} {}",
+                out.status.code(),
+                log.contains(r#","event":"panic","reason":"panicked at "#),
+                log.contains("failed printing to stdout")
+            ),
+            "Some(101) true true",
+        )
+    }
+
+    /// The daemon's life: ready on start with `run/` 0700, a socket and its pid; a second instance
+    /// refused untouched; typed errors; a silent or vanished client survived; SIGTERM drains to
+    /// exit 0 with its line logged, pid file and socket gone, and the log rotated at its cap.
+    #[test]
+    fn serve_life() -> Outcome {
+        let root = temp("serve")?;
+        let envs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        let (mut daemon, ready) = serve(&root, "1")?;
+        let (pid, version) = (daemon.0.id(), env!("CARGO_PKG_VERSION"));
+        let health: Value = serde_json::from_str(&ready)?;
+        same(
+            &format!(
+                "{} {} {} {} {}",
+                health["machine"],
+                health["pid"],
+                health["state"],
+                health["version"],
+                health["since"].as_str().map_or(0, str::len)
+            ),
+            &format!(r#""studio" {pid} "ready" "{version}" 20"#),
+        )?;
+        same(&sandman(&envs, &["status"], "")?, &format!("0\n{ready}"))?;
+        same(
+            &sandman(&envs, &["serve"], "")?,
+            "1\nsandman serve: already running\n",
+        )?;
+        let run = format!("{root}/run");
+        same(
+            &format!(
+                "{:o} {} {}",
+                fs::metadata(&run)?.mode() & 0o777,
+                fs::metadata(format!("{run}/serve.sock"))?
+                    .file_type()
+                    .is_socket(),
+                fs::read_to_string(format!("{run}/serve.pid"))?
+            ),
+            &format!("700 true {pid}"),
+        )?;
+        same(
+            &format!(
+                "{}{}{}",
+                ask(&root, "not json\n")?,
+                ask(&root, "{\"op\":\"nap\"}\n")?,
+                ask(&root, "")?
+            ),
+            "{\"code\":\"bad_request\",\"ok\":false}\n{\"code\":\"unknown_op\",\"ok\":false}\n",
+        )?;
+        // gone before the reply: the write meets EPIPE, which must not kill the daemon
+        UnixStream::connect(format!("{run}/serve.sock"))?.write_all(b"{\"op\":\"health\"}\n")?;
+        same(&ask(&root, "{\"op\":\"health\"}\n")?, &ready)?;
+        same(
+            &Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status()?
+                .success()
+                .to_string(),
+            "true",
+        )?;
+        same(&format!("{:?}", daemon.0.wait()?.code()), "Some(0)")?;
+        let logs =
+            ["serve.log", "serve.log.1"].map(|file| fs::read_to_string(format!("{run}/{file}")));
+        same(
+            &logs
+                .iter()
+                .map(|log| {
+                    log.as_ref()
+                        .map_or("", |text| text.get(28..).unwrap_or_default())
+                })
+                .collect::<String>(),
+            &format!(
+                ",\"event\":\"exit\",\"reason\":\"signal TERM\"}}\n,\"event\":\"start\",\"pid\":{pid},\"version\":\"{version}\"}}\n"
+            ),
+        )?;
+        let left = ["pid", "sock"].map(|kind| fs::exists(format!("{run}/serve.{kind}")));
+        same(&format!("{left:?}"), "[Ok(false), Ok(false)]")
+    }
+
+    /// `setup` prints the launchd plist for `dev.gigantic.sandman` and writes nothing.
+    #[test]
+    fn setup() -> Outcome {
+        let root = temp("setup")?;
+        same(
+            &sandman(&[("SANDMAN_ROOT", &root)], &["setup"], "")?,
+            &format!(
+                r#"0
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>EnvironmentVariables</key>
+  <dict><key>SANDMAN_ROOT</key><string>{root}</string></dict>
+  <key>ExitTimeOut</key>
+  <integer>2</integer>
+  <key>KeepAlive</key>
+  <true/>
+  <key>Label</key>
+  <string>dev.gigantic.sandman</string>
+  <key>ProgramArguments</key>
+  <array><string>{}</string><string>serve</string></array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>{root}/run/launchd.err</string>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>
+"#,
+                env!("CARGO_BIN_EXE_sandman")
+            ),
+        )?;
+        same(&fs::read_dir(&root)?.count().to_string(), "0")
+    }
+
+    /// `status` with no daemon prints down and exits 1; against a daemon of another version it
+    /// passes the health through and names both versions and the fix on stderr.
+    #[test]
+    fn status() -> Outcome {
+        let root = temp("status")?;
+        same(
+            &sandman(&[("SANDMAN_ROOT", &root)], &["status"], "")?,
+            "1\n{\"code\":\"down\",\"ok\":false}\n",
+        )?;
+        fs::create_dir_all(format!("{root}/run"))?;
+        let listener = UnixListener::bind(format!("{root}/run/serve.sock"))?;
+        drop(thread::spawn(move || -> io::Result<()> {
+            let (mut conn, _) = listener.accept()?;
+            conn.write_all(b"{\"ok\":true,\"version\":\"0.0.0\"}\n")
+        }));
+        same(
+            &sandman(&[("SANDMAN_ROOT", &root)], &["status"], "")?,
+            &format!(
+                "0\n{{\"ok\":true,\"version\":\"0.0.0\"}}\nsandman status: the daemon is 0.0.0, this client {}; swap it: launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman\n",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
     }
 
     /// No verb, or an unknown one, prints the two-line usage and exits 2; `$HOME` stands in

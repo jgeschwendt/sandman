@@ -1,15 +1,27 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's marks
-//! file, `chart` prints what the data root holds as one JSON object.
+//! file, `chart` prints what the data root holds as one JSON object, `serve` is the daemon,
+//! `status` asks it for its health, `setup` prints its launchd plist.
 
 use serde_json::{Map, Value, json};
+use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
+use signal_hook::low_level::signal_name;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsStr;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read as _, Write as _};
+use std::fs::{self, DirBuilder, File, OpenOptions, TryLockError};
+use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, id};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
+static STOP: OnceLock<&str> = OnceLock::new();
 
 /// This machine's id: `$SANDMAN_MACHINE`, else `<root>/machine`, created on first use by a hard
 /// link from a temp file, so concurrent first runs agree on one id.
@@ -259,9 +271,192 @@ fn main() -> ExitCode {
             ));
             ExitCode::SUCCESS
         }
+        Some("serve") => {
+            let run = root.join("run");
+            let (log, sock, tmp) = (
+                run.join("serve.log"),
+                run.join("serve.sock"),
+                run.join("serve.new"),
+            );
+            let started = || -> io::Result<_> {
+                if sock.as_os_str().len() > 103 {
+                    return Err(io::Error::other(format!(
+                        "{} is over a unix socket's 103 bytes; shorten SANDMAN_ROOT",
+                        sock.display()
+                    )));
+                }
+                fs::create_dir_all(&root)?;
+                drop(DirBuilder::new().mode(0o700).create(&run));
+                // append, not create: a second instance must not even truncate the lock file
+                let lock = OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(run.join("serve.lock"))?;
+                match lock.try_lock() {
+                    Err(TryLockError::WouldBlock) => {
+                        return Err(io::Error::other("already running"));
+                    }
+                    other => other?,
+                }
+                drop(fs::remove_file(&tmp));
+                let listener = UnixListener::bind(&tmp)?;
+                let dir = fs::metadata(&run)?;
+                if dir.uid() != fs::metadata(&tmp)?.uid() || dir.mode() & 0o077 != 0 {
+                    fs::remove_file(&tmp)?;
+                    return Err(io::Error::other(format!(
+                        "{} must be this user's, mode 0700",
+                        run.display()
+                    )));
+                }
+                fs::rename(&tmp, &sock)?;
+                fs::write(run.join("serve.pid"), id().to_string())?;
+                Ok((lock, listener, Signals::new([SIGHUP, SIGINT, SIGTERM])?))
+            };
+            let (_lock, listener, mut signals) = match started() {
+                Ok(held) => held,
+                Err(error) => {
+                    eprintln!("sandman serve: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let cap = env::var("SANDMAN_LOG_CAP")
+                .ok()
+                .and_then(|cap| cap.parse().ok())
+                .unwrap_or(1u64 << 20);
+            let write = move |mut line: Value| {
+                line["at"] = now().into();
+                if fs::metadata(&log).is_ok_and(|meta| meta.len() >= cap) {
+                    drop(fs::rename(&log, log.with_extension("log.1")));
+                }
+                drop(
+                    OpenOptions::new()
+                        .append(true)
+                        .create(true)
+                        .open(&log)
+                        .and_then(|mut file| writeln!(file, "{line}")),
+                );
+            };
+            let hook = write.clone();
+            panic::set_hook(Box::new(move |info| {
+                hook(json!({"event": "panic", "reason": info.to_string()}));
+            }));
+            let wake = sock.clone();
+            drop(thread::spawn(move || {
+                for signal in signals.forever() {
+                    STOP.set(
+                        signal_name(signal)
+                            .unwrap_or_default()
+                            .trim_start_matches("SIG"),
+                    )
+                    .unwrap_or_default();
+                    drop(UnixStream::connect(&wake));
+                }
+            }));
+            let version = env!("CARGO_PKG_VERSION");
+            let health = json!({
+                "machine": machine(&root), "ok": true, "pid": id(), "since": now(), "state": "ready", "version": version,
+            });
+            write(json!({"event": "start", "pid": id(), "version": version}));
+            // the ready line: whoever spawned the daemon reads it, so nothing polls
+            println!("{health}");
+            let reason = loop {
+                let (mut conn, _) = match listener.accept().and_then(|pair| {
+                    STOP.get().map_or(Ok(pair), |signal| {
+                        Err(io::Error::other(format!("signal {signal}")))
+                    })
+                }) {
+                    Ok(pair) => pair,
+                    Err(reason) => break reason.to_string(),
+                };
+                let mut line = String::new();
+                if conn
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .and_then(|()| BufReader::new(&conn).read_line(&mut line))
+                    .is_err()
+                {
+                    continue;
+                }
+                let reply = match serde_json::from_str::<Value>(&line).unwrap_or_default()["op"]
+                    .as_str()
+                {
+                    Some("health") => health.clone(),
+                    Some("shutdown") => {
+                        drop(listener);
+                        drop(writeln!(conn, "{}", json!({"ok": true})));
+                        break "shutdown request".to_owned();
+                    }
+                    op => json!({"code": op.map_or("bad_request", |_| "unknown_op"), "ok": false}),
+                };
+                drop(writeln!(conn, "{reply}"));
+            };
+            let pid = run.join("serve.pid");
+            if fs::read_to_string(&pid).is_ok_and(|text| text == id().to_string()) {
+                drop(fs::remove_file(&pid));
+                drop(fs::remove_file(&sock));
+            }
+            write(json!({"event": "exit", "reason": reason}));
+            ExitCode::SUCCESS
+        }
+        Some("setup") => {
+            let exe = env::current_exe().unwrap_or_default();
+            print!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>EnvironmentVariables</key>
+  <dict><key>SANDMAN_ROOT</key><string>{}</string></dict>
+  <key>ExitTimeOut</key>
+  <integer>2</integer>
+  <key>KeepAlive</key>
+  <true/>
+  <key>Label</key>
+  <string>dev.gigantic.sandman</string>
+  <key>ProgramArguments</key>
+  <array><string>{}</string><string>serve</string></array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>{}</string>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>
+"#,
+                root.display(),
+                exe.display(),
+                root.join("run/launchd.err").display()
+            );
+            ExitCode::SUCCESS
+        }
+        Some("status") => {
+            let reply = UnixStream::connect(root.join("run/serve.sock"))
+                .and_then(|mut stream| {
+                    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+                    writeln!(stream, r#"{{"op":"health"}}"#)?;
+                    let mut line = String::new();
+                    BufReader::new(stream).read_line(&mut line).map(|_| line)
+                })
+                .ok()
+                .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+                .filter(|health| health["ok"] == true);
+            let Some(health) = reply else {
+                println!("{}", json!({"code": "down", "ok": false}));
+                return ExitCode::FAILURE;
+            };
+            let version = env!("CARGO_PKG_VERSION");
+            if health["version"] != version {
+                eprintln!(
+                    "sandman status: the daemon is {}, this client {version}; swap it: launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman",
+                    health["version"].as_str().unwrap_or_default()
+                );
+            }
+            println!("{health}");
+            ExitCode::SUCCESS
+        }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman chart"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman chart | serve | setup | status"
             );
             ExitCode::from(2)
         }
