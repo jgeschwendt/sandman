@@ -5,7 +5,7 @@
     {"from": "chart", "label": "one JSON object on stdout", "to": "bifrost"},
     {"from": "dream", "label": "⑤ memory files: what the dream kept, its source naming the session", "to": "banks"},
     {"from": "dream", "label": "④ dreamed: the pointer's dreamed stamp", "to": "recent"},
-    {"from": "hooks", "label": "① session starts, ② session ends: one JSON object on stdin", "to": "mark"},
+    {"from": "mod", "label": "① session starts, ② session ends: one JSON object on stdin", "to": "mark"},
     {"from": "machine", "label": "the machine id", "to": "chart"},
     {"from": "mark", "label": "reads the machine id, minting it once", "to": "machine"},
     {"from": "mark", "label": "the start mark, the end mark: one line each, O_APPEND", "to": "marks"},
@@ -15,8 +15,8 @@
     {"from": "take", "label": "③ taken: a short-term pointer drops beside it", "to": "recent"}
   ],
   "nodes": [
-    {"col": 0, "doc": "a session's start and end hooks, under a 1.5 s budget", "id": "hooks", "kind": "source", "label": "① ② hooks", "row": 0},
-    {"col": 0, "doc": "the earlier sandman's take, at session end: archives the transcript, drops the pointer", "id": "take", "kind": "earlier", "label": "③ take", "row": 1},
+    {"col": 0, "doc": "the subether mod's session.start and session.end handlers, under a 1.5 s budget", "id": "mod", "kind": "source", "label": "① ② subether mod", "row": 0},
+    {"col": 0, "doc": "the earlier sandman's take, run by the subether mod at session end: archives the transcript, drops the pointer", "id": "take", "kind": "earlier", "label": "③ take", "row": 1},
     {"col": 0, "doc": "the earlier sandman's dream pass: takes waiting pointers oldest first, stamps each, writes what it kept", "id": "dream", "kind": "earlier", "label": "④ ⑤ dream", "row": 2.5},
     {"col": 1, "doc": "validates stdin, stamps at and machine, appends", "id": "mark", "kind": "verb", "label": "sandman mark", "row": 0},
     {"col": 2, "doc": "one mark per line, keyed by UTC day", "id": "marks", "kind": "file", "label": "marks/<yyyy>/<mm>/<dd>.jsonl", "row": 0},

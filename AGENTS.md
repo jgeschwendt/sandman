@@ -42,7 +42,7 @@ Appends with `O_APPEND` to `<root>/marks/<yyyy>/<mm>/<dd>.jsonl` (UTC), compact,
 {"at":"<RFC 3339 UTC, seconds, Z>","cwd":…,"interactive":…,"kind":…,"machine":…,"reason":…,"resume":…,"session":…,"surface":…}
 ```
 
-Exit 0 silent; 2 on bad stdin, one stderr line, nothing written; 1 when the line cannot be written. Runs inside a 1.5 s hook budget.
+Exit 0 silent; 2 on bad stdin, one stderr line, nothing written; 1 when the line cannot be written. Runs inside the subether mod's 1.5 s budget.
 
 ### `sandman chart`
 
