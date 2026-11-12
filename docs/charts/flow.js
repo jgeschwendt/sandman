@@ -1,4 +1,4 @@
-// The data flow, ①–⑤ marking the order a session passes it: hooks → mark → the marks files (① ②); the earlier
+// The data flow, ①–⑤ marking the order a session passes it: the subether mod → mark → the marks files (① ②); the earlier
 // sandman's take and dream → the archive, the pointers and the bank files (③ ④ ⑤); all of them → chart → its
 // consumer. Nodes and edges from docs/data/flow.json, each node at its column and row.
 import { d3, hover, load, mount, redraw } from "./lib.js";
@@ -11,7 +11,7 @@ const H = 32;
 const STEP = 48;
 const KIND = { earlier: "var(--kind-5)", file: "var(--kind-7)", sink: "var(--kind-4)", source: "var(--kind-1)", verb: "var(--kind-3)" };
 // the legend's words per kind; the earlier sandman's writers are dashed as well as coloured
-const NAME = { earlier: "earlier sandman", file: "file", sink: "consumer", source: "hooks", verb: "this rewrite" };
+const NAME = { earlier: "earlier sandman", file: "file", sink: "consumer", source: "mod", verb: "this rewrite" };
 const byId = new Map(data.nodes.map((n) => [n.id, n]));
 
 const { frame, hide, show } = mount(root, {

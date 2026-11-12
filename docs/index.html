@@ -133,7 +133,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 <section class="docs-section" id="mark" data-component="mark">
   <header>
     <h2 class="h2">mark</h2>
-    <p class="docs-note">A session hook's verb: it runs inside a 1.5 s budget and does nothing slow.</p>
+    <p class="docs-note">The verb the subether mod runs at a session's start and end: it runs inside a 1.5 s budget and does nothing slow.</p>
   </header>
   <p>One JSON object on stdin; <code class="code">kind</code> and <code class="code">session</code> are
     required, any other field missing is <code class="code">null</code>.</p>
@@ -204,7 +204,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
     <li><code class="code">recall</code></li>
     <li><code class="code">reflect</code></li>
     <li><code class="code">remember</code></li>
-    <li><code class="code">take</code></li>
+    <li><code class="code">take</code>: closing a background session takes it then; the earlier take declines while the job's directory exists and owes it instead.</li>
   </ul>
 </section>
 
