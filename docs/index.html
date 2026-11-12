@@ -63,6 +63,16 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 .chart-bar-mark:focus-visible, .chart-dot:focus-visible { stroke: var(--ui-accent); stroke-width: 2; }
 .chart-table { overflow-x: auto; }
 .chart-table td { font-family: var(--ui-font-mono); font-size: 12px; vertical-align: top; }
+/* the daemon's lifecycle: a static svg, tokens only */
+#lifecycle svg { display: block; font-size: 12px; max-width: none; }
+#lifecycle .life-box { fill: var(--ui-surface-raised); stroke: var(--ui-border-strong); }
+#lifecycle .life-box.is-accent { fill: var(--ui-accent); stroke: var(--ui-accent); }
+#lifecycle .life-name { fill: var(--ui-fg); font-family: var(--ui-font-mono); font-size: 13px; }
+#lifecycle .life-note { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); }
+#lifecycle .is-accent ~ text { fill: var(--ui-accent-fg); }
+#lifecycle .life-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
+#lifecycle .life-path.is-back { stroke-dasharray: 4 3; }
+#lifecycle marker path { fill: var(--ui-fg-muted); }
 </style>
 </head>
 <body data-page="sandman">
@@ -97,12 +107,14 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 <header class="stack">
   <p class="eyebrow">memory for agentic sessions</p>
   <p class="lead docs-lead"><code class="code">sandman</code> is being rewritten from scratch, one part
-    at a time; this build carries two verbs, <code class="code">mark</code> and
-    <code class="code">chart</code>.</p>
+    at a time; this build carries <code class="code">mark</code>, <code class="code">chart</code>
+    and the daemon, <code class="code">serve</code>, with its <code class="code">status</code> and
+    <code class="code">setup</code>.</p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#root">root</a>
     <a class="pill" href="#mark">mark</a>
     <a class="pill" href="#chart">chart</a>
+    <a class="pill" href="#serve">serve</a>
     <a class="pill" href="#next">next</a>
   </nav>
 </header>
@@ -127,6 +139,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
       <tr><td><code class="code">marks/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>session marks, one per line, by UTC day</td></tr>
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
+      <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>, launchd's <code class="code">launchd.err</code>; see <a class="link" href="#serve">serve</a></td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
     </tbody>
   </table>
@@ -197,13 +210,79 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   </figure>
 </section>
 
+<section class="docs-section" id="serve" data-component="serve">
+  <header>
+    <h2 class="h2">serve</h2>
+    <p class="docs-note">The daemon, a foreground process launchd keeps alive as
+      <code class="code">dev.gigantic.sandman</code>. It runs no jobs yet; it is where the dream
+      pass will live. It reads and writes nothing under the root but <code class="code">run/</code>.</p>
+  </header>
+  <figure class="figure">
+    <div class="chart-frame" id="lifecycle">
+      <svg width="736" height="178" viewBox="0 0 736 178" role="img" aria-label="the daemon's lifecycle: start, ready, stopping, exit, and launchd starting it again">
+        <defs>
+          <marker id="life-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <g transform="translate(0,16)"><rect class="life-box" width="160" height="72" rx="8" /><text class="life-name" x="14" y="24">① start</text><text class="life-note" x="14" y="44">state booting</text><text class="life-note" x="14" y="60">lock, socket, pid</text></g>
+        <g transform="translate(192,16)"><rect class="life-box is-accent" width="160" height="72" rx="8" /><text class="life-name" x="14" y="24">② ready</text><text class="life-note" x="14" y="44">health on stdout</text><text class="life-note" x="14" y="60">serves the socket</text></g>
+        <g transform="translate(384,16)"><rect class="life-box" width="160" height="72" rx="8" /><text class="life-name" x="14" y="24">③ stopping</text><text class="life-note" x="14" y="44">a signal or shutdown</text><text class="life-note" x="14" y="60">listener dropped first</text></g>
+        <g transform="translate(576,16)"><rect class="life-box" width="160" height="72" rx="8" /><text class="life-name" x="14" y="24">④ exit</text><text class="life-note" x="14" y="44">pid file, socket gone</text><text class="life-note" x="14" y="60">exit line, exit 0</text></g>
+        <g aria-hidden="true">
+          <path class="life-path" marker-end="url(#life-head)" d="M160,52H192" />
+          <path class="life-path" marker-end="url(#life-head)" d="M352,52H384" />
+          <path class="life-path" marker-end="url(#life-head)" d="M544,52H576" />
+          <path class="life-path is-back" marker-end="url(#life-head)" d="M656,88V136H80V88" />
+        </g>
+        <text class="life-note" x="368" y="156" text-anchor="middle">launchd starts it again (KeepAlive); a kill's stale socket and pid file are replaced at ①</text>
+      </svg>
+    </div>
+    <figcaption>The daemon's life, ①–④. A second instance, a socket path over 103 bytes or a
+      <code class="code">run/</code> others can reach stops at ① with one stderr line and exit 1.</figcaption>
+  </figure>
+  <p>At ① it creates <code class="code">run/</code> 0700 and refuses it if it is not this user's or
+    group or other can reach it; takes an exclusive <code class="code">flock</code> on
+    <code class="code">run/serve.lock</code>, held for life; binds <code class="code">run/serve.new</code>
+    and renames it over <code class="code">run/serve.sock</code>, safe because the lock proves no
+    one else is alive; and writes <code class="code">run/serve.pid</code>. Then it logs its start and
+    prints its health line on stdout, so whoever spawned it knows it is ready without polling.</p>
+  <p>One newline-terminated JSON request and one reply per connection, compact, keys alphabetical; a
+    connection silent for 1 s is dropped unanswered. Errors are typed codes.</p>
+  <pre class="snippet">{"op":"health"}   → {"machine":str,"ok":true,"pid":int,"since":"&lt;RFC 3339 start&gt;","state":"booting"|"ready"|"stopping","version":"&lt;crate version&gt;"}
+{"op":"shutdown"} → {"ok":true}, written after the listener is dropped
+anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>state</strong> — <code class="code">ready</code> whenever it answers today: there is
+      nothing to derive before the socket is bound, and a stopping daemon no longer accepts.</li>
+    <li><strong>signals</strong> — SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is
+      ignored. The drain budget is 2 s, launchd's <code class="code">ExitTimeOut</code>: the one
+      connection in hand, at most its 1 s read. On exit it removes <code class="code">serve.pid</code>
+      and <code class="code">serve.sock</code> while the pid file still holds its pid.</li>
+    <li><strong>log</strong> — <code class="code">run/serve.log</code>, one compact object per line
+      with <code class="code">at</code>: <code class="code">start</code> (pid, version),
+      <code class="code">exit</code> (reason: <code class="code">signal TERM</code>,
+      <code class="code">shutdown request</code>, an accept error), <code class="code">panic</code>
+      from the panic hook. A line that finds it at <code class="code">$SANDMAN_LOG_CAP</code> bytes
+      (1 MiB) first renames it to <code class="code">serve.log.1</code>.</li>
+    <li><strong>status</strong> — sends health and prints the reply, exit 0, with one stderr line
+      naming both versions and <code class="code">launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman</code>
+      when the daemon's is not the client's; no daemon prints
+      <code class="code">{"code":"down","ok":false}</code>, exit 1.</li>
+    <li><strong>setup</strong> — prints the plist and writes nothing: this executable and
+      <code class="code">serve</code>, the root it ran with, KeepAlive, RunAtLoad, ThrottleInterval 10,
+      ExitTimeOut 2, stderr to <code class="code">run/launchd.err</code> for failures before the log.</li>
+  </ul>
+  <pre class="snippet">sandman-next setup &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.plist
+launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after each install</pre>
+</section>
+
 <section class="docs-section" id="next" data-component="next">
   <header>
     <h2 class="h2">Next</h2>
     <p class="docs-note">Parts still to bring over.</p>
   </header>
   <ul class="stack" role="list">
-    <li><code class="code">dream</code></li>
+    <li><code class="code">dream</code>: runs inside <code class="code">serve</code>.</li>
     <li><code class="code">recall</code></li>
     <li><code class="code">reflect</code></li>
     <li><code class="code">remember</code></li>

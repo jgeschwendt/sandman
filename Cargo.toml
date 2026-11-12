@@ -12,6 +12,8 @@ version = "0.1.0"
 
 [dependencies]
 serde_json = "1"
+# SIGTERM, SIGINT, SIGHUP into a thread: std has no signal handling and `unsafe_code` is forbidden.
+signal-hook = "0.4"
 
 # The canonical lints for jgeschwendt crates: maximalist opt-out. Every rustc allow-by-default
 # lint and every clippy lint is on; an `allow` is an opt-out and carries its reason on the line
