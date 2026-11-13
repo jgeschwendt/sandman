@@ -279,8 +279,8 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       does, reason <code class="code">idle</code>, one a tick, so an abandoned session's memory is kept;
       otherwise it may be alive and is left. A session resumed later gets a new start mark and is open
       again.</li>
-    <li><strong>settle</strong> — a session whose latest ledger line is a <code class="code">held</code>
-      end on this machine, no job naming it any more, its transcript untouched for 120 s
+    <li><strong>settle</strong> — a session whose latest end is <code class="code">held</code> on this
+      machine with no start since, no job naming it any more, its transcript untouched for 120 s
       (<code class="code">$SANDMAN_QUIET_MS</code>), is taken as <a class="link" href="#take">take</a> does:
       <code class="code">taken</code> or <code class="code">gone</code>, reason
       <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.</li>
@@ -320,7 +320,7 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
       <code class="code">traces/&lt;bank&gt;/</code>, apart from the banks until <a class="link" href="#consolidate">consolidate</a>.</p>
   </header>
   <p>Each tick, after settling, it derives from the ledger the oldest session of this machine whose
-    latest line is a <code class="code">taken</code> end, decides one outcome, and appends one line with
+    latest end is <code class="code">taken</code>, with no start or encode since, decides one outcome, and appends one line with
     <code class="code">mark</code>'s writer:</p>
   <div class="table-wrap">
   <table data-table>

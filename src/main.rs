@@ -1507,24 +1507,25 @@ fn main() -> ExitCode {
                 while STOP.get().is_none() {
                     thread::sleep(tick);
                     let lines = ledger(&data);
+                    let story = sessions(&lines);
                     // this machine's sessions started before the grace with no end since, no job
                     // naming them: without a transcript gone, idle past the window taken; at most
                     // 20 gone and one taken a tick
                     let (mut left, born) = ([20u8, 1], ago(grace));
-                    for (session, [start, ended, _, last, _]) in sessions(&lines) {
-                        let at = last["at"].as_str();
+                    for (session, marks) in &story {
+                        let (start, at) = (&marks[0], marks[3]["at"].as_str());
                         if start["machine"] != this
-                            || at <= ended["at"].as_str()
+                            || at <= marks[1]["at"].as_str()
                             || at > Some(born.as_str())
                         {
                             continue;
                         }
-                        let live = touched(&claude, &session);
+                        let live = touched(&claude, session);
                         let which = usize::from(live.is_some());
                         let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
                         if left[which] == 0
                             || live.is_some_and(|time| spent(time) <= idle)
-                            || job(&claude, &session).is_some()
+                            || job(&claude, session).is_some()
                             || STOP.get().is_some()
                         {
                             continue;
@@ -1534,28 +1535,24 @@ fn main() -> ExitCode {
                         logged(
                             "reconcile",
                             "session",
-                            &session,
-                            end(
-                                &data,
-                                &claude,
-                                &session,
-                                &start["cwd"],
-                                &reason.into(),
-                                None,
-                            ),
+                            session,
+                            end(&data, &claude, session, &start["cwd"], &reason.into(), None),
                         );
                     }
-                    // the latest line per session; a held end whose job is gone and whose
-                    // transcript has been quiet for the window is taken
-                    let latest: BTreeMap<&str, &Value> = lines
-                        .iter()
-                        .filter_map(|entry| Some((entry["session"].as_str()?, entry)))
-                        .collect();
-                    for (session, held) in latest.clone() {
-                        let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
-                        if held["kind"] != "end"
-                            || held["outcome"] != "held"
-                            || held["machine"] != this
+                    // this machine's sessions whose latest end has `outcome`, no start since
+                    let ended = |marks: &[Value; 5], outcome: &str| {
+                        marks[1]["outcome"] == outcome
+                            && marks[1]["machine"] == this
+                            && marks[3]["at"].as_str() <= marks[1]["at"].as_str()
+                    };
+                    // a held end whose job is gone and whose transcript has been quiet for the
+                    // window is taken
+                    for (session, marks) in &story {
+                        let (_busy, held) = (
+                            BUSY.lock().unwrap_or_else(PoisonError::into_inner),
+                            &marks[1],
+                        );
+                        if !ended(marks, "held")
                             || job(&claude, session).is_some()
                             || touched(&claude, session).is_some_and(|time| spent(time) < quiet)
                             || STOP.get().is_some()
@@ -1576,27 +1573,23 @@ fn main() -> ExitCode {
                             ),
                         );
                     }
-                    let oldest = latest
-                        .into_values()
-                        .filter(|line| {
-                            line["kind"] == "end"
-                                && line["outcome"] == "taken"
-                                && line["machine"] == this
+                    let oldest = story
+                        .values()
+                        .filter(|marks| {
+                            ended(marks, "taken")
+                                && marks[2]["at"].as_str() < marks[1]["at"].as_str()
                         })
-                        .min_by_key(|line| line["at"].as_str());
+                        .min_by_key(|marks| marks[1]["at"].as_str());
                     let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
-                    // one job a tick: the oldest of this machine's episodes whose latest line is
-                    // its take; with none waiting, the quiet bank whose oldest trace is oldest
-                    let (kind, key, value, mut zero, done) = if let Some(episode) = oldest {
+                    // one job a tick: the oldest of this machine's episodes taken and not encoded
+                    // since; with none waiting, the quiet bank whose oldest trace is oldest
+                    let (kind, key, value, mut zero, done) = if let Some(marks) = oldest {
+                        let (episode, interactive) = (&marks[1], &marks[4]);
                         let session = text(&episode["session"]);
                         let archived = Path::new(text(&episode["archived"]));
                         // Ok(None): stopped, so no line and the episode waits for the next start
                         let encode = || -> io::Result<Option<Value>> {
-                            if !lines.iter().any(|mark| {
-                                mark["session"] == session
-                                    && mark["kind"] == "start"
-                                    && mark["interactive"] == true
-                            }) {
+                            if *interactive != true {
                                 return Ok(Some(json!({"outcome": "skipped", "traces": 0})));
                             }
                             if !archived.is_file() {
