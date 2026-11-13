@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en" class="ui">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sandman — recall</title>
+<link rel="stylesheet" href="https://gigantic.dev/ui/ui.css" />
+<link rel="stylesheet" href="https://gigantic.dev/ui/docs.css" />
+<link rel="stylesheet" href="charts/chart.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script type="module" src="charts/reach.js"></script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23476349'/%3E%3Cpath d='M11.5 9.5A5 5 0 0 1 6.5 4.5 5 5 0 1 0 11.5 9.5Z' fill='white'/%3E%3C/svg%3E" />
+<style>
+/* a decision: its status badge, the options table's proposed row */
+.badge { font-size: 12px; }
+.decision-head { align-items: baseline; display: flex; flex-wrap: wrap; gap: var(--ui-space-3); }
+.decision-head .h2 { max-width: var(--ui-measure); }
+.table-wrap + .docs-note { margin-top: var(--ui-space-3); }
+tr.is-proposed td { background: var(--ui-accent-soft); }
+tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
+/* the flow: a static svg, tokens only */
+#flow svg { display: block; font-size: 12px; max-width: none; }
+#flow .flow-box { fill: var(--ui-surface-raised); stroke: var(--ui-border-strong); }
+#flow .flow-box.is-accent { fill: var(--ui-accent); stroke: var(--ui-accent); }
+#flow .flow-box.is-fallback { fill: var(--ui-surface); stroke-dasharray: 4 3; }
+#flow .flow-name { fill: var(--ui-fg); font-family: var(--ui-font-mono); font-size: 13px; }
+#flow .flow-note { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); }
+#flow .is-accent ~ text { fill: var(--ui-accent-fg); }
+#flow .flow-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
+#flow .flow-path.is-fallback { stroke-dasharray: 4 3; }
+#flow .flow-time { fill: var(--ui-fg-muted); font-family: var(--ui-font-mono); }
+#flow marker path { fill: var(--ui-fg-muted); }
+/* the reach chart's own marks, over chart.css */
+#reach .reach-head { fill: var(--ui-fg); font-family: var(--ui-font-sans); font-size: 13px; }
+#reach .reach-label { fill: var(--ui-fg-muted); font-family: var(--ui-font-mono); }
+#reach .reach-open { stroke-dasharray: 3 2; stroke-width: 1.5; }
+/* the pane mock: a terminal dock 62 columns wide */
+.pane-frame { background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: var(--ui-radius-lg); overflow-x: auto; padding: var(--ui-space-4); }
+.pane { background: var(--ui-sunken); border: 1px solid var(--ui-border-strong); border-radius: var(--ui-radius-md); color: var(--ui-fg); font-family: var(--ui-font-mono); font-size: 13px; line-height: 1.5; padding: var(--ui-space-2) 0; width: calc(62ch + 2 * var(--ui-space-3)); }
+.pane > div { padding: 0 var(--ui-space-3); white-space: pre; }
+.pane-dim { color: var(--ui-fg-muted); }
+.pane-group { color: var(--ui-fg-muted); font-weight: 600; }
+.pane-head { border-bottom: 1px solid var(--ui-border); color: var(--ui-fg); font-weight: 600; margin-bottom: var(--ui-space-1); padding-bottom: var(--ui-space-1); }
+.pane-keys { border-top: 1px solid var(--ui-border); color: var(--ui-fg-muted); margin-top: var(--ui-space-1); padding-top: var(--ui-space-1); }
+.pane-sel { background: var(--ui-accent-soft); box-shadow: inset 3px 0 0 var(--ui-accent); color: var(--ui-accent-soft-fg); }
+.pane-sel .pane-dim { color: var(--ui-accent-soft-fg); }
+</style>
+</head>
+<body data-page="sandman">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<!-- Phosphor Icons (regular), MIT (c) 2023 Phosphor Icons — via jgeschwendt/ui icons/ -->
+<symbol id="ph-circle-half" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm8,16.37a86.4,86.4,0,0,1,16,3V212.67a86.4,86.4,0,0,1-16,3Zm32,9.26a87.81,87.81,0,0,1,16,10.54V195.83a87.81,87.81,0,0,1-16,10.54ZM40,128a88.11,88.11,0,0,1,80-87.63V215.63A88.11,88.11,0,0,1,40,128Zm160,50.54V77.46a87.82,87.82,0,0,1,0,101.08Z"/></symbol>
+<symbol id="ph-moon" viewBox="0 0 256 256" fill="currentColor"><path d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11a89,89,0,0,1,31.4-26A106,106,0,0,0,96,56,104.11,104.11,0,0,0,200,160a106,106,0,0,0,14.92-1.06A89,89,0,0,1,188.9,190.34Z"/></symbol>
+<symbol id="ph-sun" viewBox="0 0 256 256" fill="currentColor"><path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"/></symbol>
+</svg>
+<header class="appbar">
+  <h1 class="appbar-title">
+    <svg class="icon" aria-hidden="true"><use href="#ph-moon" /></svg>
+    sandman <small>· recall</small>
+  </h1>
+  <span class="spacer"></span>
+  <div class="segmented" role="group" aria-label="theme">
+    <button type="button" data-theme-set="light" aria-pressed="false" title="light">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-sun" /></svg>light
+    </button>
+    <button type="button" data-theme-set="auto" aria-pressed="true" title="follow the system">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-circle-half" /></svg>auto
+    </button>
+    <button type="button" data-theme-set="dark" aria-pressed="false" title="dark">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-moon" /></svg>dark
+    </button>
+</div>
+</header>
+
+<main class="docs-shell" data-container>
+
+<header class="stack">
+  <p class="eyebrow">memory for agentic sessions · <a class="link" href="index.html">the main page</a></p>
+  <p class="lead docs-lead"><code class="code">recall</code> is retrieval: at a session's start it takes what the
+    person just asked as the cue and brings the memories in the banks that answer it into the session's context.</p>
+  <p class="notice notice-warn">Design, not built. The earlier sandman's recall runs today. Each decision below is
+    open until its badge says settled.</p>
+  <p class="docs-note"><span class="badge badge-ok">settled</span> <code class="code">recall</code>
+    is the one verb the mod runs at a session's start; it writes the start mark to the ledger first, before anything
+    slow, whether or not there is anything to recall; <code class="code">mark</code> then keeps only calls and prompts;
+    the short-term pointer goes when this recall replaces the earlier one.</p>
+  <nav class="row docs-toc" aria-label="sections">
+    <a class="pill" href="#problem">problem</a>
+    <a class="pill" href="#proposed">flow</a>
+    <a class="pill" href="#cue">cue</a>
+    <a class="pill" href="#candidates">candidates</a>
+    <a class="pill" href="#always">always</a>
+    <a class="pill" href="#shape">shape</a>
+    <a class="pill" href="#budget">budget</a>
+    <a class="pill" href="#when">when</a>
+    <a class="pill" href="#latency">latency</a>
+    <a class="pill" href="#fallback">fallback</a>
+    <a class="pill" href="#privacy">privacy</a>
+    <a class="pill" href="#record">record</a>
+    <a class="pill" href="#old-sections">old sections</a>
+    <a class="pill" href="#pane">pane</a>
+    <a class="pill" href="#risks">risks</a>
+    <a class="pill" href="#open">open</a>
+  </nav>
+</header>
+
+<section class="docs-section" id="problem">
+  <header>
+    <h2 class="h2">The problem</h2>
+    <p class="docs-note">Today the mod runs the earlier <code class="code">sandman recall --hook</code> on a session's
+      first prompt, awaits it (10 s timeout) and injects up to 10,000 characters. That recall never sees the prompt: it
+      walks from the cwd's bank up through ancestor banks, never down, inside a 9,000-character budget.</p>
+  </header>
+  <p>Sessions start from one root directory and dispatch work into many repositories. From there the walk reaches 2
+    banks and, after its budget cuts, injects 31 index lines; every bank below the root is out of reach.</p>
+  <figure class="figure">
+    <div class="chart" id="reach"><noscript><p class="docs-note">The chart needs JavaScript; its data is <a class="link" href="data/recall-reach.json">docs/data/recall-reach.json</a>.</p></noscript></div>
+    <figcaption>The corpus as the earlier recall sees it from the start directory: 645 memories in 49 banks (335
+      feedback, 183 project, 109 reference, 18 user). The 2 reachable banks hold 149; 31 of their lines arrive, which
+      of the two each came from is not measured, so the strip carries the split and the bars do not. Counts from
+      <code class="code">sandman-next chart</code> (measured 2026-11-13), banks unnamed
+      (<a href="data/recall-reach.json">docs/data/recall-reach.json</a>). No memory file carries the format's
+      <code class="code">recall:</code> pin or mute field.</figcaption>
+  </figure>
+</section>
+
+<section class="docs-section" id="proposed">
+  <header>
+    <h2 class="h2">The proposed flow</h2>
+    <p class="docs-note">One request, every memory a candidate, the prompt as the cue. Each decision below can change a
+      station; the figure follows the proposed option of each.</p>
+  </header>
+  <figure class="figure">
+    <div class="chart-frame" id="flow">
+      <svg width="932" height="336" viewBox="0 0 932 336" role="img" aria-label="the proposed recall: the first prompt, then the start mark, the candidates, one jev request, rank and fill, the digest injected, one ledger line; jev down falls back to kev in two stages, both down to the always-set only">
+        <defs>
+          <marker id="flow-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <g transform="translate(0,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">first prompt</text><text class="flow-note" x="12" y="46">the cue</text><text class="flow-note" x="12" y="64">the mod awaits</text></g>
+        <g transform="translate(196,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">① start mark</text><text class="flow-note" x="12" y="46">to the ledger,</text><text class="flow-note" x="12" y="64">before anything slow</text></g>
+        <g transform="translate(392,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">② candidates</text><text class="flow-note" x="12" y="46">every memory: name,</text><text class="flow-note" x="12" y="64">description ≤ 160</text></g>
+        <g transform="translate(588,28)"><rect class="flow-box is-accent" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ jev scores</text><text class="flow-note" x="12" y="46">one request, ~50k</text><text class="flow-note" x="12" y="64">tokens, a noul each</text></g>
+        <g transform="translate(784,28)"><rect class="flow-box is-fallback" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">kev, 2 stages</text><text class="flow-note" x="12" y="46">49 banks, then the</text><text class="flow-note" x="12" y="64">top banks' memories</text></g>
+        <g transform="translate(196,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑥ recall line</text><text class="flow-note" x="12" y="46">to the ledger:</text><text class="flow-note" x="12" y="64">sent, scores, cut</text></g>
+        <g transform="translate(392,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑤ inject</text><text class="flow-note" x="12" y="46">one line a memory;</text><text class="flow-note" x="12" y="64">the pane shows it</text></g>
+        <g transform="translate(588,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">④ rank, fill</text><text class="flow-note" x="12" y="46">the always-set, then</text><text class="flow-note" x="12" y="64">by score, to 9,000</text></g>
+        <g transform="translate(784,196)"><rect class="flow-box is-fallback" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">both down</text><text class="flow-note" x="12" y="46">the always-set only,</text><text class="flow-note" x="12" y="64">an error in the pane</text></g>
+        <g aria-hidden="true">
+          <path class="flow-path" marker-end="url(#flow-head)" d="M148,70H196" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M344,70H392" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M540,70H588" />
+          <path class="flow-path is-fallback" marker-end="url(#flow-head)" d="M736,70H784" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M662,112V196" />
+          <path class="flow-path is-fallback" d="M822,112V152H662" />
+          <path class="flow-path is-fallback" marker-end="url(#flow-head)" d="M880,112V196" />
+          <path class="flow-path is-fallback" marker-end="url(#flow-head)" d="M784,238H736" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M588,238H540" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M392,238H344" />
+        </g>
+        <text class="flow-time" x="172" y="62" text-anchor="middle">0</text>
+        <text class="flow-time" x="368" y="62" text-anchor="middle">~5 ms</text>
+        <text class="flow-time" x="564" y="62" text-anchor="middle">~50 ms</text>
+        <text class="flow-time" x="760" y="62" text-anchor="middle">down</text>
+        <text class="flow-time" x="652" y="140" text-anchor="end">1.5–2.5 s</text>
+        <text class="flow-time" x="742" y="172" text-anchor="middle">2 s + 43 ms × n</text>
+        <text class="flow-time" x="888" y="176">down</text>
+        <text class="flow-time" x="564" y="230" text-anchor="middle">~5 ms</text>
+        <text class="flow-time" x="368" y="230" text-anchor="middle">~1 ms</text>
+        <text class="flow-note" x="466" y="318" text-anchor="middle">the bound: 3 s from the first prompt to ⑤ on any engine; past it ④ fills with the always-set and the pane says so</text>
+      </svg>
+</div>
+    <figcaption>①–⑥, the proposed recall; dashed is the fallback. Times on the edges are what the station before each
+      takes: Kev's 43 ms a question is measured, Jev's 1.5–2.5 s for one 645-candidate request is inferred from 95–210
+      candidates in 1.1–1.5 s, the rest are estimates.</figcaption>
+  </figure>
+</section>
+
+<section class="docs-section" id="cue">
+  <header class="decision-head">
+    <h2 class="h2">What is the cue?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>the first prompt's text <span class="badge badge-accent">proposed</span></td><td>the question's <code class="code">state</code> is what the person just asked</td><td>the prompt leaves the machine with hosted Jev (<a class="link" href="#privacy">privacy</a>)</td></tr>
+      <tr><td>the first prompt plus the cwd</td><td>the cwd joins the state</td><td>the cwd is the same root for nearly every session, so it adds tokens and no signal</td></tr>
+      <tr><td>nothing (today)</td><td>selection by place only</td><td>the 95 % in <a class="link" href="#problem">the problem</a></td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> the prompt is the only input that says what this session is about.</p>
+  <ul class="stack claims" role="list">
+    <li>The mod already awaits recall on the first prompt, so the prompt is in hand at no extra wait.</li>
+    <li>Sessions start from one root and name the repository in the prompt, when anywhere: the place says least where it is asked most.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="candidates">
+  <header class="decision-head">
+    <h2 class="h2">Which memories are candidates?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>every memory in every bank <span class="badge badge-accent">proposed</span></td><td>one noul per memory, one request</td><td>~50k tokens, ~$0.002–0.003 a recall</td></tr>
+      <tr><td>the banks a first stage picks</td><td>score 49 banks, then their memories</td><td>two round trips; a memory in a bank scored low is never seen</td></tr>
+      <tr><td>the cwd's chain (today)</td><td>the cwd's bank and its ancestors</td><td>2 of 49 banks from the root</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> one Jev request holds the whole corpus, so nothing needs narrowing.</p>
+  <ul class="stack claims" role="list">
+    <li>Each candidate is its name and its description cut at 160 characters: 25.7 KB of names plus about 95 KB of capped descriptions, about 50k tokens, inside Jev's 64k a request.</li>
+    <li>Uncapped, the descriptions are 181.7 KB (average 269 characters, longest 1,392; only 184 are within 160): the cap is what makes one request fit, and it trims the room a description has to argue for itself (<a class="link" href="#risks">risks</a>).</li>
+    <li>Headroom: about 14k tokens, some 180 more memories at the current average, before the corpus needs a first stage or a tighter cap.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="always">
+  <header class="decision-head">
+    <h2 class="h2">What comes along without a vote?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>every <code class="code">user</code> memory, plus any pinned <span class="badge badge-accent">proposed</span></td><td>filled first, before the scored lines</td><td>18 lines today, about 3,600 of the 9,000 characters</td></tr>
+      <tr><td>nothing</td><td>every line wins its place by score</td><td>facts about the person ranked against a prompt they rarely match</td></tr>
+      <tr><td><code class="code">user</code> plus <code class="code">feedback</code> that holds everywhere</td><td>the house rules ride along too</td><td>needs a marker for "holds everywhere": today that is only an absent <code class="code">about</code>, which encode leaves out for other reasons</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> a <code class="code">user</code> memory is about the person, so it bears on every session whatever the cue.</p>
+  <ul class="stack claims" role="list">
+    <li>Pinning is the format's <code class="code">recall:</code> field, written from <a class="link" href="#pane">the pane</a>; no memory carries it today.</li>
+    <li>The always-set's share of the budget grows with it; when it passes half, the cap or the set is the next decision.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="shape">
+  <header class="decision-head">
+    <h2 class="h2">What is injected?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>one line per memory, a verb to read one <span class="badge badge-accent">proposed</span></td><td><code class="code">name (type · bank) — description</code>, and <code class="code">sandman show &lt;bank&gt;/&lt;file&gt;</code> once</td><td>a body costs a tool call when the session needs it</td></tr>
+      <tr><td>bodies for the top few, lines for the rest</td><td>the best matches arrive whole</td><td>a body averages over 1 KB (888 KB over 645 files): three bodies cost about fifteen lines</td></tr>
+      <tr><td>bodies for all that fit</td><td>no reads needed</td><td>a handful of memories per session</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> it is the house rule for context injection: one line per item plus a verb to read one in full.</p>
+  <ul class="stack claims" role="list">
+    <li>A later read of a memory file shows in the tool log, so the line-then-read shape is also the use signal <a class="link" href="#record">record</a> needs; a body sent whole leaves no trace of whether it helped.</li>
+    <li><code class="code">sandman show</code> is a new verb this design implies.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="budget">
+  <header class="decision-head">
+    <h2 class="h2">How much is injected?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>9,000 characters, as today <span class="badge badge-accent">proposed</span></td><td>about 40 lines at ~200 characters: the always-set and some 22 by score</td><td>none new; under the 10,000 session-start cap</td></tr>
+      <tr><td>smaller, 4,500</td><td>about 20 lines</td><td>barely past the always-set</td></tr>
+      <tr><td>larger</td><td>more lines</td><td>over the 10,000 cap, which cuts it and trails a <code class="code">guard</code> event</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> start where today runs and tune from the ledger: how far down the ranking a used memory sat says whether the budget is right.</p>
+</section>
+
+<section class="docs-section" id="when">
+  <header class="decision-head">
+    <h2 class="h2">When does it run?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>the first prompt, plus <code class="code">/recall</code> and after <code class="code">/clear</code> <span class="badge badge-accent">proposed</span></td><td>once a session; again on demand, the cue then the prompt that asks</td><td>a session that turns to another repository keeps its first recall until asked</td></tr>
+      <tr><td>also when a later prompt moves repository</td><td>a judge on every prompt decides whether to recall again</td><td>a model call per prompt, the per-prompt judge the mod just removed</td></tr>
+      <tr><td>asynchronously, injected on the second turn</td><td>the first prompt never waits</td><td>the first answer goes without memory</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> one call at the start, where the house already pays for one; anything more is a person's explicit ask.</p>
+  <ul class="stack claims" role="list">
+    <li>A recall after <code class="code">/clear</code> writes no start mark: the session is the same one.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="latency">
+  <header class="decision-head">
+    <h2 class="h2">What does the first prompt wait for?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>a 3 s bound <span class="badge badge-accent">proposed</span></td><td>past it, the always-set goes and the pane says the scoring timed out</td><td>an unscored session when Jev is slow</td></tr>
+      <tr><td>never wait</td><td>the prompt goes on at once</td><td>the <a class="link" href="#when">asynchronous</a> option's cost</td></tr>
+      <tr><td>10 s, as today</td><td>the mod's timeout</td><td>up to 10 s before every first answer</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> the estimate is 1.5–2.5 s, so 3 s covers a normal Jev request and caps a bad one.</p>
+  <ul class="stack claims" role="list">
+    <li>The bound is recall's own, inside the mod's 10 s; ① is written before it starts, so a timeout never loses the start mark.</li>
+    <li>The 3 s is a guess until a 645-candidate request is measured; the ledger's <code class="code">ms</code> sets it.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="fallback">
+  <header class="decision-head">
+    <h2 class="h2">What happens when Jev is down?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>Kev in two stages, inside the bound <span class="badge badge-accent">proposed</span></td><td>49 banks by their path, then the top banks' memories; past the bound, the always-set</td><td>about 20 memories scored, not 645; lower quality</td></tr>
+      <tr><td>the earlier deterministic order</td><td>the cwd chain, as today</td><td>keeps a selection the design exists to replace</td></tr>
+      <tr><td>fail loudly only</td><td>the always-set and an error</td><td>an unscored session at every Jev outage</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> it is the house order, Jev then local Kev then an error, kept inside the same wait.</p>
+  <ul class="stack claims" role="list">
+    <li>Kev runs about 43 ms a question (50 in 2.0 s, 150 in 6.5 s): all 645 would take about 28 s. The banks take about 2 s, which leaves room for some 20 memories in the second stage.</li>
+    <li>Out of tokens counts as down. Both down is the always-set and an error in the pane, never a silent empty recall.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="privacy">
+  <header class="decision-head">
+    <h2 class="h2">Hosted or local?</h2><span class="badge">open</span>
+  </header>
+  <p>With hosted Jev each recall sends to <code class="code">api.typesafe.ai</code> the first prompt's text and the name
+    and description of every candidate memory, about 100 KB: repository names, paths, rules, facts about the
+    person.</p>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr><td>hosted Jev</td><td>every memory a candidate</td><td>fast, about $0.07 a day at 26 recalls; the 18 <code class="code">user</code> memories leave the machine on every recall</td></tr>
+      <tr><td>local Kev only</td><td>nothing leaves the machine</td><td>always the two-stage path: slower, about 20 memories scored, lower quality</td></tr>
+      <tr class="is-proposed"><td>hosted, <code class="code">user</code> memories never sent <span class="badge badge-accent">proposed</span></td><td>the always-set is included without a score, so it is never a candidate</td><td>the prompt and the other 627 memories' lines still leave</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> the facts most about the person need no vote, so they need not travel; the rest buys the corpus-wide reach.</p>
+  <ul class="stack claims" role="list">
+    <li>Pinned memories are not candidates either, by the same reasoning.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="record">
+  <header class="decision-head">
+    <h2 class="h2">What does recall record, so the pipeline can learn?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>one ledger line, use from the tool log, pin and mute from the pane <span class="badge badge-accent">proposed</span></td><td>below</td><td>one line a session; the sent list's bytes</td></tr>
+      <tr><td>nothing</td><td>as today</td><td>no way to tell a useful memory from a noisy one</td></tr>
+    </tbody>
+  </table>
+</div>
+  <pre class="snippet">{"at":…,"considered":n,"cut":n,"engine":"jev"|"kev"|"none","kind":"recall","ms":n,"sent":[{"file":"&lt;bank&gt;/&lt;file&gt;","noul":p}],"session":…}</pre>
+  <p class="docs-note"><strong>Proposed:</strong> sent, then read, then pinned or muted is the whole feedback loop, and two of its three parts exist already.</p>
+  <ul class="stack claims" role="list">
+    <li><strong>use</strong> — a later read of a sent memory's file in the same session, from the tool log (194 such reads on record) and, once <code class="code">mark</code> carries calls, from the ledger.</li>
+    <li><strong>pin, mute</strong> — from the pane: the memory's <code class="code">recall:</code> field and a ledger line.</li>
+    <li><strong>reflect</strong> reads these to tune the selection question and the memories' descriptions; consolidate keeps its merge and prune ops.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="old-sections">
+  <header class="decision-head">
+    <h2 class="h2">What happens to the earlier recall's other sections?</h2><span class="badge">open</span>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
+    <tbody>
+      <tr class="is-proposed"><td>drop all three <span class="badge badge-accent">proposed</span></td><td>recent sessions, the voyage log and the tool index go</td><td>a session that resumes yesterday's work starts without the list</td></tr>
+      <tr><td>keep recent episodes, three lines</td><td>from the ledger, after the memories</td><td>about 600 characters of the budget, unscored</td></tr>
+      <tr><td>keep all</td><td>as today</td><td>the budget they took is why 118 reachable lines were cut</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note"><strong>Proposed:</strong> none of them is chosen by the cue; what they carried that matters becomes memories through encode.</p>
+</section>
+
+<section class="docs-section" id="pane">
+  <header>
+    <h2 class="h2">The pane</h2>
+    <p class="docs-note">Today the mod's pane shows one row per injected block, <code class="code">▸ hh:mm · sandman recall · &lt;n&gt; chars</code>,
+      expanding to the whole text dimmed. The engine allows a working list.</p>
+  </header>
+  <figure class="figure">
+    <div class="pane-frame">
+<div class="pane" role="group" aria-label="sample: the recall pane">
+<div class="pane-head">recall · jev 1.8 s · 22 of 627 + 18 always · 7,940/9,000</div>
+<div class="pane-group">always</div>
+<div>    ·  sample: prefers short replies             user</div>
+<div>    ·  sample: works from one root directory     user</div>
+<div class="pane-dim">    ·  … 16 more</div>
+<div class="pane-group">sample-alpha</div>
+<div class="pane-sel">▾ .91  sample: pass a clock in, never mock       feedback</div>
+<div class="pane-sel"><span class="pane-dim">       tests take time from an injected clock</span></div>
+<div class="pane-sel"><span class="pane-dim">       sandman show sample-alpha/feedback_clock.md</span></div>
+<div>  .84  sample: alpha deploys need the vpn        project</div>
+<div class="pane-group">sample-beta</div>
+<div>  .62  sample: beta pins its node version        reference</div>
+<div class="pane-dim">▸ considered, not sent: 605 · next .41 .39 .38</div>
+<div class="pane-keys">enter expand · o open · p pin · m mute · r recall again</div>
+</div>
+</div>
+    <figcaption>Sample: a dock 62 columns wide, the selected row expanded. Scores rank; they are not probabilities
+      (<a href="#risks">risks</a>).</figcaption>
+  </figure>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>key</th><th>does</th><th>records</th></tr></thead>
+    <tbody>
+      <tr><td><code class="code">enter</code></td><td>expands the row: description and the verb to read it</td><td>nothing</td></tr>
+      <tr><td><code class="code">o</code></td><td>opens the memory file</td><td>nothing: the pane is the person, not the session</td></tr>
+      <tr><td><code class="code">p</code></td><td>pins: always sent from now on</td><td><code class="code">recall: pin</code> on the memory, a ledger line</td></tr>
+      <tr><td><code class="code">m</code></td><td>mutes: never a candidate</td><td><code class="code">recall: mute</code> on the memory, a ledger line</td></tr>
+      <tr><td><code class="code">r</code></td><td>recalls again, the cue the latest prompt</td><td>a new <code class="code">recall</code> line</td></tr>
+    </tbody>
+  </table>
+</div>
+  <ul class="stack claims" role="list">
+    <li><strong>engine</strong> — a Button with a hotkey per row, Text colour and dim for scores and descriptions, a Link to open the file, scroll while focused, refresh on <code class="code">r</code>.</li>
+    <li><strong>width</strong> — a dock up to 45 % of the terminal's columns, opened at 144 columns or more; under that, an inline pane a third of the rows high.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="risks">
+  <header>
+    <h2 class="h2">Risks</h2>
+  </header>
+  <ul class="stack claims" role="list">
+    <li><strong>injection</strong> — memories are written unattended from transcripts, so a name or description can argue for its own selection. The description is capped at 160 characters, the question is fixed in the binary and never read from a memory, and <code class="code">reflect</code> watches for memories sent often and never used.</li>
+    <li><strong>the number</strong> — a noul ranks well but is not a calibrated probability: recall ranks and fills a budget, never thresholds.</li>
+    <li><strong>estimates</strong> — Jev's time and cost for one 645-candidate request are inferred, not measured; the first recall lines settle them.</li>
+    <li><strong>hosted dependence</strong> — the good path needs <code class="code">api.typesafe.ai</code>; an outage degrades every session to Kev's narrow pass.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="open">
+  <header>
+    <h2 class="h2">Open questions</h2>
+  </header>
+  <ul class="stack claims" role="list">
+    <li>Scores in the pane as numbers or as bars?</li>
+    <li>A recalled memory's bank shown as the repository's name or as the bank key?</li>
+    <li>Does <code class="code">r</code> take the latest prompt as the cue, or ask for one?</li>
+  </ul>
+</section>
+
+<nav class="row link-row" aria-label="links">
+  <a class="pill" href="index.html">sandman · design</a>
+  <a class="pill" href="https://github.com/jgeschwendt/sandman">source · jgeschwendt/sandman</a>
+</nav>
+
+</main>
+<script>
+/* The theme contract, verbatim from jgeschwendt/ui docs.js — same localStorage
+   key, so a theme chosen on the ui pages is the theme this one opens in. */
+const THEME_KEY = "ui-theme";
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "auto") {
+    root.removeAttribute("data-theme");
+    localStorage.removeItem(THEME_KEY);
+  } else {
+    root.dataset.theme = mode;
+    localStorage.setItem(THEME_KEY, mode);
+  }
+  for (const b of document.querySelectorAll("[data-theme-set]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.themeSet === mode));
+  }
+}
+for (const b of document.querySelectorAll("[data-theme-set]")) {
+  b.addEventListener("click", () => applyTheme(b.dataset.themeSet));
+}
+applyTheme(localStorage.getItem(THEME_KEY) || "auto");
+</script>
+</body>
+</html>
