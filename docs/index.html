@@ -31,6 +31,7 @@
 .chart-legend { color: var(--ui-fg-muted); display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 0; }
 .chart-legend li { align-items: center; display: flex; gap: 6px; }
 .chart-key { display: block; flex: none; }
+.chart-key-dash { fill: none; stroke-dasharray: 3 2; stroke-width: 1.5; }
 .chart-toggle { background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); color: var(--ui-fg-muted); cursor: pointer; font: inherit; padding: 2px 10px; }
 .chart-frame { background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: var(--ui-radius-lg); overflow-x: auto; padding: 16px; }
 .chart-frame svg { display: block; max-width: none; font-family: var(--ui-font-mono); font-size: 12px; }
@@ -55,7 +56,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 .chart-tip dd { color: var(--ui-fg); font-family: var(--ui-font-mono); margin: 0; overflow-wrap: anywhere; }
 .chart-rule { stroke: var(--ui-border-strong); }
 .chart-node rect.chart-kind { stroke: none; }
-.chart-node.is-earlier rect:first-child { stroke-dasharray: 4 3; }
+.chart-node.is-next rect:first-child { stroke-dasharray: 4 3; }
 .chart-axis { color: var(--ui-fg-faint); font-family: var(--ui-font-sans); }
 .chart-bar-mark { fill: var(--ui-fg-muted); outline: none; }
 .chart-bar-mark.is-open { fill: none; stroke: var(--ui-fg-muted); stroke-dasharray: 3 2; }
@@ -127,7 +128,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   </header>
   <figure class="figure">
     <div class="chart" id="flow"><noscript><p class="docs-note">The data flow needs JavaScript; its data is <a class="link" href="data/flow.json">docs/data/flow.json</a>.</p></noscript></div>
-    <figcaption>The data flow, from a session's timeline down the left edge: the moments that start each writer, the file each writes under the root, and what <code class="code">chart</code> reads back. Data: <a href="data/flow.json">docs/data/flow.json</a>.</figcaption>
+    <figcaption>The data flow, ①–③, from a session's timeline down the left edge: the verb each moment runs, the files it writes under the root, and what <code class="code">chart</code> reads back. Dashed verbs are not built yet: today the subether mod runs <a class="link" href="#mark"><code class="code">sandman mark</code></a> at both moments and the earlier sandman's recall and take. Data: <a href="data/flow.json">docs/data/flow.json</a>.</figcaption>
   </figure>
   <div class="table-wrap">
   <table data-table>
@@ -149,7 +150,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 <section class="docs-section" id="mark" data-component="mark">
   <header>
     <h2 class="h2">mark</h2>
-    <p class="docs-note">The verb the subether mod runs at a session's start and end: it runs inside a 1.5 s budget and does nothing slow.</p>
+    <p class="docs-note">Today's start and end marks, run by the subether mod inside its 1.5 s budget, so it does nothing slow; <code class="code">recall</code> and <code class="code">take</code> take these over, see <a class="link" href="#next">Next</a>.</p>
   </header>
   <p>One JSON object on stdin; <code class="code">kind</code> and <code class="code">session</code> are
     required, any other field missing is <code class="code">null</code>.</p>
