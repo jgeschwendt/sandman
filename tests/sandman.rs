@@ -7,14 +7,16 @@ use signal_hook as _;
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
+    use serde_json::{Value, json};
+    use std::collections::BTreeSet;
     use std::error::Error;
-    use std::fs::Permissions;
+    use std::fs::{File, Permissions};
     use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
     use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio, id};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use std::{env, fs, thread};
 
     /// Session ids for the fixture: `5a000000-0000-4000-8000-00000000000<letter>`.
@@ -46,11 +48,30 @@ mod tests {
         let _: &mut Command = command
             .args(args)
             // not env_clear: llvm-cov reaches the child through LLVM_PROFILE_FILE
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("CLAUDE_MEMORY_PIPELINE")
             .env_remove("HOME")
             .env_remove("SANDMAN_MACHINE")
+            .env_remove("SANDMAN_NO_TAKE")
             .env_remove("SANDMAN_ROOT")
             .envs(envs.iter().copied());
         command
+    }
+
+    /// `date -u` with `args`, trimmed.
+    fn date(args: &[&str]) -> Result<String, Box<dyn Error>> {
+        let out = Command::new("date").arg("-u").args(args).output()?;
+        Ok(String::from_utf8(out.stdout)?.trim().to_owned())
+    }
+
+    /// Writes each `(path, text)` under `dir`, `@` in either standing for the fixture's id prefix.
+    fn plant(dir: &str, files: &[(&str, &str)]) -> Outcome {
+        for &(path, text) in files {
+            let file = PathBuf::from(dir).join(path.replace('@', ID));
+            fs::create_dir_all(file.parent().ok_or("parent")?)?;
+            fs::write(file, text.replace('@', ID))?;
+        }
+        Ok(())
     }
 
     /// `Err` showing both sides unless `got == want`.
@@ -88,15 +109,22 @@ mod tests {
         ))
     }
 
-    /// `sandman serve` over `root` with `SANDMAN_LOG_CAP` at `cap`, and the health line it prints
-    /// once ready.
-    fn serve(root: &str, cap: &str) -> Result<(Daemon, String), Box<dyn Error>> {
-        let envs = [
-            ("SANDMAN_LOG_CAP", cap),
-            ("SANDMAN_MACHINE", "studio"),
-            ("SANDMAN_ROOT", root),
-        ];
-        let mut daemon = Daemon(command(&envs, &["serve"]).stdout(Stdio::piped()).spawn()?);
+    /// `sandman serve` over `root` with `envs` beside it, and the health line it prints once ready.
+    fn serve(root: &str, envs: &[(&str, &str)]) -> Result<(Daemon, String), Box<dyn Error>> {
+        let claude = format!("{root}/claude");
+        let mut daemon = Daemon(
+            command(
+                &[
+                    ("CLAUDE_CONFIG_DIR", claude.as_str()),
+                    ("SANDMAN_MACHINE", "studio"),
+                    ("SANDMAN_ROOT", root),
+                ],
+                &["serve"],
+            )
+            .envs(envs.iter().copied())
+            .stdout(Stdio::piped())
+            .spawn()?,
+        );
         let mut ready = String::new();
         let _: usize =
             BufReader::new(daemon.0.stdout.take().ok_or("stdout")?).read_line(&mut ready)?;
@@ -109,6 +137,17 @@ mod tests {
         drop(fs::remove_dir_all(&dir));
         fs::create_dir_all(&dir)?;
         Ok(dir.to_str().ok_or("temp path")?.to_owned())
+    }
+
+    /// `check`, polled every 10 ms for up to 10 s.
+    fn until<F: Fn() -> bool>(check: F) -> Outcome {
+        let polled = (0u16..1000).any(|_| {
+            check() || {
+                thread::sleep(Duration::from_millis(10));
+                false
+            }
+        });
+        Ok(polled.then_some(()).ok_or("timed out")?)
     }
 
     /// `chart` over a fixture of every file kind it reads, and every one it skips, prints
@@ -131,6 +170,14 @@ mod tests {
                 r#"{{"archived":"sample","cwd":"{cwd}","ended":"sample","title":"{title}","highlights":[{highlights}]{dreamed}}}"#
             )
         };
+        // an end line with its outcome; one without reads as null
+        let ended = |line: String, outcome: &str| {
+            line.replacen(
+                ",\"kind\"",
+                &format!(",\"outcome\":\"{outcome}\",\"kind\""),
+                1,
+            )
+        };
         let marks = [
             mark(
                 "2026-11-09T08:05:00Z",
@@ -146,9 +193,15 @@ mod tests {
                 "/work/reload",
                 "studio",
             ),
-            mark("2026-11-09T09:30:00Z", "end", "a", "/work/alpha", "studio"),
+            ended(
+                mark("2026-11-09T09:30:00Z", "end", "a", "/work/alpha", "studio"),
+                "taken",
+            ),
             mark("2026-11-09T10:15:00Z", "start", "b", "/work/beta", "studio"),
-            mark("2026-11-09T12:40:00Z", "end", "b", "/work/beta", "studio"),
+            ended(
+                mark("2026-11-09T12:40:00Z", "end", "b", "/work/beta", "studio"),
+                "held",
+            ),
             mark(
                 "2026-11-09T14:00:00Z",
                 "start",
@@ -165,7 +218,10 @@ mod tests {
             (
                 "ledger/2026/11/10.jsonl",
                 [
-                    mark("2026-11-10T06:00:00Z", "end", "e", "/work/gamma", "laptop"),
+                    ended(
+                        mark("2026-11-10T06:00:00Z", "end", "e", "/work/gamma", "laptop"),
+                        "gone",
+                    ),
                     mark("2026-11-10T07:45:00Z", "start", "d", "/work/beta", "studio"),
                 ]
                 .join("\n"),
@@ -428,11 +484,11 @@ mod tests {
         let envs = [("SANDMAN_ROOT", root.as_str())];
         let down = "1\n{\"code\":\"down\",\"ok\":false}\n";
         // the guard's drop is the SIGKILL
-        drop(serve(&root, "")?);
+        drop(serve(&root, &[])?);
         let stale = ["pid", "sock"].map(|kind| fs::exists(format!("{root}/run/serve.{kind}")));
         same(&format!("{stale:?}"), "[Ok(true), Ok(true)]")?;
         same(&sandman(&envs, &["status"], "")?, down)?;
-        let (mut daemon, ready) = serve(&root, "")?;
+        let (mut daemon, ready) = serve(&root, &[])?;
         same(&ask(&root, "{\"op\":\"health\"}\n")?, &ready)?;
         same(&ask(&root, "{\"op\":\"shutdown\"}\n")?, "{\"ok\":true}\n")?;
         same(&sandman(&envs, &["status"], "")?, down)?;
@@ -497,7 +553,7 @@ mod tests {
             ("SANDMAN_MACHINE", "studio"),
             ("SANDMAN_ROOT", root.as_str()),
         ];
-        let (mut daemon, ready) = serve(&root, "1")?;
+        let (mut daemon, ready) = serve(&root, &[("SANDMAN_LOG_CAP", "1")])?;
         let (pid, version) = (daemon.0.id(), env!("CARGO_PKG_VERSION"));
         let health: Value = serde_json::from_str(&ready)?;
         same(
@@ -567,6 +623,131 @@ mod tests {
         same(&format!("{left:?}"), "[Ok(false), Ok(false)]")
     }
 
+    /// The tick settles a held session once no job names it and its transcript has been quiet for
+    /// the window, never before: a job still naming it or a touch inside the window holds it; a take
+    /// that fails is logged and retried next tick; SIGTERM after still exits 0 with its exit line.
+    #[test]
+    fn settle() -> Outcome {
+        let root = temp("settle")?;
+        let claude = format!("{root}/claude");
+        let envs = [
+            ("CLAUDE_CONFIG_DIR", claude.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        // 1 keeps its job, 2 is touched inside the window, 3 cannot leave its project at first
+        for (letter, project) in [("1", "-w"), ("2", "-w"), ("3", "-locked"), ("4", "-w")] {
+            plant(
+                &claude,
+                &[
+                    (&format!("projects/{project}/@{letter}.jsonl"), "{}\n"),
+                    (
+                        &format!("jobs/{letter}/state.json"),
+                        &format!(r#"{{"sessionId":"{ID}{letter}"}}"#),
+                    ),
+                ],
+            )?;
+            let stdin = format!(r#"{{"kind":"start","reason":"logout","session":"{ID}{letter}"}}"#);
+            same(
+                &format!(
+                    "{}{}",
+                    sandman(&envs, &["mark"], &stdin)?,
+                    sandman(&envs, &["take"], &stdin)?
+                ),
+                "0\n0\n",
+            )?;
+            if letter != "2" {
+                File::open(format!("{claude}/projects/{project}/{ID}{letter}.jsonl"))?
+                    .set_modified(UNIX_EPOCH + Duration::from_secs(1_794_216_600))?;
+            }
+            if letter != "1" {
+                fs::remove_dir_all(format!("{claude}/jobs/{letter}"))?;
+            }
+        }
+        let locked = format!("{claude}/projects/-locked");
+        fs::set_permissions(&locked, Permissions::from_mode(0o555))?;
+        let (mut daemon, _) = serve(
+            &root,
+            &[("SANDMAN_QUIET_MS", "60000"), ("SANDMAN_TICK_MS", "10")],
+        )?;
+        let (log, day) = (format!("{root}/run/serve.log"), date(&["+%Y/%m/%d"])?);
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        until(|| {
+            read(&log).contains(&format!("{ID}4")) && read(&log).contains("Permission denied")
+        })?;
+        fs::set_permissions(&locked, Permissions::from_mode(0o755))?;
+        let ledger = format!("{root}/ledger/{day}.jsonl");
+        until(|| read(&ledger).contains(&format!(r#""reason":"job gone","session":"{ID}3""#)))?;
+        same(
+            &Command::new("kill")
+                .args(["-TERM", &daemon.0.id().to_string()])
+                .status()?
+                .success()
+                .to_string(),
+            "true",
+        )?;
+        same(&format!("{:?}", daemon.0.wait()?.code()), "Some(0)")?;
+        let prefix = format!("{root}/.archive/claude/{day}/");
+        let norm = |line: &str| -> Result<String, serde_json::Error> {
+            let mut entry: Value = serde_json::from_str(line)?;
+            entry["at"] = json!(entry["at"].as_str().map(str::len));
+            if let Some(path) = entry["archived"].as_str() {
+                entry["archived"] =
+                    json!(path.strip_prefix(&prefix).and_then(|rest| rest.get(6..)));
+            }
+            Ok(entry.to_string())
+        };
+        let logged = read(&log)
+            .lines()
+            .filter(|line| line.contains(r#""event":"take""#))
+            .map(norm)
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let latest = read(&ledger)
+            .lines()
+            .filter(|line| line.contains(r#""kind":"end""#))
+            .map(norm)
+            .collect::<Result<Vec<_>, _>>()?;
+        let taken = |letter: &str, project: &str, event: &str| {
+            format!(
+                r#"{{"archived":"-projects-{project}-{ID}{letter}.jsonl","at":20,"cwd":null,{event}"kind":"end","machine":"studio","outcome":"taken","reason":"job gone","session":"{ID}{letter}"}}"#
+            )
+        };
+        let held = |letter: &str, job: &str| {
+            format!(
+                r#"{{"at":20,"cwd":null,"job":"{job}","kind":"end","machine":"studio","outcome":"held","reason":"logout","session":"{ID}{letter}"}}"#
+            )
+        };
+        same(
+            &format!(
+                "{logged:?}\n{latest:?}\n{}",
+                read(&log)
+                    .lines()
+                    .last()
+                    .and_then(|line| line.get(28..))
+                    .unwrap_or_default()
+            ),
+            &format!(
+                "{:?}\n{:?}\n{}",
+                BTreeSet::from([
+                    format!(
+                        r#"{{"at":20,"event":"take","reason":"Permission denied (os error 13)","session":"{ID}3"}}"#
+                    ),
+                    taken("3", "-locked", r#""event":"take","#),
+                    taken("4", "-w", r#""event":"take","#),
+                ]),
+                [
+                    held("1", "1"),
+                    held("2", "2"),
+                    held("3", "3"),
+                    held("4", "4"),
+                    taken("4", "-w", ""),
+                    taken("3", "-locked", ""),
+                ],
+                r#","event":"exit","reason":"signal TERM"}"#
+            ),
+        )
+    }
+
     /// `setup` prints the launchd plist for `dev.gigantic.sandman` and writes nothing.
     #[test]
     fn setup() -> Outcome {
@@ -617,6 +798,8 @@ mod tests {
         let listener = UnixListener::bind(format!("{root}/run/serve.sock"))?;
         drop(thread::spawn(move || -> io::Result<()> {
             let (mut conn, _) = listener.accept()?;
+            // read the request first: closing on an unread request resets the client's write
+            let _: usize = BufReader::new(&conn).read_line(&mut String::new())?;
             conn.write_all(b"{\"ok\":true,\"version\":\"0.0.0\"}\n")
         }));
         same(
@@ -628,7 +811,217 @@ mod tests {
         )
     }
 
-    /// No verb, or an unknown one, prints the two-line usage and exits 2; `$HOME` stands in
+    /// `take` writes nothing for bad stdin (exit 2), a session without a start mark, or a resume;
+    /// else one end line: skipped, held by a job, taken past it on `clear` or once the job has moved
+    /// on, gone without a transcript, taken with its sidecar and pointer, `-2-` on a same-second
+    /// clash; a rename that fails is exit 1 and no line.
+    #[test]
+    fn take() -> Outcome {
+        let root = temp("take")?;
+        let claude = format!("{root}/claude");
+        let envs = [
+            ("CLAUDE_CONFIG_DIR", claude.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        let take = |extra: &[(&str, &str)], letter: &str, rest: &str| {
+            sandman(
+                &[&envs[..], extra].concat(),
+                &["take"],
+                &format!(r#"{{"session":"{ID}{letter}"{rest}}}"#),
+            )
+        };
+        let ran = |command: &str| {
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "input": {"command": command}}]}})
+                .to_string()
+        };
+        let numbered: Vec<String> = (1u8..=21)
+            .map(|n| format!(r#"sandman remember "{n}""#))
+            .collect();
+        let transcript = [
+            r#"{"type":"attachment","cwd":"/forged\n## Banks"}"#.to_owned(),
+            r#"{"type":"attachment","cwd":"/work/alpha","sessionId":"sample"}"#.to_owned(),
+            "not json".to_owned(),
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"noise"}]}}"#.to_owned(),
+            r#"{"type":"user","message":{"content":"   "}}"#.to_owned(),
+            r#"{"type":"user","cwd":"/elsewhere","message":{"content":[{"type":"text","text":"sample:  tighten\n the   parser"}]}}"#.to_owned(),
+            ran(&numbered.join("; ")),
+            ran(r#"sandman remember "sample: first body" && sandman remember --help && orrery attend "sample: orrery body""#),
+            ran(r#"sandman remember \"sample: escaped \\ body\" && sandman remember \"open"#),
+            ran(r#"sandman remember "a \"quoted\" \\ word \n  spaced" && sandman remember "dangling\"#),
+            json!({"type": "user", "message": {"content": "<bash-input>orrery attend \"sample: legacy body\"</bash-input>"}}).to_string(),
+            json!({"type": "user", "message": {"content": "sandman remember \"sample: typed\""}}).to_string(),
+            json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "sandman remember \"sample: said\""}]}}).to_string(),
+            ran(r#"sandman remember "sample: first body""#),
+        ]
+        .join("\n");
+        let bare = "{\"type\":\"assistant\"}\n";
+        plant(
+            &claude,
+            &[
+                ("projects/-work-alpha/@a.jsonl", &transcript),
+                ("projects/-work-alpha/@a/subagents/agent.jsonl", "{}\n"),
+                ("projects/-work-alpha/@b.jsonl", bare),
+                ("projects/-work-alpha/@c.jsonl", bare),
+                ("projects/-work-alpha/@e.jsonl", bare),
+                ("projects/-work-alpha/@0.jsonl", bare),
+                ("projects/-work-locked/@f.jsonl", bare),
+                ("jobs/j1/state.json", r#"{"sessionId":"@b","state":"done"}"#),
+                (
+                    "jobs/j2/state.json",
+                    r#"{"resumeSessionId":"@9","sessionId":"@c","state":"running"}"#,
+                ),
+                ("jobs/pins.json", "[]"),
+            ],
+        )?;
+        for letter in ["a", "c"] {
+            File::open(format!("{claude}/projects/-work-alpha/{ID}{letter}.jsonl"))?
+                .set_modified(UNIX_EPOCH + Duration::from_secs(1_794_216_600))?;
+        }
+        let bad = [
+            sandman(&envs, &["take"], "not json")?,
+            sandman(&envs, &["take"], "{}")?,
+            sandman(&envs, &["take"], r#"{"session":"short"}"#)?,
+        ];
+        same(
+            &format!("{}{bad:?}", fs::exists(format!("{root}/ledger"))?),
+            &format!(
+                "false{:?}",
+                ["2\nsandman take: stdin is not {\"session\":\"<uuid>\",...}\n"; 3]
+            ),
+        )?;
+        for letter in ["a", "b", "c", "d", "e", "f"] {
+            same(
+                &sandman(
+                    &envs,
+                    &["mark"],
+                    &format!(r#"{{"kind":"start","session":"{ID}{letter}"}}"#),
+                )?,
+                "0\n",
+            )?;
+        }
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        for second in now..now + 4 {
+            plant(
+                &root,
+                &[(
+                    &format!(
+                        ".archive/claude/{}-projects--work-alpha-@e.jsonl",
+                        date(&["-r", &second.to_string(), "+%Y/%m/%d/%H%M%S"])?
+                    ),
+                    "earlier\n",
+                )],
+            )?;
+        }
+        let logout = r#","reason":"logout""#;
+        let runs = [
+            take(&[], "0", logout)?,
+            take(&[], "a", r#","reason":"resume""#)?,
+            take(&[("SANDMAN_NO_TAKE", "1")], "a", logout)?,
+            take(&[("CLAUDE_MEMORY_PIPELINE", "1")], "a", logout)?,
+            take(&[], "b", logout)?,
+            take(&[], "b", r#","reason":"clear""#)?,
+            take(&[], "c", r#","cwd":"/work/gamma","reason":"other""#)?,
+            take(&[], "d", logout)?,
+            take(&[], "a", r#","cwd":"/stdin","reason":"prompt_input_exit""#)?,
+            take(&[], "e", logout)?,
+        ];
+        let locked = format!("{claude}/projects/-work-locked");
+        fs::set_permissions(&locked, Permissions::from_mode(0o555))?;
+        let failed = take(&[], "f", logout)?;
+        fs::set_permissions(&locked, Permissions::from_mode(0o755))?;
+        same(
+            &format!("{}{failed}", runs.concat()),
+            &format!(
+                "{}1\nsandman take: Permission denied (os error 13)\n",
+                "0\n".repeat(10)
+            ),
+        )?;
+        let day = date(&["+%Y/%m/%d"])?;
+        let prefix = format!("{root}/.archive/claude/{day}/");
+        let closing = fs::read_to_string(format!("{root}/ledger/{day}.jsonl"))?
+            .lines()
+            .filter(|line| line.contains(r#""kind":"end""#))
+            .map(|line| {
+                let mut end: Value = serde_json::from_str(line)?;
+                end["at"] = json!(end["at"].as_str().map(str::len));
+                if let Some(path) = end["archived"].as_str() {
+                    end["archived"] =
+                        json!(path.strip_prefix(&prefix).and_then(|rest| rest.get(6..)));
+                }
+                Ok(end.to_string())
+            })
+            .collect::<Result<Vec<_>, serde_json::Error>>()?;
+        same(&closing.join("\n"), &[
+            format!(r#"{{"at":20,"cwd":null,"kind":"end","machine":"studio","outcome":"skipped","reason":"logout","session":"{ID}a"}}"#),
+            format!(r#"{{"at":20,"cwd":null,"kind":"end","machine":"studio","outcome":"skipped","reason":"logout","session":"{ID}a"}}"#),
+            format!(r#"{{"at":20,"cwd":null,"job":"j1","kind":"end","machine":"studio","outcome":"held","reason":"logout","session":"{ID}b"}}"#),
+            format!(r#"{{"archived":"-projects--work-alpha-{ID}b.jsonl","at":20,"cwd":null,"kind":"end","machine":"studio","outcome":"taken","reason":"clear","session":"{ID}b"}}"#),
+            format!(r#"{{"archived":"-projects--work-alpha-{ID}c.jsonl","at":20,"cwd":"/work/gamma","kind":"end","machine":"studio","outcome":"taken","reason":"other","session":"{ID}c"}}"#),
+            format!(r#"{{"at":20,"cwd":null,"kind":"end","machine":"studio","outcome":"gone","reason":"logout","session":"{ID}d"}}"#),
+            format!(r#"{{"archived":"-projects--work-alpha-{ID}a.jsonl","at":20,"cwd":"/stdin","kind":"end","machine":"studio","outcome":"taken","reason":"prompt_input_exit","session":"{ID}a"}}"#),
+            format!(r#"{{"archived":"-2-projects--work-alpha-{ID}e.jsonl","at":20,"cwd":null,"kind":"end","machine":"studio","outcome":"taken","reason":"logout","session":"{ID}e"}}"#),
+        ].join("\n"))?;
+        let archived = |letter: &str| -> io::Result<String> {
+            let suffix = format!("-projects--work-alpha-{ID}{letter}.jsonl");
+            Ok(fs::read_dir(&prefix)?
+                .flatten()
+                .map(|entry| entry.path().to_string_lossy().into_owned())
+                .find(|path| path.ends_with(&suffix) && !path.contains("-2-"))
+                .unwrap_or_default())
+        };
+        let (alpha, gamma) = (archived("a")?, archived("c")?);
+        let mut highlights: Vec<String> = (7u8..=21).map(|n| n.to_string()).collect();
+        highlights.extend(
+            [
+                "sample: orrery body",
+                r"sample: escaped \ body",
+                r#"a "quoted" \ word \n spaced"#,
+                "sample: legacy body",
+                "sample: first body",
+            ]
+            .map(str::to_owned),
+        );
+        let pointer =
+            |letter: &str| fs::read_to_string(format!("{root}/memories/.recent/{ID}{letter}.json"));
+        same(
+            &format!(
+                "{}{}{:?}",
+                pointer("a")?,
+                pointer("c")?,
+                [
+                    format!("{claude}/projects/-work-alpha/{ID}a.jsonl"),
+                    format!("{claude}/projects/-work-alpha/{ID}a"),
+                    format!(
+                        "{}-dir/subagents/agent.jsonl",
+                        alpha.trim_end_matches(".jsonl")
+                    ),
+                    format!("{claude}/projects/-work-alpha/{ID}0.jsonl"),
+                ]
+                .map(fs::exists)
+                .map(Result::ok)
+            ),
+            &format!(
+                r#"{{"archived":{},"cwd":"/work/alpha","ended":"2026-11-09T09:30:00Z","title":"sample: tighten the parser","highlights":{}}}
+{{"archived":{},"cwd":"/work/gamma","ended":"2026-11-09T09:30:00Z","title":"{ID}c","highlights":[]}}
+[Some(false), Some(false), Some(true), Some(true)]"#,
+                json!(alpha),
+                json!(highlights),
+                json!(gamma)
+            ),
+        )?;
+        let earlier = (now..now + 4)
+            .map(|second| {
+                let at = date(&["-r", &second.to_string(), "+%Y/%m/%d/%H%M%S"])?;
+                Ok(fs::read_to_string(format!(
+                    "{root}/.archive/claude/{at}-projects--work-alpha-{ID}e.jsonl"
+                ))?)
+            })
+            .collect::<Result<String, Box<dyn Error>>>()?;
+        same(&earlier, &"earlier\n".repeat(4))
+    }
+
+    /// No verb, or an unknown one, prints the three-line usage and exits 2; `$HOME` stands in
     /// for an unset `SANDMAN_ROOT`.
     #[test]
     fn usage() -> Outcome {
@@ -641,7 +1034,7 @@ mod tests {
                     out.get(..2).unwrap_or_default(),
                     out.lines().count()
                 ),
-                "2\n 3",
+                "2\n 4",
             )?;
         }
         Ok(())

@@ -1,10 +1,10 @@
 {
   "active": [
-    {"cwd": "/work/gamma", "end": "2026-11-10T06:00:00Z", "machine": "laptop", "session": "5a000000-0000-4000-8000-00000000000e", "start": null},
-    {"cwd": "/work/alpha", "end": "2026-11-09T09:30:00Z", "machine": "studio", "session": "5a000000-0000-4000-8000-00000000000a", "start": "2026-11-09T08:05:00Z"},
-    {"cwd": "/work/beta", "end": "2026-11-09T12:40:00Z", "machine": "studio", "session": "5a000000-0000-4000-8000-00000000000b", "start": "2026-11-09T10:15:00Z"},
-    {"cwd": "/work/alpha", "end": "2026-11-09T15:10:00Z", "machine": "laptop", "session": "5a000000-0000-4000-8000-00000000000c", "start": "2026-11-09T14:00:00Z"},
-    {"cwd": "/work/beta", "end": null, "machine": "studio", "session": "5a000000-0000-4000-8000-00000000000d", "start": "2026-11-10T07:45:00Z"}
+    {"cwd": "/work/gamma", "end": "2026-11-10T06:00:00Z", "machine": "laptop", "outcome": "gone", "session": "5a000000-0000-4000-8000-00000000000e", "start": null},
+    {"cwd": "/work/alpha", "end": "2026-11-09T09:30:00Z", "machine": "studio", "outcome": "taken", "session": "5a000000-0000-4000-8000-00000000000a", "start": "2026-11-09T08:05:00Z"},
+    {"cwd": "/work/beta", "end": "2026-11-09T12:40:00Z", "machine": "studio", "outcome": "held", "session": "5a000000-0000-4000-8000-00000000000b", "start": "2026-11-09T10:15:00Z"},
+    {"cwd": "/work/alpha", "end": "2026-11-09T15:10:00Z", "machine": "laptop", "outcome": null, "session": "5a000000-0000-4000-8000-00000000000c", "start": "2026-11-09T14:00:00Z"},
+    {"cwd": "/work/beta", "end": null, "machine": "studio", "outcome": null, "session": "5a000000-0000-4000-8000-00000000000d", "start": "2026-11-10T07:45:00Z"}
   ],
   "at": "2026-11-10T12:00:00Z",
   "machine": "studio",
