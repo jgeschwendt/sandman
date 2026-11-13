@@ -570,6 +570,10 @@ esac
 {{"archived":"{root}/archive/{letter}.jsonl","at":"2026-11-09T08:{minute:02}:30Z","cwd":null,"kind":"end","machine":"{machine}","outcome":"taken","session":"{ID}{letter}"}}"#
             ));
         }
+        // read after its take, e still encodes, once
+        ledger.push(format!(
+            r#"{{"at":"2026-11-09T09:00:00Z","file":"x","kind":"show","machine":"studio","session":"{ID}e"}}"#
+        ));
         files.push(("ledger/2026/11/09.jsonl".to_owned(), ledger.join("\n")));
         plant(
             &root,
@@ -2365,6 +2369,10 @@ esac
                 fs::remove_dir_all(format!("{claude}/jobs/{letter}"))?;
             }
         }
+        // a recall for 4 after its held end does not hide it from the settle
+        let recalled = format!("{ID}4");
+        let out = sandman(&envs, &["recall", "--cue", "x", "--session", &recalled], "")?;
+        same(out.lines().next().unwrap_or_default(), "0")?;
         let locked = format!("{claude}/projects/-locked");
         fs::set_permissions(&locked, Permissions::from_mode(0o555))?;
         let (mut daemon, _) = serve(
