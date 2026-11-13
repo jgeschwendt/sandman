@@ -1,8 +1,8 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's ledger
 //! file, `take` archives a marked session at its end, `chart` prints what the data root holds as
 //! one JSON object, `recall` scores the memories against an agent's cue and `show` prints one,
-//! `serve` is the daemon (settle, encode, consolidate), `status` asks it for its health, `setup`
-//! prints its launchd plist.
+//! `serve` is the daemon (reconcile, settle, encode, consolidate), `status` asks it for its
+//! health, `setup` prints its launchd plist.
 
 use serde_json::{Map, Value, json};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
@@ -594,6 +594,41 @@ fn run(
     reply(status, &read("out")?, &read("err")?).map(Some)
 }
 
+/// Per session in the ledger's `lines`: its earliest start mark (a reload re-fires it), its latest
+/// end, encode and start marks (null when none), and whether it is interactive: true when a start
+/// mark says so, else false when one says false, else null.
+fn sessions(lines: &[Value]) -> BTreeMap<String, [Value; 5]> {
+    let mut found: BTreeMap<String, [Value; 5]> = BTreeMap::new();
+    for mark in lines {
+        let (Some(session), Some(slot)) = (
+            mark["session"].as_str(),
+            ["start", "end", "encode"]
+                .iter()
+                .position(|kind| mark["kind"] == *kind),
+        ) else {
+            continue;
+        };
+        let held = found.entry(session.to_owned()).or_default();
+        let later = |than: &Value| mark["at"].as_str() >= than["at"].as_str();
+        if slot > 0 {
+            if later(&held[slot]) {
+                held[slot] = mark.clone();
+            }
+            continue;
+        }
+        if held[0].is_null() || !later(&held[0]) {
+            held[0] = mark.clone();
+        }
+        if later(&held[3]) {
+            held[3] = mark.clone();
+        }
+        if mark["interactive"].is_boolean() && held[4] != true {
+            held[4] = mark["interactive"].clone();
+        }
+    }
+    found
+}
+
 /// `$key` parsed, else `default`.
 fn setting<T: FromStr>(key: &str, default: T) -> T {
     env::var(key)
@@ -636,6 +671,15 @@ fn staged(path: &Path) -> PathBuf {
 /// The string `value` holds, else "".
 fn text(value: &Value) -> &str {
     value.as_str().unwrap_or_default()
+}
+
+/// When `session`'s live transcript last changed, when it has one.
+fn touched(claude: &Path, session: &str) -> Option<SystemTime> {
+    transcript(claude, session)?
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()
 }
 
 /// `<claude>/projects/*/<session>.jsonl`, the first project's that holds one.
@@ -784,22 +828,6 @@ fn main() -> ExitCode {
             }
         }
         "chart" => {
-            let mut marks: BTreeMap<String, [Value; 3]> = BTreeMap::new();
-            for mark in ledger(&root) {
-                let (Some(session), Some(slot)) = (
-                    mark["session"].as_str(),
-                    ["start", "end", "encode"]
-                        .iter()
-                        .position(|kind| mark["kind"] == *kind),
-                ) else {
-                    continue;
-                };
-                let held = &mut marks.entry(session.to_owned()).or_default()[slot];
-                // the earliest start (a reload re-fires it), the latest end and encode
-                if held.is_null() || (mark["at"].as_str() < held["at"].as_str()) == (slot == 0) {
-                    *held = mark;
-                }
-            }
             let memories: Vec<Value> = notes(&root, "memories")
                 .iter()
                 .map(|note| {
@@ -869,13 +897,20 @@ fn main() -> ExitCode {
                     "taken": format!("{yyyy}-{mm}-{dd}T{}Z", clock.join(":")), "title": pointer["title"],
                 })));
             }
-            let active = marks
+            let active = sessions(&ledger(&root))
                 .into_iter()
-                .map(|(session, [start, end, encode])| {
+                .map(|(session, [start, end, encode, last, interactive])| {
                     let from = if start.is_null() { &end } else { &start };
+                    // an end before the latest start was resumed past: running again
+                    let ended = |field: &str| {
+                        end[field]
+                            .as_str()
+                            .filter(|_| last["at"].as_str() <= end["at"].as_str())
+                    };
                     json!({
-                        "cwd": from["cwd"], "encoded": encode["outcome"], "end": end["at"], "machine": from["machine"],
-                        "outcome": end["outcome"], "session": session, "start": start["at"],
+                        "cwd": from["cwd"], "encoded": encode["outcome"], "end": ended("at"), "interactive": interactive,
+                        "machine": from["machine"], "outcome": ended("outcome"),
+                        "seen": touched(&claude, &session).map(utc), "session": session, "start": start["at"],
                     })
                 })
                 .collect();
@@ -1419,7 +1454,7 @@ fn main() -> ExitCode {
                         .append(true)
                         .create(true)
                         .open(&log)
-                        .and_then(|mut file| writeln!(file, "{line}")),
+                        .and_then(|mut file| file.write_all(format!("{line}\n").as_bytes())),
                 );
             };
             let hook = write.clone();
@@ -1445,6 +1480,13 @@ fn main() -> ExitCode {
                 ms("SANDMAN_QUIET_MS", 120_000),
                 ms("SANDMAN_CONSOLIDATE_QUIET_MS", 600_000),
             );
+            let (grace, idle) = (
+                ms("SANDMAN_GRACE_MS", 600_000),
+                ms("SANDMAN_IDLE_MS", 604_800_000),
+            );
+            let ago =
+                |span: Duration| utc(SystemTime::now().checked_sub(span).unwrap_or(UNIX_EPOCH));
+            let spent = |time: SystemTime| time.elapsed().unwrap_or_default();
             let (encode_limit, consolidate_limit) = (
                 ms("SANDMAN_ENCODE_MS", 300_000),
                 ms("SANDMAN_CONSOLIDATE_MS", 600_000),
@@ -1464,9 +1506,47 @@ fn main() -> ExitCode {
             drop(thread::spawn(move || {
                 while STOP.get().is_none() {
                     thread::sleep(tick);
+                    let lines = ledger(&data);
+                    // this machine's sessions started before the grace with no end since, no job
+                    // naming them: without a transcript gone, idle past the window taken; at most
+                    // 20 gone and one taken a tick
+                    let (mut left, born) = ([20u8, 1], ago(grace));
+                    for (session, [start, ended, _, last, _]) in sessions(&lines) {
+                        let at = last["at"].as_str();
+                        if start["machine"] != this
+                            || at <= ended["at"].as_str()
+                            || at > Some(born.as_str())
+                        {
+                            continue;
+                        }
+                        let live = touched(&claude, &session);
+                        let which = usize::from(live.is_some());
+                        let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
+                        if left[which] == 0
+                            || live.is_some_and(|time| spent(time) <= idle)
+                            || job(&claude, &session).is_some()
+                            || STOP.get().is_some()
+                        {
+                            continue;
+                        }
+                        left[which] = left[which].saturating_sub(1);
+                        let reason = ["no end recorded", "idle"][which];
+                        logged(
+                            "reconcile",
+                            "session",
+                            &session,
+                            end(
+                                &data,
+                                &claude,
+                                &session,
+                                &start["cwd"],
+                                &reason.into(),
+                                None,
+                            ),
+                        );
+                    }
                     // the latest line per session; a held end whose job is gone and whose
                     // transcript has been quiet for the window is taken
-                    let lines = ledger(&data);
                     let latest: BTreeMap<&str, &Value> = lines
                         .iter()
                         .filter_map(|entry| Some((entry["session"].as_str()?, entry)))
@@ -1477,11 +1557,7 @@ fn main() -> ExitCode {
                             || held["outcome"] != "held"
                             || held["machine"] != this
                             || job(&claude, session).is_some()
-                            || transcript(&claude, session)
-                                .and_then(|path| {
-                                    path.metadata().and_then(|meta| meta.modified()).ok()
-                                })
-                                .is_some_and(|time| time.elapsed().unwrap_or_default() < quiet)
+                            || touched(&claude, session).is_some_and(|time| spent(time) < quiet)
                             || STOP.get().is_some()
                         {
                             continue;
@@ -1682,7 +1758,7 @@ fn main() -> ExitCode {
                             encode(),
                         )
                     } else {
-                        let cutoff = utc(SystemTime::now().checked_sub(calm).unwrap_or(UNIX_EPOCH));
+                        let cutoff = ago(calm);
                         let traces = notes(&data, "traces");
                         let mut banks: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
                         for trace in &traces {

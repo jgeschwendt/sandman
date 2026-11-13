@@ -58,7 +58,7 @@
   <p class="lead docs-lead"><code class="code">sandman</code> is being rewritten from scratch, one part
     at a time; this build carries <code class="code">mark</code>, <code class="code">take</code>,
     <code class="code">chart</code>, the agent's <a class="link" href="recall.html"><code class="code">recall</code>, <code class="code">show</code> and <code class="code">remember</code></a>
-    and the daemon, <code class="code">serve</code>, which settles held takes,
+    and the daemon, <code class="code">serve</code>, which ends sessions that never ended, settles held takes,
     <a class="link" href="#encode">encodes</a> episodes and <a class="link" href="#consolidate">consolidates</a>
     banks, with its <code class="code">status</code> and <code class="code">setup</code>. Its memory follows
     complementary learning systems: a fast, temporary store captures each session as an episode, and a slow
@@ -169,7 +169,7 @@
     <li><strong>exit 0</strong> — decided, silent. <strong>exit 2</strong> — bad stdin, one stderr
       line, nothing written. <strong>exit 1</strong> — a rename or write failed (cross-device
       included): one stderr line, no ledger line.</li>
-    <li><strong>held</strong> — the daemon takes it later, see <a class="link" href="#serve">serve</a>.</li>
+    <li><strong>tick</strong> — the daemon ends sessions through the same path, see <a class="link" href="#serve">serve</a>: a <code class="code">held</code> one, reason <code class="code">job gone</code>; one that never ended, <code class="code">no end recorded</code> (<code class="code">gone</code>) or <code class="code">idle</code> (<code class="code">taken</code>).</li>
   </ul>
 </section>
 
@@ -180,7 +180,7 @@
       never writes it, bar minting <code class="code">machine</code>; every absence is an empty list
       or a skipped item, never an error.</p>
   </header>
-  <pre class="snippet">{"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"machine":str,"outcome":str|null,"session":str,"start":str|null}],
+  <pre class="snippet">{"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"interactive":bool|null,"machine":str,"outcome":str|null,"seen":str|null,"session":str,"start":str|null}],
  "at":"&lt;now, RFC 3339 UTC&gt;",
  "machine":"&lt;this machine's id&gt;",
  "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"consolidate"|"dream"|"reflect"|"remember"|"other","type":str}],
@@ -190,9 +190,12 @@
     <li><strong>active</strong> — one per session in the ledger files: <code class="code">start</code>
       the <code class="code">at</code> of its earliest start mark (a reload re-fires it),
       <code class="code">end</code> and <code class="code">outcome</code> of its latest end mark (an end
-      without one: null); <code class="code">cwd</code> and
-      <code class="code">machine</code> from that start mark, else the end mark; <code class="code">encoded</code> the
-      outcome of its latest encode line. By <code class="code">start</code>, then session.</li>
+      without one: null), both null when a start mark is later (resumed, running again);
+      <code class="code">cwd</code> and <code class="code">machine</code> from that start mark, else the end
+      mark; <code class="code">encoded</code> the outcome of its latest encode line;
+      <code class="code">interactive</code> true when a start mark says so, else false when one says false,
+      else null; <code class="code">seen</code> the live transcript's mtime, null without one. By
+      <code class="code">start</code>, then session.</li>
     <li><strong>taken</strong> — one per archived transcript, a file directly in a day dir named
       <code class="code">&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code>; the latest wins when a session
       has several. <code class="code">taken</code> is that day and time in UTC,
@@ -226,9 +229,9 @@
   <header>
     <h2 class="h2">serve</h2>
     <p class="docs-note">The daemon, a foreground process launchd keeps alive as
-      <code class="code">dev.gigantic.sandman</code>. Its tick runs three jobs, in order: it settles held
-      takes, then <a class="link" href="#encode">encodes</a> one episode or, with none waiting,
-      <a class="link" href="#consolidate">consolidates</a> one bank.</p>
+      <code class="code">dev.gigantic.sandman</code>. Its tick runs four jobs, in order: it reconciles sessions
+      that never ended, settles held takes, then <a class="link" href="#encode">encodes</a> one episode
+      or, with none waiting, <a class="link" href="#consolidate">consolidates</a> one bank.</p>
   </header>
   <figure class="figure">
     <div class="chart-frame" id="lifecycle">
@@ -266,13 +269,21 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
   <ul class="stack claims" role="list">
     <li><strong>state</strong> — <code class="code">ready</code> whenever it answers today: there is
       nothing to derive before the socket is bound, and a stopping daemon no longer accepts.</li>
-    <li><strong>tick</strong> — every 30 s (<code class="code">$SANDMAN_TICK_MS</code>) it re-derives
-      from disk every session whose latest ledger line is a <code class="code">held</code> end on this
-      machine; one no job names any more, whose transcript has been untouched for 120 s
-      (<code class="code">$SANDMAN_QUIET_MS</code>), it takes as <a class="link" href="#take">take</a> does
-      and ends with <code class="code">taken</code> or <code class="code">gone</code>, reason
-      <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.
-      Then one job: an encode, else a consolidate, never both.</li>
+    <li><strong>reconcile</strong> — every 30 s (<code class="code">$SANDMAN_TICK_MS</code>), from disk,
+      first: a session of this machine whose latest start mark is later than its
+      latest end, or that has none, older than 10 min (<code class="code">$SANDMAN_GRACE_MS</code>; its
+      transcript may not exist yet), no job naming it: without a live transcript it ends
+      <code class="code">gone</code>, reason <code class="code">no end recorded</code> (a crash, a kill, a
+      session from before <code class="code">take</code>), at most 20 a tick; with one untouched for a
+      week (<code class="code">$SANDMAN_IDLE_MS</code>) it is taken as <a class="link" href="#take">take</a>
+      does, reason <code class="code">idle</code>, one a tick, so an abandoned session's memory is kept;
+      otherwise it may be alive and is left. A session resumed later gets a new start mark and is open
+      again.</li>
+    <li><strong>settle</strong> — a session whose latest ledger line is a <code class="code">held</code>
+      end on this machine, no job naming it any more, its transcript untouched for 120 s
+      (<code class="code">$SANDMAN_QUIET_MS</code>), is taken as <a class="link" href="#take">take</a> does:
+      <code class="code">taken</code> or <code class="code">gone</code>, reason
+      <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.</li>
     <li><strong>signals</strong> — SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is
       ignored. The drain budget is 2 s, launchd's <code class="code">ExitTimeOut</code>: the one
       connection in hand, at most its 1 s read, and the tick's job in hand (a running model command
@@ -281,7 +292,7 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
     <li><strong>log</strong> — <code class="code">run/serve.log</code>, one compact object per line
       with <code class="code">at</code>: <code class="code">start</code> (pid, version),
       <code class="code">exit</code> (reason: <code class="code">signal TERM</code>,
-      <code class="code">shutdown request</code>, an accept error), <code class="code">take</code>,
+      <code class="code">shutdown request</code>, an accept error), <code class="code">reconcile</code>, <code class="code">take</code>,
       <code class="code">encode</code> and <code class="code">consolidate</code> (the tick's ledger line, or
       its <code class="code">session</code> or <code class="code">bank</code> and the write's error as
       <code class="code">reason</code>),
