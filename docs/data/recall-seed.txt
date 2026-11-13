@@ -1,0 +1,11 @@
+Memory from earlier sessions is yours to pull: run `sandman recall --session 5a000000-0000-4000-8000-00000000000a --cue "<what you are about to do>"` before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `sandman show <bank>/<file> --session 5a000000-0000-4000-8000-00000000000a` before acting on it. When the person states a preference, corrects you, or decides something a later session needs, run `sandman remember "<their words>"` at once, one fact per call.
+
+always · about the person, or pinned
+  · Pinned (project · common/project_pinned.md) — always sent
+  · Prefers short replies (user · common/user_short.md) — lead with the result
+recall · add a clock to the alpha tests · 4 of 5
+.91 Pass a clock in (feedback · -work-alpha/feedback_clock.md) — Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates — naïve caf
+.84 Alpha deploys need the vpn (project · -work-alpha/project_vpn.md) — the deploy host is private
+.84 Beta ties break by date (feedback · -work-beta/feedback_tie.md) — newer first
+.62 Beta pins its node version (project · -work-beta/project_node.md) — node 22 from mise
+read one in full: sandman show <bank>/<file>
