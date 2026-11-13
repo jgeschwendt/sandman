@@ -283,7 +283,7 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
   </header>
   <ul class="stack" role="list">
     <li><code class="code">dream</code>: runs inside <code class="code">serve</code>.</li>
-    <li><code class="code">recall</code></li>
+    <li><code class="code">recall</code>: the one verb the mod runs at a session's start. It writes the start mark first, whether or not there is anything to recall, so <code class="code">mark</code> goes.</li>
     <li><code class="code">reflect</code></li>
     <li><code class="code">remember</code></li>
     <li><code class="code">take</code>: the one verb the mod runs at a session's end. It refuses a session with no start mark, takes a closed background session then instead of owing it, and writes the end to the ledger with its outcome, so the mod stops marking the end.</li>
