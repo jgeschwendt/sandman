@@ -26,6 +26,8 @@ A fact a future session would act on, of one of four types:
 - Quote the person. A preference or correction carries their words verbatim, in quotes, in the body: a paraphrase loses what they meant.
 - Make each trace stand alone. It is read without this session, by an agent that never saw it. Name its scope in the body (the repository, or every project), give the date it was said as YYYY-MM-DD from the episode's date, and never write "today", "this session", "above" or "just now".
 - Give the reason. A `feedback` or `project` body states the rule or fact, then a `Why:` line, then a `How to apply:` line when applying it is not obvious.
+- Name and describe for retrieval: a later session finds a trace by its name and the first 160 characters of its description alone. `name` is a short noun phrase naming the rule or fact, never a date, a sentence or the session's story. `description` is one line that leads with when it applies (the repository, tool, file or decision that should bring it up), then the rule, in the words a future request would use, within 160 characters.
+- A rule that holds in every repository carries no `about`, so it is filed at the root, never under the one repository the session happened to touch.
 - One fact per trace. Two candidates that say the same thing are one trace.
 - When the person changed their mind during the session, keep only where they ended up.
 
@@ -51,7 +53,7 @@ tool: Bash cd /work/ledger-api && go test ./...
 Reply:
 
 ```
-{"traces":[{"type":"feedback","name":"Pass a clock in; never mock time","description":"ledger-api tests take time from an injected clock, never a time mock","body":"In /work/ledger-api, code and tests take time from a clock passed in, never a mocked time source. Said 2026-03-04: \"no mocks for time in this repo, we pass a clock in\".\n\nWhy: \"mocks hid a real ordering bug last year\".\n\nHow to apply: a test that depends on time passes a clock to the code under test.","about":"/work/ledger-api"},{"type":"feedback","name":"No closing summary of changes","description":"End a reply without summarising the changes made; the person reads the diff","body":"In every project, end a reply without a summary of what was changed. Said 2026-03-04: \"stop ending replies with a summary of what you did, in any repo. I read the diff\".\n\nWhy: the person reads the diff itself.","about":null}]}
+{"traces":[{"type":"feedback","name":"Injected clock in ledger-api tests","description":"ledger-api tests take time from an injected clock, never a time mock","body":"In /work/ledger-api, code and tests take time from a clock passed in, never a mocked time source. Said 2026-03-04: \"no mocks for time in this repo, we pass a clock in\".\n\nWhy: \"mocks hid a real ordering bug last year\".\n\nHow to apply: a test that depends on time passes a clock to the code under test.","about":"/work/ledger-api"},{"type":"feedback","name":"No closing summary of changes","description":"Every reply, in any repository: no closing summary of the changes made; the person reads the diff","body":"In every project, end a reply without a summary of what was changed. Said 2026-03-04: \"stop ending replies with a summary of what you did, in any repo. I read the diff\".\n\nWhy: the person reads the diff itself.","about":null}]}
 ```
 
 <commentary>
