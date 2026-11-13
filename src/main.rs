@@ -1,5 +1,5 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's ledger
-//! file, `chart` prints what the data root holds as one JSON object, `serve` is the daemon,
+//! file, `take` archives a marked session at its end, `chart` prints what the data root holds as one JSON object, `serve` is the daemon,
 //! `status` asks it for its health, `setup` prints its launchd plist.
 
 use serde_json::{Map, Value, json};
@@ -11,17 +11,197 @@ use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, DirBuilder, File, OpenOptions, TryLockError};
 use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
+use std::iter;
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, id};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// Held by the tick for each take; the drain takes it after setting `STOP`, so the take in hand
+/// finishes and no other starts.
+static BUSY: Mutex<()> = Mutex::new(());
+
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
+
+/// Ends `session`'s ledger story with one end line, returned as written: `decided` (skipped,
+/// held) as is, else the take — the transcript and its sidecar renamed into the archive, then the
+/// pointer — or `gone` when there is no transcript.
+fn end(
+    root: &Path,
+    claude: &Path,
+    session: &str,
+    cwd: &Value,
+    reason: &Value,
+    decided: Option<Value>,
+) -> io::Result<Value> {
+    let mut line = match (decided, transcript(claude, session)) {
+        (Some(line), _) => line,
+        (None, None) => json!({"outcome": "gone"}),
+        (None, Some(path)) => {
+            let at = utc(SystemTime::now());
+            let day = root.join(format!(
+                ".archive/claude/{}",
+                at.get(..10).unwrap_or_default().replace('-', "/")
+            ));
+            let base = format!(
+                "{}-{}",
+                at.get(11..19).unwrap_or_default().replace(':', ""),
+                path.strip_prefix(claude)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('/', "-")
+            );
+            // a same-second clash takes `<HHMMSS>-<n>-…`, never the earlier archive
+            let name = iter::once(base.clone())
+                .chain((2u32..1000).map(|n| base.replacen('-', &format!("-{n}-"), 1)))
+                .find(|name| !day.join(name).exists())
+                .unwrap_or_default();
+            let (archived, ended) = (day.join(&name), utc(fs::metadata(&path)?.modified()?));
+            fs::create_dir_all(&day)?;
+            fs::rename(&path, &archived)?;
+            let (sidecar, beside) = (
+                path.with_extension(""),
+                day.join(format!("{}-dir", name.trim_end_matches(".jsonl"))),
+            );
+            if sidecar.is_dir() {
+                fs::rename(sidecar, beside)?;
+            }
+            let lines: Vec<Value> = String::from_utf8_lossy(&fs::read(&archived)?)
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect();
+            let title = lines
+                .iter()
+                .filter(|line| line["type"] == "user")
+                .filter_map(|line| {
+                    let content = &line["message"]["content"];
+                    content.as_str().or_else(|| {
+                        content
+                            .as_array()?
+                            .iter()
+                            .find(|block| block["type"] == "text")?["text"]
+                            .as_str()
+                    })
+                })
+                .map(|said| one_line(said, 80))
+                .find(|title| !title.is_empty())
+                .unwrap_or_else(|| session.to_owned());
+            let mut highlights: Vec<String> = Vec::new();
+            // only commands the session ran: an assistant's tool_use, a user's `!` line
+            for command in lines.iter().flat_map(|line| {
+                let content = &line["message"]["content"];
+                let user = line["type"] == "user";
+                let bang = content
+                    .as_str()
+                    .filter(|said| user && said.starts_with("<bash-input>"));
+                let ran = content
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|block| line["type"] == "assistant" && block["type"] == "tool_use");
+                bang.into_iter()
+                    .chain(ran.filter_map(|block| block["input"]["command"].as_str()))
+            }) {
+                for marker in ["sandman remember ", "orrery attend "] {
+                    let mut rest = command;
+                    while let Some((_, after)) = rest.split_once(marker) {
+                        rest = after;
+                        let mut body = String::new();
+                        // `\"…\"` (shell-escaped) closes at the next `\"`; `"…"` at the next
+                        // unescaped `"`, unescaping `\"` and `\\`
+                        match (after.strip_prefix("\\\""), after.strip_prefix('"')) {
+                            (Some(open), _) => {
+                                let Some((inner, tail)) = open.split_once("\\\"") else {
+                                    continue;
+                                };
+                                (body, rest) = (inner.replace("\\\\", "\\"), tail);
+                            }
+                            (None, Some(open)) => {
+                                let mut chars = open.chars();
+                                loop {
+                                    match (chars.next(), chars.as_str().chars().next()) {
+                                        (Some('"'), _) => break rest = chars.as_str(),
+                                        (Some('\\'), Some(escaped @ ('"' | '\\'))) => {
+                                            body.push(escaped);
+                                            chars =
+                                                chars.as_str().get(1..).unwrap_or_default().chars();
+                                        }
+                                        (Some(other), _) => body.push(other),
+                                        (None, _) => break body.clear(),
+                                    }
+                                }
+                            }
+                            (None, None) => {}
+                        }
+                        let kept = one_line(&body, 4000);
+                        if !kept.is_empty() {
+                            highlights.retain(|held| *held != kept);
+                            highlights.push(kept);
+                        }
+                    }
+                }
+            }
+            let found = lines
+                .iter()
+                .map(|line| &line["cwd"])
+                .chain([cwd])
+                .filter_map(Value::as_str)
+                .find(|dir| !dir.is_empty() && !dir.contains(char::is_control));
+            let recent = root.join("memories/.recent");
+            let tmp = recent.join(format!(".{session}.json.{}", id()));
+            fs::create_dir_all(&recent)?;
+            let pointer = format!(
+                "{{\"archived\":{},\"cwd\":{},\"ended\":{},\"title\":{},\"highlights\":{}}}\n",
+                json!(archived.to_string_lossy()),
+                json!(found),
+                json!(ended),
+                json!(title),
+                json!(highlights.split_off(highlights.len().saturating_sub(20)))
+            );
+            fs::write(&tmp, pointer)?;
+            fs::rename(tmp, recent.join(format!("{session}.json")))?;
+            json!({"archived": archived.to_string_lossy(), "outcome": "taken"})
+        }
+    };
+    line["cwd"] = cwd.clone();
+    line["kind"] = "end".into();
+    line["reason"] = reason.clone();
+    line["session"] = session.into();
+    record(root, &mut line).map(|()| line)
+}
+
+/// The background job under `<claude>/jobs/` that names `session`: its `resumeSessionId`, else
+/// its `sessionId` (a `/clear` moves a job on to a new id and leaves the old one in `sessionId`).
+fn job(claude: &Path, session: &str) -> Option<String> {
+    tree(&claude.join("jobs"), 1).into_iter().find_map(|dir| {
+        let state: Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("state.json")).ok()?).ok()?;
+        (state["resumeSessionId"]
+            .as_str()
+            .or_else(|| state["sessionId"].as_str())
+            == Some(session))
+        .then(|| name(&dir).to_owned())
+    })
+}
+
+/// Every line of `<root>/ledger/*/*/*.jsonl` that parses, oldest file first.
+fn ledger(root: &Path) -> Vec<Value> {
+    tree(&root.join("ledger"), 3)
+        .iter()
+        .flat_map(|file| {
+            fs::read_to_string(file)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
 
 /// This machine's id: `$SANDMAN_MACHINE`, else `<root>/machine`, created on first use by a hard
 /// link from a temp file, so concurrent first runs agree on one id.
@@ -50,15 +230,71 @@ fn name(path: &Path) -> &str {
     path.file_name().and_then(OsStr::to_str).unwrap_or_default()
 }
 
-/// Now as RFC 3339 UTC to the second (Howard Hinnant's `civil_from_days`).
+/// `text` with its whitespace collapsed to single spaces and cut at `max` characters.
+fn one_line(text: &str, max: usize) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max)
+        .collect()
+}
+
+/// Appends `line`, stamped with `at` and `machine`, to today's ledger file with `O_APPEND`.
+fn record(root: &Path, line: &mut Value) -> io::Result<()> {
+    let at = utc(SystemTime::now());
+    let day = root.join(format!(
+        "ledger/{}.jsonl",
+        at.get(..10).unwrap_or_default().replace('-', "/")
+    ));
+    line["at"] = at.into();
+    line["machine"] = machine(root).into();
+    day.parent().map_or(Ok(()), fs::create_dir_all)?;
+    OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&day)?
+        .write_all(format!("{line}\n").as_bytes())
+}
+
+/// `rows`, stably sorted by the string at `key` (a null first).
+fn sorted(mut rows: Vec<Value>, key: &str) -> Vec<Value> {
+    rows.sort_by(|left, right| left[key].as_str().cmp(&right[key].as_str()));
+    rows
+}
+
+/// `<claude>/projects/*/<session>.jsonl`, the first project's that holds one.
+fn transcript(claude: &Path, session: &str) -> Option<PathBuf> {
+    tree(&claude.join("projects"), 1)
+        .into_iter()
+        .map(|dir| dir.join(format!("{session}.jsonl")))
+        .find(|path| path.is_file())
+}
+
+/// Every path exactly `depth` levels under `path`, sorted; an unreadable level yields none.
+fn tree(path: &Path, depth: usize) -> Vec<PathBuf> {
+    let Some(next) = depth.checked_sub(1) else {
+        return vec![path.to_owned()];
+    };
+    let mut kids: Vec<PathBuf> = fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    kids.sort();
+    kids.iter().flat_map(|kid| tree(kid, next)).collect()
+}
+
+/// `time` as RFC 3339 UTC to the second (Howard Hinnant's `civil_from_days`).
 #[expect(
     clippy::arithmetic_side_effects,
     clippy::integer_division,
     clippy::integer_division_remainder_used,
     reason = "calendar math on unsigned seconds since the epoch: nothing goes negative or overflows"
 )]
-fn now() -> String {
-    let secs = SystemTime::now()
+fn utc(time: SystemTime) -> String {
+    let secs = time
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
     let days = secs / 86_400 + 719_468;
@@ -77,27 +313,6 @@ fn now() -> String {
     )
 }
 
-/// `rows`, stably sorted by the string at `key` (a null first).
-fn sorted(mut rows: Vec<Value>, key: &str) -> Vec<Value> {
-    rows.sort_by(|left, right| left[key].as_str().cmp(&right[key].as_str()));
-    rows
-}
-
-/// Every path exactly `depth` levels under `path`, sorted; an unreadable level yields none.
-fn tree(path: &Path, depth: usize) -> Vec<PathBuf> {
-    let Some(next) = depth.checked_sub(1) else {
-        return vec![path.to_owned()];
-    };
-    let mut kids: Vec<PathBuf> = fs::read_dir(path)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
-        .collect();
-    kids.sort();
-    kids.iter().flat_map(|kid| tree(kid, next)).collect()
-}
-
 /// Whether `text` is a 36-character session id.
 fn uuid(text: &str) -> bool {
     text.len() == 36
@@ -107,70 +322,79 @@ fn uuid(text: &str) -> bool {
 }
 
 fn main() -> ExitCode {
-    let root = env::var_os("SANDMAN_ROOT").map_or_else(
-        || PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".sandman"),
-        PathBuf::from,
-    );
+    let home = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+    let root = env::var_os("SANDMAN_ROOT").map_or_else(|| home.join(".sandman"), PathBuf::from);
+    let claude =
+        env::var_os("CLAUDE_CONFIG_DIR").map_or_else(|| home.join(".claude"), PathBuf::from);
     match env::args().nth(1).as_deref() {
-        Some("mark") => {
+        Some(verb @ ("mark" | "take")) => {
             let mut text = String::new();
             drop(io::stdin().read_to_string(&mut text));
             let input: Map<String, Value> = serde_json::from_str(&text).unwrap_or_default();
             let field = |key: &str| input.get(key).cloned().unwrap_or_default();
-            if !matches!(field("kind").as_str(), Some("start" | "end"))
-                || !field("session").as_str().is_some_and(uuid)
-            {
+            let (session, reason) = (field("session"), field("reason"));
+            let Some(id) = session.as_str().filter(|id| uuid(id)).filter(|_| {
+                verb == "take" || matches!(field("kind").as_str(), Some("start" | "end"))
+            }) else {
                 eprintln!(
-                    r#"sandman mark: stdin is not {{"kind":"start"|"end","session":"<uuid>",...}}"#
+                    r#"sandman {verb}: stdin is not {{{}"session":"<uuid>",...}}"#,
+                    if verb == "mark" {
+                        r#""kind":"start"|"end","#
+                    } else {
+                        ""
+                    }
                 );
                 return ExitCode::from(2);
-            }
-            let at = now();
-            let line = json!({
-                "at": at, "cwd": field("cwd"), "interactive": field("interactive"),
-                "kind": field("kind"), "machine": machine(&root), "reason": field("reason"),
-                "resume": field("resume"), "session": field("session"), "surface": field("surface"),
-            });
-            let day = root.join(format!(
-                "ledger/{}.jsonl",
-                at.get(..10).unwrap_or_default().replace('-', "/")
-            ));
-            match day
-                .parent()
-                .map_or(Ok(()), fs::create_dir_all)
-                .and_then(|()| OpenOptions::new().append(true).create(true).open(&day))
-                .and_then(|mut file| file.write_all(format!("{line}\n").as_bytes()))
+            };
+            let skip = env::var_os("SANDMAN_NO_TAKE").is_some_and(|value| !value.is_empty())
+                || env::var("CLAUDE_MEMORY_PIPELINE").as_deref() == Ok("1");
+            let done = if verb == "mark" {
+                record(
+                    &root,
+                    &mut json!({
+                        "cwd": field("cwd"), "interactive": field("interactive"), "kind": field("kind"),
+                        "reason": reason, "resume": field("resume"), "session": session, "surface": field("surface"),
+                    }),
+                )
+            } else if reason == "resume"
+                || !ledger(&root)
+                    .iter()
+                    .any(|mark| mark["session"] == id && mark["kind"] == "start")
             {
+                Ok(())
+            } else {
+                let decided = skip.then(|| json!({"outcome": "skipped"})).or_else(|| {
+                    job(&claude, id)
+                        .filter(|_| reason != "clear")
+                        .map(|job| json!({"job": job, "outcome": "held"}))
+                });
+                end(&root, &claude, id, &field("cwd"), &reason, decided).map(drop)
+            };
+            match done {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
-                    eprintln!("sandman mark: {error}");
+                    eprintln!("sandman {verb}: {error}");
                     ExitCode::FAILURE
                 }
             }
         }
         Some("chart") => {
             let mut marks: BTreeMap<String, (Value, Value)> = BTreeMap::new();
-            for file in tree(&root.join("ledger"), 3) {
-                for mark in fs::read_to_string(file)
-                    .unwrap_or_default()
-                    .lines()
-                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            for mark in ledger(&root) {
+                if let (Some(session), Some(kind)) =
+                    (mark["session"].as_str(), mark["kind"].as_str())
                 {
-                    if let (Some(session), Some(kind)) =
-                        (mark["session"].as_str(), mark["kind"].as_str())
+                    let pair = marks.entry(session.to_owned()).or_default();
+                    let slot = if kind == "end" {
+                        &mut pair.1
+                    } else {
+                        &mut pair.0
+                    };
+                    // the earliest start (a reload re-fires it), the latest end
+                    if slot.is_null()
+                        || (mark["at"].as_str() < slot["at"].as_str()) == (kind != "end")
                     {
-                        let pair = marks.entry(session.to_owned()).or_default();
-                        let slot = if kind == "end" {
-                            &mut pair.1
-                        } else {
-                            &mut pair.0
-                        };
-                        // the earliest start (a reload re-fires it), the latest end
-                        if slot.is_null()
-                            || (mark["at"].as_str() < slot["at"].as_str()) == (kind != "end")
-                        {
-                            *slot = mark;
-                        }
+                        *slot = mark;
                     }
                 }
             }
@@ -256,7 +480,7 @@ fn main() -> ExitCode {
                     let from = if start.is_null() { &end } else { &start };
                     json!({
                         "cwd": from["cwd"], "end": end["at"], "machine": from["machine"],
-                        "session": session, "start": start["at"],
+                        "outcome": end["outcome"], "session": session, "start": start["at"],
                     })
                 })
                 .collect();
@@ -265,7 +489,7 @@ fn main() -> ExitCode {
                 io::stdout().lock(),
                 "{}",
                 json!({
-                    "active": sorted(active, "start"), "at": now(), "machine": machine(&root),
+                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "machine": machine(&root),
                     "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"),
                 })
             ));
@@ -319,12 +543,15 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let cap = env::var("SANDMAN_LOG_CAP")
-                .ok()
-                .and_then(|cap| cap.parse().ok())
-                .unwrap_or(1u64 << 20);
+            let number = |key: &str, default: u64| {
+                env::var(key)
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(default)
+            };
+            let cap = number("SANDMAN_LOG_CAP", 1 << 20);
             let write = move |mut line: Value| {
-                line["at"] = now().into();
+                line["at"] = utc(SystemTime::now()).into();
                 if fs::metadata(&log).is_ok_and(|meta| meta.len() >= cap) {
                     drop(fs::rename(&log, log.with_extension("log.1")));
                 }
@@ -352,9 +579,52 @@ fn main() -> ExitCode {
                     drop(UnixStream::connect(&wake));
                 }
             }));
+            let (this, settle, data) = (machine(&root), write.clone(), root.clone());
+            let tick = Duration::from_millis(number("SANDMAN_TICK_MS", 30_000));
+            let quiet = Duration::from_millis(number("SANDMAN_QUIET_MS", 120_000));
+            drop(thread::spawn(move || {
+                while STOP.get().is_none() {
+                    thread::sleep(tick);
+                    // the latest line per session; a held end whose job is gone and whose
+                    // transcript has been quiet for the window is taken
+                    let latest: BTreeMap<String, Value> = ledger(&data)
+                        .into_iter()
+                        .filter_map(|entry| Some((entry["session"].as_str()?.to_owned(), entry)))
+                        .collect();
+                    for (session, held) in latest {
+                        let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
+                        if held["kind"] != "end"
+                            || held["outcome"] != "held"
+                            || held["machine"] != this
+                            || job(&claude, &session).is_some()
+                            || transcript(&claude, &session)
+                                .and_then(|path| {
+                                    path.metadata().and_then(|meta| meta.modified()).ok()
+                                })
+                                .is_some_and(|time| time.elapsed().unwrap_or_default() < quiet)
+                            || STOP.get().is_some()
+                        {
+                            continue;
+                        }
+                        let mut line = end(
+                            &data,
+                            &claude,
+                            &session,
+                            &held["cwd"],
+                            &"job gone".into(),
+                            None,
+                        )
+                        .unwrap_or_else(
+                            |error| json!({"reason": error.to_string(), "session": session}),
+                        );
+                        line["event"] = "take".into();
+                        settle(line);
+                    }
+                }
+            }));
             let version = env!("CARGO_PKG_VERSION");
             let health = json!({
-                "machine": machine(&root), "ok": true, "pid": id(), "since": now(), "state": "ready", "version": version,
+                "machine": machine(&root), "ok": true, "pid": id(), "since": utc(SystemTime::now()), "state": "ready", "version": version,
             });
             write(json!({"event": "start", "pid": id(), "version": version}));
             // the ready line: whoever spawned the daemon reads it, so nothing polls
@@ -389,6 +659,9 @@ fn main() -> ExitCode {
                 };
                 drop(writeln!(conn, "{reply}"));
             };
+            // the take in hand finishes; the tick starts no other
+            STOP.set("").unwrap_or_default();
+            let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
             let pid = run.join("serve.pid");
             if fs::read_to_string(&pid).is_ok_and(|text| text == id().to_string()) {
                 drop(fs::remove_file(&pid));
@@ -457,7 +730,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman chart | serve | setup | status"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman chart | serve | setup | status"
             );
             ExitCode::from(2)
         }
