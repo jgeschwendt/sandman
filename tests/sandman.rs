@@ -18,7 +18,7 @@ mod tests {
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio, id};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
-    use std::{env, fs, thread};
+    use std::{env, fs, iter, thread};
 
     /// Recall's corpus: candidates in two banks (one description past 160 characters, a tie on
     /// score broken by date, a remembered trace), and in a third a `user` memory, a pinned one and a
@@ -271,13 +271,15 @@ mod tests {
                 "/work/alpha",
                 "studio",
             ),
+            // interactive: a's true outlasts its reload's false, c's is false, e says nothing
             mark(
                 "2026-11-09T08:40:00Z",
                 "start",
                 "a",
                 "/work/reload",
                 "studio",
-            ),
+            )
+            .replace("true", "false"),
             ended(
                 mark("2026-11-09T09:30:00Z", "end", "a", "/work/alpha", "studio"),
                 "taken",
@@ -293,7 +295,8 @@ mod tests {
                 "c",
                 "/work/alpha",
                 "laptop",
-            ),
+            )
+            .replace("true", "false"),
             mark("2026-11-09T15:10:00Z", "end", "c", "/work/alpha", "laptop"),
             format!(
                 r#"{{"at":"2026-11-09T09:31:00Z","error":"sample","kind":"encode","machine":"studio","outcome":"failed","session":"{ID}a","traces":0}}"#
@@ -425,15 +428,23 @@ mod tests {
                 "traces/-work-alpha/.feedback_sample_spans.md.1",
                 String::new(),
             ),
+            // d's live transcript: its `seen`
+            ("claude/projects/-work-beta/@d.jsonl", String::new()),
         ];
         for (path, text) in files {
             let file = PathBuf::from(&root).join(path.replace('@', ID));
             fs::create_dir_all(file.parent().ok_or("parent")?)?;
             fs::write(file, text)?;
         }
+        File::open(format!("{root}/claude/projects/-work-beta/{ID}d.jsonl"))?
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1_794_299_400))?;
         let want: Value = serde_json::from_str(include_str!("../docs/data/chart.json"))?;
         let out = sandman(
-            &[("SANDMAN_MACHINE", "studio"), ("SANDMAN_ROOT", &root)],
+            &[
+                ("CLAUDE_CONFIG_DIR", &format!("{root}/claude")),
+                ("SANDMAN_MACHINE", "studio"),
+                ("SANDMAN_ROOT", &root),
+            ],
             &["chart"],
             "",
         )?;
@@ -2167,6 +2178,150 @@ esac
         )?;
         let left = ["pid", "sock"].map(|kind| fs::exists(format!("{run}/serve.{kind}")));
         same(&format!("{left:?}"), "[Ok(false), Ok(false)]")
+    }
+
+    /// The tick's first job ends what never ended, of this machine's sessions started before the
+    /// grace with no end since and no job naming them: one without a transcript `gone`, 20 a tick;
+    /// one idle past the window taken, one a tick; each a `reconcile` log line. A live transcript, a
+    /// job, an end since, a start inside the grace or another machine's session is left alone; a
+    /// later start reads as running again in `chart`.
+    #[test]
+    fn reconcile() -> Outcome {
+        let root = temp("reconcile")?;
+        let claude = format!("{root}/claude");
+        let envs = [
+            ("CLAUDE_CONFIG_DIR", claude.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        // 21 without a transcript; a and b idle, c live, d a job's, e ended, f the laptop's
+        let lost = |n: u8| format!("5b000000-0000-4000-8000-0000000000{n:02x}");
+        let start = |session: &str, machine: &str| {
+            format!(
+                r#"{{"at":"2026-11-01T00:00:00Z","cwd":"/w","interactive":false,"kind":"start","machine":"{machine}","session":"{session}"}}"#
+            )
+        };
+        let mut lines: Vec<String> = (0..21).map(|n| start(&lost(n), "studio")).collect();
+        lines.extend(
+            ["a", "b", "c", "d", "e"].map(|letter| start(&format!("{ID}{letter}"), "studio")),
+        );
+        lines.push(start(&format!("{ID}f"), "laptop"));
+        lines.push(format!(
+            r#"{{"at":"2026-11-01T01:00:00Z","kind":"end","machine":"studio","outcome":"gone","session":"{ID}e"}}"#
+        ));
+        plant(
+            &root,
+            &[
+                ("ledger/2026/11/01.jsonl", &lines.join("\n")),
+                ("claude/projects/-w/@a.jsonl", "{}\n"),
+                ("claude/projects/-w/@b.jsonl", "{}\n"),
+                ("claude/projects/-w/@c.jsonl", "{}\n"),
+                ("claude/jobs/j/state.json", r#"{"sessionId":"@d"}"#),
+            ],
+        )?;
+        for letter in ["a", "b"] {
+            File::open(format!("{claude}/projects/-w/{ID}{letter}.jsonl"))?
+                .set_modified(UNIX_EPOCH + Duration::from_secs(1_767_225_600))?;
+        }
+        // 0 starts now, inside the grace
+        let fresh = format!(r#"{{"kind":"start","session":"{ID}0"}}"#);
+        same(&sandman(&envs, &["mark"], &fresh)?, "0\n")?;
+        let (mut daemon, _) = serve(&root, &[("SANDMAN_TICK_MS", "1000")])?;
+        let (log, day) = (format!("{root}/run/serve.log"), date(&["+%Y/%m/%d"])?);
+        let prefix = format!("{root}/.archive/claude/{day}/");
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        // whole lines only: the daemon may be mid-write
+        let pick = |file: &str, kind: &str| -> Vec<String> {
+            read(file)
+                .lines()
+                .filter(|line| line.contains(kind))
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .map(|mut entry| {
+                    entry["at"] = json!(entry["at"].as_str().map(str::len));
+                    if let Some(path) = entry["archived"].as_str() {
+                        entry["archived"] =
+                            json!(path.strip_prefix(&prefix).and_then(|rest| rest.get(6..)));
+                    }
+                    entry.to_string()
+                })
+                .collect()
+        };
+        let reconciled = || pick(&log, r#""event":"reconcile""#);
+        until(|| reconciled().len() >= 21)?;
+        let first = reconciled();
+        until(|| reconciled().len() >= 23)?;
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let line = |session: &str, event: &str, tail: &str| {
+            format!(
+                r#"{{{tail}"at":20,"cwd":"/w",{event}"kind":"end","machine":"studio","outcome":{}"session":"{session}"}}"#,
+                if tail.is_empty() {
+                    r#""gone","reason":"no end recorded","#
+                } else {
+                    r#""taken","reason":"idle","#
+                }
+            )
+        };
+        let want = |event: &str| {
+            let idle = |letter: &str| {
+                line(
+                    &format!("{ID}{letter}"),
+                    event,
+                    &format!(r#""archived":"-projects--w-{ID}{letter}.jsonl","#),
+                )
+            };
+            iter::once(idle("a"))
+                .chain((0..20).map(|n| line(&lost(n), event, "")))
+                .chain([idle("b"), line(&lost(20), event, "")])
+                .collect::<Vec<_>>()
+        };
+        let logged = want(r#""event":"reconcile","#);
+        same(
+            &format!(
+                "{first:?}\n{:?}\n{:?}",
+                reconciled(),
+                pick(&format!("{root}/ledger/{day}.jsonl"), r#""kind":"end""#)
+            ),
+            &format!(
+                "{:?}\n{logged:?}\n{:?}",
+                logged.iter().take(21).collect::<Vec<_>>(),
+                want("")
+            ),
+        )?;
+        // lost 00 resumes: running again; 01 stays gone
+        let resumed = format!(r#"{{"kind":"start","session":"{}"}}"#, lost(0));
+        same(&sandman(&envs, &["mark"], &resumed)?, "0\n")?;
+        let out = sandman(&envs, &["chart"], "")?;
+        let chart: Value =
+            serde_json::from_str(out.strip_prefix("0\n").ok_or_else(|| out.clone())?)?;
+        let rows: Vec<String> = chart["active"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|row| {
+                [lost(0), lost(1)]
+                    .iter()
+                    .any(|id| row["session"] == id.as_str())
+            })
+            .map(|row| {
+                format!(
+                    "{} {} {}",
+                    row["end"].is_null(),
+                    row["outcome"],
+                    row["interactive"]
+                )
+            })
+            .collect();
+        same(
+            &format!("{rows:?}"),
+            r#"["true null false", "false \"gone\" false"]"#,
+        )
     }
 
     /// The tick settles a held session once no job names it and its transcript has been quiet for
