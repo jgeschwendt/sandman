@@ -110,7 +110,8 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   <p class="lead docs-lead"><code class="code">sandman</code> is being rewritten from scratch, one part
     at a time; this build carries <code class="code">mark</code>, <code class="code">take</code>,
     <code class="code">chart</code> and the daemon, <code class="code">serve</code>, with its <code class="code">status</code> and
-    <code class="code">setup</code>.</p>
+    <code class="code">setup</code>. Its memory follows complementary learning systems: a fast, temporary store
+    captures each session as an episode, and a slow store absorbs episodes through replay.</p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#root">root</a>
     <a class="pill" href="#mark">mark</a>
@@ -140,7 +141,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
       <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>; <code class="code">call</code> and <code class="code">prompt</code> not built yet</td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
-      <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
+      <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>the banks, the long-term store: memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
       <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>; see <a class="link" href="#serve">serve</a></td></tr>
       <tr><td><code class="code">machine</code></td><td>this machine's id: one line, 32 lowercase hex from <code class="code">/dev/urandom</code>, minted on first use; <code class="code">$SANDMAN_MACHINE</code> overrides it</td></tr>
     </tbody>
@@ -266,7 +267,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
     <h2 class="h2">serve</h2>
     <p class="docs-note">The daemon, a foreground process launchd keeps alive as
       <code class="code">dev.gigantic.sandman</code>. Its one job is the tick that settles held
-      takes; the first memory and the review will run here too.</p>
+      takes; encoding and consolidation (<a class="link" href="#next">Next</a>) will run here too.</p>
   </header>
   <figure class="figure">
     <div class="chart-frame" id="lifecycle">
@@ -340,12 +341,13 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
     <p class="docs-note">Parts still to bring over.</p>
   </header>
   <ul class="stack" role="list">
-    <li><code class="code">first memory</code>: in <code class="code">serve</code>, right after a take, one session at a time. A headless model, Claude Opus by default (one setting, so a local model can replace it), reads the archived transcript and writes the session's first memories, each carrying its session id and archive path, into a group: <code class="code">groups/&lt;bank&gt;/&lt;file&gt;.md</code>, the bank the session's cwd belongs to, apart from the banks. The run is flagged so it is never itself marked, taken or turned into a memory. It replaces the short-term pointer.</li>
-    <li><code class="code">mark</code>: the mod's tool log moves into the ledger, which becomes every mod event: <code class="code">mark</code> writes a <code class="code">call</code> line per tool call and a <code class="code">prompt</code> line per typed prompt. Readers that need only sessions skip those kinds; the first memory, the review and the end-of-day judge read a session's calls and prompts from it.</li>
+    <li><code class="code">consolidate</code>: in <code class="code">serve</code>, later. Consolidation stabilises a bank's traces (newly encoded memories, still labile: easy to change or lose) and integrates them with what the bank already holds: a trace that revises a memory updates it (reconsolidation), and pruning drops a trace that does not hold or a memory gone stale. It takes the place of the dream pass.</li>
+    <li><code class="code">encode</code>: in <code class="code">serve</code>, right after a take, one episode at a time. Encoding is a headless model, Claude Opus by default (one setting, so a local model can replace it), reading the archived transcript and writing the episode's traces, each carrying its session id and archive path, to <code class="code">traces/&lt;bank&gt;/&lt;file&gt;.md</code>, for the bank the session's cwd belongs to. The run is flagged so it is never itself marked, taken or encoded. Once it lands, the short-term pointer goes.</li>
+    <li><code class="code">mark</code>: the mod's tool log moves into the ledger, which becomes every mod event: <code class="code">mark</code> writes a <code class="code">call</code> line per tool call and a <code class="code">prompt</code> line per typed prompt. Readers that need only sessions skip those kinds; encoding, consolidation and the end-of-day judge read a session's calls and prompts from it.</li>
     <li><code class="code">recall</code>: the one verb the mod runs at a session's start. It writes the start mark first, whether or not there is anything to recall, so <code class="code">mark</code> stops writing it.</li>
     <li><code class="code">reflect</code></li>
     <li><code class="code">remember</code></li>
-    <li><code class="code">review</code>: in <code class="code">serve</code>, later. A group is reviewed against the memories its bank already holds, then added to the bank, <code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code>. It takes the place of the dream pass.</li>  </ul>
+  </ul>
 </section>
 
 <nav class="row link-row" aria-label="links">
