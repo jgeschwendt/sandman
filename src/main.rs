@@ -70,8 +70,9 @@ const RECORD: fn(&Value) -> String = |memory| {
     )
 };
 
-/// The seed's instructions, first in a session's context; `<id>` is the session's id.
-const SEED: &str = "Memory from earlier sessions is yours to pull: run `sandman recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `sandman show <bank>/<file> --session <id>` before acting on it. When the person states a preference, corrects you, or decides something a later session needs, run `sandman remember \"<their words>\"` at once, one fact per call.";
+/// The seed's instructions, first in a session's context; `<id>` is the session's id, `<me>` the
+/// name the binary was invoked as.
+const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, with `--about <repository path>` when it holds in one repository, one fact per call.";
 
 /// Held by the tick for each take; the drain takes it after setting `STOP`, so the take in hand
 /// finishes and no other starts.
@@ -360,8 +361,10 @@ fn note(fields: &[(&str, &str)], body: &str) -> String {
 }
 
 /// Every `<root>/<dir>/<bank>/<file>.md` but `MEMORY.md`, banks and files starting `.` or `_`
-/// skipped: its frontmatter as an object, with `bank`, `file`, `text` (the whole file), and
-/// `name` when the frontmatter has none (the stem). By bank, then file.
+/// skipped: its frontmatter as an object, with `bank`, `file`, `text` (the whole file), `body`
+/// (frontmatter stripped, trimmed), `path` (what `show` takes: `<bank>/<file>` for a memory,
+/// `<dir>/<bank>/<file>` else) and `name` when the frontmatter has none (the stem). By bank, then
+/// file.
 fn notes(root: &Path, dir: &str) -> Vec<Value> {
     tree(&root.join(dir), 2)
         .iter()
@@ -378,8 +381,19 @@ fn notes(root: &Path, dir: &str) -> Vec<Value> {
                 for (key, value) in front(&text) {
                     note[key] = value.into();
                 }
-                (note["bank"], note["file"], note["text"]) =
-                    (bank.into(), file.into(), text.into());
+                let address = format!("{dir}/{bank}/{file}");
+                (note["bank"], note["file"], note["path"]) = (
+                    bank.into(),
+                    file.into(),
+                    address.strip_prefix("memories/").unwrap_or(&address).into(),
+                );
+                note["body"] = text
+                    .strip_prefix("---\n")
+                    .and_then(|rest| rest.split_once("\n---"))
+                    .map_or(text.as_str(), |(_, body)| body)
+                    .trim()
+                    .into();
+                note["text"] = text.into();
                 note
             })
         })
@@ -695,6 +709,8 @@ fn main() -> ExitCode {
     let claude =
         env::var_os("CLAUDE_CONFIG_DIR").map_or_else(|| home.join(".claude"), PathBuf::from);
     let args: Vec<String> = env::args().collect();
+    // the name it was invoked as, so a command printed for an agent runs this binary
+    let me = name(Path::new(args.first().map_or("", String::as_str)));
     let flag = |name: &str| args.iter().skip_while(|arg| *arg != name).nth(1).cloned();
     let pull = flag("--session");
     if !pull.as_deref().is_none_or(uuid) {
@@ -907,7 +923,7 @@ fn main() -> ExitCode {
                 setting("SANDMAN_RECALL_GATE", 0.15f64),
             );
             let fits = |scored: usize, used: usize| scored < max && used <= budget;
-            let memories = notes(&root, "memories");
+            let memories = [notes(&root, "memories"), notes(&root, "traces")].concat();
             // the always-set comes without a vote and never leaves the machine; muted, nothing
             let (always, mut candidates): (Vec<&Value>, Vec<&Value>) = memories
                 .iter()
@@ -915,8 +931,7 @@ fn main() -> ExitCode {
                 .partition(|memory| memory["type"] == "user" || memory["recall"] == "pin");
             // a seed without a prompt scores nothing
             candidates.retain(|_| !cue.trim().is_empty());
-            let path =
-                |memory: &Value| format!("{}/{}", text(&memory["bank"]), text(&memory["file"]));
+            let path = |memory: &Value| text(&memory["path"]).to_owned();
             // what this session's earlier recalls sent is not sent again
             let earlier: Vec<Value> = ledger(&root)
                 .into_iter()
@@ -1179,11 +1194,11 @@ fn main() -> ExitCode {
                     candidates.len()
                 )
             };
-            let foot = "read one in full: sandman show <bank>/<file>\n";
+            let foot = &*format!("read one in full: {me} show <path>\n");
             // the seed opens with its instructions and the always-set, counted first
             let opening: String = iter::once(format!(
                 "{}\n\nalways \u{b7} about the person, or pinned\n",
-                SEED.replace("<id>", sid)
+                SEED.replace("<id>", sid).replace("<me>", me)
             ))
             .filter(|_| seed)
             .collect();
@@ -1209,9 +1224,15 @@ fn main() -> ExitCode {
                     )
                 {
                     let row = format!(
-                        "{} {} ({} \u{b7} {}) \u{2014} {}\n",
+                        "{} {}{} ({} \u{b7} {}) \u{2014} {}\n",
                         noul.as_deref()
                             .map_or("  \u{b7}", |score| score.trim_start_matches('0')),
+                        // a trace is provisional until consolidation keeps it
+                        if path(memory).starts_with("traces/") {
+                            "~"
+                        } else {
+                            ""
+                        },
                         text(&memory["name"]),
                         text(&memory["type"]),
                         path(memory),
@@ -1268,6 +1289,75 @@ fn main() -> ExitCode {
             );
             print!("{opening}{listed}{tail}");
             drop(record(&root, &mut line));
+            ExitCode::SUCCESS
+        }
+        "remember" => {
+            let body = args.get(2).map_or("", |said| said.trim());
+            let kind = flag("--type").unwrap_or_else(|| "feedback".to_owned());
+            if body.is_empty() || !KINDS.contains(&kind.as_str()) {
+                eprintln!(
+                    "sandman remember: takes a non-empty \"<body>\" first and --type user|feedback|project|reference"
+                );
+                return ExitCode::from(2);
+            }
+            // homed as encode homes a trace: the directory --about names, else the cwd, else home
+            let about = flag("--about").map(|given| {
+                fs::canonicalize(&given)
+                    .ok()
+                    .filter(|dir| dir.is_dir())
+                    .map_or(given, |dir| dir.to_string_lossy().into_owned())
+            });
+            let bank = key(&project(
+                &about
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .filter(|dir| dir.is_dir())
+                    .or_else(|| env::current_dir().ok())
+                    .unwrap_or_else(|| home.clone()),
+            ));
+            let title = flag("--name").unwrap_or_else(|| {
+                body.split_whitespace()
+                    .take(8)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            });
+            let line = flag("--description")
+                .unwrap_or_else(|| one_line(body.lines().next().unwrap_or_default(), 160));
+            let file = slot(
+                &root.join("traces").join(&bank),
+                &kind,
+                &title,
+                &mut BTreeSet::new(),
+            );
+            let (now, session) = (utc(SystemTime::now()), pull.as_deref());
+            let contents = note(
+                &[
+                    ("name", one_line(&title, 200).as_str()),
+                    ("description", one_line(&line, 400).as_str()),
+                    ("type", &kind),
+                    ("created", &now),
+                    (
+                        "about",
+                        &one_line(about.as_deref().unwrap_or_default(), 400),
+                    ),
+                    ("session", session.unwrap_or_default()),
+                    (
+                        "source",
+                        &format!("remember {now} \u{b7} {}", session.unwrap_or("-")),
+                    ),
+                ],
+                body,
+            );
+            if let Err(error) = put(&file, &contents) {
+                eprintln!("sandman remember: {error}");
+                return ExitCode::FAILURE;
+            }
+            let path = format!("traces/{bank}/{}", name(&file));
+            drop(record(
+                &root,
+                &mut json!({"file": path, "kind": "remember", "session": pull, "type": kind}),
+            ));
+            println!("{me} show {path}");
             ExitCode::SUCCESS
         }
         "serve" => {
@@ -1443,11 +1533,48 @@ fn main() -> ExitCode {
                                 text(&episode["at"]),
                                 cwd.unwrap_or("unknown")
                             );
-                            let chosen = highlights(&turns);
-                            if !chosen.is_empty() {
-                                digest.push_str("# highlights\n");
-                                digest.extend(chosen.iter().map(|body| format!("- {body}\n")));
-                                digest.push('\n');
+                            // what the session already remembered is done; a highlight it covers
+                            // (the same body, whitespace collapsed) is dropped
+                            let remembered: Vec<Value> =
+                                [notes(&data, "memories"), notes(&data, "traces")]
+                                    .concat()
+                                    .into_iter()
+                                    .filter(|note| {
+                                        note["session"] == session
+                                            && text(&note["source"]).starts_with("remember")
+                                    })
+                                    .collect();
+                            for (title, items) in [
+                                (
+                                    "already remembered",
+                                    remembered
+                                        .iter()
+                                        .map(|note| {
+                                            format!(
+                                                "{} \u{2014} {}",
+                                                text(&note["name"]),
+                                                text(&note["description"])
+                                            )
+                                        })
+                                        .collect(),
+                                ),
+                                (
+                                    "highlights",
+                                    highlights(&turns)
+                                        .into_iter()
+                                        .filter(|body| {
+                                            !remembered.iter().any(|note| {
+                                                one_line(text(&note["body"]), 4000) == *body
+                                            })
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
+                            ] {
+                                if !items.is_empty() {
+                                    digest.extend([format!("# {title}\n")]);
+                                    digest.extend(items.iter().map(|line| format!("- {line}\n")));
+                                    digest.push('\n');
+                                }
                             }
                             digest.push_str("# transcript\n");
                             digest.extend(
@@ -1933,27 +2060,28 @@ fn main() -> ExitCode {
         }
         "show" => {
             let wanted = args.get(2).cloned().unwrap_or_default();
-            let Some(memory) = notes(&root, "memories")
+            let Some(memory) = [notes(&root, "memories"), notes(&root, "traces")]
+                .concat()
                 .into_iter()
-                .find(|note| format!("{}/{}", text(&note["bank"]), text(&note["file"])) == wanted)
+                .find(|note| note["path"] == wanted.as_str())
             else {
                 eprintln!(
-                    "sandman show: no memory {wanted} (want <bank>/<file>.md under {}/memories)",
+                    "sandman show: no memory {wanted} (want [traces/]<bank>/<file>.md under {})",
                     root.display()
                 );
                 return ExitCode::FAILURE;
             };
-            let whole = text(&memory["text"]);
             println!(
-                "{} ({}) \u{b7} {}\n{}",
+                "{} ({}{}) \u{b7} {}\n{}",
                 text(&memory["name"]),
                 text(&memory["type"]),
+                if wanted.starts_with("traces/") {
+                    " \u{b7} trace"
+                } else {
+                    ""
+                },
                 when(&memory).unwrap_or("undated"),
-                whole
-                    .strip_prefix("---\n")
-                    .and_then(|rest| rest.split_once("\n---"))
-                    .map_or(whole, |(_, body)| body)
-                    .trim()
+                text(&memory["body"])
             );
             drop(record(
                 &root,
@@ -1988,7 +2116,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--session <uuid>] [--budget <chars>]\n       sandman show <bank>/<file>.md [--session <uuid>]\n       sandman chart | serve | setup | status"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show [traces/]<bank>/<file>.md [--session <uuid>]\n       sandman chart | serve | setup | status"
             );
             ExitCode::from(2)
         }
