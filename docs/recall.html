@@ -81,8 +81,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p class="lead docs-lead"><code class="code">recall</code> is the agent's tool: it pulls the memories that
     bear on what it is about to do, by its own cue, whenever it needs them. A session's start gets a seed.</p>
   <p class="notice notice-warn"><span>Partly built: <code class="code">sandman recall</code>, the seed and the pull,
-    and <code class="code">sandman show</code> run (<a class="link" href="#tool">the tools</a>); the mod wiring, the Kev
-    fallback, <code class="code">remember</code> and the pane are not, and the earlier sandman's recall runs at every
+    <code class="code">sandman show</code> and <code class="code">sandman remember</code> run (<a class="link" href="#tool">the tools</a>); the mod wiring, the Kev
+    fallback and the pane are not, and the earlier sandman's recall runs at every
     session's start. A decision is open until its badge says settled; what Jev sees, the question, the gate and the
     cut are <a class="link" href="#chosen">the evaluation's choice</a>.</span></p>
   <nav class="row docs-toc" aria-label="sections">
@@ -134,14 +134,14 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </header>
   <figure class="figure">
     <div class="chart-frame" id="flow">
-      <svg width="932" height="336" viewBox="0 0 932 336" role="img" aria-label="recall's flow: the mod's first prompt (not wired) reaches the seed, which writes the start mark and brings the instructions and the always-set; the seed and the agent's pull both reach the candidates, jev answers the gate and scores each candidate in three requests run at once, the gate open, the top 6 over .35, the digest, one ledger line; jev down falls back to kev in two stages, both down to the always-set only, neither built">
+      <svg width="932" height="336" viewBox="0 0 932 336" role="img" aria-label="recall's flow: the mod's first prompt (not wired) reaches the seed, which writes the start mark and brings the instructions and the always-set; the seed and the agent's pull both reach the candidates, every memory and trace, jev answers the gate and scores each candidate in three requests run at once, the gate open, the top 6 over .35, the digest, one ledger line; jev down falls back to kev in two stages, both down to the always-set only, neither built">
         <defs>
           <marker id="flow-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
         </defs>
         <g transform="translate(0,28)"><rect class="flow-box is-next" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">first prompt</text><text class="flow-note" x="12" y="46">the mod awaits;</text><text class="flow-note" x="12" y="64">a real ask, the cue</text></g>
         <g transform="translate(196,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">① seed</text><text class="flow-note" x="12" y="46">start mark, then the</text><text class="flow-note" x="12" y="64">instructions, always</text></g>
         <g transform="translate(0,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">agent's pull</text><text class="flow-note" x="12" y="46">its cue, any time,</text><text class="flow-note" x="12" y="64">--about its repo</text></g>
-        <g transform="translate(392,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">② candidates</text><text class="flow-note" x="12" y="46">every other memory,</text><text class="flow-note" x="12" y="64">with its repository</text></g>
+        <g transform="translate(392,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">② candidates</text><text class="flow-note" x="12" y="46">memories, traces ~,</text><text class="flow-note" x="12" y="64">with their repository</text></g>
         <g transform="translate(588,28)"><rect class="flow-box is-accent" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ jev scores</text><text class="flow-note" x="12" y="46">the gate, a noul each;</text><text class="flow-note" x="12" y="64">3 parts at once</text></g>
         <g transform="translate(784,28)"><rect class="flow-box is-next" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">kev, 2 stages</text><text class="flow-note" x="12" y="46">49 banks, then the</text><text class="flow-note" x="12" y="64">top banks' memories</text></g>
         <g transform="translate(196,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑥ recall line</text><text class="flow-note" x="12" y="46">to the ledger:</text><text class="flow-note" x="12" y="64">sent, scores, cut</text></g>
@@ -265,7 +265,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <ul class="stack claims" role="list">
     <li>Each candidate carries its name, its description cut at 160 characters and its repository's label beside the fixed question and criteria; the labels come from the grove root's owner and repository dirs, so a worktree's bank reads as its repository and a bank matching no dir as a guessed path (AGENTS.md).</li>
     <li>Uncapped, the descriptions are 181.7 KB (average 269 characters, longest 1,392; only 184 are within 160): the cap trims the room a description has to argue for itself (<a class="link" href="#risks">risks</a>).</li>
-    <li>Candidates are memories only; traces join them, marked provisional, when <a class="link" href="#tool"><code class="code">remember</code></a> lands.</li>
+    <li>Traces are candidates too, from the moment they are written: a <a class="link" href="#tool"><code class="code">remember</code></a> made at 10:05 is recallable at 10:06, marked <code class="code">~</code> until consolidation keeps, merges or prunes it; a <code class="code">user</code> trace rides the always-set.</li>
   </ul>
 </section>
 
@@ -290,7 +290,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <table data-table>
     <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
     <tbody>
-      <tr class="is-proposed"><td>one line per memory, a verb to read one <span class="badge badge-ok">built</span></td><td><code class="code">.NN name (type · bank/file) — description</code>, and <code class="code">sandman show &lt;bank&gt;/&lt;file&gt;</code> once</td><td>a body costs a tool call when the session needs it</td></tr>
+      <tr class="is-proposed"><td>one line per memory, a verb to read one <span class="badge badge-ok">built</span></td><td><code class="code">.NN name (type · path) — description</code>, <code class="code">~name</code> for a trace, and <code class="code">sandman show &lt;path&gt;</code> once</td><td>a body costs a tool call when the session needs it</td></tr>
       <tr><td>bodies for the top few, lines for the rest</td><td>the best matches arrive whole</td><td>a body averages over 1 KB (888 KB over 645 files): three bodies cost about fifteen lines</td></tr>
       <tr><td>bodies for all that fit</td><td>no reads needed</td><td>a handful of memories per session</td></tr>
     </tbody>
@@ -391,8 +391,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     </tbody>
   </table>
 </div>
-  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;bank&gt;/&lt;file&gt;"],"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"engine":"jev-latest","error"?,"gate":0.87,"kind":"recall","machine":…,"ms":n,"seed"?:true,"sent":[{"file":"&lt;bank&gt;/&lt;file&gt;","noul":0.91}],"session":…,"tokens":n}
-{"at":…,"file":"&lt;bank&gt;/&lt;file&gt;","kind":"show","machine":…,"session":…}</pre>
+  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"engine":"jev-latest","error"?,"gate":0.87,"kind":"recall","machine":…,"ms":n,"seed"?:true,"sent":[{"file":"&lt;path&gt;","noul":0.91}],"session":…,"tokens":n}
+{"at":…,"file":"&lt;path&gt;","kind":"show","machine":…,"session":…}
+{"at":…,"file":"traces/&lt;bank&gt;/&lt;file&gt;","kind":"remember","machine":…,"session":…,"type":"feedback"}</pre>
   <p class="docs-note"><strong>Proposed:</strong> sent, then read, then pinned or muted is the whole feedback loop, and two of its three parts exist already.</p>
   <ul class="stack claims" role="list">
     <li><strong>use</strong> — a <code class="code">show</code> line of a sent memory in the same session; before the seed and the pulls pass <code class="code">--session</code>, a read of the file in the tool log (194 on record).</li>
@@ -436,16 +437,19 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       <code class="code">$SANDMAN_SYSTEMONE</code> (default: curl to Jev, the key as curl config on its stdin, never in an
       argv); stdout the header, the ranked lines and the footer, never the always-set; stderr one stats line; one
       ledger line; within a session nothing already sent, by the seed or a pull, is sent again.</li>
-    <li><strong><code class="code">sandman show &lt;bank&gt;/&lt;file&gt;.md [--session &lt;uuid&gt;]</code></strong>
-      <span class="badge badge-ok">built</span> — the memory's body under its name, type and date, and a ledger line;
-      anything that is not a memory file under the banks is refused.</li>
-    <li><strong><code class="code">sandman remember "&lt;body&gt;" [--type user|feedback|project|reference] [--name …] [--about &lt;path&gt;] [--session &lt;uuid&gt;]</code></strong>
-      <span class="badge">not built</span> — encodes on purpose: a trace written at once to
-      <code class="code">traces/&lt;bank&gt;/</code> (source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>),
-      homed by <code class="code">--about</code> as an encoded trace is (none: about the person, or true everywhere), and
-      a ledger line. Traces then join recall's candidates, marked <code class="code">~</code> until consolidation keeps,
-      merges or prunes them, and the episode's encode takes what was remembered as done. Until it lands, the earlier
-      sandman's <code class="code">remember</code> writes straight into a bank.</li>
+    <li><strong><code class="code">sandman show [traces/]&lt;bank&gt;/&lt;file&gt;.md [--session &lt;uuid&gt;]</code></strong>
+      <span class="badge badge-ok">built</span> — the memory's or trace's body under its name, type (a trace says so)
+      and date, and a ledger line; a memory is <code class="code">&lt;bank&gt;/&lt;file&gt;</code>, a trace
+      <code class="code">traces/&lt;bank&gt;/&lt;file&gt;</code>, anything else refused.</li>
+    <li><strong><code class="code">sandman remember "&lt;body&gt;" [--type user|feedback|project|reference] [--name …] [--description …] [--about &lt;path&gt;] [--session &lt;uuid&gt;]</code></strong>
+      <span class="badge badge-ok">built</span> — encodes on purpose: one trace written at once to
+      <code class="code">traces/&lt;bank&gt;/</code>, source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>,
+      homed by <code class="code">--about</code> as an encoded trace is, else by the cwd (from the root: about the person,
+      or true everywhere); defaults feedback, the body's first eight words, its first line. It prints the
+      <code class="code">show</code> line to read it back and writes a ledger line. The episode's encode lists what the
+      session remembered under <code class="code"># already remembered</code>, which the contract forbids writing again,
+      and drops a highlight with the same body; consolidation takes the trace like any other.</li>
+    <li>Every command printed for the agent names the binary as invoked: <code class="code">sandman-next</code> today.</li>
   </ul>
   <figure class="figure">
     <pre class="snippet wrap" id="seed"><a class="link" href="data/recall-seed.txt">docs/data/recall-seed.txt</a></pre>
@@ -454,8 +458,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </figure>
   <figure class="figure">
     <pre class="snippet wrap" id="digest"><a class="link" href="data/recall-digest.txt">docs/data/recall-digest.txt</a></pre>
-    <figcaption>Sample: a pull of the same cue with <code class="code">--budget 500</code>, two lines before the budget;
-      the suite fails unless this is the verb's output.</figcaption>
+    <figcaption>Sample: a pull of the same cue with <code class="code">--budget 650</code>, four lines before the budget,
+      one a remembered trace; the suite fails unless this is the verb's output.</figcaption>
   </figure>
 </section>
 
@@ -479,7 +483,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
 <div class="pane-sel"><span class="pane-dim">         sandman show sample-alpha/feedback_clock.md</span></div>
 <div>    .84  sample: alpha deploys need the vpn    project</div>
 <div class="pane-group">  sample-beta</div>
-<div>  ~ .71  sample: beta retries back off twice   feedback</div>
+<div>    .71 ~sample: beta retries back off twice   feedback</div>
 <div class="pane-dim">  ▸ considered, not sent: 624 · next .41 .39 .38</div>
 <div class="pane-keys">enter expand · o open · p pin · m mute · r recall again</div>
 </div>

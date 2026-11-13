@@ -14,15 +14,16 @@ mod tests {
     use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
     use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _};
     use std::os::unix::net::{UnixListener, UnixStream};
+    use std::os::unix::process::CommandExt as _;
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio, id};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use std::{env, fs, thread};
 
     /// Recall's corpus: candidates in two banks (one description past 160 characters, a tie on
-    /// score broken by date), and in a third a `user` memory and a pinned one (the always-set) and
-    /// a muted one (nothing).
-    const CORPUS: [(&str, &str); 8] = [
+    /// score broken by date, a remembered trace), and in a third a `user` memory, a pinned one and a
+    /// `user` trace (the always-set) and a muted one (nothing).
+    const CORPUS: [(&str, &str); 10] = [
         (
             "memories/-work-alpha/feedback_clock.md",
             "---\nname: Pass a clock in\ndescription: Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\u{e9} clocks lose\ntype: feedback\ncreated: 2026-11-02T00:00:00Z\n---\n\nInject the clock.\n",
@@ -54,6 +55,14 @@ mod tests {
         (
             "memories/common/user_short.md",
             "---\nname: Prefers short replies\ndescription: lead with the result\ntype: user\n---\n\nShort.\n",
+        ),
+        (
+            "traces/-work-beta/feedback_retry.md",
+            "---\nname: Beta retries back off twice\ndescription: a failed beta deploy retries twice, then stops\ntype: feedback\ncreated: 2026-11-06T00:00:00Z\nsession: @a\nsource: remember 2026-11-06T00:00:00Z \u{b7} @a\n---\n\nTwice, then stop.\n",
+        ),
+        (
+            "traces/common/user_terse.md",
+            "---\nname: Writes terse commits\ndescription: one line, present tense\ntype: user\ncreated: 2026-11-06T00:00:00Z\nsource: remember 2026-11-06T00:00:00Z \u{b7} -\n---\n\nTerse.\n",
         ),
     ];
     /// Session ids for the fixture: `5a000000-0000-4000-8000-00000000000<letter>`.
@@ -158,7 +167,12 @@ mod tests {
         args: &[&str],
         stdin: &str,
     ) -> Result<String, Box<dyn Error>> {
-        let mut child = command(envs, args)
+        ran(&mut command(envs, args), stdin)
+    }
+
+    /// `command` run, `stdin` piped in: its exit code, a newline, its stdout, then its stderr.
+    fn ran(command: &mut Command, stdin: &str) -> Result<String, Box<dyn Error>> {
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -447,7 +461,7 @@ mod tests {
         let user = |cwd: &str, text: &str| json!({"type": "user", "cwd": cwd, "message": {"content": text}});
         let transcript = [
             user(&format!("{work}/r/gone"), "case two"),
-            json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "sample: on it"}, ran("Bash", "sandman remember \"sample: keep the clock\"")]}}),
+            json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "sample: on it"}, ran("Bash", "sandman remember \"sample: keep the clock\""), ran("Bash", "sandman remember \"sample: not yet saved\"")]}}),
             json!({"type": "user", "message": {"content": [{"type": "tool_result", "content": "sample: dropped"}]}}),
             json!({"type": "user", "message": {"content": [{"type": "text", "text": filler}]}}),
             json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/work/sample.rs"}}, {"type": "text", "text": "sample: done"}]}}),
@@ -490,6 +504,19 @@ esac
             ),
             ("work/repo/src/lib.rs".to_owned(), String::new()),
             ("work/elsewhere/README".to_owned(), String::new()),
+            // what session a remembered on the fly; a dream of it is not
+            (
+                "memories/-sample/user_said.md".to_owned(),
+                "---\nname: Sample: said once\ndescription: sample: a memory remembered\ntype: user\nsession: @a\nsource: remember 2026-11-09T08:00:10Z \u{b7} @a\n---\n\nsample: other\n".to_owned(),
+            ),
+            (
+                "memories/-sample/user_dreamed.md".to_owned(),
+                "---\nname: Sample: dreamed\ndescription: x\ntype: user\nsession: @a\nsource: dream\n---\n\nsample: keep the clock\n".to_owned(),
+            ),
+            (
+                "traces/-sample/feedback_kept.md".to_owned(),
+                "---\nname: Sample: keep the clock\ndescription: sample: remembered at once\ntype: feedback\ncreated: 2999-01-01T00:00:00Z\nsession: @a\nsource: remember 2026-11-09T08:00:20Z \u{b7} @a\n---\n\nsample:  keep\n the clock\n".to_owned(),
+            ),
             (
                 "prompts/encode.md".to_owned(),
                 "sample: guidance\n".to_owned(),
@@ -643,7 +670,7 @@ esac
         same(
             &format!("{}\n{cases:?}", runs.first().unwrap_or(&"")),
             &format!(
-                "sample: guidance\n\n{}\n# episode\ndate: 2026-11-09T08:00:30Z\ncwd: {work}/r/gone\n\n# highlights\n- sample: keep the clock\n\n# transcript\nuser: case two\nassistant: sample: on it\ntool: Bash sandman remember \"sample: keep the clock\"\n\u{2026} 3007 bytes omitted \u{2026}\ntool: Read /work/sample.rs\nassistant: sample: done\n\n{:?}",
+                "sample: guidance\n\n{}\n# episode\ndate: 2026-11-09T08:00:30Z\ncwd: {work}/r/gone\n\n# already remembered\n- Sample: said once \u{2014} sample: a memory remembered\n- Sample: keep the clock \u{2014} sample: remembered at once\n\n# highlights\n- sample: not yet saved\n\n# transcript\nuser: case two\nassistant: sample: on it\ntool: Bash sandman remember \"sample: keep the clock\"\ntool: Bash sandman remember \"sample: not yet saved\"\n\u{2026} 3007 bytes omitted \u{2026}\ntool: Read /work/sample.rs\nassistant: sample: done\n\n{:?}",
                 include_str!("../src/prompts/encode.contract.md"),
                 [
                     "two", "one", "one", "one", "none", "exit", "junk", "type", "about", "nodir",
@@ -695,6 +722,7 @@ esac
                 key(&format!("{work}/repo/src"))
             ),
             format!("{}/feedback_sample_pass_the_clock_in.md", key(&home)),
+            "-sample/feedback_kept.md".to_owned(),
             format!(
                 "{}/feedback_sample_pass_the_clock_in.md",
                 key(&format!("{work}/elsewhere"))
@@ -743,13 +771,13 @@ esac
                 "---\nname: {name}\ndescription: sample: {name}\ntype: {kind}\ncreated: {created}\n{rest}---\n\n{body}\n"
             )
         };
-        let trace = |name: &str, created: &str, letter: &str, about: &str| {
+        let trace = |name: &str, created: &str, letter: &str| {
             note(
                 name,
                 "feedback",
                 created,
                 &format!(
-                    "{about}session: @{letter}\narchived: /sample/{letter}.jsonl\nsource: encode {created} \u{b7} @{letter} \u{b7} model=opus\n"
+                    "session: @{letter}\narchived: /sample/{letter}.jsonl\nsource: encode {created} \u{b7} @{letter} \u{b7} model=opus\n"
                 ),
                 "sample: trace body",
             )
@@ -758,20 +786,22 @@ esac
         let alpha = [
             (
                 "traces/alpha/feedback_t_keep.md",
-                trace(
+                // remembered on the fly: kept like any trace, its session and about carried
+                note(
                     "T keep",
+                    "feedback",
                     "2026-11-01T01:00:00Z",
-                    "a",
-                    "about: /work/alpha\n",
+                    "about: /work/alpha\nsession: @a\nsource: remember 2026-11-01T01:00:00Z \u{b7} @a\n",
+                    "sample: trace body",
                 ),
             ),
             (
                 "traces/alpha/feedback_t_merge.md",
-                trace("T merge", "2026-11-01T01:01:00Z", "b", ""),
+                trace("T merge", "2026-11-01T01:01:00Z", "b"),
             ),
             (
                 "traces/alpha/feedback_t_prune.md",
-                trace("T prune", "2026-11-01T01:02:00Z", "c", ""),
+                trace("T prune", "2026-11-01T01:02:00Z", "c"),
             ),
             (
                 "memories/alpha/project_m_merge.md",
@@ -804,7 +834,7 @@ esac
         for (minute, bank) in failing.iter().enumerate() {
             files.push((
                 format!("traces/{bank}/feedback_t.md"),
-                trace("T", &format!("2026-11-01T02:{minute:02}:00Z"), "d", ""),
+                trace("T", &format!("2026-11-01T02:{minute:02}:00Z"), "d"),
             ));
         }
         for (path, body) in [
@@ -824,7 +854,7 @@ esac
         ] {
             files.push((
                 format!("traces/quiet/feedback_{file}.md"),
-                trace("T", created, "e", ""),
+                trace("T", created, "e"),
             ));
         }
         let keep = r#"{"op":"keep","trace":"feedback_t_keep.md","type":"project","name":"Sample: kept","description":"sample: kept","body":"sample: kept body"}"#;
@@ -916,7 +946,7 @@ esac
             &root,
             &[(
                 "traces/rearm/feedback_t2.md",
-                &trace("T2", &date(&["+%Y-%m-%dT%H:%M:%SZ"])?, "f", ""),
+                &trace("T2", &date(&["+%Y-%m-%dT%H:%M:%SZ"])?, "f"),
             )],
         )?;
         let (again, _) = serve(
@@ -1096,7 +1126,7 @@ esac
                 aside("alpha-ops.json")?
             ),
             &format!(
-                "---\nname: Sample: kept\ndescription: sample: kept\ntype: project\ncreated: 2026-11-01T01:00:00Z\nabout: /work/alpha\nsession: {ID}a\narchived: /sample/a.jsonl\n{}\n---\n\nsample: kept body\n---\nname: M merge\ndescription: sample: merged\ntype: project\ncreated: 2026-10-01T00:00:00Z\nrecall: pin\n{}\nupdated: <now>\n---\n\nsample: merged body\n{}{}{}\n",
+                "---\nname: Sample: kept\ndescription: sample: kept\ntype: project\ncreated: 2026-11-01T01:00:00Z\nabout: /work/alpha\nsession: {ID}a\n{}\n---\n\nsample: kept body\n---\nname: M merge\ndescription: sample: merged\ntype: project\ncreated: 2026-10-01T00:00:00Z\nrecall: pin\n{}\nupdated: <now>\n---\n\nsample: merged body\n{}{}{}\n",
                 source("a"),
                 source("b"),
                 alpha[3].1,
@@ -1284,7 +1314,7 @@ esac
         let root = temp("recall")?;
         plant(&root, &CORPUS)?;
         fs::create_dir_all(format!("{root}/parts"))?;
-        let answers = ["0.91", "0.84", "0.2", "0.84", "0.62"]
+        let answers = ["0.91", "0.84", "0.2", "0.84", "0.62", "0.71"]
             .iter()
             .enumerate()
             .map(|(id, noul)| format!(r#""{id}":{{"type":"noul","noul":{noul}}}"#))
@@ -1324,7 +1354,7 @@ esac
         };
         let stats = |requests: u8, sent: u8, cut: u8, max: u8| {
             format!(
-                "recall: engine=jev-latest ms=N requests={requests} input_tokens={} considered=5 sent={sent} cut={cut} gate=0.9 floor=0.35 max={max}\n",
+                "recall: engine=jev-latest ms=N requests={requests} input_tokens={} considered=6 sent={sent} cut={cut} gate=0.9 floor=0.35 max={max}\n",
                 u16::from(requests) * 300
             )
         };
@@ -1340,7 +1370,7 @@ esac
             &format!(
                 "0\n{}{}",
                 include_str!("../docs/data/recall-seed.txt"),
-                stats(1, 4, 0, 6)
+                stats(1, 5, 0, 6)
             ),
         )?;
         let asked = [
@@ -1349,6 +1379,7 @@ esac
             ("The grammar lives in one file \u{2014} src/grammar.pest", "/work/alpha"),
             ("Beta ties break by date \u{2014} newer first", "/work/beta"),
             ("Beta pins its node version \u{2014} node 22 from mise", "/work/beta"),
+            ("Beta retries back off twice \u{2014} a failed beta deploy retries twice, then stops", "/work/beta"),
         ]
         .iter()
         .enumerate()
@@ -1374,16 +1405,16 @@ esac
                 &[],
             )?,
             &format!(
-                "0\nrecall \u{b7} then the beta release \u{b7} 0 of 5\nnothing recalled\n{}",
+                "0\nrecall \u{b7} then the beta release \u{b7} 0 of 6\nnothing recalled\n{}",
                 stats(1, 0, 0, 6)
             ),
         )?;
         same(
-            &run(&["recall", "--cue", clocked, "--budget", "500"], "", &[])?,
+            &run(&["recall", "--cue", clocked, "--budget", "650"], "", &[])?,
             &format!(
                 "0\n{}{}",
                 include_str!("../docs/data/recall-digest.txt"),
-                stats(1, 2, 2, 6)
+                stats(1, 4, 1, 6)
             ),
         )?;
         fs::write(format!("{root}/order"), "")?;
@@ -1400,11 +1431,11 @@ esac
                 ],
             )?,
             &format!(
-                "0\nrecall \u{b7} split \u{b7} 2 of 5\n.91 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.84 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\nread one in full: sandman show <bank>/<file>\n{}",
-                stats(3, 2, 2, 2)
+                "0\nrecall \u{b7} split \u{b7} 2 of 6\n.91 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.84 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\nread one in full: sandman show <path>\n{}",
+                stats(3, 2, 3, 2)
             ),
         )?;
-        // balanced, not greedy (gate,0,1,2 | 3,4): a part closes past its share of the whole
+        // balanced, not greedy: a part closes past its share of the whole
         let mut parts = fs::read_dir(format!("{root}/parts"))?
             .map(|request| {
                 let text = fs::read_to_string(request?.path())?;
@@ -1420,7 +1451,7 @@ esac
                 fs::read_to_string(format!("{root}/order"))?.replace('\n', ""),
                 parts.join(" | ")
             ),
-            "ssseee 0,1,gate | 2,3 | 4",
+            "ssseee 0,1,gate | 2,3,4 | 5",
         )?;
         let sent = |files: &[&str]| {
             files
@@ -1431,6 +1462,7 @@ esac
                         ("-work-alpha/project_vpn.md", "0.84"),
                         ("-work-beta/feedback_tie.md", "0.84"),
                         ("-work-beta/project_node.md", "0.62"),
+                        ("traces/-work-beta/feedback_retry.md", "0.71"),
                     ]
                     .iter()
                     .find(|pair| pair.0 == *file)
@@ -1440,15 +1472,16 @@ esac
                 .collect::<Vec<_>>()
                 .join(",")
         };
-        let (clock, vpn, tie, node) = (
+        let (clock, vpn, tie, node, retry) = (
             "-work-alpha/feedback_clock.md",
             "-work-alpha/project_vpn.md",
             "-work-beta/feedback_tie.md",
             "-work-beta/project_node.md",
+            "traces/-work-beta/feedback_retry.md",
         );
         let line = |cue: &str, cut: u8, files: &[&str], id: &str, tokens: u16| {
             format!(
-                r#"{{"at":"A","considered":5,"cue":"{cue}","cut":{cut},"engine":"jev-latest","gate":0.9,"kind":"recall","machine":"studio","ms":0,"sent":[{}],"session":{id},"tokens":{tokens}}}"#,
+                r#"{{"at":"A","considered":6,"cue":"{cue}","cut":{cut},"engine":"jev-latest","gate":0.9,"kind":"recall","machine":"studio","ms":0,"sent":[{}],"session":{id},"tokens":{tokens}}}"#,
                 sent(files)
             )
         };
@@ -1459,12 +1492,12 @@ esac
                     r#"{{"at":"A","cwd":"/work/alpha","interactive":true,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{session}","surface":"cli"}}"#
                 ),
                 format!(
-                    r#"{{"always":["common/project_pinned.md","common/user_short.md"],"at":"A","considered":5,"cue":"{clocked}","cut":0,"engine":"jev-latest","gate":0.9,"kind":"recall","machine":"studio","ms":0,"seed":true,"sent":[{}],"session":"{session}","tokens":300}}"#,
-                    sent(&[clock, vpn, tie, node])
+                    r#"{{"always":["common/project_pinned.md","common/user_short.md","traces/common/user_terse.md"],"at":"A","considered":6,"cue":"{clocked}","cut":0,"engine":"jev-latest","gate":0.9,"kind":"recall","machine":"studio","ms":0,"seed":true,"sent":[{}],"session":"{session}","tokens":300}}"#,
+                    sent(&[clock, vpn, tie, retry, node])
                 ),
                 line("then the beta release", 0, &[], &format!("\"{session}\""), 300),
-                line(clocked, 2, &[clock, vpn], "null", 300),
-                line("split", 2, &[clock, vpn], "null", 900),
+                line(clocked, 1, &[clock, vpn, tie, retry], "null", 300),
+                line("split", 3, &[clock, vpn], "null", 900),
             ]
             .join("\n"),
         )
@@ -1481,15 +1514,18 @@ esac
         plant(&root, &CORPUS)?;
         fs::write(
             format!("{root}/reply.json"),
-            r#"{"answers":{"0":{"noul":0.9},"1":{"noul":0.9},"2":{"noul":0.9},"3":{"noul":0.9},"4":{"noul":0.9},"gate":{"noul":0.9}}}"#,
+            r#"{"answers":{"0":{"noul":0.9},"1":{"noul":0.9},"2":{"noul":0.9},"3":{"noul":0.9},"4":{"noul":0.9},"5":{"noul":0.9},"gate":{"noul":0.9}}}"#,
         )?;
         let reply = format!("cat {root}/reply.json");
+        // the sample seed's instructions and always-set, for another session
         let opening = |letter: &str| {
-            format!(
-                "Memory from earlier sessions is yours to pull: run `sandman recall --session {ID}{letter} --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `sandman show <bank>/<file> --session {ID}{letter}` before acting on it. When the person states a preference, corrects you, or decides something a later session needs, run `sandman remember \"<their words>\"` at once, one fact per call.\n\nalways \u{b7} about the person, or pinned\n  \u{b7} Pinned (project \u{b7} common/project_pinned.md) \u{2014} always sent\n  \u{b7} Prefers short replies (user \u{b7} common/user_short.md) \u{2014} lead with the result\n"
-            )
+            let sample = include_str!("../docs/data/recall-seed.txt");
+            sample
+                .get(..sample.find("recall \u{b7}").unwrap_or_default())
+                .unwrap_or_default()
+                .replace(&format!("{ID}a"), &format!("{ID}{letter}"))
         };
-        let foot = "read one in full: sandman show <bank>/<file>\n";
+        let foot = "read one in full: sandman show <path>\n";
         let mut want = Vec::new();
         for (letter, prompt, knob, transport, verdict) in [
             ("b", "", ("SANDMAN_SEED_MS", "3000"), "exit 9", ""),
@@ -1498,7 +1534,7 @@ esac
                 "hello",
                 ("SANDMAN_RECALL_FLOOR", "0.95"),
                 reply.as_str(),
-                "0 of 5",
+                "0 of 6",
             ),
             (
                 "d",
@@ -1533,7 +1569,7 @@ esac
             } else {
                 "0.35"
             };
-            let gate = if verdict == "0 of 5" { "0.9" } else { "null" };
+            let gate = if verdict == "0 of 6" { "0.9" } else { "null" };
             let error = verdict
                 .strip_prefix("not scored (")
                 .and_then(|rest| rest.split_once("); "))
@@ -1552,15 +1588,15 @@ esac
                 &format!(
                     "0\n{}{ranked}{foot}recall: engine=jev-latest ms=N requests={scored} input_tokens=0 considered={} sent=0 cut=0 gate={gate} floor={floor} max=6\n",
                     opening(letter),
-                    scored * 5
+                    scored * 6
                 ),
             )?;
             want.push(format!(
                 r#"{{"at":"A","cwd":null,"interactive":null,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{session}","surface":null}}"#
             ));
             want.push(format!(
-                r#"{{"always":["common/project_pinned.md","common/user_short.md"],"at":"A","considered":{},"cue":"{prompt}","cut":0,"engine":"jev-latest",{error}"gate":{gate},"kind":"recall","machine":"studio","ms":0,"seed":true,"sent":[],"session":"{session}","tokens":0}}"#,
-                scored * 5
+                r#"{{"always":["common/project_pinned.md","common/user_short.md","traces/common/user_terse.md"],"at":"A","considered":{},"cue":"{prompt}","cut":0,"engine":"jev-latest",{error}"gate":{gate},"kind":"recall","machine":"studio","ms":0,"seed":true,"sent":[],"session":"{session}","tokens":0}}"#,
+                scored * 6
             ));
         }
         same(
@@ -1579,7 +1615,21 @@ esac
         want.push(format!(
             r#"{{"at":"A","cwd":null,"interactive":null,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{ID}f","surface":null}}"#
         ));
-        same(&ledger(&root)?, &want.join("\n"))
+        same(&ledger(&root)?, &want.join("\n"))?;
+        // invoked as sandman-next, every command it gives the agent names sandman-next
+        let next = ran(
+            command(&[("SANDMAN_ROOT", &format!("{root}/next"))], &["recall"])
+                .arg0(format!("{root}/bin/sandman-next")),
+            &format!(r#"{{"session":"{ID}a"}}"#),
+        )?;
+        same(
+            &format!(
+                "{} {}",
+                next.matches("`sandman-next ").count(),
+                next.lines().nth(4).unwrap_or_default()
+            ),
+            "3 read one in full: sandman-next show <path>",
+        )
     }
 
     /// `recall` refuses a seed's bad stdin and a bad session id (exit 2); each failure — no key, the
@@ -1803,7 +1853,7 @@ esac
         for (gate, args, stdin, want) in [
             ("0.9", ["recall", "--cue", "fix", "--about", &about].as_slice(), String::new(), "\"repository: own/app\\nfix\" 0\nrecall \u{b7} fix \u{b7} 6 of 9\n".to_owned()),
             ("0.1", &["recall", "--cue", "thanks"], String::new(), "\"thanks\" 0\nrecall \u{b7} thanks \u{b7} 0 of 9\nnothing recalled: no specific ask\nrecall: engine=jev-latest".to_owned()),
-            ("0.1", &["recall"], seeded("a", &repo), format!("\"repository: own/app\\ngo\" {always}read one in full: sandman show <bank>/<file>\nrecall: engine=jev-latest")),
+            ("0.1", &["recall"], seeded("a", &repo), format!("\"repository: own/app\\ngo\" {always}read one in full: sandman show <path>\nrecall: engine=jev-latest")),
             ("0.9", &["recall"], seeded("b", &grove), format!("\"go\" {always}recall \u{b7} go \u{b7} 6 of 9\n")),
         ] {
             let (got, _) = run(gate, args, &stdin)?;
@@ -1826,6 +1876,150 @@ esac
         same(
             &recalls.join("|"),
             "\"own/app\" 0.9 6|\"own/app\" 0.9 6|null 0.1 0|\"own/app\" 0.1 0|null 0.9 6",
+        )
+    }
+
+    /// `remember` writes one trace at once and prints how to read it back: defaults from the body,
+    /// every option, homed by `--about`'s directory (relative resolved), else the cwd, else home
+    /// (a cwd gone); `--about` naming no directory is kept but homes by the cwd. Each refusal is exit
+    /// 2 with nothing written, a failed write exit 1.
+    #[test]
+    fn remember() -> Outcome {
+        let root = fs::canonicalize(temp("remember")?)?
+            .to_str()
+            .ok_or("root")?
+            .to_owned();
+        let (work, home) = (format!("{root}/work"), format!("{root}/home"));
+        fs::create_dir_all(format!("{work}/repo"))?;
+        let envs = [
+            ("HOME", home.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", &root),
+        ];
+        let key = |dir: &str| dir.replace(|letter: char| !letter.is_ascii_alphanumeric(), "-");
+        let session = format!("{ID}a");
+        let missing = format!("{root}/missing");
+        let mut out = String::new();
+        for args in [
+            &[
+                "remember",
+                "sample: the person says pass a clock in, never a mock\n  Why: a mock hid a bug ",
+            ][..],
+            &[
+                "remember",
+                "sample: terse",
+                "--type",
+                "user",
+                "--name",
+                "Sample: terse commits",
+                "--description",
+                "sample: one line",
+                "--about",
+                "repo",
+                "--session",
+                &session,
+            ],
+            &["remember", "sample: elsewhere", "--about", &missing],
+            &["remember"],
+            &["remember", " \n "],
+            &["remember", "x", "--type", "opinion"],
+            &["remember", "x", "--session", "nope"],
+        ] {
+            out.push_str(&ran(command(&envs, args).current_dir(&work), "")?);
+        }
+        // a cwd gone homes by $HOME
+        out.push_str(&ran(
+            Command::new("sh")
+                .args(["-c", r#"mkdir gone && cd gone && rmdir ../gone && exec "$0" remember "sample: homeless""#, env!("CARGO_BIN_EXE_sandman")])
+                .envs(envs)
+                .current_dir(&work),
+            "",
+        )?);
+        plant(&root, &[("blocked/traces", "")])?;
+        out.push_str(&sandman(
+            &[("SANDMAN_ROOT", &format!("{root}/blocked"))],
+            &["remember", "x"],
+            "",
+        )?);
+        let refused = "2\nsandman remember: takes a non-empty \"<body>\" first and --type user|feedback|project|reference\n";
+        let files = [
+            (
+                key(&work),
+                "feedback_sample_the_person_says_pass_a_clock_in.md",
+            ),
+            (key(&format!("{work}/repo")), "user_sample_terse_commits.md"),
+            (key(&work), "feedback_sample_elsewhere.md"),
+            (key(&home), "feedback_sample_homeless.md"),
+        ]
+        .map(|(bank, file)| format!("traces/{bank}/{file}"));
+        let shown = |at: usize| {
+            format!(
+                "0\nsandman show {}\n",
+                files.get(at).map_or("", String::as_str)
+            )
+        };
+        same(
+            &out,
+            &[
+                shown(0),
+                shown(1),
+                shown(2),
+                refused.to_owned(),
+                refused.to_owned(),
+                refused.to_owned(),
+                "2\nsandman: --session takes a session id\n".to_owned(),
+                shown(3),
+                "1\nsandman remember: Not a directory (os error 20)\n".to_owned(),
+            ]
+            .concat(),
+        )?;
+        // the four traces and nothing else
+        let found = Command::new("find")
+            .args(["traces", "-type", "f"])
+            .current_dir(&root)
+            .output()?;
+        same(
+            &String::from_utf8(found.stdout)?.lines().count().to_string(),
+            "4",
+        )?;
+        let mut written = String::new();
+        for file in &files {
+            written.push_str(&fs::read_to_string(format!("{root}/{file}"))?);
+        }
+        let now = written
+            .lines()
+            .find_map(|line| line.strip_prefix("created: "))
+            .unwrap_or_default()
+            .to_owned();
+        // name, description and type; what follows `created`; the source's session; the body
+        let note = |head: [&str; 3], rest: &str, id: &str, body: &str| {
+            format!(
+                "---\nname: {}\ndescription: {}\ntype: {}\ncreated: <now>\n{rest}source: remember <now> \u{b7} {id}\n---\n\n{body}\n",
+                head[0], head[1], head[2]
+            )
+        };
+        let (elsewhere, homeless) = ("sample: elsewhere", "sample: homeless");
+        same(
+            &written.replace(&now, "<now>"),
+            &[
+                note(["sample: the person says pass a clock in,", "sample: the person says pass a clock in, never a mock", "feedback"], "", "-", "sample: the person says pass a clock in, never a mock\n  Why: a mock hid a bug"),
+                note(["Sample: terse commits", "sample: one line", "user"], &format!("about: {work}/repo\nsession: {session}\n"), &session, "sample: terse"),
+                note([elsewhere, elsewhere, "feedback"], &format!("about: {missing}\n"), "-", elsewhere),
+                note([homeless, homeless, "feedback"], "", "-", homeless),
+            ]
+            .concat(),
+        )?;
+        same(
+            &ledger(&root)?,
+            &files
+                .iter()
+                .zip(["feedback", "user", "feedback", "feedback"])
+                .map(|(file, kind)| {
+                    let id = if kind == "user" { format!("\"{session}\"") } else { "null".to_owned() };
+                    format!(r#"{{"at":"A","file":"{file}","kind":"remember","machine":"studio","session":{id},"type":"{kind}"}}"#)
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
         )
     }
 
@@ -2137,8 +2331,8 @@ esac
         same(&fs::read_dir(&root)?.count().to_string(), "0")
     }
 
-    /// `show` prints a memory's body under its name, type and date, and logs the read; it refuses
-    /// a path that escapes the banks or names no memory file.
+    /// `show` prints a memory's or a trace's body under its name, type (a trace says so) and date,
+    /// and logs the read; it refuses a path that escapes the banks or names no memory or trace file.
     #[test]
     fn show() -> Outcome {
         let root = temp("show")?;
@@ -2164,6 +2358,10 @@ esac
             &sandman(&envs, &["show", "common/user_short.md"], "")?,
             "0\nPrefers short replies (user) \u{b7} undated\nShort.\n",
         )?;
+        same(
+            &sandman(&envs, &["show", "traces/-work-beta/feedback_retry.md"], "")?,
+            "0\nBeta retries back off twice (feedback \u{b7} trace) \u{b7} 2026-11-06T00:00:00Z\nTwice, then stop.\n",
+        )?;
         plant(
             &root,
             &[
@@ -2177,19 +2375,21 @@ esac
             "-work-alpha",
             "-work-alpha/MEMORY.md",
             "-work-alpha/../../secret.md",
+            "-work-beta/feedback_retry.md",
+            "traces/-work-alpha/project_vpn.md",
             "",
         ] {
             same(
                 &sandman(&envs, &["show", wanted], "")?,
                 &format!(
-                    "1\nsandman show: no memory {wanted} (want <bank>/<file>.md under {root}/memories)\n"
+                    "1\nsandman show: no memory {wanted} (want [traces/]<bank>/<file>.md under {root})\n"
                 ),
             )?;
         }
         same(
             &ledger(&root)?,
             &format!(
-                "{{\"at\":\"A\",\"file\":\"-work-alpha/project_vpn.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":\"{session}\"}}\n{{\"at\":\"A\",\"file\":\"-work-alpha/feedback_clock.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}\n{{\"at\":\"A\",\"file\":\"common/user_short.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}"
+                "{{\"at\":\"A\",\"file\":\"-work-alpha/project_vpn.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":\"{session}\"}}\n{{\"at\":\"A\",\"file\":\"-work-alpha/feedback_clock.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}\n{{\"at\":\"A\",\"file\":\"common/user_short.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}\n{{\"at\":\"A\",\"file\":\"traces/-work-beta/feedback_retry.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}"
             ),
         )
     }
@@ -2430,7 +2630,7 @@ esac
         same(&earlier, &"earlier\n".repeat(4))
     }
 
-    /// No verb, or an unknown one, prints the five-line usage and exits 2; `$HOME` stands in
+    /// No verb, or an unknown one, prints the six-line usage and exits 2; `$HOME` stands in
     /// for an unset `SANDMAN_ROOT`.
     #[test]
     fn usage() -> Outcome {
@@ -2443,7 +2643,7 @@ esac
                     out.get(..2).unwrap_or_default(),
                     out.lines().count()
                 ),
-                "2\n 6",
+                "2\n 7",
             )?;
         }
         Ok(())
