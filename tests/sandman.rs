@@ -34,6 +34,15 @@ mod tests {
         }
     }
 
+    /// `kill <signal> <pid>`: whether the signal was delivered.
+    fn kill(signal: &str, pid: &str) -> io::Result<bool> {
+        Ok(Command::new("kill")
+            .args([signal, pid])
+            .stderr(Stdio::null())
+            .status()?
+            .success())
+    }
+
     /// `request` to the daemon over `root`, and its whole reply.
     fn ask(root: &str, request: &str) -> io::Result<String> {
         let mut stream = UnixStream::connect(format!("{root}/run/serve.sock"))?;
@@ -210,6 +219,12 @@ mod tests {
                 "laptop",
             ),
             mark("2026-11-09T15:10:00Z", "end", "c", "/work/alpha", "laptop"),
+            format!(
+                r#"{{"at":"2026-11-09T09:31:00Z","error":"sample","kind":"encode","machine":"studio","outcome":"failed","session":"{ID}a","traces":0}}"#
+            ),
+            format!(
+                r#"{{"at":"2026-11-09T09:40:00Z","kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}a","traces":1}}"#
+            ),
             "not json".to_owned(),
             r#"{"kind":"start"}"#.to_owned(),
         ];
@@ -324,6 +339,16 @@ mod tests {
             ),
             ("memories/_archive/old.md", String::new()),
             ("memories/TOOLS.md", String::new()),
+            (
+                "traces/-work-alpha/feedback_sample_spans.md",
+                format!(
+                    "---\nname: Sample: spans\ntype: feedback\ncreated: 2026-11-09T09:40:00Z\nsession: {ID}a\nsource: encode 2026-11-09T09:40:00Z \u{b7} {ID}a \u{b7} model=opus\n---\n\nsample body\n"
+                ),
+            ),
+            (
+                "traces/-work-alpha/.feedback_sample_spans.md.1",
+                String::new(),
+            ),
         ];
         for (path, text) in files {
             let file = PathBuf::from(&root).join(path.replace('@', ID));
@@ -340,6 +365,267 @@ mod tests {
             serde_json::from_str(out.strip_prefix("0\n").ok_or_else(|| out.clone())?)?;
         got["at"] = want["at"].clone();
         same(&got.to_string(), &want.to_string())
+    }
+
+    /// The tick encodes this machine's taken episodes one a tick, oldest first, through the stub
+    /// encoder: prompt and digest on its stdin (highlights first, results dropped, the middle cut)
+    /// and both guard variables in its env; traces into the cwd's bank, a clash `_2`; zero traces;
+    /// skipped without a run, gone, and failed four ways with no files. A stop mid-run kills the
+    /// encoder's group and writes no line, so the next daemon runs it again, into its timeout.
+    #[test]
+    fn encode() -> Outcome {
+        let root = temp("encode")?;
+        let (stub, work) = (format!("{root}/stub.sh"), format!("{root}/work"));
+        let trace = r#"{"type":"feedback","name":"Sample: pass the clock in!","description":"sample: one line","body":"sample: the body\n\nWhy: sample."}"#;
+        let filler = "x".repeat(3000);
+        let ran = |name: &str, input: &str| json!({"type": "tool_use", "name": name, "input": {"command": input, "file_path": input}});
+        let user = |cwd: &str, text: &str| json!({"type": "user", "cwd": cwd, "message": {"content": text}});
+        let transcript = [
+            user(&format!("{work}/r/gone"), "case two"),
+            json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "sample: on it"}, ran("Bash", "sandman remember \"sample: keep the clock\"")]}}),
+            json!({"type": "user", "message": {"content": [{"type": "tool_result", "content": "sample: dropped"}]}}),
+            json!({"type": "user", "message": {"content": [{"type": "text", "text": filler}]}}),
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/work/sample.rs"}}, {"type": "text", "text": "sample: done"}]}}),
+        ]
+        .map(|line| line.to_string())
+        .join("\n");
+        let mut files = vec![
+            ("archive/a.jsonl".to_owned(), transcript),
+            (
+                "stub.sh".to_owned(),
+                format!(
+                    r#"echo "env $CLAUDE_MEMORY_PIPELINE $SANDMAN_NO_TAKE" >> "$0.log"
+T='{trace}'
+case $(tee -a "$0.log" | sed -n 's/^user: case //p') in
+  two) printf '```json\n{{"traces":[%s,%s]}}\n```\n' "$T" "$T";;
+  one) printf '{{"traces":[%s]}}\n' "$T";;
+  none) printf '{{"traces":[]}}\n';;
+  exit) printf 'sample: broke\n' >&2; exit 3;;
+  junk) printf 'not json\n';;
+  type) printf '{{"traces":[{{"type":"opinion","name":"x","description":"x","body":"x"}}]}}\n';;
+  slow) echo $$ >> "$0.pid"; exec sleep 30;;
+esac
+"#
+                ),
+            ),
+            (
+                "work/r/main/.git".to_owned(),
+                "gitdir: /sample/bare/worktrees/main\n".to_owned(),
+            ),
+            (
+                "work/r/next/.git".to_owned(),
+                "gitdir: /sample/bare/worktrees/next\n".to_owned(),
+            ),
+            ("work/repo/.git/worktrees/x/HEAD".to_owned(), String::new()),
+            (
+                "work/repo/.claude/worktrees/x/.git".to_owned(),
+                format!("gitdir: {work}/repo/.git/worktrees/x\n"),
+            ),
+            ("work/repo/src/lib.rs".to_owned(), String::new()),
+        ];
+        let mut ledger = Vec::new();
+        // the episodes, oldest first: (letter, its case, its cwd, its start's interactive, its machine)
+        for (minute, (letter, case, cwd, interactive, machine)) in [
+            ("a", "", "", true, "studio"),
+            ("b", "one", "/repo/.claude/worktrees/x", true, "studio"),
+            ("c", "one", "/repo/src", true, "studio"),
+            ("d", "one", "", true, "studio"),
+            ("e", "none", "/repo", true, "studio"),
+            ("f", "one", "/repo", false, "studio"),
+            ("g", "", "", true, "studio"),
+            ("h", "exit", "/repo", true, "studio"),
+            ("i", "junk", "/repo", true, "studio"),
+            ("j", "type", "/repo", true, "studio"),
+            ("k", "one", "/repo", true, "laptop"),
+            ("l", "slow", "/repo", true, "studio"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if !case.is_empty() {
+                let at = if cwd.is_empty() {
+                    String::new()
+                } else {
+                    format!("{work}{cwd}")
+                };
+                files.push((
+                    format!("archive/{letter}.jsonl"),
+                    user(&at, &format!("case {case}")).to_string(),
+                ));
+            }
+            ledger.push(format!(
+                r#"{{"at":"2026-11-09T08:{minute:02}:00Z","interactive":{interactive},"kind":"start","machine":"{machine}","session":"{ID}{letter}"}}
+{{"archived":"{root}/archive/{letter}.jsonl","at":"2026-11-09T08:{minute:02}:30Z","cwd":null,"kind":"end","machine":"{machine}","outcome":"taken","session":"{ID}{letter}"}}"#
+            ));
+        }
+        files.push(("ledger/2026/11/09.jsonl".to_owned(), ledger.join("\n")));
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|file| (file.0.as_str(), file.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let (home, encoder) = (
+            format!("{root}/home"),
+            format!("sh {stub} --model sample-model"),
+        );
+        let envs = [
+            ("HOME", home.as_str()),
+            ("SANDMAN_DIGEST_BYTES", "2000"),
+            ("SANDMAN_ENCODER", encoder.as_str()),
+            ("SANDMAN_TICK_MS", "10"),
+        ];
+        let (mut daemon, _) = serve(
+            &root,
+            &[&envs[..], &[("SANDMAN_ENCODE_MS", "60000")]].concat(),
+        )?;
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        until(|| !read(&format!("{stub}.pid")).is_empty())?;
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let log = format!("{root}/run/serve.log");
+        let (stopped, day) = (read(&log), date(&["+%Y/%m/%d"])?);
+        let today = format!("{root}/ledger/{day}.jsonl");
+        same(
+            &format!(
+                "{} {}",
+                read(&today).contains(&format!("{ID}l")),
+                stopped
+                    .lines()
+                    .last()
+                    .and_then(|line| line.get(28..))
+                    .unwrap_or_default()
+            ),
+            r#"false ,"event":"exit","reason":"signal TERM"}"#,
+        )?;
+        let (mut again, _) = serve(
+            &root,
+            &[&envs[..], &[("SANDMAN_ENCODE_MS", "300")]].concat(),
+        )?;
+        until(|| read(&today).contains(&format!("{ID}l")))?;
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &again.0.id().to_string())?,
+                again.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let lines = read(&today)
+            .lines()
+            .map(|line| {
+                let mut entry: Value = serde_json::from_str(line)?;
+                entry["at"] = json!(entry["at"].as_str().map(str::len));
+                Ok(entry.to_string())
+            })
+            .collect::<Result<Vec<_>, serde_json::Error>>()?;
+        let line = |letter: &str, outcome: &str, traces: u8, error: &str| {
+            format!(
+                r#"{{"at":20,{error}"kind":"encode","machine":"studio","outcome":"{outcome}","session":"{ID}{letter}","traces":{traces}}}"#
+            )
+        };
+        same(
+            &lines.join("\n"),
+            &[
+                line("a", "encoded", 2, ""),
+                line("b", "encoded", 1, ""),
+                line("c", "encoded", 1, ""),
+                line("d", "encoded", 1, ""),
+                line("e", "encoded", 0, ""),
+                line("f", "skipped", 0, ""),
+                line("g", "gone", 0, ""),
+                line("h", "failed", 0, r#""error":"exit status: 3: sample: broke","#),
+                line("i", "failed", 0, r#""error":"output: EOF while parsing a value at line 1 column 1","#),
+                line(
+                    "j",
+                    "failed",
+                    0,
+                    r#""error":"output: not a trace: {\"body\":\"x\",\"description\":\"x\",\"name\":\"x\",\"type\":\"opinion\"}","#,
+                ),
+                line("l", "failed", 0, r#""error":"timed out after 300 ms","#),
+            ]
+            .join("\n"),
+        )?;
+        // what the stub read, run by run: the first whole, the rest by their case
+        let seen = read(&format!("{stub}.log"));
+        let runs: Vec<&str> = seen.split("env 1 1\n").skip(1).collect();
+        let cases: Vec<&str> = runs
+            .iter()
+            .map(|run| {
+                run.lines()
+                    .find_map(|said| said.strip_prefix("user: case "))
+                    .unwrap_or_default()
+            })
+            .collect();
+        same(
+            &format!("{}\n{cases:?}", runs.first().unwrap_or(&"")),
+            &format!(
+                "{}\n# episode\ndate: 2026-11-09T08:00:30Z\ncwd: {work}/r/gone\n\n# highlights\n- sample: keep the clock\n\n# transcript\nuser: case two\nassistant: sample: on it\ntool: Bash sandman remember \"sample: keep the clock\"\n\u{2026} 3007 bytes omitted \u{2026}\ntool: Read /work/sample.rs\nassistant: sample: done\n\n{:?}",
+                include_str!("../src/encode.prompt.md"),
+                [
+                    "two", "one", "one", "one", "none", "exit", "junk", "type", "slow", "slow"
+                ]
+            ),
+        )?;
+        // every encoder the stop and the timeout ended is gone, its group with it
+        for pid in read(&format!("{stub}.pid")).lines() {
+            same(&kill("-0", pid)?.to_string(), "false")?;
+        }
+        let key = |dir: &str| dir.replace(|letter: char| !letter.is_ascii_alphanumeric(), "-");
+        let mut written = Vec::new();
+        for bank in fs::read_dir(format!("{root}/traces"))? {
+            for file in fs::read_dir(bank?.path())? {
+                let path = file?.path();
+                written.push(
+                    path.strip_prefix(format!("{root}/traces"))?
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+        written.sort();
+        let first = read(&format!(
+            "{root}/traces/{}/feedback_sample_pass_the_clock_in.md",
+            key(&format!("{work}/r"))
+        ));
+        let now = first
+            .lines()
+            .nth(4)
+            .and_then(|said| said.strip_prefix("created: "))
+            .unwrap_or_default();
+        let mut want = [
+            format!(
+                "{}/feedback_sample_pass_the_clock_in.md",
+                key(&format!("{work}/r"))
+            ),
+            format!(
+                "{}/feedback_sample_pass_the_clock_in_2.md",
+                key(&format!("{work}/r"))
+            ),
+            format!(
+                "{}/feedback_sample_pass_the_clock_in.md",
+                key(&format!("{work}/repo"))
+            ),
+            format!(
+                "{}/feedback_sample_pass_the_clock_in.md",
+                key(&format!("{work}/repo/src"))
+            ),
+            format!("{}/feedback_sample_pass_the_clock_in.md", key(&home)),
+        ];
+        want.sort();
+        same(
+            &format!("{}{written:?}", first.replace(now, "<now>")),
+            &format!(
+                "---\nname: Sample: pass the clock in!\ndescription: sample: one line\ntype: feedback\ncreated: <now>\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsource: encode <now> \u{b7} {ID}a \u{b7} model=sample-model\n---\n\nsample: the body\n\nWhy: sample.\n{want:?}"
+            ),
+        )
     }
 
     /// `chart` into a pipe whose reader is gone ends quietly: exit 0, nothing on stderr.
@@ -597,14 +883,13 @@ mod tests {
         UnixStream::connect(format!("{run}/serve.sock"))?.write_all(b"{\"op\":\"health\"}\n")?;
         same(&ask(&root, "{\"op\":\"health\"}\n")?, &ready)?;
         same(
-            &Command::new("kill")
-                .args(["-TERM", &pid.to_string()])
-                .status()?
-                .success()
-                .to_string(),
-            "true",
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &pid.to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
         )?;
-        same(&format!("{:?}", daemon.0.wait()?.code()), "Some(0)")?;
         let logs =
             ["serve.log", "serve.log.1"].map(|file| fs::read_to_string(format!("{run}/{file}")));
         same(
@@ -679,14 +964,13 @@ mod tests {
         let ledger = format!("{root}/ledger/{day}.jsonl");
         until(|| read(&ledger).contains(&format!(r#""reason":"job gone","session":"{ID}3""#)))?;
         same(
-            &Command::new("kill")
-                .args(["-TERM", &daemon.0.id().to_string()])
-                .status()?
-                .success()
-                .to_string(),
-            "true",
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
         )?;
-        same(&format!("{:?}", daemon.0.wait()?.code()), "Some(0)")?;
         let prefix = format!("{root}/.archive/claude/{day}/");
         let norm = |line: &str| -> Result<String, serde_json::Error> {
             let mut entry: Value = serde_json::from_str(line)?;
@@ -761,7 +1045,7 @@ mod tests {
 <plist version="1.0">
 <dict>
   <key>EnvironmentVariables</key>
-  <dict><key>SANDMAN_ROOT</key><string>{root}</string></dict>
+  <dict><key>PATH</key><string>{}</string><key>SANDMAN_ROOT</key><string>{root}</string></dict>
   <key>ExitTimeOut</key>
   <integer>2</integer>
   <key>KeepAlive</key>
@@ -779,6 +1063,7 @@ mod tests {
 </dict>
 </plist>
 "#,
+                env::var("PATH")?,
                 env!("CARGO_BIN_EXE_sandman")
             ),
         )?;

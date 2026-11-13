@@ -109,7 +109,8 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   <p class="eyebrow">memory for agentic sessions</p>
   <p class="lead docs-lead"><code class="code">sandman</code> is being rewritten from scratch, one part
     at a time; this build carries <code class="code">mark</code>, <code class="code">take</code>,
-    <code class="code">chart</code> and the daemon, <code class="code">serve</code>, with its <code class="code">status</code> and
+    <code class="code">chart</code> and the daemon, <code class="code">serve</code>, which settles held takes and
+    <a class="link" href="#encode">encodes</a> episodes, with its <code class="code">status</code> and
     <code class="code">setup</code>. Its memory follows complementary learning systems: a fast, temporary store
     captures each session as an episode, and a slow store absorbs episodes through replay.</p>
   <nav class="row docs-toc" aria-label="sections">
@@ -118,6 +119,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
     <a class="pill" href="#take">take</a>
     <a class="pill" href="#chart">chart</a>
     <a class="pill" href="#serve">serve</a>
+    <a class="pill" href="#encode">encode</a>
     <a class="pill" href="#next">next</a>
   </nav>
 </header>
@@ -139,8 +141,9 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
     </thead>
     <tbody>
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
-      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>; <code class="code">call</code> and <code class="code">prompt</code> not built yet</td></tr>
+      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>; <code class="code">call</code> and <code class="code">prompt</code> not built yet; and the daemon's <code class="code">encode</code></td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
+      <tr><td><code class="code">traces/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>traces, newly encoded memories awaiting consolidation, one dir per bank; see <a class="link" href="#encode">encode</a></td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>the banks, the long-term store: memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
       <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>; see <a class="link" href="#serve">serve</a></td></tr>
       <tr><td><code class="code">machine</code></td><td>this machine's id: one line, 32 lowercase hex from <code class="code">/dev/urandom</code>, minted on first use; <code class="code">$SANDMAN_MACHINE</code> overrides it</td></tr>
@@ -199,7 +202,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
     at the take's UTC time (<code class="code">&lt;HHMMSS&gt;-&lt;n&gt;-…</code> on a same-second clash) and its
     sidecar dir <code class="code">&lt;session&gt;/</code>, when there is one, to the same stem plus
     <code class="code">-dir</code>. Then it writes <code class="code">memories/.recent/&lt;session&gt;.json</code>
-    atomically, keys in this order, for the earlier recall and dream to read:</p>
+    atomically, keys in this order, for the earlier recall and dream to read; it goes when <code class="code">recall</code> (<a class="link" href="#next">Next</a>) replaces the earlier one:</p>
   <pre class="snippet">{"archived":"&lt;abs path&gt;","cwd":str|null,"ended":"&lt;the transcript's mtime&gt;","title":"&lt;str&gt;","highlights":[…]}</pre>
   <ul class="stack claims" role="list">
     <li><strong>pointer</strong> — <code class="code">cwd</code>: the first transcript line's without control
@@ -224,17 +227,19 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
       never writes it, bar minting <code class="code">machine</code>; every absence is an empty list
       or a skipped item, never an error.</p>
   </header>
-  <pre class="snippet">{"active":[{"cwd":str|null,"end":str|null,"machine":str,"outcome":str|null,"session":str,"start":str|null}],
+  <pre class="snippet">{"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"machine":str,"outcome":str|null,"session":str,"start":str|null}],
  "at":"&lt;now, RFC 3339 UTC&gt;",
  "machine":"&lt;this machine's id&gt;",
  "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"dream"|"reflect"|"remember"|"other","type":str}],
- "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}]}</pre>
+ "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}],
+ "traces":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"type":str}]}</pre>
   <ul class="stack claims" role="list">
     <li><strong>active</strong> — one per session in the ledger files: <code class="code">start</code>
       the <code class="code">at</code> of its earliest start mark (a reload re-fires it),
       <code class="code">end</code> and <code class="code">outcome</code> of its latest end mark (an end
       without one: null); <code class="code">cwd</code> and
-      <code class="code">machine</code> from that start mark, else the end mark. By <code class="code">start</code>, then session.</li>
+      <code class="code">machine</code> from that start mark, else the end mark; <code class="code">encoded</code> the
+      outcome of its latest encode line. By <code class="code">start</code>, then session.</li>
     <li><strong>taken</strong> — one per archived transcript, a file directly in a day dir named
       <code class="code">&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code>; the latest wins when a session
       has several. <code class="code">taken</code> is that day and time in UTC,
@@ -253,6 +258,8 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
       <code class="code">other</code>; a dream's <code class="code">session</code> is the uuid in its
       source line (<code class="code">dream &lt;ISO&gt; · &lt;uuid&gt; · minds=…</code>). By bank, then
       file.</li>
+    <li><strong>traces</strong> — every trace file, read and skipped as memories are;
+      <code class="code">session</code> from its frontmatter. By bank, then file.</li>
   </ul>
   <figure class="figure">
     <div class="chart" id="timeline"><noscript><p class="docs-note">The timeline needs JavaScript; its data is <a class="link" href="data/chart.json">docs/data/chart.json</a>.</p></noscript></div>
@@ -266,8 +273,8 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   <header>
     <h2 class="h2">serve</h2>
     <p class="docs-note">The daemon, a foreground process launchd keeps alive as
-      <code class="code">dev.gigantic.sandman</code>. Its one job is the tick that settles held
-      takes; encoding and consolidation (<a class="link" href="#next">Next</a>) will run here too.</p>
+      <code class="code">dev.gigantic.sandman</code>. Its tick settles held takes and
+      <a class="link" href="#encode">encodes</a> one episode; consolidation (<a class="link" href="#next">Next</a>) will run here too.</p>
   </header>
   <figure class="figure">
     <div class="chart-frame" id="lifecycle">
@@ -310,16 +317,19 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       machine; one no job names any more, whose transcript has been untouched for 120 s
       (<code class="code">$SANDMAN_QUIET_MS</code>), it takes as <a class="link" href="#take">take</a> does
       and ends with <code class="code">taken</code> or <code class="code">gone</code>, reason
-      <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.</li>
+      <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.
+      Then it <a class="link" href="#encode">encodes</a> one episode.</li>
     <li><strong>signals</strong> — SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is
       ignored. The drain budget is 2 s, launchd's <code class="code">ExitTimeOut</code>: the one
-      connection in hand, at most its 1 s read, and the take in hand; the tick starts no other. On exit it removes <code class="code">serve.pid</code>
+      connection in hand, at most its 1 s read, and the take or encode in hand (a running encoder is
+      killed); the tick starts no other. On exit it removes <code class="code">serve.pid</code>
       and <code class="code">serve.sock</code> while the pid file still holds its pid.</li>
     <li><strong>log</strong> — <code class="code">run/serve.log</code>, one compact object per line
       with <code class="code">at</code>: <code class="code">start</code> (pid, version),
       <code class="code">exit</code> (reason: <code class="code">signal TERM</code>,
-      <code class="code">shutdown request</code>, an accept error), <code class="code">take</code> (the
-      tick's end line, or its <code class="code">session</code> and error as <code class="code">reason</code>),
+      <code class="code">shutdown request</code>, an accept error), <code class="code">take</code> and
+      <code class="code">encode</code> (the tick's ledger line, or its <code class="code">session</code> and the
+      write's error as <code class="code">reason</code>),
       <code class="code">panic</code> from the panic hook. A line that finds it at <code class="code">$SANDMAN_LOG_CAP</code> bytes
       (1 MiB) first renames it to <code class="code">serve.log.1</code>.</li>
     <li><strong>status</strong> — sends health and prints the reply, exit 0, with one stderr line
@@ -327,12 +337,80 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       when the daemon's is not the client's; no daemon prints
       <code class="code">{"code":"down","ok":false}</code>, exit 1.</li>
     <li><strong>setup</strong> — prints the plist and writes nothing: this executable and
-      <code class="code">serve</code>, the root it ran with, KeepAlive, RunAtLoad, ThrottleInterval 10,
+      <code class="code">serve</code>, the root it ran with and the caller's <code class="code">PATH</code> (launchd's
+      finds no <code class="code">claude</code>), KeepAlive, RunAtLoad, ThrottleInterval 10,
       ExitTimeOut 2, stderr to <code class="code">serve.err</code> beside <code class="code">run/</code> for failures before the log.</li>
   </ul>
   <pre class="snippet">sandman-next setup &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.plist
 launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after each install</pre>
+</section>
+
+<section class="docs-section" id="encode" data-component="encode">
+  <header>
+    <h2 class="h2">encode</h2>
+    <p class="docs-note">A job of <a class="link" href="#serve">serve</a>'s tick, not a verb: one episode, a taken
+      session, at a time, written as traces, newly encoded memories still labile, under
+      <code class="code">traces/&lt;bank&gt;/</code>, apart from the banks until consolidation (<a class="link" href="#next">Next</a>).</p>
+  </header>
+  <p>Each tick, after settling, it derives from the ledger the oldest session of this machine whose
+    latest line is a <code class="code">taken</code> end, decides one outcome, and appends one line with
+    <code class="code">mark</code>'s writer:</p>
+  <div class="table-wrap">
+  <table data-table>
+    <thead>
+      <tr><th>when</th><th>outcome</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>no start mark of the session says <code class="code">interactive</code> true: a headless run, most sessions</td><td><code class="code">skipped</code>, no model call</td></tr>
+      <tr><td>no file at the end line's <code class="code">archived</code></td><td><code class="code">gone</code></td></tr>
+      <tr><td>the encoder exits non-zero, outlives <code class="code">$SANDMAN_ENCODE_MS</code> (300 000), or prints no valid object</td><td><code class="code">failed</code>, with <code class="code">error</code>; no trace written</td></tr>
+      <tr><td>otherwise</td><td><code class="code">encoded</code>; <code class="code">traces</code> counts them, often 0</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <pre class="snippet">{"at":…,"error":"&lt;one line&gt;"?,"kind":"encode","machine":…,"outcome":"encoded"|"skipped"|"gone"|"failed","session":…,"traces":&lt;count&gt;}</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>digest</strong> — what the model reads, built from the archive:
+      <code class="code"># episode</code> (the take's time, the cwd as the pointer finds it), <code class="code"># highlights</code>
+      (take's, when there are any: what the session chose to remember), <code class="code"># transcript</code>: a
+      <code class="code">user:</code> or <code class="code">assistant:</code> line per message text and a
+      <code class="code">tool:</code> line per tool call (its name and command or file, 200 characters); tool
+      results dropped. Over <code class="code">$SANDMAN_DIGEST_BYTES</code> (300 000) it keeps the head and the
+      tail, whole lines, and the middle becomes <code class="code">… &lt;n&gt; bytes omitted …</code>.</li>
+    <li><strong>encoder</strong> — <code class="code">$SANDMAN_ENCODER</code>, a command line run by
+      <code class="code">sh -c</code>; by default a headless Claude Opus with no tools, no hooks, MCP servers or
+      CLAUDE.md, and no saved session:
+      <code class="code">claude -p --model opus --output-format text --safe-mode --tools "" --no-session-persistence</code>.
+      A local model replaces it with any command that keeps the contract: stdin is the prompt
+      (<a class="link" href="https://github.com/jgeschwendt/sandman/blob/main/src/encode.prompt.md">src/encode.prompt.md</a>), a blank
+      line and the digest; stdout one object, text around it ignored; exit 0:
+      <pre class="snippet">{"traces":[{"type":"user"|"feedback"|"project"|"reference","name":str,"description":str,"body":str}]}</pre>
+      It runs in its own process group with <code class="code">CLAUDE_MEMORY_PIPELINE=1</code> and
+      <code class="code">SANDMAN_NO_TAKE=1</code>, so a session it starts is taken as <code class="code">skipped</code> and never encoded.</li>
+    <li><strong>trace</strong> — <code class="code">traces/&lt;bank&gt;/&lt;type&gt;_&lt;slug&gt;.md</code>, by temp file and
+      rename. The bank is the cwd's key as the earlier sandman makes it: the directory a linked worktree
+      sits in, the checkout a nested worktree belongs to, else the cwd, <code class="code">$HOME</code> without
+      one; every byte not alphanumeric becomes <code class="code">-</code>. The slug is the bank format's: the
+      name lowercased, non-alphanumeric runs <code class="code">_</code>, 60 characters;
+      <code class="code">_2</code>, <code class="code">_3</code> on a clash.</li>
+    <li><strong>stop</strong> — a stop signal or shutdown request kills the encoder's group and writes no
+      line, so the episode is encoded after the next start. <code class="code">failed</code> is final: the tick
+      never retries it; removing its line from the ledger does.</li>
+  </ul>
+  <pre class="snippet">---
+name: Pass a clock in; never mock time
+description: tests take time from an injected clock, never a time mock
+type: feedback
+created: 2026-03-04T17:25:10Z
+session: 5a000000-0000-4000-8000-00000000000a
+archived: &lt;root&gt;/.archive/claude/2026/03/04/172010-projects--work-ledger-api-5a000000-0000-4000-8000-00000000000a.jsonl
+source: encode 2026-03-04T17:25:10Z · 5a000000-0000-4000-8000-00000000000a · model=opus
+---
+
+In /work/ledger-api, tests take time from a clock passed in. Said 2026-03-04: "no mocks for time in this repo, we pass a clock in".
+
+Why: "mocks hid a real ordering bug last year".</pre>
 </section>
 
 <section class="docs-section" id="next" data-component="next">
@@ -341,8 +419,7 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
     <p class="docs-note">Parts still to bring over.</p>
   </header>
   <ul class="stack" role="list">
-    <li><code class="code">consolidate</code>: in <code class="code">serve</code>, later. Consolidation stabilises a bank's traces (newly encoded memories, still labile: easy to change or lose) and integrates them with what the bank already holds: a trace that revises a memory updates it (reconsolidation), and pruning drops a trace that does not hold or a memory gone stale. It takes the place of the dream pass.</li>
-    <li><code class="code">encode</code>: in <code class="code">serve</code>, right after a take, one episode at a time. Encoding is a headless model, Claude Opus by default (one setting, so a local model can replace it), reading the archived transcript and writing the episode's traces, each carrying its session id and archive path, to <code class="code">traces/&lt;bank&gt;/&lt;file&gt;.md</code>, for the bank the session's cwd belongs to. The run is flagged so it is never itself marked, taken or encoded. Once it lands, the short-term pointer goes.</li>
+    <li><code class="code">consolidate</code>: in <code class="code">serve</code>, later. Consolidation stabilises a bank's <a class="link" href="#encode">traces</a> (still labile: easy to change or lose) and integrates them with what the bank already holds: a trace that revises a memory updates it (reconsolidation), and pruning drops a trace that does not hold or a memory gone stale. It takes the place of the dream pass.</li>
     <li><code class="code">mark</code>: the mod's tool log moves into the ledger, which becomes every mod event: <code class="code">mark</code> writes a <code class="code">call</code> line per tool call and a <code class="code">prompt</code> line per typed prompt. Readers that need only sessions skip those kinds; encoding, consolidation and the end-of-day judge read a session's calls and prompts from it.</li>
     <li><code class="code">recall</code>: the one verb the mod runs at a session's start. It writes the start mark first, whether or not there is anything to recall, so <code class="code">mark</code> stops writing it.</li>
     <li><code class="code">reflect</code></li>
