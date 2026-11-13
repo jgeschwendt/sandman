@@ -1,7 +1,8 @@
-// The data flow, ①–⑤ marking the order a session passes it: a session timeline down the left edge, broken before the
-// later dream pass; its moments (① ② start and end) → mark → the ledger files, and → the earlier sandman's take and dream
-// → the archive, the pointers and the bank files (③ ④ ⑤); all of them → chart → its consumer. Nodes and edges from
-// docs/data/flow.json, each node at its column and row; a moment is a dot on the timeline, every other node a box.
+// The data flow, ①–③ marking the order a session passes it: a session timeline down the left edge, broken before the
+// later dream pass; its moments → recall at ① and take at ② → the ledger, the machine id, the archive and the pointers,
+// later → dream (③) → the pointers and the bank files; all of them → chart → its consumer. recall, take and dream are
+// not built yet in this rewrite: dashed. Nodes and edges from docs/data/flow.json, each node at its column and row; a
+// moment is a dot on the timeline, every other node a box.
 import { d3, hover, load, mount, redraw } from "./lib.js";
 
 const root = document.getElementById("flow");
@@ -10,14 +11,14 @@ const data = await load("flow.json");
 const COLS = [180, 170, 290, 120, 150];
 const H = 32;
 const STEP = 48;
-const KIND = { earlier: "var(--kind-5)", file: "var(--kind-7)", moment: "var(--kind-1)", sink: "var(--kind-4)", verb: "var(--kind-3)" };
-// the legend's words per kind; the earlier sandman's writers are dashed as well as coloured
-const NAME = { earlier: "earlier sandman", file: "file", moment: "moment", sink: "consumer", verb: "this rewrite" };
+const KIND = { file: "var(--kind-7)", moment: "var(--kind-1)", next: "var(--kind-3)", sink: "var(--kind-4)", verb: "var(--kind-3)" };
+// the legend's words per kind; next shares the rewrite's colour and is told apart by its dashed border
+const NAME = { file: "file", moment: "moment", next: "next", sink: "consumer", verb: "this rewrite" };
 const byId = new Map(data.nodes.map((n) => [n.id, n]));
 
 const { frame, hide, show } = mount(root, {
   head: ["from", "to", "carries"],
-  legend: Object.entries(KIND).map(([kind, color]) => ({ color, label: NAME[kind], mark: kind === "moment" && "dot" })),
+  legend: Object.entries(KIND).map(([kind, color]) => ({ color, label: NAME[kind], mark: { moment: "dot", next: "dash" }[kind] })),
   rows: data.edges.map((e) => [byId.get(e.from).label, byId.get(e.to).label, e.label]),
 });
 

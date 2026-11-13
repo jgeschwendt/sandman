@@ -4,7 +4,7 @@ export const d3 = globalThis.d3;
 
 export const load = async (name) => (await fetch(new URL(`../data/${name}`, import.meta.url))).json();
 
-// mounts the chrome into `root`: a legend of { label, color, mark: "dot" | "rect" }, the table toggle, the frame, a
+// mounts the chrome into `root`: a legend of { label, color, mark: "dot" | "dash" | "rect" }, the table toggle, the frame, a
 // tooltip, the table of `head` × `rows`; returns the frame, show(element, title, pairs) and hide()
 export const mount = (root, { head, legend, rows }) => {
   root.replaceChildren();
@@ -15,6 +15,7 @@ export const mount = (root, { head, legend, rows }) => {
     const li = list.append("li");
     const svg = li.append("svg").attr("class", "chart-key").attr("width", 16).attr("height", 12).attr("aria-hidden", "true");
     if (mark === "dot") svg.append("circle").attr("cx", 8).attr("cy", 6).attr("r", 4).style("fill", color);
+    else if (mark === "dash") svg.append("rect").attr("class", "chart-key-dash").attr("x", 1).attr("y", 2).attr("width", 14).attr("height", 8).attr("rx", 2).style("stroke", color);
     else svg.append("rect").attr("x", 2).attr("y", 3).attr("width", 12).attr("height", 6).attr("rx", 2).style("fill", color);
     li.append("span").text(label);
   }
