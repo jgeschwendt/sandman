@@ -1,6 +1,7 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's ledger
-//! file, `take` archives a marked session at its end, `chart` prints what the data root holds as one JSON object, `serve` is the daemon,
-//! `status` asks it for its health, `setup` prints its launchd plist.
+//! file, `take` archives a marked session at its end, `chart` prints what the data root holds as
+//! one JSON object, `serve` is the daemon, `status` asks it for its health, `setup` prints its
+//! launchd plist.
 
 use serde_json::{Map, Value, json};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};

@@ -108,12 +108,13 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 <header class="stack">
   <p class="eyebrow">memory for agentic sessions</p>
   <p class="lead docs-lead"><code class="code">sandman</code> is being rewritten from scratch, one part
-    at a time; this build carries <code class="code">mark</code>, <code class="code">chart</code>
-    and the daemon, <code class="code">serve</code>, with its <code class="code">status</code> and
+    at a time; this build carries <code class="code">mark</code>, <code class="code">take</code>,
+    <code class="code">chart</code> and the daemon, <code class="code">serve</code>, with its <code class="code">status</code> and
     <code class="code">setup</code>.</p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#root">root</a>
     <a class="pill" href="#mark">mark</a>
+    <a class="pill" href="#take">take</a>
     <a class="pill" href="#chart">chart</a>
     <a class="pill" href="#serve">serve</a>
     <a class="pill" href="#next">next</a>
@@ -128,7 +129,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   </header>
   <figure class="figure">
     <div class="chart" id="flow"><noscript><p class="docs-note">The data flow needs JavaScript; its data is <a class="link" href="data/flow.json">docs/data/flow.json</a>.</p></noscript></div>
-    <figcaption>The data flow, ①–④, from a session's timeline down the left edge: the verb each moment runs, what it writes under the root (<a href="data/flow.json">docs/data/flow.json</a>), and what <code class="code">chart</code> reads back. Dashed verbs are not built yet: today the subether mod runs <a class="link" href="#mark"><code class="code">sandman mark</code></a> at start and end, keeps its tool calls and prompts in its own daily tool log, and runs the earlier sandman's recall and take, whose take writes a short-term pointer <code class="code">memories/.recent/&lt;session&gt;.json</code> for the earlier recall and dream to read, until the first memory lands.</figcaption>
+    <figcaption>The data flow, ①–④, from a session's timeline down the left edge: the verb each moment runs, what it writes under the root (<a href="data/flow.json">docs/data/flow.json</a>), and what <code class="code">chart</code> reads back. Dashed verbs are not built yet: today the subether mod runs <a class="link" href="#mark"><code class="code">sandman mark</code></a> at start and end, keeps its tool calls and prompts in its own daily tool log, and runs the earlier sandman's recall and take.</figcaption>
   </figure>
   <div class="table-wrap">
   <table data-table>
@@ -150,7 +151,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 <section class="docs-section" id="mark" data-component="mark">
   <header>
     <h2 class="h2">mark</h2>
-    <p class="docs-note">Run by the subether mod inside its 1.5 s budget, so it does nothing slow. Today it writes the start and end marks; next it carries <code class="code">call</code> and <code class="code">prompt</code> while <code class="code">recall</code> and <code class="code">take</code> take over start and end, see <a class="link" href="#next">Next</a>.</p>
+    <p class="docs-note">Run by the subether mod inside its 1.5 s budget, so it does nothing slow. Today it writes the start and end marks; next it carries <code class="code">call</code> and <code class="code">prompt</code> while <code class="code">recall</code> (<a class="link" href="#next">Next</a>) and <a class="link" href="#take"><code class="code">take</code></a> take over start and end.</p>
   </header>
   <p>One JSON object on stdin; <code class="code">kind</code> and <code class="code">session</code> are
     required, any other field missing is <code class="code">null</code>.</p>
@@ -167,6 +168,54 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   </ul>
 </section>
 
+<section class="docs-section" id="take" data-component="take">
+  <header>
+    <h2 class="h2">take</h2>
+    <p class="docs-note">The one verb the mod runs at a session's end, inside its 1.5 s budget: nothing slow, nothing spawned. A session is marked at its start and taken at its end; one without a start mark is outside this system.</p>
+  </header>
+  <p>One JSON object on stdin; <code class="code">session</code> is checked as in <a class="link" href="#mark">mark</a>.</p>
+  <pre class="snippet">{"session":"&lt;uuid&gt;","cwd":"&lt;path&gt;"?,"reason":"&lt;str&gt;"?}</pre>
+  <p>It decides one outcome, the first that holds, and appends one end line to today's ledger with the same writer as <code class="code">mark</code>:</p>
+  <div class="table-wrap">
+  <table data-table>
+    <thead>
+      <tr><th>when</th><th>outcome</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>no start mark for the session in the ledger</td><td>nothing written</td></tr>
+      <tr><td><code class="code">reason</code> is <code class="code">resume</code>: the end fires on the session a resume adopts</td><td>nothing written</td></tr>
+      <tr><td><code class="code">$SANDMAN_NO_TAKE</code> set, or <code class="code">CLAUDE_MEMORY_PIPELINE=1</code></td><td><code class="code">skipped</code></td></tr>
+      <tr><td>a job's <code class="code">state.json</code> under <code class="code">&lt;claude&gt;/jobs/</code> names it, by <code class="code">resumeSessionId</code>, else <code class="code">sessionId</code>, and <code class="code">reason</code> is not <code class="code">clear</code></td><td><code class="code">held</code>, with <code class="code">job</code></td></tr>
+      <tr><td>no <code class="code">&lt;claude&gt;/projects/*/&lt;session&gt;.jsonl</code></td><td><code class="code">gone</code></td></tr>
+      <tr><td>otherwise</td><td><code class="code">taken</code>, with <code class="code">archived</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <pre class="snippet">{"archived":"&lt;path&gt;"?,"at":…,"cwd":…,"job":"&lt;job dir&gt;"?,"kind":"end","machine":…,"outcome":"skipped"|"held"|"gone"|"taken","reason":…,"session":…}</pre>
+  <p><code class="code">&lt;claude&gt;</code> is <code class="code">$CLAUDE_CONFIG_DIR</code>, else
+    <code class="code">$HOME/.claude</code>. The take renames, never copies, the transcript to
+    <code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-projects-&lt;project&gt;-&lt;session&gt;.jsonl</code>
+    at the take's UTC time (<code class="code">&lt;HHMMSS&gt;-&lt;n&gt;-…</code> on a same-second clash) and its
+    sidecar dir <code class="code">&lt;session&gt;/</code>, when there is one, to the same stem plus
+    <code class="code">-dir</code>. Then it writes <code class="code">memories/.recent/&lt;session&gt;.json</code>
+    atomically, keys in this order, for the earlier recall and dream to read:</p>
+  <pre class="snippet">{"archived":"&lt;abs path&gt;","cwd":str|null,"ended":"&lt;the transcript's mtime&gt;","title":"&lt;str&gt;","highlights":[…]}</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>pointer</strong> — <code class="code">cwd</code>: the first transcript line's without control
+      characters, else stdin's. <code class="code">title</code>: the first user message, whitespace
+      collapsed, cut at 80 characters, else the session id. <code class="code">highlights</code>: the
+      quoted bodies of <code class="code">sandman remember</code> and <code class="code">orrery attend</code>
+      in the commands the session ran (a tool call, a <code class="code">!</code> line), one-lined, cut
+      at 4,000 characters, the latest of a repeat kept, the last 20.</li>
+    <li><strong>order</strong> — rename, pointer, ledger line: an interruption never loses a
+      transcript, and an archive without a pointer charts as <code class="code">archived</code>.</li>
+    <li><strong>exit 0</strong> — decided, silent. <strong>exit 2</strong> — bad stdin, one stderr
+      line, nothing written. <strong>exit 1</strong> — a rename or write failed (cross-device
+      included): one stderr line, no ledger line.</li>
+    <li><strong>held</strong> — the daemon takes it later, see <a class="link" href="#serve">serve</a>.</li>
+  </ul>
+</section>
+
 <section class="docs-section" id="chart" data-component="chart">
   <header>
     <h2 class="h2">chart</h2>
@@ -174,7 +223,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
       never writes it, bar minting <code class="code">machine</code>; every absence is an empty list
       or a skipped item, never an error.</p>
   </header>
-  <pre class="snippet">{"active":[{"cwd":str|null,"end":str|null,"machine":str,"session":str,"start":str|null}],
+  <pre class="snippet">{"active":[{"cwd":str|null,"end":str|null,"machine":str,"outcome":str|null,"session":str,"start":str|null}],
  "at":"&lt;now, RFC 3339 UTC&gt;",
  "machine":"&lt;this machine's id&gt;",
  "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"dream"|"reflect"|"remember"|"other","type":str}],
@@ -182,7 +231,8 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   <ul class="stack claims" role="list">
     <li><strong>active</strong> — one per session in the ledger files: <code class="code">start</code>
       the <code class="code">at</code> of its earliest start mark (a reload re-fires it),
-      <code class="code">end</code> of its latest end mark; <code class="code">cwd</code> and
+      <code class="code">end</code> and <code class="code">outcome</code> of its latest end mark (an end
+      without one: null); <code class="code">cwd</code> and
       <code class="code">machine</code> from that start mark, else the end mark. By <code class="code">start</code>, then session.</li>
     <li><strong>taken</strong> — one per archived transcript, a file directly in a day dir named
       <code class="code">&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code>; the latest wins when a session
@@ -215,8 +265,8 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   <header>
     <h2 class="h2">serve</h2>
     <p class="docs-note">The daemon, a foreground process launchd keeps alive as
-      <code class="code">dev.gigantic.sandman</code>. It runs no jobs yet; it is where the first
-      memory and the review will run. It reads and writes nothing under the root but <code class="code">run/</code>.</p>
+      <code class="code">dev.gigantic.sandman</code>. Its one job is the tick that settles held
+      takes; the first memory and the review will run here too.</p>
   </header>
   <figure class="figure">
     <div class="chart-frame" id="lifecycle">
@@ -254,15 +304,22 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
   <ul class="stack claims" role="list">
     <li><strong>state</strong> — <code class="code">ready</code> whenever it answers today: there is
       nothing to derive before the socket is bound, and a stopping daemon no longer accepts.</li>
+    <li><strong>tick</strong> — every 30 s (<code class="code">$SANDMAN_TICK_MS</code>) it re-derives
+      from disk every session whose latest ledger line is a <code class="code">held</code> end on this
+      machine; one no job names any more, whose transcript has been untouched for 120 s
+      (<code class="code">$SANDMAN_QUIET_MS</code>), it takes as <a class="link" href="#take">take</a> does
+      and ends with <code class="code">taken</code> or <code class="code">gone</code>, reason
+      <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.</li>
     <li><strong>signals</strong> — SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is
       ignored. The drain budget is 2 s, launchd's <code class="code">ExitTimeOut</code>: the one
-      connection in hand, at most its 1 s read. On exit it removes <code class="code">serve.pid</code>
+      connection in hand, at most its 1 s read, and the take in hand; the tick starts no other. On exit it removes <code class="code">serve.pid</code>
       and <code class="code">serve.sock</code> while the pid file still holds its pid.</li>
     <li><strong>log</strong> — <code class="code">run/serve.log</code>, one compact object per line
       with <code class="code">at</code>: <code class="code">start</code> (pid, version),
       <code class="code">exit</code> (reason: <code class="code">signal TERM</code>,
-      <code class="code">shutdown request</code>, an accept error), <code class="code">panic</code>
-      from the panic hook. A line that finds it at <code class="code">$SANDMAN_LOG_CAP</code> bytes
+      <code class="code">shutdown request</code>, an accept error), <code class="code">take</code> (the
+      tick's end line, or its <code class="code">session</code> and error as <code class="code">reason</code>),
+      <code class="code">panic</code> from the panic hook. A line that finds it at <code class="code">$SANDMAN_LOG_CAP</code> bytes
       (1 MiB) first renames it to <code class="code">serve.log.1</code>.</li>
     <li><strong>status</strong> — sends health and prints the reply, exit 0, with one stderr line
       naming both versions and <code class="code">launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman</code>
@@ -288,9 +345,7 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
     <li><code class="code">recall</code>: the one verb the mod runs at a session's start. It writes the start mark first, whether or not there is anything to recall, so <code class="code">mark</code> stops writing it.</li>
     <li><code class="code">reflect</code></li>
     <li><code class="code">remember</code></li>
-    <li><code class="code">review</code>: in <code class="code">serve</code>, later. A group is reviewed against the memories its bank already holds, then added to the bank, <code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code>. It takes the place of the dream pass.</li>
-    <li><code class="code">take</code>: the one verb the mod runs at a session's end. It refuses a session with no start mark, takes a closed background session then instead of owing it, and writes the end to the ledger with its outcome, so the mod stops marking the end.</li>
-  </ul>
+    <li><code class="code">review</code>: in <code class="code">serve</code>, later. A group is reviewed against the memories its bank already holds, then added to the bank, <code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code>. It takes the place of the dream pass.</li>  </ul>
 </section>
 
 <nav class="row link-row" aria-label="links">
