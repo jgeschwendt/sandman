@@ -83,11 +83,13 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p class="notice notice-warn"><span>Partly built: <code class="code">sandman recall</code>, the seed and the pull,
     and <code class="code">sandman show</code> run (<a class="link" href="#tool">the tools</a>); the mod wiring, the Kev
     fallback, <code class="code">remember</code> and the pane are not, and the earlier sandman's recall runs at every
-    session's start. A decision is open until its badge says settled. The record Jev sees, the question and the cut
-    rule are being tuned by an evaluation and will change.</span></p>
+    session's start. A decision is open until its badge says settled; what Jev sees, the question, the gate and the
+    cut are <a class="link" href="#chosen">the evaluation's choice</a>.</span></p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#problem">problem</a>
     <a class="pill" href="#proposed">flow</a>
+    <a class="pill" href="#chosen">chosen</a>
+    <a class="pill" href="#quality">misses</a>
     <a class="pill" href="#cue">cue</a>
     <a class="pill" href="#candidates">candidates</a>
     <a class="pill" href="#always">always</a>
@@ -132,19 +134,19 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </header>
   <figure class="figure">
     <div class="chart-frame" id="flow">
-      <svg width="932" height="336" viewBox="0 0 932 336" role="img" aria-label="recall's flow: the mod's first prompt (not wired) reaches the seed, which writes the start mark and brings the instructions and the always-set; the seed and the agent's pull both reach the candidates, jev scores them in requests run at once, rank and cut, the digest, one ledger line; jev down falls back to kev in two stages, both down to the always-set only, neither built">
+      <svg width="932" height="336" viewBox="0 0 932 336" role="img" aria-label="recall's flow: the mod's first prompt (not wired) reaches the seed, which writes the start mark and brings the instructions and the always-set; the seed and the agent's pull both reach the candidates, jev answers the gate and scores each candidate in three requests run at once, the gate open, the top 6 over .35, the digest, one ledger line; jev down falls back to kev in two stages, both down to the always-set only, neither built">
         <defs>
           <marker id="flow-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
         </defs>
         <g transform="translate(0,28)"><rect class="flow-box is-next" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">first prompt</text><text class="flow-note" x="12" y="46">the mod awaits;</text><text class="flow-note" x="12" y="64">a real ask, the cue</text></g>
         <g transform="translate(196,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">① seed</text><text class="flow-note" x="12" y="46">start mark, then the</text><text class="flow-note" x="12" y="64">instructions, always</text></g>
-        <g transform="translate(0,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">agent's pull</text><text class="flow-note" x="12" y="46">sandman recall,</text><text class="flow-note" x="12" y="64">its cue, any time</text></g>
-        <g transform="translate(392,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">② candidates</text><text class="flow-note" x="12" y="46">every memory but the</text><text class="flow-note" x="12" y="64">always-set and muted</text></g>
-        <g transform="translate(588,28)"><rect class="flow-box is-accent" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ jev scores</text><text class="flow-note" x="12" y="46">a noul a memory, in</text><text class="flow-note" x="12" y="64">requests run at once</text></g>
+        <g transform="translate(0,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">agent's pull</text><text class="flow-note" x="12" y="46">its cue, any time,</text><text class="flow-note" x="12" y="64">--about its repo</text></g>
+        <g transform="translate(392,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">② candidates</text><text class="flow-note" x="12" y="46">every other memory,</text><text class="flow-note" x="12" y="64">with its repository</text></g>
+        <g transform="translate(588,28)"><rect class="flow-box is-accent" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ jev scores</text><text class="flow-note" x="12" y="46">the gate, a noul each;</text><text class="flow-note" x="12" y="64">3 parts at once</text></g>
         <g transform="translate(784,28)"><rect class="flow-box is-next" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">kev, 2 stages</text><text class="flow-note" x="12" y="46">49 banks, then the</text><text class="flow-note" x="12" y="64">top banks' memories</text></g>
         <g transform="translate(196,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑥ recall line</text><text class="flow-note" x="12" y="46">to the ledger:</text><text class="flow-note" x="12" y="64">sent, scores, cut</text></g>
         <g transform="translate(392,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑤ digest</text><text class="flow-note" x="12" y="46">to the caller; the</text><text class="flow-note" x="12" y="64">seed's is injected</text></g>
-        <g transform="translate(588,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">④ rank, fill</text><text class="flow-note" x="12" y="46">over the floor, the</text><text class="flow-note" x="12" y="64">top 8, to the budget</text></g>
+        <g transform="translate(588,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">④ gate, rank</text><text class="flow-note" x="12" y="46">gate under .15: none;</text><text class="flow-note" x="12" y="64">top 6 over .35</text></g>
         <g transform="translate(784,196)"><rect class="flow-box is-next" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">both down</text><text class="flow-note" x="12" y="46">the always-set only,</text><text class="flow-note" x="12" y="64">an error in the pane</text></g>
         <g aria-hidden="true">
           <path class="flow-path is-next" marker-end="url(#flow-head)" d="M148,70H196" />
@@ -163,55 +165,105 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
         <text class="flow-time" x="368" y="62" text-anchor="middle">~5 ms</text>
         <text class="flow-time" x="564" y="62" text-anchor="middle">~50 ms</text>
         <text class="flow-time" x="760" y="62" text-anchor="middle">down</text>
-        <text class="flow-time" x="652" y="140" text-anchor="end">≤ 1.1 s</text>
+        <text class="flow-time" x="652" y="140" text-anchor="end">p50 0.97 s · max 3.2 s</text>
         <text class="flow-time" x="742" y="172" text-anchor="middle">2 s + 43 ms × n</text>
         <text class="flow-time" x="888" y="176">down</text>
         <text class="flow-time" x="564" y="230" text-anchor="middle">~5 ms</text>
         <text class="flow-time" x="368" y="230" text-anchor="middle">~1 ms</text>
-        <text class="flow-note" x="466" y="318" text-anchor="middle">the seed's bound: 3 s for the scoring; past it, or on any failure, ⑤ is the instructions and the always-set, and says the prompt was not scored</text>
+        <text class="flow-note" x="466" y="318" text-anchor="middle">the seed's bound: 4 s for the scoring; past it, or on any failure, ⑤ is the instructions and the always-set, and says the prompt was not scored</text>
       </svg>
 </div>
     <figcaption>Solid runs today as <code class="code">sandman recall</code>; dashed is not built or not wired. Times
-      on the edges are what the station before each takes: Kev's 43 ms a question is measured; 627 candidates took two
-      Jev requests and 1.1 s run in turn (measured 2026-11-13), so at once they take about the slower; the rest are
-      estimates.</figcaption>
+      on the edges are what the station before each takes: Jev's pass and Kev's 43 ms a question are measured
+      (2026-11-13), the rest estimates.</figcaption>
   </figure>
+</section>
+
+<section class="docs-section" id="chosen">
+  <header class="decision-head">
+    <h2 class="h2">What did the evaluation choose?</h2><span class="badge badge-ok">settled</span>
+  </header>
+  <p>Each memory goes to Jev as <code class="code">name — description</code> (160 characters) with its repository;
+    the question is <em>does the agent need this memory to carry out the request correctly</em>, with criteria for
+    yes (same repository, tool, file or decision, and a rule the work will run into) and no (another area, loosely on
+    topic, or no concrete work); a gate asks whether the request asks for anything specific. A gate under .15 recalls
+    nothing; otherwise the top 6 at or over .35.</p>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>shape</th><th>lines returned</th><th>precision</th><th>must-recall</th><th>no-ask empty</th></tr></thead>
+    <tbody>
+      <tr><td>first build: floor .5, cap 8</td><td>7.3</td><td>.33</td><td>.58</td><td>23 %</td></tr>
+      <tr class="is-proposed"><td>chosen: gate .15, floor .35, cap 6 <span class="badge badge-ok">built</span></td><td>4.0</td><td>.62</td><td>.69</td><td>92 %</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note">98 cues over the real corpus (33 first prompts, 32 agent cues, 20 planted, 13 with no ask),
+    gold labels judged by Opus; chosen on a dev half of 50, confirmed on the held-out 48 (measured 2026-11-13).</p>
+  <ul class="stack claims" role="list">
+    <li><strong>trade-off</strong> — half the lines at nearly twice the precision and more of the memories the work
+      must have, for fewer of the merely useful ones and an empty answer to some terse real asks.</li>
+    <li><strong>cost</strong> — about 121.5k input tokens a pull ($0.0051) in three parts run at once; wall p50
+      0.97 s, p90 2.2 s, max 3.2 s.</li>
+    <li><strong>unmeasured</strong> — score variance under reruns, and resistance to memories that argue for their own
+      selection: the run stopped when the hosted balance ran out.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="quality">
+  <header class="decision-head">
+    <h2 class="h2">What still gets missed</h2><span class="badge">open</span>
+  </header>
+  <p>The largest remaining losses come from the memories, not the scoring: retrieval reads only a name and 160
+    characters of description.</p>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>cause</th><th>misses</th><th>addressed by</th></tr></thead>
+    <tbody>
+      <tr><td>a rule for every repository whose description hides when it applies</td><td>22</td><td rowspan="2">encode and consolidate guidance for new memories <span class="badge badge-ok">built</span>; a one-time redescription of the corpus <span class="badge">planned</span></td></tr>
+      <tr><td>a name that is a date or a sentence</td><td>10</td></tr>
+      <tr><td>filed under another repository's bank</td><td>8</td><td>encode: a rule for every repository carries no <code class="code">about</code>; the redescription refiles</td></tr>
+      <tr><td>a repository's own rule, the trigger missing from its description</td><td>about 6</td><td>the guidance and the redescription</td></tr>
+      <tr><td>an arguable gold label</td><td>about 6</td><td>nothing</td></tr>
+    </tbody>
+  </table>
+</div>
+  <p class="docs-note">56 % of wrong returns come from 28 memories that rank on unrelated cues:
+    <code class="code">reflect</code> watches for memories sent often and never read <span class="badge">not built</span>.</p>
 </section>
 
 <section class="docs-section" id="cue">
   <header class="decision-head">
-    <h2 class="h2">What is the seed's cue?</h2><span class="badge">open</span>
+    <h2 class="h2">What is the cue?</h2><span class="badge badge-ok">settled</span>
   </header>
   <div class="table-wrap">
   <table data-table>
     <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
     <tbody>
-      <tr class="is-proposed"><td>the first prompt's text <span class="badge badge-accent">proposed</span> <span class="badge badge-ok">built</span></td><td>the question's <code class="code">state</code> is what the person just asked</td><td>the prompt leaves the machine with hosted Jev (<a class="link" href="#privacy">privacy</a>)</td></tr>
-      <tr><td>the first prompt plus the cwd</td><td>the cwd joins the state</td><td>the cwd is the same root for nearly every session, so it adds tokens and no signal</td></tr>
+      <tr class="is-proposed"><td>the ask, led by its repository when one is known <span class="badge badge-ok">built</span></td><td><code class="code">state</code> is <code class="code">repository: &lt;owner/repo&gt;</code> and the first prompt or the agent's cue; known from a pull's <code class="code">--about</code> or a seed's cwd inside a repository</td><td>the ask leaves the machine with hosted Jev (<a class="link" href="#privacy">privacy</a>)</td></tr>
+      <tr><td>the ask alone</td><td>no place in the state</td><td>a rule from the wrong repository ranks beside the right one</td></tr>
       <tr><td>nothing (today)</td><td>selection by place only</td><td>the 95 % in <a class="link" href="#problem">the problem</a></td></tr>
     </tbody>
   </table>
 </div>
-  <p class="docs-note"><strong>Proposed:</strong> the prompt is the only input at the start that says what the session is about; every later pull brings the agent's own cue.</p>
+  <p class="docs-note">The cwd is the grove root for nearly every session, which says nothing: only a cwd inside a repository, or the agent naming it, leads the state.</p>
 </section>
 
 <section class="docs-section" id="candidates">
   <header class="decision-head">
-    <h2 class="h2">Which memories are candidates?</h2><span class="badge">open</span>
+    <h2 class="h2">Which memories are candidates?</h2><span class="badge badge-ok">settled</span>
   </header>
   <div class="table-wrap">
   <table data-table>
     <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
     <tbody>
-      <tr class="is-proposed"><td>every memory in every bank <span class="badge badge-accent">proposed</span> <span class="badge badge-ok">built</span></td><td>one noul per memory, split into requests under 60k estimated tokens</td><td>about 65–90k tokens a pull, unmeasured</td></tr>
+      <tr class="is-proposed"><td>every memory in every bank <span class="badge badge-ok">built</span></td><td>one noul per memory, in balanced requests under 60k estimated tokens</td><td>about 121.5k tokens a pull, three requests (<a class="link" href="#chosen">measured</a>)</td></tr>
       <tr><td>the banks a first stage picks</td><td>score 49 banks, then their memories</td><td>two round trips; a memory in a bank scored low is never seen</td></tr>
       <tr><td>the cwd's chain (today)</td><td>the cwd's bank and its ancestors</td><td>2 of 49 banks from the root</td></tr>
     </tbody>
   </table>
 </div>
-  <p class="docs-note"><strong>Proposed:</strong> Jev scores the whole corpus in one or two requests, so nothing needs narrowing.</p>
   <ul class="stack claims" role="list">
-    <li>Each candidate is its name and its description cut at 160 characters, 25.7 KB of names and about 95 KB of capped descriptions, plus the fixed question each one carries, 144 characters and its JSON, about 138 KB over 627 candidates. At recall's own estimate, a token per 3 bytes, that is two requests, as a pull over the real corpus split it (measured 2026-11-13).</li>
+    <li>Each candidate carries its name, its description cut at 160 characters and its repository's label beside the fixed question and criteria; the labels come from the grove root's owner and repository dirs, so a worktree's bank reads as its repository and a bank matching no dir as a guessed path (AGENTS.md).</li>
     <li>Uncapped, the descriptions are 181.7 KB (average 269 characters, longest 1,392; only 184 are within 160): the cap trims the room a description has to argue for itself (<a class="link" href="#risks">risks</a>).</li>
     <li>Candidates are memories only; traces join them, marked provisional, when <a class="link" href="#tool"><code class="code">remember</code></a> lands.</li>
   </ul>
@@ -232,39 +284,38 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
 
 <section class="docs-section" id="shape">
   <header class="decision-head">
-    <h2 class="h2">What is injected?</h2><span class="badge">open</span>
+    <h2 class="h2">What is injected?</h2><span class="badge badge-ok">settled</span>
   </header>
   <div class="table-wrap">
   <table data-table>
     <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
     <tbody>
-      <tr class="is-proposed"><td>one line per memory, a verb to read one <span class="badge badge-accent">proposed</span> <span class="badge badge-ok">built</span></td><td><code class="code">.NN name (type · bank/file) — description</code>, and <code class="code">sandman show &lt;bank&gt;/&lt;file&gt;</code> once</td><td>a body costs a tool call when the session needs it</td></tr>
+      <tr class="is-proposed"><td>one line per memory, a verb to read one <span class="badge badge-ok">built</span></td><td><code class="code">.NN name (type · bank/file) — description</code>, and <code class="code">sandman show &lt;bank&gt;/&lt;file&gt;</code> once</td><td>a body costs a tool call when the session needs it</td></tr>
       <tr><td>bodies for the top few, lines for the rest</td><td>the best matches arrive whole</td><td>a body averages over 1 KB (888 KB over 645 files): three bodies cost about fifteen lines</td></tr>
       <tr><td>bodies for all that fit</td><td>no reads needed</td><td>a handful of memories per session</td></tr>
     </tbody>
   </table>
 </div>
-  <p class="docs-note"><strong>Proposed:</strong> it is the house rule for context injection: one line per item plus a verb to read one in full.</p>
-  <p>A read through <code class="code">show</code> writes a ledger line, so line-then-read is also the use signal
+  <p>The house rule for context injection: one line per item plus a verb to read one in full. A read through <code class="code">show</code> writes a ledger line, so line-then-read is also the use signal
     <a class="link" href="#record">record</a> needs; a body sent whole leaves no trace of whether it helped. The bank
     shows as its key, the path <code class="code">show</code> takes.</p>
 </section>
 
 <section class="docs-section" id="budget">
   <header class="decision-head">
-    <h2 class="h2">How much is injected?</h2><span class="badge">open</span>
+    <h2 class="h2">How much is injected?</h2><span class="badge badge-ok">settled</span>
   </header>
   <div class="table-wrap">
   <table data-table>
     <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
     <tbody>
-      <tr class="is-proposed"><td>seed 9,000, pull 4,000, at most 8 ranked lines <span class="badge badge-accent">proposed</span> <span class="badge badge-ok">built</span></td><td>the seed's instructions and always-set first, then its prompt's lines; a pull a few lines in the agent's context</td><td>under the 10,000 session-start cap; the 8 is a guess</td></tr>
-      <tr><td>a floor and the budget only</td><td>every line over 0.5 that fits</td><td>24–70 lines on real cues: the floor does not discriminate</td></tr>
-      <tr><td>larger</td><td>more lines</td><td>over the 10,000 cap, which cuts it and trails a <code class="code">guard</code> event</td></tr>
+      <tr class="is-proposed"><td>gate .15, floor .35, at most 6 lines; seed 9,000, pull 4,000 characters <span class="badge badge-ok">built</span></td><td>nothing for a cue with no ask; else 4 lines on average</td><td>under the 10,000 session-start cap</td></tr>
+      <tr><td>floor .5, at most 8</td><td>the first build</td><td>7.3 lines at precision .33 (<a class="link" href="#chosen">chosen</a>)</td></tr>
+      <tr><td>a floor and the budget only</td><td>every line over .5 that fits</td><td>34 lines on average: the floor does not discriminate</td></tr>
     </tbody>
   </table>
 </div>
-  <p class="docs-note"><strong>Proposed:</strong> the evaluation sets the cap and the floor; the ledger then tunes them: how far down the ranking a used memory sat says whether they are right. <code class="code">--budget</code>, <code class="code">$SANDMAN_SEED_BUDGET</code> and <code class="code">$SANDMAN_RECALL_MAX</code> move them.</p>
+  <p class="docs-note">The ledger tunes them next: how far down the ranking a read memory sat says whether they are right. <code class="code">$SANDMAN_RECALL_GATE</code>, <code class="code">$SANDMAN_RECALL_FLOOR</code>, <code class="code">$SANDMAN_RECALL_MAX</code>, <code class="code">--budget</code> and <code class="code">$SANDMAN_SEED_BUDGET</code> move them.</p>
 </section>
 
 <section class="docs-section" id="when">
@@ -277,7 +328,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p>The session's start is a seed, the one verb the mod runs there: ① the start mark, first and whatever follows, so
     <code class="code">mark</code> keeps only calls and prompts and the short-term pointer goes; ② short instructions
     saying memory exists and when and how to pull it (<a class="link" href="#tool">as shipped</a>); ③ the always-set;
-    ④ memories for the first prompt, only when it carries a real ask that scores well.</p>
+    ④ memories for the first prompt, only when the gate finds a real ask.</p>
   <ul class="stack claims" role="list">
     <li>Most detailed asks come later or out of the agent's own discovery, so the seed matters and the pulls carry the weight.</li>
     <li>After <code class="code">/clear</code> the seed runs again for the same session: a second start mark (<code class="code">chart</code> keeps the earliest), and nothing an earlier recall sent is sent again.</li>
@@ -288,7 +339,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <header class="decision-head">
     <h2 class="h2">What does the seed wait for?</h2><span class="badge badge-ok">settled</span>
   </header>
-  <p>At most 3 s of scoring (<code class="code">$SANDMAN_SEED_MS</code>), inside the mod's 10 s; a pull waits up to
+  <p>At most 4 s of scoring (<code class="code">$SANDMAN_SEED_MS</code>; a pass measured p50 0.97 s, p90 2.2 s,
+    max 3.2 s in three parts), inside the mod's 10 s; a pull waits up to
     <code class="code">$SANDMAN_RECALL_MS</code>, 10 s. The requests of one pass run at once, each under the same
     bound. The seed never fails the prompt: on a timeout, a transport failure or a missing key it still prints the
     instructions and the always-set, says the prompt could not be scored and to pull when the task is clear, exits 0
@@ -322,8 +374,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </header>
   <p>Hosted Jev scores, and the <code class="code">user</code> memories are never candidates: they always come along
     unscored, as the always-set, pinned memories with them. Each pull sends to <code class="code">api.typesafe.ai</code>
-    the cue and every other memory's name and description beside the fixed question, about 260 KB: repository names,
-    paths, rules.</p>
+    the cue and every other memory's name, description and repository beside the fixed question, about 121.5k
+    tokens: repository names, paths, rules.</p>
 </section>
 
 <section class="docs-section" id="record">
@@ -339,7 +391,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     </tbody>
   </table>
 </div>
-  <pre class="snippet">{"always"?:["&lt;bank&gt;/&lt;file&gt;"],"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"engine":"jev-latest","error"?,"kind":"recall","machine":…,"ms":n,"seed"?:true,"sent":[{"file":"&lt;bank&gt;/&lt;file&gt;","noul":0.91}],"session":…,"tokens":n}
+  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;bank&gt;/&lt;file&gt;"],"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"engine":"jev-latest","error"?,"gate":0.87,"kind":"recall","machine":…,"ms":n,"seed"?:true,"sent":[{"file":"&lt;bank&gt;/&lt;file&gt;","noul":0.91}],"session":…,"tokens":n}
 {"at":…,"file":"&lt;bank&gt;/&lt;file&gt;","kind":"show","machine":…,"session":…}</pre>
   <p class="docs-note"><strong>Proposed:</strong> sent, then read, then pinned or muted is the whole feedback loop, and two of its three parts exist already.</p>
   <ul class="stack claims" role="list">
@@ -377,10 +429,10 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <li><strong><code class="code">sandman recall &lt; {"session","prompt"?,…}</code></strong>
       <span class="badge badge-ok">built</span> — the seed, once at the first prompt: ① the start mark, first and
       whatever follows; then, within 9,000 characters, the instructions with the session id, the always-set, the
-      prompt's ranked lines when it has one, and the footer; not scored within 3 s, a line saying so instead.
+      prompt's ranked lines when the gate finds an ask, and the footer; not scored within 4 s, a line saying so instead.
       <code class="code">CLAUDE_MEMORY_PIPELINE=1</code>: the start mark only. Bad stdin: exit 2, nothing written.</li>
-    <li><strong><code class="code">sandman recall --cue "…" [--session &lt;uuid&gt;] [--budget &lt;chars&gt;]</code></strong>
-      <span class="badge badge-ok">built</span> — the pull: one noul a candidate through
+    <li><strong><code class="code">sandman recall --cue "…" [--about &lt;path&gt;] [--session &lt;uuid&gt;] [--budget &lt;chars&gt;]</code></strong>
+      <span class="badge badge-ok">built</span> — the pull: the gate and one noul a candidate through
       <code class="code">$SANDMAN_SYSTEMONE</code> (default: curl to Jev, the key as curl config on its stdin, never in an
       argv); stdout the header, the ranked lines and the footer, never the always-set; stderr one stats line; one
       ledger line; within a session nothing already sent, by the seed or a pull, is sent again.</li>
@@ -395,9 +447,6 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       merges or prunes them, and the episode's encode takes what was remembered as done. Until it lands, the earlier
       sandman's <code class="code">remember</code> writes straight into a bank.</li>
   </ul>
-  <p class="docs-note">Being tuned by an evaluation, each one place in the binary: what Jev sees of a memory (its name
-    and its description cut at 160), the fixed question, and the cut rule (the floor, at most 8 ranked lines, the
-    budget).</p>
   <figure class="figure">
     <pre class="snippet wrap" id="seed"><a class="link" href="data/recall-seed.txt">docs/data/recall-seed.txt</a></pre>
     <figcaption>Sample: the seed over the test corpus for the prompt <code class="code">add a clock to the alpha
@@ -462,9 +511,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <h2 class="h2">Risks</h2>
   </header>
   <ul class="stack claims" role="list">
-    <li><strong>injection</strong> — memories are written unattended from transcripts, so a name or description can argue for its own selection. The description is capped at 160 characters, the memory travels as data beside a question fixed in the binary that says so, and <code class="code">reflect</code> watches for memories sent often and never used.</li>
-    <li><strong>the number</strong> — a noul ranks well but is not a calibrated probability: the 0.5 floor only drops what Jev leans against; the cap of 8 and the budget do the rest.</li>
-    <li><strong>estimates</strong> — Jev's time, tokens and cost for the whole corpus are inferred, not measured; the first recall lines settle them, and whether the question must shorten to fit one request.</li>
+    <li><strong>injection</strong> — memories are written unattended from transcripts, so a name or description can argue for its own selection. The description is capped at 160 characters, the memory travels as data beside a question fixed in the binary that says so (its resistance is <a class="link" href="#chosen">unmeasured</a>), and <code class="code">reflect</code> watches for memories sent often and never used.</li>
+    <li><strong>the number</strong> — a noul ranks well but is not a calibrated probability: the .35 floor and the .15 gate are where this corpus's scores fell, and move with it.</li>
     <li><strong>hosted dependence</strong> — the good path needs <code class="code">api.typesafe.ai</code>; an outage degrades every session to Kev's narrow pass.</li>
   </ul>
 </section>
@@ -475,7 +523,6 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </header>
   <ul class="stack claims" role="list">
     <li>Scores in the pane as numbers or as bars?</li>
-    <li>Is the floor enough to tell the seed's real ask from a greeting, or does ④ want its own noul on the first prompt?</li>
   </ul>
 </section>
 
