@@ -2,7 +2,7 @@
 
 ```stele
 kind: system
-purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `serve` is the daemon under launchd, whose tick settles held takes and encodes episodes into traces, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
+purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `serve` is the daemon under launchd, whose tick settles held takes, encodes episodes into traces and consolidates a bank's traces into the bank, unattended, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
 commands:
   check: mise run check
   cover: mise run cover
@@ -14,10 +14,10 @@ commands:
 
 | path                     | what                                                                                       |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
-| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `serve` and its tick (settle, encode), `setup`, `status` |
-| `src/encode.prompt.md`   | the encoder's prompt, embedded with `include_str!`; the digest follows it on stdin          |
-| `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots and Claude homes via `SANDMAN_ROOT`, `SANDMAN_MACHINE`, `CLAUDE_CONFIG_DIR`, a stub shell encoder via `SANDMAN_ENCODER`; a `Daemon` guard kills every `serve` it starts (SIGTERM one whose coverage counts: a SIGKILL writes no profile) |
-| `docs/index.html`        | the page: data root, `mark`, `take`, `chart`, `serve`, `encode`, next; two d3 charts and the daemon's lifecycle figure |
+| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `serve` and its tick (settle, encode, consolidate), `setup`, `status` |
+| `src/prompts/<job>.md`   | a tick job's default guidance, `<job>.contract.md` its fixed contract; both embedded with `include_str!` |
+| `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots and Claude homes via `SANDMAN_ROOT`, `SANDMAN_MACHINE`, `CLAUDE_CONFIG_DIR`, stub shell model commands via `SANDMAN_ENCODER` and `SANDMAN_CONSOLIDATOR` (`exit 9` unless a test names one); a `Daemon` guard kills every `serve` it starts (SIGTERM one whose coverage counts: a SIGKILL writes no profile) |
+| `docs/index.html`        | the page: data root, `mark`, `take`, `chart`, `serve`, `encode`, `consolidate`, next; two d3 charts and the daemon's lifecycle figure |
 | `docs/charts/*.js`       | one ES module per chart over `lib.js`'s chrome; d3 7.9.0 is the page's global              |
 | `docs/data/chart.json`   | the timeline's sample: `tests/sandman.rs` `chart` fails unless it is the verb's output     |
 | `docs/data/flow.json`    | the data-flow chart's moments, nodes and edges, ①–④ marking the order a session passes them; `next` nodes are not built yet |
@@ -69,14 +69,14 @@ Stdout, one compact object, keys alphabetical; reads the root, writes nothing bu
 {"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"machine":str,"outcome":str|null,"session":str,"start":str|null}],
  "at":"<now, RFC 3339 UTC>",
  "machine":"<this machine's id>",
- "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"dream"|"reflect"|"remember"|"other","type":str}],
+ "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"consolidate"|"dream"|"reflect"|"remember"|"other","type":str}],
  "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}],
  "traces":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"type":str}]}
 ```
 
 - `active` — per session in `ledger/*/*/*.jsonl`: `start` the `at` of its earliest start mark (a reload re-fires it), `end` and `outcome` of its latest end mark (null on an end line without one); `cwd`, `machine` from that start mark, else the end mark; `encoded` the `outcome` of its latest encode line. By `start` (null first), then session.
 - `taken` — per file `<root>/.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` directly in a day dir; the latest per session wins. `taken` = that date and time as UTC, `bytes` = size; `title`, `cwd`, `highlights` (count, 0 without), `dreamed` from `<root>/memories/.recent/<session>.json` when it parses as an object. `state`: `waiting` pointer without `dreamed`, `dreamed` with it, `archived` no pointer. `memories` = memory entries naming the session. By `taken`, then session.
-- `memories` — per `<root>/memories/<bank>/<file>.md`, banks and files starting `.` or `_` and `MEMORY.md` skipped. Frontmatter: `key: value` lines between `---` fences; `name` (else the stem), `type` (else ""), `created`, `source` → `dream`/`reflect`/`remember` by its first word, else `other`; a dream's `session` is the uuid in `dream <ISO> · <uuid> · minds=…`. By bank, then file.
+- `memories` — per `<root>/memories/<bank>/<file>.md`, banks and files starting `.` or `_` and `MEMORY.md` skipped. Frontmatter: `key: value` lines between `---` fences; `name` (else the stem), `type` (else ""), `created`, `source` → `consolidate`/`dream`/`reflect`/`remember` by its first word, else `other`; `session` the uuid in a consolidate's or a dream's (`dream <ISO> · <uuid> · minds=…`). By bank, then file.
 - `traces` — per `<root>/traces/<bank>/<file>.md`, the same reader and skips; `session` from the frontmatter. By bank, then file.
 
 ### `sandman serve`
@@ -91,9 +91,9 @@ One newline-terminated JSON request and one reply per connection, compact, keys 
 anything else     → {"code":"bad_request"|"unknown_op","ok":false}
 ```
 
-`state` is `ready` whenever it answers today: state is derived before the socket is bound, and a stopping daemon no longer accepts. SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is ignored (Rust's default). Exit 0 after removing `serve.pid` and `serve.sock` while the pid file still holds its pid. The drain budget is 2 s (`ExitTimeOut`): one connection in hand, at most its 1 s read, and the tick's take or encode in hand (a running encoder's group killed); the tick starts no other.
+`state` is `ready` whenever it answers today: state is derived before the socket is bound, and a stopping daemon no longer accepts. SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is ignored (Rust's default). Exit 0 after removing `serve.pid` and `serve.sock` while the pid file still holds its pid. The drain budget is 2 s (`ExitTimeOut`): one connection in hand, at most its 1 s read, and the tick's job in hand (a running model command's group killed); the tick starts no other.
 
-The tick, a thread: every `$SANDMAN_TICK_MS` (30 000) it re-reads the ledger and, per session whose latest line is an end with outcome `held` and this machine's id, under a lock the drain takes after setting the stop flag, skips one a job still names or whose transcript was modified within `$SANDMAN_QUIET_MS` (120 000) and otherwise runs `take`'s end with reason `job gone` (`taken` or `gone`). Nothing is held in memory; a failed take stays held and is retried next tick. Then it runs one encode (below). `run/serve.log` is the daemon's: one compact object per line, keys alphabetical, `at` on each — `{"event":"start","pid","version"}`, `{"event":"exit","reason":"signal TERM"|"shutdown request"|<accept error>}`, `{"event":"take"|"encode",…the ledger line}` or `{"event":…,"reason":<write error>,"session"}` per tick take or encode, `{"event":"panic","reason"}` from the panic hook. A line that finds the log at `$SANDMAN_LOG_CAP` bytes (default 1 MiB) first renames it to `serve.log.1`.
+The tick, a thread: every `$SANDMAN_TICK_MS` (30 000) it re-reads the ledger and, per session whose latest line is an end with outcome `held` and this machine's id, under a lock the drain takes after setting the stop flag, skips one a job still names or whose transcript was modified within `$SANDMAN_QUIET_MS` (120 000) and otherwise runs `take`'s end with reason `job gone` (`taken` or `gone`). Nothing is held in memory; a failed take stays held and is retried next tick. Then one job: an encode when an episode waits, else a consolidate (below). `run/serve.log` is the daemon's: one compact object per line, keys alphabetical, `at` on each — `{"event":"start","pid","version"}`, `{"event":"exit","reason":"signal TERM"|"shutdown request"|<accept error>}`, `{"event":"take"|"encode"|"consolidate",…the ledger line}` or `{"event":…,"reason":<write error>,"session"|"bank"}` per tick job, `{"event":"panic","reason"}` from the panic hook. A line that finds the log at `$SANDMAN_LOG_CAP` bytes (default 1 MiB) first renames it to `serve.log.1`.
 
 ### encode
 
@@ -103,7 +103,9 @@ A job of `serve`'s tick, not a verb. Per tick, under the tick's lock, after sett
 {"at","error"?,"kind":"encode","machine","outcome":"encoded"|"skipped"|"gone"|"failed","session","traces":<count>}
 ```
 
-`skipped`: no start mark of the session has `interactive` true. `gone`: no file at the end line's `archived`. Else the digest, to `run/encode.in`: `# episode` (`date:` the end's `at`, `cwd:` as the pointer's, else `unknown`), `# highlights` (`- <body>` per take highlight, absent without), `# transcript` (per user or assistant message part: `user: <text>`, `assistant: <text>`, `tool: <name> <command|file_path>` one-lined to 200; tool results and other lines dropped); over `$SANDMAN_DIGEST_BYTES` (300 000) the head and tail halves, cut back to whole lines, around `… <n> bytes omitted …`. The encoder, `$SANDMAN_ENCODER` else `claude -p --model opus --output-format text --safe-mode --tools "" --no-session-persistence`, runs as `sh -c`, own process group, env `CLAUDE_MEMORY_PIPELINE=1` `SANDMAN_NO_TAKE=1`, stdin `<prompt>\n<digest>`, stdout and stderr to `run/encode.out`, `run/encode.err`. The contract a replacement keeps: exit 0 and stdout holding one object, `{"traces":[{"type":"user"|"feedback"|"project"|"reference","name":str,"description":str,"body":str}]}`, read from its first `{` to its last `}`. `failed` (`error` one line, 400 chars, no file written): `exit status: <n>: <stderr>`, `timed out after <ms> ms` (`$SANDMAN_ENCODE_MS`, 300 000; the group killed), `output: <parse error>`, `output: not a trace: <it>`. Else `encoded`, one file per trace: `<root>/traces/<bank>/<type>_<slug>.md` by temp + rename, `<bank>` the earlier sandman's `Bank::key_for(project::root(cwd))` (`project`, `common`; no cwd: `$HOME`), `<slug>` its `slug::slug` (lowercase, non-alphanumeric runs `_`, trimmed, 60 chars), `_2`… on a clash:
+`skipped`: no start mark of the session has `interactive` true. `gone`: no file at the end line's `archived`. Else the digest: `# episode` (`date:` the end's `at`, `cwd:` as the pointer's, else `unknown`), `# highlights` (`- <body>` per take highlight, absent without), `# transcript` (per user or assistant message part: `user: <text>`, `assistant: <text>`, `tool: <name> <command|file_path>` one-lined to 200; tool results and other lines dropped); over `$SANDMAN_DIGEST_BYTES` (300 000) the head and tail halves, cut back to whole lines, around `… <n> bytes omitted …`.
+
+The model run, shared with consolidate: `$SANDMAN_ENCODER` else `claude -p --model opus --output-format text --safe-mode --tools "" --no-session-persistence`, as `sh -c`, own process group, env `CLAUDE_MEMORY_PIPELINE=1` `SANDMAN_NO_TAKE=1`, stdin `run/<job>.in` = `<guidance>\n<contract>\n<data>`, stdout and stderr to `run/<job>.out`, `.err`. The guidance is `<root>/prompts/<job>.md` when it holds any non-blank text, else the embedded `src/prompts/<job>.md`; the contract, `src/prompts/<job>.contract.md`, is embedded and always sent; the daemon never writes `prompts/`. A replacement keeps: exit 0 and stdout holding one object, read from its first `{` to its last `}`; encode's is `{"traces":[{"type":"user"|"feedback"|"project"|"reference","name":str,"description":str,"body":str,"about":str|null?}]}`. `failed` (`error` one line, 400 chars, no file written): `exit status: <n>: <stderr>`, `timed out after <ms> ms` (`$SANDMAN_ENCODE_MS`, 300 000; the group killed), `output: <parse error>`, `output: not a trace: <it>`. Else `encoded`, one file per trace: `<root>/traces/<bank>/<type>_<slug>.md` by temp + rename, `<bank>` the earlier sandman's `Bank::key_for(project::root(dir))` (`project`, `common`), `dir` the trace's `about` when it is an absolute path to an existing directory, else the episode's cwd, else `$HOME`; `<slug>` its `slug::slug` (lowercase, non-alphanumeric runs `_`, trimmed, 60 chars), `_2`… on a clash. `about:` is written when given:
 
 ```
 ---
@@ -111,15 +113,44 @@ name: <one-lined, 200>
 description: <one-lined, 400>
 type: <type>
 created: <now>
+about: <one-lined, 400>?
 session: <uuid>
 archived: <path>
-source: encode <now> · <uuid> · model=<the word after --model in the encoder, else its first word>
+source: encode <now> · <uuid> · model=<the word after --model in the command, else its first word>
 ---
 
 <body, trimmed>
 ```
 
 A stop signal or shutdown mid-run kills the group and writes no line: the episode runs again after the next start. `failed` is final for the tick; removing its line retries it.
+
+### consolidate
+
+A job of `serve`'s tick, run only when no episode waits (never in the tick of an encode), at most one bank a tick, everything derived from disk. Candidates: each `<root>/traces/<bank>/` holding a trace file (the `notes` reader) whose newest `created` is at or before now − `$SANDMAN_CONSOLIDATE_QUIET_MS` (600 000), and, when the bank's latest `failed` consolidate line has `at` F, whose newest `created` is after F. Of those, the bank with the earliest `created`. Data (after the guidance and the contract, as above, job `consolidate`, `$SANDMAN_CONSOLIDATOR`, `$SANDMAN_CONSOLIDATE_MS` 600 000):
+
+```
+# bank
+<bank>
+
+# traces
+<trace file="<file>">
+<the whole file, trailing whitespace trimmed>
+</trace>
+…
+# memories                                   (absent without any)
+<memory file="<file>">…</memory>             (memories/<bank>/ by file, while their bytes fit $SANDMAN_CONSOLIDATE_BYTES, 300 000)
+
+# listed                                     (absent when all fit)
+- <file> · <name> · <description>            (the rest)
+```
+
+Reply `{"ops":[…]}`, each op `{"op":"keep","trace","type","name","description","body"}`, `{"op":"merge","trace","memory","description","body"}`, `{"op":"prune","trace","reason"}` or `{"op":"prune","memory","reason"}` (string values). Rejected whole, `failed`, nothing written: `output: not an op: <it>` when `ops` is not an array, an op is none of these (a keep naming a `memory`, a prune naming both or neither), a file is not in the input, a listed memory is named, or a trace or memory is named twice; `output: trace not named: <file>`; and the model run's errors. Applied, in this order: every write staged as `.<file>.<pid>` beside its target (a failure removes them all and fails); then each named trace and each merged or pruned memory renamed to `<root>/.pruned/<yyyy>/<mm>/<dd>/<HHMMSS>-<bank>-<file>` (UTC; `<HHMMSS>-<n>-…` on a clash); then the staged writes renamed in. The writes: `.pruned/…/<HHMMSS>-<bank>-ops.json`, the reply, compact; per keep `memories/<bank>/<type>_<slug>.md` (encode's slug and clash) with `name`, `description`, `type` from the op and `created`, `about`, `session`, `archived` from the trace, in encode's order, `source: consolidate <now> · <the trace's session> · model=<model>`; per merge the memory rewritten: its frontmatter kept in order with `description` and `source` (that stamp) replaced and `updated: <now>` set (appended when absent), the op's body. One line through `mark`'s writer, logged as `event` `consolidate`:
+
+```
+{"at","bank","error"?,"kind":"consolidate","kept":n,"machine","merged":n,"outcome":"consolidated"|"failed","pruned":n}
+```
+
+A stop mid-run kills the group and writes no line. `MEMORY.md` is left alone: the earlier sandman's recall reads memory files, never the index, and its commit path regenerates the index whole.
 
 ### `sandman setup`
 

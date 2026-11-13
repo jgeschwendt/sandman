@@ -118,13 +118,16 @@ mod tests {
         ))
     }
 
-    /// `sandman serve` over `root` with `envs` beside it, and the health line it prints once ready.
+    /// `sandman serve` over `root` with `envs` beside it (a model command never a real one), and
+    /// the health line it prints once ready.
     fn serve(root: &str, envs: &[(&str, &str)]) -> Result<(Daemon, String), Box<dyn Error>> {
         let claude = format!("{root}/claude");
         let mut daemon = Daemon(
             command(
                 &[
                     ("CLAUDE_CONFIG_DIR", claude.as_str()),
+                    ("SANDMAN_CONSOLIDATOR", "exit 9"),
+                    ("SANDMAN_ENCODER", "exit 9"),
                     ("SANDMAN_MACHINE", "studio"),
                     ("SANDMAN_ROOT", root),
                 ],
@@ -368,15 +371,18 @@ mod tests {
     }
 
     /// The tick encodes this machine's taken episodes one a tick, oldest first, through the stub
-    /// encoder: prompt and digest on its stdin (highlights first, results dropped, the middle cut)
-    /// and both guard variables in its env; traces into the cwd's bank, a clash `_2`; zero traces;
-    /// skipped without a run, gone, and failed four ways with no files. A stop mid-run kills the
+    /// encoder: the guidance override, the contract and the digest on its stdin (highlights first,
+    /// results dropped, the middle cut) and both guard variables in its env; traces into the bank
+    /// of the directory they are about, else the cwd's, a clash `_2`; zero traces; skipped without
+    /// a run, gone, and failed four ways with no files. A stop mid-run kills the
     /// encoder's group and writes no line, so the next daemon runs it again, into its timeout.
     #[test]
     fn encode() -> Outcome {
         let root = temp("encode")?;
         let (stub, work) = (format!("{root}/stub.sh"), format!("{root}/work"));
         let trace = r#"{"type":"feedback","name":"Sample: pass the clock in!","description":"sample: one line","body":"sample: the body\n\nWhy: sample."}"#;
+        let about = |dir: &str| trace.replacen('{', &format!(r#"{{"about":"{work}/{dir}","#), 1);
+        let (elsewhere, missing) = (about("elsewhere"), about("missing"));
         let filler = "x".repeat(3000);
         let ran = |name: &str, input: &str| json!({"type": "tool_use", "name": name, "input": {"command": input, "file_path": input}});
         let user = |cwd: &str, text: &str| json!({"type": "user", "cwd": cwd, "message": {"content": text}});
@@ -403,6 +409,8 @@ case $(tee -a "$0.log" | sed -n 's/^user: case //p') in
   exit) printf 'sample: broke\n' >&2; exit 3;;
   junk) printf 'not json\n';;
   type) printf '{{"traces":[{{"type":"opinion","name":"x","description":"x","body":"x"}}]}}\n';;
+  about) printf '{{"traces":[%s]}}\n' '{elsewhere}';;
+  nodir) printf '{{"traces":[%s]}}\n' '{missing}';;
   slow) echo $$ >> "$0.pid"; exec sleep 30;;
 esac
 "#
@@ -422,6 +430,11 @@ esac
                 format!("gitdir: {work}/repo/.git/worktrees/x\n"),
             ),
             ("work/repo/src/lib.rs".to_owned(), String::new()),
+            ("work/elsewhere/README".to_owned(), String::new()),
+            (
+                "prompts/encode.md".to_owned(),
+                "sample: guidance\n".to_owned(),
+            ),
         ];
         let mut ledger = Vec::new();
         // the episodes, oldest first: (letter, its case, its cwd, its start's interactive, its machine)
@@ -437,6 +450,8 @@ esac
             ("i", "junk", "/repo", true, "studio"),
             ("j", "type", "/repo", true, "studio"),
             ("k", "one", "/repo", true, "laptop"),
+            ("m", "about", "/repo", true, "studio"),
+            ("n", "nodir", "/repo", true, "studio"),
             ("l", "slow", "/repo", true, "studio"),
         ]
         .into_iter()
@@ -549,6 +564,8 @@ esac
                     0,
                     r#""error":"output: not a trace: {\"body\":\"x\",\"description\":\"x\",\"name\":\"x\",\"type\":\"opinion\"}","#,
                 ),
+                line("m", "encoded", 1, ""),
+                line("n", "encoded", 1, ""),
                 line("l", "failed", 0, r#""error":"timed out after 300 ms","#),
             ]
             .join("\n"),
@@ -567,10 +584,11 @@ esac
         same(
             &format!("{}\n{cases:?}", runs.first().unwrap_or(&"")),
             &format!(
-                "{}\n# episode\ndate: 2026-11-09T08:00:30Z\ncwd: {work}/r/gone\n\n# highlights\n- sample: keep the clock\n\n# transcript\nuser: case two\nassistant: sample: on it\ntool: Bash sandman remember \"sample: keep the clock\"\n\u{2026} 3007 bytes omitted \u{2026}\ntool: Read /work/sample.rs\nassistant: sample: done\n\n{:?}",
-                include_str!("../src/encode.prompt.md"),
+                "sample: guidance\n\n{}\n# episode\ndate: 2026-11-09T08:00:30Z\ncwd: {work}/r/gone\n\n# highlights\n- sample: keep the clock\n\n# transcript\nuser: case two\nassistant: sample: on it\ntool: Bash sandman remember \"sample: keep the clock\"\n\u{2026} 3007 bytes omitted \u{2026}\ntool: Read /work/sample.rs\nassistant: sample: done\n\n{:?}",
+                include_str!("../src/prompts/encode.contract.md"),
                 [
-                    "two", "one", "one", "one", "none", "exit", "junk", "type", "slow", "slow"
+                    "two", "one", "one", "one", "none", "exit", "junk", "type", "about", "nodir",
+                    "slow", "slow"
                 ]
             ),
         )?;
@@ -618,12 +636,445 @@ esac
                 key(&format!("{work}/repo/src"))
             ),
             format!("{}/feedback_sample_pass_the_clock_in.md", key(&home)),
+            format!(
+                "{}/feedback_sample_pass_the_clock_in.md",
+                key(&format!("{work}/elsewhere"))
+            ),
+            format!(
+                "{}/feedback_sample_pass_the_clock_in_2.md",
+                key(&format!("{work}/repo"))
+            ),
         ];
         want.sort();
+        let abouts = [("elsewhere", ""), ("repo", "_2")].map(|(dir, clash)| {
+            read(&format!(
+                "{root}/traces/{}/feedback_sample_pass_the_clock_in{clash}.md",
+                key(&format!("{work}/{dir}"))
+            ))
+            .lines()
+            .nth(5)
+            .unwrap_or_default()
+            .to_owned()
+        });
         same(
-            &format!("{}{written:?}", first.replace(now, "<now>")),
+            &format!("{}{written:?}\n{abouts:?}", first.replace(now, "<now>")),
             &format!(
-                "---\nname: Sample: pass the clock in!\ndescription: sample: one line\ntype: feedback\ncreated: <now>\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsource: encode <now> \u{b7} {ID}a \u{b7} model=sample-model\n---\n\nsample: the body\n\nWhy: sample.\n{want:?}"
+                "---\nname: Sample: pass the clock in!\ndescription: sample: one line\ntype: feedback\ncreated: <now>\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsource: encode <now> \u{b7} {ID}a \u{b7} model=sample-model\n---\n\nsample: the body\n\nWhy: sample.\n{want:?}\n{:?}",
+                [
+                    format!("about: {work}/elsewhere"),
+                    format!("about: {work}/missing")
+                ]
+            ),
+        )
+    }
+
+    /// The tick consolidates one quiet bank a tick, the one whose oldest trace is oldest, never
+    /// while an episode waits: the stub consolidator reads the default guidance, the contract and
+    /// the bank (whole memories within the budget, the rest listed) with both guard variables set;
+    /// keep, merge and both prunes land, every consumed or pruned file and the reply moved under
+    /// `.pruned/`; each malformed reply, and a write that fails, leaves the tree as it was and
+    /// writes `failed`, which only a newer trace re-arms; a stop mid-run kills the consolidator and
+    /// writes no line, so the next daemon runs it again, into its timeout; `chart` reads the stamp.
+    #[test]
+    fn consolidate() -> Outcome {
+        let root = temp("consolidate")?;
+        let stub = format!("{root}/stub.sh");
+        let note = |name: &str, kind: &str, created: &str, rest: &str, body: &str| {
+            format!(
+                "---\nname: {name}\ndescription: sample: {name}\ntype: {kind}\ncreated: {created}\n{rest}---\n\n{body}\n"
+            )
+        };
+        let trace = |name: &str, created: &str, letter: &str, about: &str| {
+            note(
+                name,
+                "feedback",
+                created,
+                &format!(
+                    "{about}session: @{letter}\narchived: /sample/{letter}.jsonl\nsource: encode {created} \u{b7} @{letter} \u{b7} model=opus\n"
+                ),
+                "sample: trace body",
+            )
+        };
+        let (big, small) = ("x".repeat(700), "sample: memory body");
+        let alpha = [
+            (
+                "traces/alpha/feedback_t_keep.md",
+                trace(
+                    "T keep",
+                    "2026-11-01T01:00:00Z",
+                    "a",
+                    "about: /work/alpha\n",
+                ),
+            ),
+            (
+                "traces/alpha/feedback_t_merge.md",
+                trace("T merge", "2026-11-01T01:01:00Z", "b", ""),
+            ),
+            (
+                "traces/alpha/feedback_t_prune.md",
+                trace("T prune", "2026-11-01T01:02:00Z", "c", ""),
+            ),
+            (
+                "memories/alpha/project_m_merge.md",
+                note(
+                    "M merge",
+                    "project",
+                    "2026-10-01T00:00:00Z",
+                    "recall: pin\nsource: remember 2026-10-01T00:00:00Z\n",
+                    "sample: before",
+                ),
+            ),
+            (
+                "memories/alpha/reference_m_prune.md",
+                note("M prune", "reference", "2026-10-02T00:00:00Z", "", small),
+            ),
+            (
+                "memories/alpha/user_m_listed.md",
+                note("M listed", "user", "2026-10-03T00:00:00Z", "", &big),
+            ),
+        ];
+        let mut files: Vec<(String, String)> = alpha
+            .iter()
+            .map(|file| (file.0.to_owned(), file.1.clone()))
+            .collect();
+        // the failing banks, oldest trace first; each stub case is its bank's name
+        let failing = [
+            "exit", "junk", "shape", "verb", "field", "ghost", "twice", "listed", "again",
+            "unnamed", "locked", "rearm", "slow",
+        ];
+        for (minute, bank) in failing.iter().enumerate() {
+            files.push((
+                format!("traces/{bank}/feedback_t.md"),
+                trace("T", &format!("2026-11-01T02:{minute:02}:00Z"), "d", ""),
+            ));
+        }
+        for (path, body) in [
+            ("again/project_m.md", small),
+            ("listed/project_m.md", &big),
+            ("locked/project_m.md", small),
+        ] {
+            files.push((
+                format!("memories/{path}"),
+                note("M", "project", "2026-10-04T00:00:00Z", "", body),
+            ));
+        }
+        // the oldest trace of all, but its bank is not quiet: its newest is still to come
+        for (file, created) in [
+            ("old", "2026-11-01T00:00:00Z"),
+            ("new", "2999-01-01T00:00:00Z"),
+        ] {
+            files.push((
+                format!("traces/quiet/feedback_{file}.md"),
+                trace("T", created, "e", ""),
+            ));
+        }
+        let keep = r#"{"op":"keep","trace":"feedback_t_keep.md","type":"project","name":"Sample: kept","description":"sample: kept","body":"sample: kept body"}"#;
+        let merge = r#"{"op":"merge","trace":"feedback_t_merge.md","memory":"project_m_merge.md","description":"sample: merged","body":"sample: merged body"}"#;
+        let prunes = r#"{"op":"prune","trace":"feedback_t_prune.md","reason":"sample: says what project_m_merge.md says"},{"op":"prune","memory":"reference_m_prune.md","reason":"sample: superseded"}"#;
+        files.push((
+            "stub.sh".to_owned(),
+            format!(
+                r#"echo "env $CLAUDE_MEMORY_PIPELINE $SANDMAN_NO_TAKE" >> "$0.log"
+case $(tee -a "$0.log" | sed -n '/^# bank$/{{n;p;}}' | tail -n 1) in
+  alpha) printf '%s' '{{"ops":[{keep},{merge},{prunes}]}}';;
+  exit) printf 'sample: broke\n' >&2; exit 3;;
+  junk) printf 'not json\n';;
+  shape) printf '{{"ops":{{}}}}';;
+  verb) printf '{{"ops":[{{"op":"forget","trace":"feedback_t.md"}}]}}';;
+  field) printf '{{"ops":[{{"op":"keep","trace":"feedback_t.md","type":"opinion","name":"x","description":"x","body":"x"}}]}}';;
+  ghost) printf '{{"ops":[{{"op":"prune","trace":"feedback_nope.md","reason":"x"}}]}}';;
+  twice) printf '{{"ops":[{{"op":"prune","trace":"feedback_t.md","reason":"x"}},{{"op":"prune","trace":"feedback_t.md","reason":"x"}}]}}';;
+  listed) printf '{{"ops":[{{"op":"merge","trace":"feedback_t.md","memory":"project_m.md","description":"x","body":"x"}}]}}';;
+  again) printf '{{"ops":[{{"op":"merge","trace":"feedback_t.md","memory":"project_m.md","description":"x","body":"x"}},{{"op":"prune","memory":"project_m.md","reason":"x"}}]}}';;
+  unnamed) printf '{{"ops":[]}}';;
+  locked) printf '{{"ops":[{{"op":"keep","trace":"feedback_t.md","type":"user","name":"x","description":"x","body":"x"}}]}}';;
+  rearm) grep -q feedback_t2 "$0.log" || {{ printf 'sample: broke\n' >&2; exit 3; }}
+    printf '{{"ops":[{{"op":"prune","trace":"feedback_t.md","reason":"x"}},{{"op":"prune","trace":"feedback_t2.md","reason":"x"}}]}}';;
+  slow) echo $$ >> "$0.pid"; exec sleep 30;;
+esac
+"#
+            ),
+        ));
+        // two headless episodes still to encode: no bank is consolidated before both are
+        let episodes = ["a", "b"].map(|letter| {
+            format!(
+                r#"{{"at":"2026-11-09T08:00:00Z","interactive":false,"kind":"start","machine":"studio","session":"@{letter}"}}
+{{"archived":"/sample","at":"2026-11-09T08:00:30Z","kind":"end","machine":"studio","outcome":"taken","session":"@{letter}"}}"#
+            )
+        });
+        files.push(("ledger/2026/11/09.jsonl".to_owned(), episodes.join("\n")));
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|file| (file.0.as_str(), file.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let locked = format!("{root}/memories/locked");
+        fs::set_permissions(&locked, Permissions::from_mode(0o555))?;
+        let consolidator = format!("sh {stub} --model sample-model");
+        let envs = [
+            ("SANDMAN_CONSOLIDATE_BYTES", "600"),
+            ("SANDMAN_CONSOLIDATE_QUIET_MS", "0"),
+            ("SANDMAN_CONSOLIDATOR", consolidator.as_str()),
+            ("SANDMAN_TICK_MS", "10"),
+        ];
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        let (log, today) = (
+            format!("{root}/run/serve.log"),
+            format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?),
+        );
+        let stop = |mut daemon: Daemon| -> Outcome {
+            same(
+                &format!(
+                    "{} {:?} {}",
+                    kill("-TERM", &daemon.0.id().to_string())?,
+                    daemon.0.wait()?.code(),
+                    read(&log)
+                        .lines()
+                        .last()
+                        .and_then(|line| line.get(28..))
+                        .unwrap_or_default()
+                ),
+                r#"true Some(0) ,"event":"exit","reason":"signal TERM"}"#,
+            )
+        };
+        let (daemon, _) = serve(
+            &root,
+            &[&envs[..], &[("SANDMAN_CONSOLIDATE_MS", "60000")]].concat(),
+        )?;
+        until(|| !read(&format!("{stub}.pid")).is_empty())?;
+        stop(daemon)?;
+        let rearm: Value = serde_json::from_str(
+            read(&today)
+                .lines()
+                .find(|line| line.contains(r#""bank":"rearm""#))
+                .ok_or("rearm")?,
+        )?;
+        let failed = rearm["at"].as_str().unwrap_or_default();
+        until(|| date(&["+%Y-%m-%dT%H:%M:%SZ"]).is_ok_and(|now| now.as_str() > failed))?;
+        plant(
+            &root,
+            &[(
+                "traces/rearm/feedback_t2.md",
+                &trace("T2", &date(&["+%Y-%m-%dT%H:%M:%SZ"])?, "f", ""),
+            )],
+        )?;
+        let (again, _) = serve(
+            &root,
+            &[&envs[..], &[("SANDMAN_CONSOLIDATE_MS", "300")]].concat(),
+        )?;
+        until(|| read(&today).contains(r#""bank":"slow""#))?;
+        stop(again)?;
+        fs::set_permissions(&locked, Permissions::from_mode(0o755))?;
+        let lines = read(&today)
+            .lines()
+            .map(|line| {
+                let mut entry: Value = serde_json::from_str(line)?;
+                entry["at"] = json!(entry["at"].as_str().map(str::len));
+                Ok(entry.to_string())
+            })
+            .collect::<Result<Vec<_>, serde_json::Error>>()?;
+        let line = |bank: &str, counts: [u8; 3], error: &str| {
+            let mut entry = json!({
+                "at": 20u8, "bank": bank, "kept": counts[0], "kind": "consolidate", "machine": "studio",
+                "merged": counts[1], "outcome": "consolidated", "pruned": counts[2],
+            });
+            if !error.is_empty() {
+                (entry["error"], entry["outcome"]) = (error.into(), "failed".into());
+            }
+            entry.to_string()
+        };
+        let op = |text: &str| format!("output: not an op: {text}");
+        let mut want: Vec<String> = ["a", "b"]
+            .map(|letter| {
+                format!(
+                    r#"{{"at":20,"kind":"encode","machine":"studio","outcome":"skipped","session":"{ID}{letter}","traces":0}}"#
+                )
+            })
+            .into();
+        want.extend([
+            line("alpha", [1, 1, 2], ""),
+            line("exit", [0; 3], "exit status: 3: sample: broke"),
+            line("junk", [0; 3], "output: EOF while parsing a value at line 1 column 1"),
+            line("shape", [0; 3], &op(r#"{"ops":{}}"#)),
+            line("verb", [0; 3], &op(r#"{"op":"forget","trace":"feedback_t.md"}"#)),
+            line(
+                "field",
+                [0; 3],
+                &op(
+                    r#"{"body":"x","description":"x","name":"x","op":"keep","trace":"feedback_t.md","type":"opinion"}"#,
+                ),
+            ),
+            line("ghost", [0; 3], &op(r#"{"op":"prune","reason":"x","trace":"feedback_nope.md"}"#)),
+            line("twice", [0; 3], &op(r#"{"op":"prune","reason":"x","trace":"feedback_t.md"}"#)),
+            line(
+                "listed",
+                [0; 3],
+                &op(
+                    r#"{"body":"x","description":"x","memory":"project_m.md","op":"merge","trace":"feedback_t.md"}"#,
+                ),
+            ),
+            line("again", [0; 3], &op(r#"{"memory":"project_m.md","op":"prune","reason":"x"}"#)),
+            line("unnamed", [0; 3], "output: trace not named: feedback_t.md"),
+            line("locked", [0; 3], "Permission denied (os error 13)"),
+            line("rearm", [0; 3], "exit status: 3: sample: broke"),
+            line("rearm", [0, 0, 2], ""),
+            line("slow", [0; 3], "timed out after 300 ms"),
+        ]);
+        same(&lines.join("\n"), &want.join("\n"))?;
+        // what the stub read, run by run: the first whole, the rest by their bank
+        let seen = read(&format!("{stub}.log"));
+        let runs: Vec<&str> = seen.split("env 1 1\n").skip(1).collect();
+        let banks: Vec<&str> = runs
+            .iter()
+            .map(|run| {
+                run.rsplit_once("\n# bank\n")
+                    .and_then(|(_, rest)| rest.lines().next())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let block = |tag: &str, path: &str| {
+            let file = alpha
+                .iter()
+                .find(|held| held.0 == path)
+                .map_or("", |held| held.1.as_str());
+            format!(
+                "<{tag} file=\"{}\">\n{}\n</{tag}>\n",
+                path.rsplit('/').next().unwrap_or_default(),
+                file.trim_end().replace('@', ID)
+            )
+        };
+        let mut order = vec!["alpha"];
+        order.extend(failing);
+        order.extend(["rearm", "slow"]);
+        same(
+            &format!("{}\n{banks:?}", runs.first().unwrap_or(&"")),
+            &format!(
+                "{}\n{}\n# bank\nalpha\n\n# traces\n{}{}{}\n# memories\n{}{}\n# listed\n- user_m_listed.md \u{b7} M listed \u{b7} sample: M listed\n\n{order:?}",
+                include_str!("../src/prompts/consolidate.md"),
+                include_str!("../src/prompts/consolidate.contract.md"),
+                block("trace", "traces/alpha/feedback_t_keep.md"),
+                block("trace", "traces/alpha/feedback_t_merge.md"),
+                block("trace", "traces/alpha/feedback_t_prune.md"),
+                block("memory", "memories/alpha/project_m_merge.md"),
+                block("memory", "memories/alpha/reference_m_prune.md"),
+            ),
+        )?;
+        for pid in read(&format!("{stub}.pid")).lines() {
+            same(&kill("-0", pid)?.to_string(), "false")?;
+        }
+        // every file left, `.pruned/<day>/<HHMMSS>-` cut to `.pruned/`
+        let aside_dir = format!(".pruned/{}/", date(&["+%Y/%m/%d"])?);
+        let found = Command::new("find")
+            .args(["memories", "traces", ".pruned", "-type", "f"])
+            .current_dir(&root)
+            .output()?;
+        let mut left: Vec<String> = String::from_utf8(found.stdout)?
+            .lines()
+            .map(|path| {
+                path.strip_prefix(&aside_dir)
+                    .and_then(|rest| rest.get(7..))
+                    .map_or_else(|| path.to_owned(), |rest| format!(".pruned/{rest}"))
+            })
+            .collect();
+        left.sort();
+        let mut kept: Vec<String> = [
+            ".pruned/alpha-feedback_t_keep.md",
+            ".pruned/alpha-feedback_t_merge.md",
+            ".pruned/alpha-feedback_t_prune.md",
+            ".pruned/alpha-ops.json",
+            ".pruned/alpha-project_m_merge.md",
+            ".pruned/alpha-reference_m_prune.md",
+            ".pruned/rearm-feedback_t.md",
+            ".pruned/rearm-feedback_t2.md",
+            ".pruned/rearm-ops.json",
+            "memories/again/project_m.md",
+            "memories/alpha/project_m_merge.md",
+            "memories/alpha/project_sample_kept.md",
+            "memories/alpha/user_m_listed.md",
+            "memories/listed/project_m.md",
+            "memories/locked/project_m.md",
+            "traces/quiet/feedback_new.md",
+            "traces/quiet/feedback_old.md",
+        ]
+        .map(str::to_owned)
+        .into();
+        kept.extend(
+            failing
+                .iter()
+                .filter(|bank| !["rearm"].contains(bank))
+                .map(|bank| format!("traces/{bank}/feedback_t.md")),
+        );
+        kept.sort();
+        same(&format!("{left:?}"), &format!("{kept:?}"))?;
+        let bank = |file: &str| read(&format!("{root}/memories/alpha/{file}"));
+        let made = bank("project_sample_kept.md");
+        let now = made
+            .lines()
+            .find_map(|said| said.strip_prefix("source: consolidate "))
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap_or_default();
+        let aside = |file: &str| -> io::Result<String> {
+            let dir = format!("{root}/{aside_dir}");
+            let path = fs::read_dir(&dir)?
+                .flatten()
+                .map(|entry| entry.path())
+                .find(|path| path.to_string_lossy().ends_with(file))
+                .unwrap_or_default();
+            fs::read_to_string(path)
+        };
+        let source = |letter: &str| {
+            format!("source: consolidate <now> \u{b7} {ID}{letter} \u{b7} model=sample-model")
+        };
+        same(
+            &format!(
+                "{}{}{}{}{}",
+                made.replace(now, "<now>"),
+                bank("project_m_merge.md").replace(now, "<now>"),
+                aside("alpha-project_m_merge.md")?,
+                aside("alpha-feedback_t_keep.md")?,
+                aside("alpha-ops.json")?
+            ),
+            &format!(
+                "---\nname: Sample: kept\ndescription: sample: kept\ntype: project\ncreated: 2026-11-01T01:00:00Z\nabout: /work/alpha\nsession: {ID}a\narchived: /sample/a.jsonl\n{}\n---\n\nsample: kept body\n---\nname: M merge\ndescription: sample: merged\ntype: project\ncreated: 2026-10-01T00:00:00Z\nrecall: pin\n{}\nupdated: <now>\n---\n\nsample: merged body\n{}{}{}\n",
+                source("a"),
+                source("b"),
+                alpha[3].1,
+                alpha[0].1.replace('@', ID),
+                serde_json::from_str::<Value>(&format!("{{\"ops\":[{keep},{merge},{prunes}]}}"))?
+            ),
+        )?;
+        let chart: Value = serde_json::from_str(
+            sandman(
+                &[("SANDMAN_MACHINE", "studio"), ("SANDMAN_ROOT", &root)],
+                &["chart"],
+                "",
+            )?
+            .get(2..)
+            .unwrap_or_default(),
+        )?;
+        let sources: Vec<String> = chart["memories"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|memory| memory["bank"] == "alpha")
+            .map(|memory| {
+                format!(
+                    "{} {} {}",
+                    memory["file"], memory["source"], memory["session"]
+                )
+            })
+            .collect();
+        same(
+            &format!("{sources:?}"),
+            &format!(
+                "{:?}",
+                [
+                    format!(r#""project_m_merge.md" "consolidate" "{ID}b""#),
+                    format!(r#""project_sample_kept.md" "consolidate" "{ID}a""#),
+                    r#""user_m_listed.md" "other" null"#.to_owned(),
+                ]
             ),
         )
     }
