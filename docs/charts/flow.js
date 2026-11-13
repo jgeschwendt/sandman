@@ -1,14 +1,18 @@
-// The data flow, ①–③ marking the order a session passes it: a session timeline down the left edge, broken before the
-// later dream pass; its moments → recall at ① and take at ② → the ledger, the machine id, the archive and the pointers,
-// later → dream (③) → the pointers and the bank files; all of them → chart → its consumer. recall, take and dream are
-// not built yet in this rewrite: dashed. Nodes and edges from docs/data/flow.json, each node at its column and row; a
-// moment is a dot on the timeline, every other node a box.
+// The data flow, ①–④ marking the order a session passes it: a session timeline down the left edge, broken before the
+// later review; its moments → recall at ①, mark during, take at ②, serve's first memory at ③ and review at ④ → the files
+// under the root, directories first; all of them → chart → its consumer. The verbs are not built yet in this rewrite (mark
+// only for start and end): dashed.
+// Nodes and edges from docs/data/flow.json, each node at its column and row; a moment is a dot on the timeline, every
+// other node a box. An edge running back a column (a verb reading a file) is drawn on the forward curve 8px lower, its
+// head at the verb.
 import { d3, hover, load, mount, redraw } from "./lib.js";
 
 const root = document.getElementById("flow");
 const data = await load("flow.json");
 
-const COLS = [180, 170, 290, 120, 150];
+const COLS = [210, 190, 290, 120, 150];
+// the gaps' shares of the spare width: the verbs-to-files gap carries most of the edges
+const GAPS = [1, 3, 1, 1];
 const H = 32;
 const STEP = 48;
 const KIND = { file: "var(--kind-7)", moment: "var(--kind-1)", next: "var(--kind-3)", sink: "var(--kind-4)", verb: "var(--kind-3)" };
@@ -22,18 +26,24 @@ const { frame, hide, show } = mount(root, {
   rows: data.edges.map((e) => [byId.get(e.from).label, byId.get(e.to).label, e.label]),
 });
 
-redraw(root, frame, d3.sum(COLS) + 4 * 40, (width) => {
-  const gap = (width - d3.sum(COLS)) / (COLS.length - 1);
-  const left = COLS.map((_, i) => d3.sum(COLS.slice(0, i)) + i * gap);
+redraw(root, frame, d3.sum(COLS) + d3.sum(GAPS) * 40, (width) => {
+  const gap = (width - d3.sum(COLS)) / d3.sum(GAPS);
+  const left = COLS.map((_, i) => d3.sum(COLS.slice(0, i)) + d3.sum(GAPS.slice(0, i)) * gap);
   const height = (d3.max(data.nodes, (n) => n.row) + 1) * STEP;
   const at = new Map(data.nodes.map((n) => [n.id, { x: left[n.col], y: n.row * STEP + (STEP - H) / 2 }]));
   const svg = frame.append("svg").attr("width", width).attr("height", height).attr("role", "img").attr("aria-label", "sandman data flow");
 
   svg.append("defs").append("marker").attr("id", "flow-head").attr("viewBox", "0 0 8 8").attr("refX", 8).attr("refY", 4)
-    .attr("markerUnits", "userSpaceOnUse").attr("markerWidth", 8).attr("markerHeight", 8).attr("orient", "auto").append("path").attr("d", "M0,0L8,4L0,8Z");
+    .attr("markerUnits", "userSpaceOnUse").attr("markerWidth", 8).attr("markerHeight", 8).attr("orient", "auto-start-reverse").append("path").attr("d", "M0,0L8,4L0,8Z");
   const link = d3.linkHorizontal().x((p) => p[0]).y((p) => p[1]);
-  const edges = svg.append("g").attr("class", "chart-links").selectAll("path").data(data.edges).join("path").attr("marker-end", "url(#flow-head)")
-    .attr("d", (e) => link({ source: [at.get(e.from).x + COLS[byId.get(e.from).col], at.get(e.from).y + H / 2], target: [at.get(e.to).x, at.get(e.to).y + H / 2] }));
+  const back = (e) => byId.get(e.to).col < byId.get(e.from).col;
+  const edges = svg.append("g").attr("class", "chart-links").selectAll("path").data(data.edges).join("path")
+    .attr("marker-start", (e) => (back(e) ? "url(#flow-head)" : null)).attr("marker-end", (e) => (back(e) ? null : "url(#flow-head)"))
+    .attr("d", (e) => {
+      const [s, t] = back(e) ? [e.to, e.from] : [e.from, e.to];
+      const dy = H / 2 + (back(e) ? 8 : 0);
+      return link({ source: [at.get(s).x + COLS[byId.get(s).col], at.get(s).y + dy], target: [at.get(t).x, at.get(t).y + dy] });
+    });
 
   const time = svg.append("g").attr("class", "chart-time").attr("aria-hidden", "true");
   time.append("path").attr("marker-end", "url(#flow-head)").attr("d", `M6,0V${at.get("later").y - 16}M6,${at.get("later").y - 4}V${height}`);

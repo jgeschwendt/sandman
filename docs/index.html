@@ -128,7 +128,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   </header>
   <figure class="figure">
     <div class="chart" id="flow"><noscript><p class="docs-note">The data flow needs JavaScript; its data is <a class="link" href="data/flow.json">docs/data/flow.json</a>.</p></noscript></div>
-    <figcaption>The data flow, ①–③, from a session's timeline down the left edge: the verb each moment runs, the files it writes under the root, and what <code class="code">chart</code> reads back. Dashed verbs are not built yet: today the subether mod runs <a class="link" href="#mark"><code class="code">sandman mark</code></a> at both moments and the earlier sandman's recall and take. Data: <a href="data/flow.json">docs/data/flow.json</a>.</figcaption>
+    <figcaption>The data flow, ①–④, from a session's timeline down the left edge: the verb each moment runs, what it writes under the root (<a href="data/flow.json">docs/data/flow.json</a>), and what <code class="code">chart</code> reads back. Dashed verbs are not built yet: today the subether mod runs <a class="link" href="#mark"><code class="code">sandman mark</code></a> at start and end, keeps its tool calls and prompts in its own daily tool log, and runs the earlier sandman's recall and take, whose take writes a short-term pointer <code class="code">memories/.recent/&lt;session&gt;.json</code> for the earlier recall and dream to read, until the first memory lands.</figcaption>
   </figure>
   <div class="table-wrap">
   <table data-table>
@@ -136,12 +136,12 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
       <tr><th>path</th><th>holds</th></tr>
     </thead>
     <tbody>
-      <tr><td><code class="code">machine</code></td><td>this machine's id: one line, 32 lowercase hex from <code class="code">/dev/urandom</code>, minted on first use; <code class="code">$SANDMAN_MACHINE</code> overrides it</td></tr>
-      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>session marks, one per line, by UTC day</td></tr>
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
+      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>; <code class="code">call</code> and <code class="code">prompt</code> not built yet</td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
-      <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>; see <a class="link" href="#serve">serve</a></td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
+      <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>; see <a class="link" href="#serve">serve</a></td></tr>
+      <tr><td><code class="code">machine</code></td><td>this machine's id: one line, 32 lowercase hex from <code class="code">/dev/urandom</code>, minted on first use; <code class="code">$SANDMAN_MACHINE</code> overrides it</td></tr>
     </tbody>
   </table>
   </div>
@@ -150,7 +150,7 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
 <section class="docs-section" id="mark" data-component="mark">
   <header>
     <h2 class="h2">mark</h2>
-    <p class="docs-note">Today's start and end marks, run by the subether mod inside its 1.5 s budget, so it does nothing slow; <code class="code">recall</code> and <code class="code">take</code> take these over, see <a class="link" href="#next">Next</a>.</p>
+    <p class="docs-note">Run by the subether mod inside its 1.5 s budget, so it does nothing slow. Today it writes the start and end marks; next it carries <code class="code">call</code> and <code class="code">prompt</code> while <code class="code">recall</code> and <code class="code">take</code> take over start and end, see <a class="link" href="#next">Next</a>.</p>
   </header>
   <p>One JSON object on stdin; <code class="code">kind</code> and <code class="code">session</code> are
     required, any other field missing is <code class="code">null</code>.</p>
@@ -215,8 +215,8 @@ svg.is-focus .chart-node.is-lit rect:first-child { stroke: var(--ui-fg); }
   <header>
     <h2 class="h2">serve</h2>
     <p class="docs-note">The daemon, a foreground process launchd keeps alive as
-      <code class="code">dev.gigantic.sandman</code>. It runs no jobs yet; it is where the dream
-      pass will live. It reads and writes nothing under the root but <code class="code">run/</code>.</p>
+      <code class="code">dev.gigantic.sandman</code>. It runs no jobs yet; it is where the first
+      memory and the review will run. It reads and writes nothing under the root but <code class="code">run/</code>.</p>
   </header>
   <figure class="figure">
     <div class="chart-frame" id="lifecycle">
@@ -283,10 +283,12 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
     <p class="docs-note">Parts still to bring over.</p>
   </header>
   <ul class="stack" role="list">
-    <li><code class="code">dream</code>: runs inside <code class="code">serve</code>.</li>
-    <li><code class="code">recall</code>: the one verb the mod runs at a session's start. It writes the start mark first, whether or not there is anything to recall, so <code class="code">mark</code> goes.</li>
+    <li><code class="code">first memory</code>: in <code class="code">serve</code>, right after a take, one session at a time. A headless model, Claude Opus by default (one setting, so a local model can replace it), reads the archived transcript and writes the session's first memories, each carrying its session id and archive path, into a group: <code class="code">groups/&lt;bank&gt;/&lt;file&gt;.md</code>, the bank the session's cwd belongs to, apart from the banks. The run is flagged so it is never itself marked, taken or turned into a memory. It replaces the short-term pointer.</li>
+    <li><code class="code">mark</code>: the mod's tool log moves into the ledger, which becomes every mod event: <code class="code">mark</code> writes a <code class="code">call</code> line per tool call and a <code class="code">prompt</code> line per typed prompt. Readers that need only sessions skip those kinds; the first memory, the review and the end-of-day judge read a session's calls and prompts from it.</li>
+    <li><code class="code">recall</code>: the one verb the mod runs at a session's start. It writes the start mark first, whether or not there is anything to recall, so <code class="code">mark</code> stops writing it.</li>
     <li><code class="code">reflect</code></li>
     <li><code class="code">remember</code></li>
+    <li><code class="code">review</code>: in <code class="code">serve</code>, later. A group is reviewed against the memories its bank already holds, then added to the bank, <code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code>. It takes the place of the dream pass.</li>
     <li><code class="code">take</code>: the one verb the mod runs at a session's end. It refuses a session with no start mark, takes a closed background session then instead of owing it, and writes the end to the ledger with its outcome, so the mod stops marking the end.</li>
   </ul>
 </section>
