@@ -2,7 +2,7 @@
 
 ```stele
 kind: system
-purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `serve` is the daemon under launchd, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
+purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `serve` is the daemon under launchd, whose tick settles held takes and encodes episodes into traces, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
 commands:
   check: mise run check
   cover: mise run cover
@@ -14,9 +14,10 @@ commands:
 
 | path                     | what                                                                                       |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
-| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `serve` and its tick, `setup`, `status` |
-| `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots and Claude homes via `SANDMAN_ROOT`, `SANDMAN_MACHINE`, `CLAUDE_CONFIG_DIR`; a `Daemon` guard kills every `serve` it starts |
-| `docs/index.html`        | the page: data root, `mark`, `take`, `chart`, `serve`, next; two d3 charts and the daemon's lifecycle figure |
+| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `serve` and its tick (settle, encode), `setup`, `status` |
+| `src/encode.prompt.md`   | the encoder's prompt, embedded with `include_str!`; the digest follows it on stdin          |
+| `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots and Claude homes via `SANDMAN_ROOT`, `SANDMAN_MACHINE`, `CLAUDE_CONFIG_DIR`, a stub shell encoder via `SANDMAN_ENCODER`; a `Daemon` guard kills every `serve` it starts (SIGTERM one whose coverage counts: a SIGKILL writes no profile) |
+| `docs/index.html`        | the page: data root, `mark`, `take`, `chart`, `serve`, `encode`, next; two d3 charts and the daemon's lifecycle figure |
 | `docs/charts/*.js`       | one ES module per chart over `lib.js`'s chrome; d3 7.9.0 is the page's global              |
 | `docs/data/chart.json`   | the timeline's sample: `tests/sandman.rs` `chart` fails unless it is the verb's output     |
 | `docs/data/flow.json`    | the data-flow chart's moments, nodes and edges, ①–④ marking the order a session passes them; `next` nodes are not built yet |
@@ -52,7 +53,7 @@ The end of a session, inside the mod's 1.5 s budget; it spawns nothing. Stdin, o
 {"session":"<uuid>","cwd":"<path>"?,"reason":"<str>"?}
 ```
 
-The first that holds: no start mark for the session in the ledger, or `reason` `resume` → nothing written. Else one end line through `mark`'s writer, `outcome`: `skipped` when `$SANDMAN_NO_TAKE` is non-empty or `CLAUDE_MEMORY_PIPELINE=1`; `held` (plus `job`, the dir name) when `reason` is not `clear` and a `<claude>/jobs/*/state.json` names the session by `resumeSessionId`, else `sessionId`; `gone` without `<claude>/projects/*/<session>.jsonl`; else `taken` (plus `archived`). `<claude>` = `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`.
+The first that holds: no start mark for the session in the ledger, or `reason` `resume` → nothing written. Else one end line through `mark`'s writer, `outcome`: `skipped` when `$SANDMAN_NO_TAKE` is non-empty or `CLAUDE_MEMORY_PIPELINE=1`; `held` (plus `job`, the dir name) when `reason` is not `clear` and a `<claude>/jobs/*/state.json` names the session by `resumeSessionId`, else `sessionId`; `gone` without `<claude>/projects/*/<session>.jsonl`; else `taken` (plus `archived`). `<claude>` = `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`. The pointer below stays until `recall` replaces the earlier one.
 
 ```
 {"archived"?,"at","cwd","job"?,"kind":"end","machine","outcome","reason","session"}
@@ -65,16 +66,18 @@ The take, byte-compatible with the earlier sandman's: `fs::rename` the transcrip
 Stdout, one compact object, keys alphabetical; reads the root, writes nothing but a missing `machine`; every absence is an empty list or a skipped item; a closed stdout ends it quietly (exit 0):
 
 ```
-{"active":[{"cwd":str|null,"end":str|null,"machine":str,"outcome":str|null,"session":str,"start":str|null}],
+{"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"machine":str,"outcome":str|null,"session":str,"start":str|null}],
  "at":"<now, RFC 3339 UTC>",
  "machine":"<this machine's id>",
  "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"dream"|"reflect"|"remember"|"other","type":str}],
- "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}]}
+ "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}],
+ "traces":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"type":str}]}
 ```
 
-- `active` — per session in `ledger/*/*/*.jsonl`: `start` the `at` of its earliest start mark (a reload re-fires it), `end` and `outcome` of its latest end mark (null on an end line without one); `cwd`, `machine` from that start mark, else the end mark. By `start` (null first), then session.
+- `active` — per session in `ledger/*/*/*.jsonl`: `start` the `at` of its earliest start mark (a reload re-fires it), `end` and `outcome` of its latest end mark (null on an end line without one); `cwd`, `machine` from that start mark, else the end mark; `encoded` the `outcome` of its latest encode line. By `start` (null first), then session.
 - `taken` — per file `<root>/.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` directly in a day dir; the latest per session wins. `taken` = that date and time as UTC, `bytes` = size; `title`, `cwd`, `highlights` (count, 0 without), `dreamed` from `<root>/memories/.recent/<session>.json` when it parses as an object. `state`: `waiting` pointer without `dreamed`, `dreamed` with it, `archived` no pointer. `memories` = memory entries naming the session. By `taken`, then session.
 - `memories` — per `<root>/memories/<bank>/<file>.md`, banks and files starting `.` or `_` and `MEMORY.md` skipped. Frontmatter: `key: value` lines between `---` fences; `name` (else the stem), `type` (else ""), `created`, `source` → `dream`/`reflect`/`remember` by its first word, else `other`; a dream's `session` is the uuid in `dream <ISO> · <uuid> · minds=…`. By bank, then file.
+- `traces` — per `<root>/traces/<bank>/<file>.md`, the same reader and skips; `session` from the frontmatter. By bank, then file.
 
 ### `sandman serve`
 
@@ -88,13 +91,39 @@ One newline-terminated JSON request and one reply per connection, compact, keys 
 anything else     → {"code":"bad_request"|"unknown_op","ok":false}
 ```
 
-`state` is `ready` whenever it answers today: state is derived before the socket is bound, and a stopping daemon no longer accepts. SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is ignored (Rust's default). Exit 0 after removing `serve.pid` and `serve.sock` while the pid file still holds its pid. The drain budget is 2 s (`ExitTimeOut`): one connection in hand, at most its 1 s read, and the tick's take in hand; the tick starts no other.
+`state` is `ready` whenever it answers today: state is derived before the socket is bound, and a stopping daemon no longer accepts. SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is ignored (Rust's default). Exit 0 after removing `serve.pid` and `serve.sock` while the pid file still holds its pid. The drain budget is 2 s (`ExitTimeOut`): one connection in hand, at most its 1 s read, and the tick's take or encode in hand (a running encoder's group killed); the tick starts no other.
 
-The tick, a thread: every `$SANDMAN_TICK_MS` (30 000) it re-reads the ledger and, per session whose latest line is an end with outcome `held` and this machine's id, under a lock the drain takes after setting the stop flag, skips one a job still names or whose transcript was modified within `$SANDMAN_QUIET_MS` (120 000) and otherwise runs `take`'s end with reason `job gone` (`taken` or `gone`). Nothing is held in memory; a failed take stays held and is retried next tick. `run/serve.log` is the daemon's: one compact object per line, keys alphabetical, `at` on each — `{"event":"start","pid","version"}`, `{"event":"exit","reason":"signal TERM"|"shutdown request"|<accept error>}`, `{"event":"take",…the end line}` or `{"event":"take","reason":<error>,"session"}` per tick take, `{"event":"panic","reason"}` from the panic hook. A line that finds the log at `$SANDMAN_LOG_CAP` bytes (default 1 MiB) first renames it to `serve.log.1`.
+The tick, a thread: every `$SANDMAN_TICK_MS` (30 000) it re-reads the ledger and, per session whose latest line is an end with outcome `held` and this machine's id, under a lock the drain takes after setting the stop flag, skips one a job still names or whose transcript was modified within `$SANDMAN_QUIET_MS` (120 000) and otherwise runs `take`'s end with reason `job gone` (`taken` or `gone`). Nothing is held in memory; a failed take stays held and is retried next tick. Then it runs one encode (below). `run/serve.log` is the daemon's: one compact object per line, keys alphabetical, `at` on each — `{"event":"start","pid","version"}`, `{"event":"exit","reason":"signal TERM"|"shutdown request"|<accept error>}`, `{"event":"take"|"encode",…the ledger line}` or `{"event":…,"reason":<write error>,"session"}` per tick take or encode, `{"event":"panic","reason"}` from the panic hook. A line that finds the log at `$SANDMAN_LOG_CAP` bytes (default 1 MiB) first renames it to `serve.log.1`.
+
+### encode
+
+A job of `serve`'s tick, not a verb. Per tick, under the tick's lock, after settling: of the sessions whose latest ledger line is an end with outcome `taken` and this machine's id, the one with the earliest `at` (so an encoded episode, whose latest line is its encode, is never picked again). One line through `mark`'s writer, logged to `serve.log` as `event` `encode`:
+
+```
+{"at","error"?,"kind":"encode","machine","outcome":"encoded"|"skipped"|"gone"|"failed","session","traces":<count>}
+```
+
+`skipped`: no start mark of the session has `interactive` true. `gone`: no file at the end line's `archived`. Else the digest, to `run/encode.in`: `# episode` (`date:` the end's `at`, `cwd:` as the pointer's, else `unknown`), `# highlights` (`- <body>` per take highlight, absent without), `# transcript` (per user or assistant message part: `user: <text>`, `assistant: <text>`, `tool: <name> <command|file_path>` one-lined to 200; tool results and other lines dropped); over `$SANDMAN_DIGEST_BYTES` (300 000) the head and tail halves, cut back to whole lines, around `… <n> bytes omitted …`. The encoder, `$SANDMAN_ENCODER` else `claude -p --model opus --output-format text --safe-mode --tools "" --no-session-persistence`, runs as `sh -c`, own process group, env `CLAUDE_MEMORY_PIPELINE=1` `SANDMAN_NO_TAKE=1`, stdin `<prompt>\n<digest>`, stdout and stderr to `run/encode.out`, `run/encode.err`. The contract a replacement keeps: exit 0 and stdout holding one object, `{"traces":[{"type":"user"|"feedback"|"project"|"reference","name":str,"description":str,"body":str}]}`, read from its first `{` to its last `}`. `failed` (`error` one line, 400 chars, no file written): `exit status: <n>: <stderr>`, `timed out after <ms> ms` (`$SANDMAN_ENCODE_MS`, 300 000; the group killed), `output: <parse error>`, `output: not a trace: <it>`. Else `encoded`, one file per trace: `<root>/traces/<bank>/<type>_<slug>.md` by temp + rename, `<bank>` the earlier sandman's `Bank::key_for(project::root(cwd))` (`project`, `common`; no cwd: `$HOME`), `<slug>` its `slug::slug` (lowercase, non-alphanumeric runs `_`, trimmed, 60 chars), `_2`… on a clash:
+
+```
+---
+name: <one-lined, 200>
+description: <one-lined, 400>
+type: <type>
+created: <now>
+session: <uuid>
+archived: <path>
+source: encode <now> · <uuid> · model=<the word after --model in the encoder, else its first word>
+---
+
+<body, trimmed>
+```
+
+A stop signal or shutdown mid-run kills the group and writes no line: the episode runs again after the next start. `failed` is final for the tick; removing its line retries it.
 
 ### `sandman setup`
 
-Prints the launchd plist for `dev.gigantic.sandman` on stdout and writes nothing: `ProgramArguments` this executable and `serve`, `EnvironmentVariables` the root it ran with, `KeepAlive`, `RunAtLoad`, `ThrottleInterval` 10, `ExitTimeOut` 2, `StandardErrorPath` `<root>/serve.err` for failures before the log (outside `run/`, which launchd would otherwise create 0744). Install, then swap after each `mise run install`:
+Prints the launchd plist for `dev.gigantic.sandman` on stdout and writes nothing: `ProgramArguments` this executable and `serve`, `EnvironmentVariables` the caller's `PATH` (launchd's finds no `claude`) and the root it ran with, `KeepAlive`, `RunAtLoad`, `ThrottleInterval` 10, `ExitTimeOut` 2, `StandardErrorPath` `<root>/serve.err` for failures before the log (outside `run/`, which launchd would otherwise create 0744). Install, then swap after each `mise run install`:
 
 ```
 sandman-next setup > ~/Library/LaunchAgents/dev.gigantic.sandman.plist

@@ -15,12 +15,21 @@ use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
 use std::iter;
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::process::CommandExt as _;
 use std::panic;
 use std::path::{Path, PathBuf};
-use std::process::{ExitCode, id};
+use std::process::{Command, ExitCode, id};
+use std::str::FromStr;
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// The encoder when `$SANDMAN_ENCODER` names none: a headless Claude Opus that reads only stdin,
+/// with no tools, no customizations (hooks, MCP servers, CLAUDE.md) and no saved session.
+const ENCODER: &str = r#"claude -p --model opus --output-format text --safe-mode --tools "" --no-session-persistence"#;
+
+/// What the encoder reads before the digest.
+const PROMPT: &str = include_str!("encode.prompt.md");
 
 /// Held by the tick for each take; the drain takes it after setting `STOP`, so the take in hand
 /// finishes and no other starts.
@@ -28,6 +37,22 @@ static BUSY: Mutex<()> = Mutex::new(());
 
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
+
+/// The common git dir of the linked worktree at `dir`: its `.git` a file naming
+/// `<common>/worktrees/<name>`, the shape `git worktree add` writes and a submodule's does not.
+fn common(dir: &Path) -> Option<PathBuf> {
+    let gitdir = dir.join(
+        fs::read_to_string(dir.join(".git"))
+            .ok()?
+            .trim()
+            .strip_prefix("gitdir:")?
+            .trim(),
+    );
+    let worktrees = gitdir.parent()?;
+    let repo = worktrees.parent().unwrap_or(worktrees);
+    (name(worktrees) == "worktrees")
+        .then(|| fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf()))
+}
 
 /// Ends `session`'s ledger story with one end line, returned as written: `decided` (skipped,
 /// held) as is, else the take — the transcript and its sidecar renamed into the archive, then the
@@ -72,97 +97,24 @@ fn end(
             if sidecar.is_dir() {
                 fs::rename(sidecar, beside)?;
             }
-            let lines: Vec<Value> = String::from_utf8_lossy(&fs::read(&archived)?)
-                .lines()
-                .filter_map(|line| serde_json::from_str(line).ok())
-                .collect();
+            let lines = jsonl(&archived);
             let title = lines
                 .iter()
-                .filter(|line| line["type"] == "user")
-                .filter_map(|line| {
-                    let content = &line["message"]["content"];
-                    content.as_str().or_else(|| {
-                        content
-                            .as_array()?
-                            .iter()
-                            .find(|block| block["type"] == "text")?["text"]
-                            .as_str()
-                    })
-                })
-                .map(|said| one_line(said, 80))
+                .flat_map(parts)
+                .filter(|&(role, _)| role == "user")
+                .map(|(_, said)| one_line(&said, 80))
                 .find(|title| !title.is_empty())
                 .unwrap_or_else(|| session.to_owned());
-            let mut highlights: Vec<String> = Vec::new();
-            // only commands the session ran: an assistant's tool_use, a user's `!` line
-            for command in lines.iter().flat_map(|line| {
-                let content = &line["message"]["content"];
-                let user = line["type"] == "user";
-                let bang = content
-                    .as_str()
-                    .filter(|said| user && said.starts_with("<bash-input>"));
-                let ran = content
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter(|block| line["type"] == "assistant" && block["type"] == "tool_use");
-                bang.into_iter()
-                    .chain(ran.filter_map(|block| block["input"]["command"].as_str()))
-            }) {
-                for marker in ["sandman remember ", "orrery attend "] {
-                    let mut rest = command;
-                    while let Some((_, after)) = rest.split_once(marker) {
-                        rest = after;
-                        let mut body = String::new();
-                        // `\"…\"` (shell-escaped) closes at the next `\"`; `"…"` at the next
-                        // unescaped `"`, unescaping `\"` and `\\`
-                        match (after.strip_prefix("\\\""), after.strip_prefix('"')) {
-                            (Some(open), _) => {
-                                let Some((inner, tail)) = open.split_once("\\\"") else {
-                                    continue;
-                                };
-                                (body, rest) = (inner.replace("\\\\", "\\"), tail);
-                            }
-                            (None, Some(open)) => {
-                                let mut chars = open.chars();
-                                loop {
-                                    match (chars.next(), chars.as_str().chars().next()) {
-                                        (Some('"'), _) => break rest = chars.as_str(),
-                                        (Some('\\'), Some(escaped @ ('"' | '\\'))) => {
-                                            body.push(escaped);
-                                            chars =
-                                                chars.as_str().get(1..).unwrap_or_default().chars();
-                                        }
-                                        (Some(other), _) => body.push(other),
-                                        (None, _) => break body.clear(),
-                                    }
-                                }
-                            }
-                            (None, None) => {}
-                        }
-                        let kept = one_line(&body, 4000);
-                        if !kept.is_empty() {
-                            highlights.retain(|held| *held != kept);
-                            highlights.push(kept);
-                        }
-                    }
-                }
-            }
-            let found = lines
-                .iter()
-                .map(|line| &line["cwd"])
-                .chain([cwd])
-                .filter_map(Value::as_str)
-                .find(|dir| !dir.is_empty() && !dir.contains(char::is_control));
             let recent = root.join("memories/.recent");
             let tmp = recent.join(format!(".{session}.json.{}", id()));
             fs::create_dir_all(&recent)?;
             let pointer = format!(
                 "{{\"archived\":{},\"cwd\":{},\"ended\":{},\"title\":{},\"highlights\":{}}}\n",
                 json!(archived.to_string_lossy()),
-                json!(found),
+                json!(place(&lines, cwd)),
                 json!(ended),
                 json!(title),
-                json!(highlights.split_off(highlights.len().saturating_sub(20)))
+                json!(highlights(&lines))
             );
             fs::write(&tmp, pointer)?;
             fs::rename(tmp, recent.join(format!("{session}.json")))?;
@@ -174,6 +126,66 @@ fn end(
     line["reason"] = reason.clone();
     line["session"] = session.into();
     record(root, &mut line).map(|()| line)
+}
+
+/// The quoted bodies after `sandman remember ` and `orrery attend ` in the commands a transcript's
+/// session ran (an assistant's `tool_use`, a user's `!` line), one-lined, a repeat moved to the
+/// end, the last 20.
+fn highlights(lines: &[Value]) -> Vec<String> {
+    let mut highlights: Vec<String> = Vec::new();
+    for command in lines.iter().flat_map(|line| {
+        let content = &line["message"]["content"];
+        let user = line["type"] == "user";
+        let bang = content
+            .as_str()
+            .filter(|said| user && said.starts_with("<bash-input>"));
+        let ran = content
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|block| line["type"] == "assistant" && block["type"] == "tool_use");
+        bang.into_iter()
+            .chain(ran.filter_map(|block| block["input"]["command"].as_str()))
+    }) {
+        for marker in ["sandman remember ", "orrery attend "] {
+            let mut rest = command;
+            while let Some((_, after)) = rest.split_once(marker) {
+                rest = after;
+                let mut body = String::new();
+                // `\"…\"` (shell-escaped) closes at the next `\"`; `"…"` at the next
+                // unescaped `"`, unescaping `\"` and `\\`
+                match (after.strip_prefix("\\\""), after.strip_prefix('"')) {
+                    (Some(open), _) => {
+                        let Some((inner, tail)) = open.split_once("\\\"") else {
+                            continue;
+                        };
+                        (body, rest) = (inner.replace("\\\\", "\\"), tail);
+                    }
+                    (None, Some(open)) => {
+                        let mut chars = open.chars();
+                        loop {
+                            match (chars.next(), chars.as_str().chars().next()) {
+                                (Some('"'), _) => break rest = chars.as_str(),
+                                (Some('\\'), Some(escaped @ ('"' | '\\'))) => {
+                                    body.push(escaped);
+                                    chars = chars.as_str().get(1..).unwrap_or_default().chars();
+                                }
+                                (Some(other), _) => body.push(other),
+                                (None, _) => break body.clear(),
+                            }
+                        }
+                    }
+                    (None, None) => {}
+                }
+                let kept = one_line(&body, 4000);
+                if !kept.is_empty() {
+                    highlights.retain(|held| *held != kept);
+                    highlights.push(kept);
+                }
+            }
+        }
+    }
+    highlights.split_off(highlights.len().saturating_sub(20))
 }
 
 /// The background job under `<claude>/jobs/` that names `session`: its `resumeSessionId`, else
@@ -190,17 +202,19 @@ fn job(claude: &Path, session: &str) -> Option<String> {
     })
 }
 
+/// Every line of the JSONL file at `path` that parses; none when it cannot be read.
+fn jsonl(path: &Path) -> Vec<Value> {
+    String::from_utf8_lossy(&fs::read(path).unwrap_or_default())
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
 /// Every line of `<root>/ledger/*/*/*.jsonl` that parses, oldest file first.
 fn ledger(root: &Path) -> Vec<Value> {
     tree(&root.join("ledger"), 3)
         .iter()
-        .flat_map(|file| {
-            fs::read_to_string(file)
-                .unwrap_or_default()
-                .lines()
-                .filter_map(|line| serde_json::from_str(line).ok())
-                .collect::<Vec<_>>()
-        })
+        .flat_map(|file| jsonl(file))
         .collect()
 }
 
@@ -231,6 +245,38 @@ fn name(path: &Path) -> &str {
     path.file_name().and_then(OsStr::to_str).unwrap_or_default()
 }
 
+/// Every `<root>/<dir>/<bank>/<file>.md` but `MEMORY.md`, banks and files starting `.` or `_`
+/// skipped: its frontmatter's `key: value` lines between `---` fences as an object, with `bank`,
+/// `file`, and `name` when the frontmatter has none (the stem). By bank, then file.
+fn notes(root: &Path, dir: &str) -> Vec<Value> {
+    tree(&root.join(dir), 2)
+        .iter()
+        .filter_map(|path| {
+            let (bank, file) = (path.parent().map_or("", name), name(path));
+            let skip = [bank, file].iter().any(|part| part.starts_with(['.', '_']));
+            (!skip
+                && file != "MEMORY.md"
+                && path.extension() == Some("md".as_ref())
+                && path.is_file())
+            .then(|| {
+                let text = fs::read_to_string(path).unwrap_or_default();
+                let mut note = json!({"name": path.file_stem().and_then(OsStr::to_str)});
+                for (key, value) in text
+                    .strip_prefix("---\n")
+                    .and_then(|rest| rest.split_once("\n---"))
+                    .map_or("", |(head, _)| head)
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                {
+                    note[key.trim()] = value.trim().into();
+                }
+                (note["bank"], note["file"]) = (bank.into(), file.into());
+                note
+            })
+        })
+        .collect()
+}
+
 /// `text` with its whitespace collapsed to single spaces and cut at `max` characters.
 fn one_line(text: &str, max: usize) -> String {
     text.split_whitespace()
@@ -239,6 +285,87 @@ fn one_line(text: &str, max: usize) -> String {
         .chars()
         .take(max)
         .collect()
+}
+
+/// A transcript line's parts in order: `(role, text)` per text of a user or assistant message,
+/// `("tool", name and command or file)` per tool call; tool results and other lines dropped.
+fn parts(line: &Value) -> Vec<(&str, String)> {
+    let content = &line["message"]["content"];
+    let role = line["type"].as_str().unwrap_or_default();
+    content
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| vec![json!({"text": content, "type": "text"})])
+        .iter()
+        .filter(|_| ["assistant", "user"].contains(&role))
+        .filter_map(|block| match block["type"].as_str() {
+            Some("text") => Some((role, block["text"].as_str()?.to_owned())),
+            Some("tool_use") => Some((
+                "tool",
+                one_line(
+                    &format!(
+                        "{} {}",
+                        block["name"].as_str().unwrap_or_default(),
+                        block["input"]["command"]
+                            .as_str()
+                            .or_else(|| block["input"]["file_path"].as_str())
+                            .unwrap_or_default()
+                    ),
+                    200,
+                ),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A transcript's working directory: the first line's `cwd` that is neither empty nor carries a
+/// control character, else `fallback`'s.
+fn place<'line>(lines: &'line [Value], fallback: &'line Value) -> Option<&'line str> {
+    lines
+        .iter()
+        .map(|line| &line["cwd"])
+        .chain([fallback])
+        .filter_map(Value::as_str)
+        .find(|dir| !dir.is_empty() && !dir.contains(char::is_control))
+}
+
+/// The directory `path`'s memories belong to, the earlier sandman's `project::root`: a linked
+/// worktree keys as the directory it sits in, a worktree nested in a checkout of its repo as that
+/// checkout's project, a vanished directory beside one repo's worktrees as that repo's project;
+/// a primary checkout, a submodule or a plain directory as itself.
+fn project(path: &Path) -> PathBuf {
+    let cwd: PathBuf = path.components().collect();
+    if !cwd.exists()
+        && let Some(live) = cwd.ancestors().find(|dir| dir.exists())
+    {
+        let mut worktrees = fs::read_dir(live)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| Some((common(&entry.path())?, entry.path())));
+        if let Some((repo, sibling)) = worktrees.next()
+            && worktrees.all(|(other, _)| other == repo)
+        {
+            return project(&sibling);
+        }
+    }
+    let (mut found, mut outer) = (None, None);
+    for dir in cwd.ancestors() {
+        let dot_git = dir.join(".git");
+        match common(dir) {
+            Some(repo) if [None, Some(&repo)].contains(&outer.as_ref()) => {
+                (found, outer) = (dir.parent().or(Some(dir)), Some(repo));
+            }
+            None if outer.is_some() && fs::canonicalize(&dot_git).ok() == outer => {
+                return dir.to_path_buf();
+            }
+            // a primary checkout, a submodule or another repo's worktree owns everything below it
+            _ if dot_git.exists() => break,
+            _ => {}
+        }
+    }
+    found.map_or_else(|| cwd.clone(), Path::to_path_buf)
 }
 
 /// Appends `line`, stamped with `at` and `machine`, to today's ledger file with `O_APPEND`.
@@ -256,6 +383,14 @@ fn record(root: &Path, line: &mut Value) -> io::Result<()> {
         .create(true)
         .open(&day)?
         .write_all(format!("{line}\n").as_bytes())
+}
+
+/// `$key` parsed, else `default`.
+fn setting<T: FromStr>(key: &str, default: T) -> T {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
 }
 
 /// `rows`, stably sorted by the string at `key` (a null first).
@@ -380,54 +515,44 @@ fn main() -> ExitCode {
             }
         }
         Some("chart") => {
-            let mut marks: BTreeMap<String, (Value, Value)> = BTreeMap::new();
+            let mut marks: BTreeMap<String, [Value; 3]> = BTreeMap::new();
             for mark in ledger(&root) {
-                if let (Some(session), Some(kind)) =
-                    (mark["session"].as_str(), mark["kind"].as_str())
-                {
-                    let pair = marks.entry(session.to_owned()).or_default();
-                    let slot = if kind == "end" {
-                        &mut pair.1
-                    } else {
-                        &mut pair.0
-                    };
-                    // the earliest start (a reload re-fires it), the latest end
-                    if slot.is_null()
-                        || (mark["at"].as_str() < slot["at"].as_str()) == (kind != "end")
-                    {
-                        *slot = mark;
-                    }
+                let (Some(session), Some(slot)) = (
+                    mark["session"].as_str(),
+                    ["start", "end", "encode"]
+                        .iter()
+                        .position(|kind| mark["kind"] == *kind),
+                ) else {
+                    continue;
+                };
+                let held = &mut marks.entry(session.to_owned()).or_default()[slot];
+                // the earliest start (a reload re-fires it), the latest end and encode
+                if held.is_null() || (mark["at"].as_str() < held["at"].as_str()) == (slot == 0) {
+                    *held = mark;
                 }
             }
-            let memories: Vec<Value> = tree(&root.join("memories"), 2)
+            let memories: Vec<Value> = notes(&root, "memories")
                 .iter()
-                .filter_map(|path| {
-                    let (bank, file) = (path.parent().map_or("", name), name(path));
-                    let skip = [bank, file].iter().any(|part| part.starts_with(['.', '_']));
-                    (!skip && file != "MEMORY.md" && path.extension() == Some("md".as_ref()) && path.is_file())
-                        .then_some((path, bank, file))
-                })
-                .map(|(path, bank, file)| {
-                    let text = fs::read_to_string(path).unwrap_or_default();
-                    let front: BTreeMap<&str, &str> = text
-                        .strip_prefix("---\n")
-                        .and_then(|rest| rest.split_once("\n---"))
-                        .map_or("", |(head, _)| head)
-                        .lines()
-                        .filter_map(|line| line.split_once(':'))
-                        .map(|(key, value)| (key.trim(), value.trim()))
-                        .collect();
-                    let source = front.get("source").copied().unwrap_or_default();
+                .map(|note| {
+                    let source = note["source"].as_str().unwrap_or_default();
                     let kind = source
                         .split_whitespace()
                         .next()
                         .filter(|word| ["dream", "reflect", "remember"].contains(word))
                         .unwrap_or("other");
                     json!({
-                        "bank": bank, "created": front.get("created"), "file": file,
-                        "name": front.get("name").copied().unwrap_or_else(|| path.file_stem().and_then(OsStr::to_str).unwrap_or_default()),
+                        "bank": note["bank"], "created": note["created"], "file": note["file"], "name": note["name"],
                         "session": source.split_whitespace().find(|word| kind == "dream" && uuid(word)),
-                        "source": kind, "type": front.get("type").copied().unwrap_or_default(),
+                        "source": kind, "type": note["type"].as_str().unwrap_or_default(),
+                    })
+                })
+                .collect();
+            let traces: Vec<Value> = notes(&root, "traces")
+                .iter()
+                .map(|note| {
+                    json!({
+                        "bank": note["bank"], "created": note["created"], "file": note["file"], "name": note["name"],
+                        "session": note["session"], "type": note["type"].as_str().unwrap_or_default(),
                     })
                 })
                 .collect();
@@ -477,10 +602,10 @@ fn main() -> ExitCode {
             }
             let active = marks
                 .into_iter()
-                .map(|(session, (start, end))| {
+                .map(|(session, [start, end, encode])| {
                     let from = if start.is_null() { &end } else { &start };
                     json!({
-                        "cwd": from["cwd"], "end": end["at"], "machine": from["machine"],
+                        "cwd": from["cwd"], "encoded": encode["outcome"], "end": end["at"], "machine": from["machine"],
                         "outcome": end["outcome"], "session": session, "start": start["at"],
                     })
                 })
@@ -491,7 +616,7 @@ fn main() -> ExitCode {
                 "{}",
                 json!({
                     "active": sorted(active, "start"), "at": utc(SystemTime::now()), "machine": machine(&root),
-                    "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"),
+                    "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
                 })
             ));
             ExitCode::SUCCESS
@@ -544,13 +669,7 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let number = |key: &str, default: u64| {
-                env::var(key)
-                    .ok()
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or(default)
-            };
-            let cap = number("SANDMAN_LOG_CAP", 1 << 20);
+            let cap = setting("SANDMAN_LOG_CAP", 1u64 << 20);
             let write = move |mut line: Value| {
                 line["at"] = utc(SystemTime::now()).into();
                 if fs::metadata(&log).is_ok_and(|meta| meta.len() >= cap) {
@@ -581,24 +700,44 @@ fn main() -> ExitCode {
                 }
             }));
             let (this, settle, data) = (machine(&root), write.clone(), root.clone());
-            let tick = Duration::from_millis(number("SANDMAN_TICK_MS", 30_000));
-            let quiet = Duration::from_millis(number("SANDMAN_QUIET_MS", 120_000));
+            let tick = Duration::from_millis(setting("SANDMAN_TICK_MS", 30_000));
+            let quiet = Duration::from_millis(setting("SANDMAN_QUIET_MS", 120_000));
+            let limit = Duration::from_millis(setting("SANDMAN_ENCODE_MS", 300_000));
+            let budget = setting("SANDMAN_DIGEST_BYTES", 300_000usize);
+            let named = env::var("SANDMAN_ENCODER");
+            let encoder = named.as_deref().unwrap_or(ENCODER).to_owned();
+            let first = encoder.split_whitespace().next();
+            let model = encoder
+                .split_whitespace()
+                .skip_while(|word| *word != "--model")
+                .nth(1)
+                .or(first)
+                .unwrap_or_default()
+                .to_owned();
+            let note = move |event: &str, session: &str, written: io::Result<Value>| {
+                let mut line = written.unwrap_or_else(
+                    |error| json!({"reason": error.to_string(), "session": session}),
+                );
+                line["event"] = event.into();
+                settle(line);
+            };
             drop(thread::spawn(move || {
                 while STOP.get().is_none() {
                     thread::sleep(tick);
                     // the latest line per session; a held end whose job is gone and whose
                     // transcript has been quiet for the window is taken
-                    let latest: BTreeMap<String, Value> = ledger(&data)
-                        .into_iter()
-                        .filter_map(|entry| Some((entry["session"].as_str()?.to_owned(), entry)))
+                    let lines = ledger(&data);
+                    let latest: BTreeMap<&str, &Value> = lines
+                        .iter()
+                        .filter_map(|entry| Some((entry["session"].as_str()?, entry)))
                         .collect();
-                    for (session, held) in latest {
+                    for (session, held) in latest.clone() {
                         let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
                         if held["kind"] != "end"
                             || held["outcome"] != "held"
                             || held["machine"] != this
-                            || job(&claude, &session).is_some()
-                            || transcript(&claude, &session)
+                            || job(&claude, session).is_some()
+                            || transcript(&claude, session)
                                 .and_then(|path| {
                                     path.metadata().and_then(|meta| meta.modified()).ok()
                                 })
@@ -607,20 +746,212 @@ fn main() -> ExitCode {
                         {
                             continue;
                         }
-                        let mut line = end(
-                            &data,
-                            &claude,
-                            &session,
-                            &held["cwd"],
-                            &"job gone".into(),
-                            None,
-                        )
-                        .unwrap_or_else(
-                            |error| json!({"reason": error.to_string(), "session": session}),
+                        note(
+                            "take",
+                            session,
+                            end(
+                                &data,
+                                &claude,
+                                session,
+                                &held["cwd"],
+                                &"job gone".into(),
+                                None,
+                            ),
                         );
-                        line["event"] = "take".into();
-                        settle(line);
                     }
+                    // one episode a tick, the oldest of this machine's whose latest line is its take
+                    let Some(episode) = latest
+                        .into_values()
+                        .filter(|line| {
+                            line["kind"] == "end"
+                                && line["outcome"] == "taken"
+                                && line["machine"] == this
+                        })
+                        .min_by_key(|line| line["at"].as_str())
+                    else {
+                        continue;
+                    };
+                    let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
+                    let session = episode["session"].as_str().unwrap_or_default();
+                    let archived = Path::new(episode["archived"].as_str().unwrap_or_default());
+                    let (input, output, errors) = (
+                        data.join("run/encode.in"),
+                        data.join("run/encode.out"),
+                        data.join("run/encode.err"),
+                    );
+                    // Ok(None): stopped, so no line and the episode waits for the next start
+                    let encode = || -> io::Result<Option<Value>> {
+                        if !lines.iter().any(|mark| {
+                            mark["session"] == session
+                                && mark["kind"] == "start"
+                                && mark["interactive"] == true
+                        }) {
+                            return Ok(Some(json!({"outcome": "skipped", "traces": 0})));
+                        }
+                        if !archived.is_file() {
+                            return Ok(Some(json!({"outcome": "gone", "traces": 0})));
+                        }
+                        let turns = jsonl(archived);
+                        let cwd = place(&turns, &episode["cwd"]);
+                        let mut digest = format!(
+                            "# episode\ndate: {}\ncwd: {}\n\n",
+                            episode["at"].as_str().unwrap_or_default(),
+                            cwd.unwrap_or("unknown")
+                        );
+                        let chosen = highlights(&turns);
+                        if !chosen.is_empty() {
+                            digest.push_str("# highlights\n");
+                            digest.extend(chosen.iter().map(|body| format!("- {body}\n")));
+                            digest.push('\n');
+                        }
+                        digest.push_str("# transcript\n");
+                        digest.extend(
+                            turns
+                                .iter()
+                                .flat_map(parts)
+                                .map(|(role, said)| format!("{role}: {said}\n")),
+                        );
+                        // the head and the tail, whole lines, the middle one line
+                        if digest.len() > budget {
+                            let half = budget.div_euclid(2);
+                            let head = digest
+                                .get(..digest.floor_char_boundary(half))
+                                .and_then(|kept| kept.rfind('\n'))
+                                .map_or(0, |at| at.saturating_add(1));
+                            let from = digest.ceil_char_boundary(digest.len().saturating_sub(half));
+                            let tail = digest
+                                .get(from..)
+                                .and_then(|kept| kept.find('\n'))
+                                .map_or(digest.len(), |at| {
+                                    from.saturating_add(at).saturating_add(1)
+                                });
+                            digest = format!(
+                                "{}\u{2026} {} bytes omitted \u{2026}\n{}",
+                                digest.get(..head).unwrap_or_default(),
+                                tail.saturating_sub(head),
+                                digest.get(tail..).unwrap_or_default()
+                            );
+                        }
+                        fs::write(&input, format!("{PROMPT}\n{digest}"))?;
+                        let mut child = Command::new("sh")
+                            .args(["-c", &encoder])
+                            .env("CLAUDE_MEMORY_PIPELINE", "1")
+                            .env("SANDMAN_NO_TAKE", "1")
+                            .process_group(0)
+                            .stdin(File::open(&input)?)
+                            .stdout(File::create(&output)?)
+                            .stderr(File::create(&errors)?)
+                            .spawn()?;
+                        let begun = Instant::now();
+                        let status = loop {
+                            if let Some(status) = child.try_wait()? {
+                                break status;
+                            }
+                            if STOP.get().is_some() || begun.elapsed() > limit {
+                                // the whole group: whatever the encoder started dies with it
+                                drop(
+                                    Command::new("kill")
+                                        .args(["-KILL", &format!("-{}", child.id())])
+                                        .status(),
+                                );
+                                drop(child.wait());
+                                return match STOP.get() {
+                                    Some(_) => Ok(None),
+                                    None => Err(io::Error::other(format!(
+                                        "timed out after {} ms",
+                                        limit.as_millis()
+                                    ))),
+                                };
+                            }
+                            thread::sleep(Duration::from_millis(20));
+                        };
+                        let out = fs::read_to_string(&output)?;
+                        if !status.success() {
+                            return Err(io::Error::other(format!(
+                                "{status}: {}",
+                                one_line(&fs::read_to_string(&errors)?, 200)
+                            )));
+                        }
+                        // the object from the first `{` to the last `}`, so a fence around it passes
+                        let reply: Value = serde_json::from_str(
+                            out.get(out.find('{').unwrap_or(0)..=out.rfind('}').unwrap_or(0))
+                                .unwrap_or_default(),
+                        )
+                        .map_err(|error| io::Error::other(format!("output: {error}")))?;
+                        let traces = reply["traces"].as_array();
+                        if let Some(bad) = traces.map_or(Some(&reply), |list| {
+                            list.iter().find(|trace| {
+                                !["feedback", "project", "reference", "user"]
+                                    .contains(&trace["type"].as_str().unwrap_or_default())
+                                    || ["body", "description", "name"]
+                                        .iter()
+                                        .any(|key| !trace[key].is_string())
+                            })
+                        }) {
+                            return Err(io::Error::other(format!(
+                                "output: not a trace: {}",
+                                one_line(&bad.to_string(), 200)
+                            )));
+                        }
+                        let bank: String =
+                            project(&cwd.map_or_else(|| home.clone(), PathBuf::from))
+                                .as_os_str()
+                                .as_encoded_bytes()
+                                .iter()
+                                .map(|&byte| {
+                                    if byte.is_ascii_alphanumeric() {
+                                        char::from(byte)
+                                    } else {
+                                        '-'
+                                    }
+                                })
+                                .collect();
+                        let (dir, now) = (data.join("traces").join(bank), utc(SystemTime::now()));
+                        for trace in traces.into_iter().flatten() {
+                            let (kind, name) = (
+                                trace["type"].as_str().unwrap_or_default(),
+                                trace["name"].as_str().unwrap_or_default(),
+                            );
+                            // the bank format's slug: lowercase, non-alphanumeric runs `_`, 60 characters
+                            let slug: String = name
+                                .split(|letter: char| !letter.is_ascii_alphanumeric())
+                                .filter(|word| !word.is_empty())
+                                .collect::<Vec<_>>()
+                                .join("_")
+                                .to_ascii_lowercase()
+                                .chars()
+                                .take(60)
+                                .collect();
+                            let base = format!("{kind}_{slug}");
+                            let file = iter::once(format!("{base}.md"))
+                                .chain((2u32..1000).map(|n| format!("{base}_{n}.md")))
+                                .find(|file| !dir.join(file).exists())
+                                .unwrap_or_default();
+                            let staged = dir.join(format!(".{file}.{}", id()));
+                            let text = format!(
+                                "---\nname: {}\ndescription: {}\ntype: {kind}\ncreated: {now}\nsession: {session}\narchived: {}\nsource: encode {now} \u{b7} {session} \u{b7} model={model}\n---\n\n{}\n",
+                                one_line(name, 200),
+                                one_line(trace["description"].as_str().unwrap_or_default(), 400),
+                                archived.display(),
+                                trace["body"].as_str().unwrap_or_default().trim()
+                            );
+                            fs::create_dir_all(&dir)?;
+                            fs::write(&staged, text)?;
+                            fs::rename(staged, dir.join(file))?;
+                        }
+                        Ok(Some(
+                            json!({"outcome": "encoded", "traces": traces.map_or(0, Vec::len)}),
+                        ))
+                    };
+                    let mut line = match encode() {
+                        Ok(None) => continue,
+                        Ok(Some(line)) => line,
+                        Err(error) => json!({
+                            "error": one_line(&error.to_string(), 400), "outcome": "failed", "traces": 0u8,
+                        }),
+                    };
+                    (line["kind"], line["session"]) = ("encode".into(), session.into());
+                    note("encode", session, record(&data, &mut line).map(|()| line));
                 }
             }));
             let version = env!("CARGO_PKG_VERSION");
@@ -679,7 +1010,7 @@ fn main() -> ExitCode {
 <plist version="1.0">
 <dict>
   <key>EnvironmentVariables</key>
-  <dict><key>SANDMAN_ROOT</key><string>{}</string></dict>
+  <dict><key>PATH</key><string>{}</string><key>SANDMAN_ROOT</key><string>{}</string></dict>
   <key>ExitTimeOut</key>
   <integer>2</integer>
   <key>KeepAlive</key>
@@ -697,6 +1028,8 @@ fn main() -> ExitCode {
 </dict>
 </plist>
 "#,
+                // launchd's own PATH holds no `claude`: the encoder finds it on the caller's
+                env::var("PATH").unwrap_or_default(),
                 root.display(),
                 exe.display(),
                 // beside run/, not in it: launchd creates the parent of this path 0744, which serve refuses
