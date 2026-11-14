@@ -2,7 +2,7 @@
 //! file, `take` archives a marked session at its end, `chart` prints what the data root holds as
 //! one JSON object, `recall` scores the memories against an agent's cue and `show` prints one,
 //! `mcp` serves `recall`, `remember` and `show` as MCP tools,
-//! `serve` is the daemon (reconcile, settle, encode, consolidate), `status` asks it for its
+//! `serve` is the daemon (reconcile, settle, encode, consolidate, reflect), `status` asks it for its
 //! health, `setup` prints its launchd plist.
 
 use serde_json::{Map, Value, json};
@@ -60,22 +60,10 @@ const CLAIM: [&str; 21] = [
 /// CLAUDE.md) and no saved session.
 const CLAUDE: &str = r#"claude -p --model opus --output-format text --safe-mode --tools "" --no-session-persistence"#;
 
-/// Consolidate's default guidance and its fixed contract, sent before the bank.
-const CONSOLIDATE: [&str; 2] = [
-    include_str!("prompts/consolidate.md"),
-    include_str!("prompts/consolidate.contract.md"),
-];
-
 /// Recall's embedding model and the instruct prefix of its query (docs/recall.html#chosen).
 const EMBED: [&str; 2] = [
     "qwen3-embedding:0.6b",
     "Instruct: Given what an AI coding agent is about to do, retrieve the memory notes it needs to do it correctly\nQuery: ",
-];
-
-/// Encode's default guidance and its fixed contract, sent before the digest.
-const ENCODE: [&str; 2] = [
-    include_str!("prompts/encode.md"),
-    include_str!("prompts/encode.contract.md"),
 ];
 
 /// The cross-repository banks' labels, which earn a candidate 1.
@@ -83,6 +71,39 @@ const GENERAL: [&str; 2] = ["home (~)", "grove root (every repository)"];
 
 /// The four memory types, a trace's and a memory's `type`.
 const KINDS: [&str; 4] = ["feedback", "project", "reference", "user"];
+
+/// Each model job's default guidance and its fixed contract, sent before its data; `guide` reads
+/// `<root>/prompts/<job>.md` in place of the guidance.
+const PROMPTS: [(&str, [&str; 2]); 4] = [
+    (
+        "consolidate",
+        [
+            include_str!("prompts/consolidate.md"),
+            include_str!("prompts/consolidate.contract.md"),
+        ],
+    ),
+    (
+        "encode",
+        [
+            include_str!("prompts/encode.md"),
+            include_str!("prompts/encode.contract.md"),
+        ],
+    ),
+    (
+        "judge",
+        [
+            include_str!("prompts/judge.md"),
+            include_str!("prompts/judge.contract.md"),
+        ],
+    ),
+    (
+        "reflect",
+        [
+            include_str!("prompts/reflect.md"),
+            include_str!("prompts/reflect.contract.md"),
+        ],
+    ),
+];
 
 /// Recall's fixed question, after each candidate's record: never read from a memory. The
 /// reference's, byte for byte (docs/recall.html#chosen).
@@ -104,6 +125,26 @@ static BUSY: Mutex<()> = Mutex::new(());
 
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
+
+/// Puts each `(job, guidance)` in force: the guidance in force first copied to
+/// `<root>/prompts/.history/<yyyy>/<mm>/<dd>/<HHMMSS>-<job>.md` (UTC, `dated`), then the new one
+/// written to `<root>/prompts/<job>.md` by temp + rename; the copies' paths under the root, by job.
+fn adopt(root: &Path, changes: &[(&str, String)]) -> io::Result<Map<String, Value>> {
+    let (mut claimed, mut history) = (BTreeSet::new(), Map::new());
+    for change in changes {
+        let copy = dated(
+            root,
+            "prompts/.history",
+            &format!("{}.md", change.0),
+            &mut claimed,
+        );
+        put(&copy, &guide(root, change.0))?;
+        put(&root.join(format!("prompts/{}.md", change.0)), &change.1)?;
+        let kept = copy.strip_prefix(root).unwrap_or(&copy).to_string_lossy();
+        drop(history.insert(change.0.to_owned(), kept.into()));
+    }
+    Ok(history)
+}
 
 /// Appends `rows`, each `{"h","path","v"}`, to the embedding cache `<root>/embeddings.jsonl` in one
 /// write.
@@ -134,6 +175,30 @@ fn common(dir: &Path) -> Option<PathBuf> {
     let repo = worktrees.parent().unwrap_or(worktrees);
     (name(worktrees) == "worktrees")
         .then(|| fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf()))
+}
+
+/// `whole` within `budget` bytes: past it, the head and the tail halves, cut back to whole lines,
+/// around `… <n> bytes omitted …`.
+fn cut(whole: String, budget: usize) -> String {
+    if whole.len() <= budget {
+        return whole;
+    }
+    let half = budget.div_euclid(2);
+    let head = whole
+        .get(..whole.floor_char_boundary(half))
+        .and_then(|kept| kept.rfind('\n'))
+        .map_or(0, |at| at.saturating_add(1));
+    let from = whole.ceil_char_boundary(whole.len().saturating_sub(half));
+    let tail = whole
+        .get(from..)
+        .and_then(|kept| kept.find('\n'))
+        .map_or(whole.len(), |at| from.saturating_add(at).saturating_add(1));
+    format!(
+        "{}\u{2026} {} bytes omitted \u{2026}\n{}",
+        whole.get(..head).unwrap_or_default(),
+        tail.saturating_sub(head),
+        whole.get(tail..).unwrap_or_default()
+    )
 }
 
 /// A free `<root>/<dir>/<yyyy>/<mm>/<dd>/<HHMMSS>-<file>` at this UTC second, claimed; a clash
@@ -248,6 +313,60 @@ fn end(
     record(root, &mut line).map(|()| line)
 }
 
+/// An episode's digest from its end line (AGENTS.md `### encode`), cut to `budget` bytes, and the
+/// directory it ran in.
+fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<String>) {
+    let (session, turns) = (
+        text(&closing["session"]),
+        jsonl(Path::new(text(&closing["archived"]))),
+    );
+    let cwd = place(&turns, &closing["cwd"]);
+    // what the session already remembered is done; a highlight it covers (the same body,
+    // whitespace collapsed) is dropped
+    let remembered: Vec<Value> = [notes(root, "memories"), notes(root, "traces")]
+        .concat()
+        .into_iter()
+        .filter(|note| note["session"] == session && text(&note["source"]).starts_with("remember"))
+        .collect();
+    let digest = format!(
+        "# episode\ndate: {}\ncwd: {}\n\n{}# transcript\n{}",
+        text(&closing["at"]),
+        cwd.unwrap_or("unknown"),
+        sections(&[
+            (
+                "already remembered",
+                remembered
+                    .iter()
+                    .map(|note| {
+                        format!(
+                            "{} \u{2014} {}",
+                            text(&note["name"]),
+                            text(&note["description"])
+                        )
+                    })
+                    .collect(),
+            ),
+            (
+                "highlights",
+                highlights(&turns)
+                    .into_iter()
+                    .filter(|body| {
+                        !remembered
+                            .iter()
+                            .any(|note| one_line(text(&note["body"]), 4000) == *body)
+                    })
+                    .collect(),
+            ),
+        ]),
+        turns
+            .iter()
+            .flat_map(parts)
+            .map(|(role, said)| [role, ": ", &said, "\n"].concat())
+            .collect::<String>()
+    );
+    (cut(digest, budget), cwd.map(str::to_owned))
+}
+
 /// What is embedded of a candidate: its head and the first 1,500 characters of its body.
 fn excerpt(memory: &Value, label: &str) -> String {
     format!(
@@ -281,6 +400,21 @@ fn front(text: &str) -> Vec<(&str, &str)> {
         .filter_map(|line| line.split_once(':'))
         .map(|(key, value)| (key.trim(), value.trim()))
         .collect()
+}
+
+/// A job's guidance in force: `<root>/prompts/<job>.md` when it holds any non-blank text, else the
+/// default built in.
+fn guide(root: &Path, job: &str) -> String {
+    let custom = fs::read_to_string(root.join(format!("prompts/{job}.md"))).unwrap_or_default();
+    if custom.trim().is_empty() {
+        PROMPTS
+            .iter()
+            .find(|prompt| prompt.0 == job)
+            .map_or("", |prompt| prompt.1[0])
+            .to_owned()
+    } else {
+        custom
+    }
 }
 
 /// An embedding's cache key, the reference's: SHA-256 (FIPS 180-4) hex of
@@ -658,24 +792,16 @@ fn notes(root: &Path, dir: &str) -> Vec<Value> {
                 && path.extension() == Some("md".as_ref())
                 && path.is_file())
             .then(|| {
-                let text = fs::read_to_string(path).unwrap_or_default();
-                let mut note = json!({"name": path.file_stem().and_then(OsStr::to_str)});
-                for (key, value) in front(&text) {
-                    note[key] = value.into();
-                }
+                let mut note = read(
+                    json!({"name": path.file_stem().and_then(OsStr::to_str)}),
+                    fs::read_to_string(path).unwrap_or_default(),
+                );
                 let address = format!("{dir}/{bank}/{file}");
                 (note["bank"], note["file"], note["path"]) = (
                     bank.into(),
                     file.into(),
                     address.strip_prefix("memories/").unwrap_or(&address).into(),
                 );
-                note["body"] = text
-                    .strip_prefix("---\n")
-                    .and_then(|rest| rest.split_once("\n---"))
-                    .map_or(text.as_str(), |(_, body)| body)
-                    .trim()
-                    .into();
-                note["text"] = text.into();
                 note
             })
         })
@@ -854,6 +980,22 @@ fn random() -> String {
     bytes.map(|byte| format!("{byte:02x}")).concat()
 }
 
+/// `note` with `whole`'s frontmatter fields set on it, then `body` (the frontmatter stripped,
+/// trimmed) and `text` (`whole`).
+fn read(mut note: Value, whole: String) -> Value {
+    for (key, value) in front(&whole) {
+        note[key] = value.into();
+    }
+    note["body"] = whole
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---"))
+        .map_or(whole.as_str(), |(_, body)| body)
+        .trim()
+        .into();
+    note["text"] = whole.into();
+    note
+}
+
 /// Appends `line`, stamped with `at` and `machine`, to today's ledger file with `O_APPEND`.
 fn record(root: &Path, line: &mut Value) -> io::Result<()> {
     let at = utc(SystemTime::now());
@@ -912,28 +1054,29 @@ fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
 }
 
 /// A tick job's model run: `command` through `sh -c` in its own process group, flagged so a
-/// session it starts is never taken, stdin `run/<job>.in` (the guidance, `<root>/prompts/<job>.md`
-/// when it holds any text, else `prompt`'s default; the contract; `data`), stdout and stderr to
-/// `run/<job>.out` and `.err`; the long-lived sign-in in `$CLAUDE_CODE_OAUTH_TOKEN` when its file
-/// passes, `noted` what the job's line says of it. `Ok(None)`: stopped, the group killed.
+/// session it starts is never taken, stdin `run/<job>.in` (`guidance`, else the job's in force;
+/// its contract; `data`), stdout and stderr to `run/<job>.out` and `.err`; the long-lived sign-in
+/// in `$CLAUDE_CODE_OAUTH_TOKEN` when its file passes, `noted` what the job's line says of it. A
+/// stop signal kills the group and fails the run.
 fn run(
     root: &Path,
     job: &str,
-    prompt: [&str; 2],
+    guidance: Option<&str>,
     command: &str,
     data: &str,
     limit: Duration,
     noted: &Cell<Option<String>>,
-) -> io::Result<Option<Value>> {
-    let [guidance, contract] = prompt;
+) -> io::Result<Value> {
     let file = |ext: &str| root.join(format!("run/{job}.{ext}"));
-    let custom = fs::read_to_string(root.join(format!("prompts/{job}.md"))).unwrap_or_default();
-    let chosen = if custom.trim().is_empty() {
-        guidance
-    } else {
-        &custom
-    };
-    fs::write(file("in"), format!("{chosen}\n{contract}\n{data}"))?;
+    let input = format!(
+        "{}\n{}\n{data}",
+        guidance.map_or_else(|| guide(root, job), str::to_owned),
+        PROMPTS
+            .iter()
+            .find(|prompt| prompt.0 == job)
+            .map_or("", |prompt| prompt.1[1])
+    );
+    fs::write(file("in"), input)?;
     // read at each run: a regular file no group or other can read, its trimmed text the token
     let path = env::var_os("SANDMAN_CLAUDE_TOKEN_FILE").map_or_else(
         || Path::new(&env::var_os("HOME").unwrap_or_default()).join("Codes/claude-oauth-token"),
@@ -970,12 +1113,25 @@ fn run(
         .stdout(File::create(file("out"))?)
         .stderr(File::create(file("err"))?)
         .spawn()?;
-    let status = match reap(&mut child, Instant::now(), limit) {
-        Err(_) if STOP.get().is_some() => return Ok(None),
-        done => done?,
-    };
-    let read = |ext: &str| fs::read_to_string(file(ext));
-    reply(status, &read("out")?, &read("err")?).map(Some)
+    let status = reap(&mut child, Instant::now(), limit)?;
+    let output = |ext: &str| fs::read_to_string(file(ext));
+    reply(status, &output("out")?, &output("err")?)
+}
+
+/// Per titled list that has any items: `# <title>`, a `- <item>` line each, a blank line.
+fn sections(lists: &[(&str, Vec<String>)]) -> String {
+    lists
+        .iter()
+        .filter(|list| !list.1.is_empty())
+        .map(|list| {
+            let items: String = list
+                .1
+                .iter()
+                .map(|item| ["- ", item, "\n"].concat())
+                .collect();
+            ["# ", list.0, "\n", &items, "\n"].concat()
+        })
+        .collect()
 }
 
 /// Per session in the ledger's `lines`: its earliest start mark (a reload re-fires it), its latest
@@ -1045,6 +1201,66 @@ fn slot(dir: &Path, kind: &str, name: &str, claimed: &mut BTreeSet<PathBuf>) -> 
 fn sorted(mut rows: Vec<Value>, key: &str) -> Vec<Value> {
     rows.sort_by(|left, right| left[key].as_str().cmp(&right[key].as_str()));
     rows
+}
+
+/// Consolidate's input for `bank` (AGENTS.md `### consolidate`): the traces whole, the memories
+/// whole while their bytes fit `allowance`, the rest listed; and the whole ones.
+fn stack<'note>(
+    bank: &str,
+    traces: &[&Value],
+    memories: &'note [Value],
+    allowance: usize,
+) -> (String, Vec<&'note Value>) {
+    let mut used = 0usize;
+    let (full, listed): (Vec<&Value>, Vec<&Value>) = memories.iter().partition(|memory| {
+        used = used.saturating_add(text(&memory["text"]).len());
+        used <= allowance
+    });
+    let block = |tag: &str, file: &Value| {
+        format!(
+            "<{tag} file=\"{}\">\n{}\n</{tag}>\n",
+            text(&file["file"]),
+            text(&file["text"]).trim_end()
+        )
+    };
+    let mut input = format!(
+        "# bank\n{bank}\n\n# traces\n{}",
+        traces
+            .iter()
+            .map(|trace| block("trace", trace))
+            .collect::<String>()
+    );
+    for (title, body) in [
+        (
+            "memories",
+            full.iter()
+                .map(|memory| block("memory", memory))
+                .collect::<String>(),
+        ),
+        (
+            "listed",
+            listed
+                .iter()
+                .map(|memory| {
+                    [
+                        "- ",
+                        text(&memory["file"]),
+                        " \u{b7} ",
+                        text(&memory["name"]),
+                        " \u{b7} ",
+                        text(&memory["description"]),
+                        "\n",
+                    ]
+                    .concat()
+                })
+                .collect(),
+        ),
+    ] {
+        if !body.is_empty() {
+            input.extend(["\n# ", title, "\n", &body]);
+        }
+    }
+    (input, full)
 }
 
 /// `.<file>.<pid>` beside `path`: a temp name every reader skips.
@@ -2177,9 +2393,22 @@ fn main() -> ExitCode {
                 setting("SANDMAN_DIGEST_BYTES", 300_000usize),
                 setting("SANDMAN_CONSOLIDATE_BYTES", 300_000usize),
             );
+            let (cadence, reflect_limit) = (
+                ms("SANDMAN_REFLECT_MS", 604_800_000),
+                ms("SANDMAN_REFLECTOR_MS", 600_000),
+            );
+            let (minimum, replays, ceiling, evidence) = (
+                setting("SANDMAN_REFLECT_MIN", 5usize),
+                setting("SANDMAN_REFLECT_REPLAY", 3usize),
+                setting("SANDMAN_GUIDANCE_BYTES", 8000usize),
+                setting("SANDMAN_REFLECT_BYTES", 300_000usize),
+            );
             let command = |key: &str| env::var(key).unwrap_or_else(|_| CLAUDE.to_owned());
-            let (encoder, consolidator) =
-                (command("SANDMAN_ENCODER"), command("SANDMAN_CONSOLIDATOR"));
+            let (encoder, consolidator, reflector) = (
+                command("SANDMAN_ENCODER"),
+                command("SANDMAN_CONSOLIDATOR"),
+                command("SANDMAN_REFLECTOR"),
+            );
             let logged = move |event: &str, key: &str, value: &str, written: io::Result<Value>| {
                 let mut line = written.unwrap_or_else(|error| json!({"reason": error.to_string()}));
                 (line["event"], line[key]) = (event.into(), value.into());
@@ -2317,115 +2546,114 @@ fn main() -> ExitCode {
                                 && marks[2]["at"].as_str() < marks[1]["at"].as_str()
                         })
                         .min_by_key(|marks| marks[1]["at"].as_str());
+                    let cutoff = ago(calm);
+                    let labile = notes(&data, "traces");
+                    let mut banks: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
+                    for trace in &labile {
+                        banks.entry(text(&trace["bank"])).or_default().push(trace);
+                    }
+                    // quiet: its newest trace older than the window; a failed bank waits for a
+                    // trace newer than its failure
+                    let ripe = banks
+                        .into_iter()
+                        .filter(|pair| {
+                            let newest = pair.1.iter().map(|trace| text(&trace["created"])).max();
+                            let failed = lines
+                                .iter()
+                                .filter(|line| {
+                                    line["kind"] == "consolidate"
+                                        && line["outcome"] == "failed"
+                                        && line["bank"] == pair.0
+                                })
+                                .filter_map(|line| line["at"].as_str())
+                                .max();
+                            newest <= Some(cutoff.as_str()) && failed < newest
+                        })
+                        .min_by_key(|pair| {
+                            pair.1.iter().map(|trace| text(&trace["created"])).min()
+                        });
+                    // the latest reflect line of this machine, and the model runs since
+                    let since = lines
+                        .iter()
+                        .rposition(|line| line["kind"] == "reflect" && line["machine"] == this);
+                    let last = since
+                        .and_then(|at| lines.get(at))
+                        .cloned()
+                        .unwrap_or_default();
+                    let after = lines
+                        .get(since.map_or(0, |at| at.saturating_add(1))..)
+                        .unwrap_or_default();
+                    let ran = |line: &&Value| {
+                        line["machine"] == this
+                            && (line["kind"] == "consolidate"
+                                || (line["kind"] == "encode"
+                                    && (line["outcome"] == "encoded"
+                                        || line["outcome"] == "failed")))
+                    };
+                    // an adoption whose job's next two runs both failed is rolled back
+                    let revert = last["history"]
+                        .as_object()
+                        .filter(|_| last["outcome"] == "adopted")
+                        .into_iter()
+                        .flat_map(Map::keys)
+                        .find(|job| {
+                            let next: Vec<&Value> = after
+                                .iter()
+                                .filter(ran)
+                                .filter(|line| line["kind"] == job.as_str())
+                                .take(2)
+                                .collect();
+                            next.len() == 2 && next.iter().all(|line| line["outcome"] == "failed")
+                        })
+                        .cloned();
+                    let due = last["at"]
+                        .as_str()
+                        .is_none_or(|at| at <= ago(cadence).as_str())
+                        && after.iter().filter(ran).count() >= minimum;
                     let (_busy, noted) = (
                         BUSY.lock().unwrap_or_else(PoisonError::into_inner),
                         Cell::new(None),
                     );
-                    // one job a tick: the oldest of this machine's episodes taken and not encoded
-                    // since; with none waiting, the quiet bank whose oldest trace is oldest
-                    let (kind, key, value, mut zero, done) = if let Some(marks) = oldest {
-                        let (episode, interactive) = (&marks[1], &marks[4]);
-                        let session = text(&episode["session"]);
-                        let archived = Path::new(text(&episode["archived"]));
-                        // Ok(None): stopped, so no line and the episode waits for the next start
-                        let encode = || -> io::Result<Option<Value>> {
+                    // one job a tick: a rollback; else the oldest of this machine's episodes taken
+                    // and not encoded since; else the quiet bank whose oldest trace is oldest; else,
+                    // when due, the weekly review of the guidance
+                    let (kind, key, value, mut zero, done) = if let Some(job) = revert {
+                        let back = || -> io::Result<Value> {
+                            let earlier =
+                                fs::read_to_string(data.join(text(&last["history"][&job])))?;
+                            Ok(json!({
+                                "history": adopt(&data, &[(job.as_str(), earlier)])?,
+                                "outcome": "reverted", "reason": "its next two runs failed",
+                            }))
+                        };
+                        (
+                            "reflect",
+                            "kind",
+                            "reflect".to_owned(),
+                            json!({"history": {}}),
+                            back(),
+                        )
+                    } else if let Some(marks) = oldest {
+                        let (closing, interactive) = (&marks[1], &marks[4]);
+                        let session = text(&closing["session"]);
+                        let archived = Path::new(text(&closing["archived"]));
+                        let encode = || -> io::Result<Value> {
                             if *interactive != true {
-                                return Ok(Some(json!({"outcome": "skipped", "traces": 0})));
+                                return Ok(json!({"outcome": "skipped", "traces": 0}));
                             }
                             if !archived.is_file() {
-                                return Ok(Some(json!({"outcome": "gone", "traces": 0})));
+                                return Ok(json!({"outcome": "gone", "traces": 0}));
                             }
-                            let turns = jsonl(archived);
-                            let cwd = place(&turns, &episode["cwd"]);
-                            let mut digest = format!(
-                                "# episode\ndate: {}\ncwd: {}\n\n",
-                                text(&episode["at"]),
-                                cwd.unwrap_or("unknown")
-                            );
-                            // what the session already remembered is done; a highlight it covers
-                            // (the same body, whitespace collapsed) is dropped
-                            let remembered: Vec<Value> =
-                                [notes(&data, "memories"), notes(&data, "traces")]
-                                    .concat()
-                                    .into_iter()
-                                    .filter(|note| {
-                                        note["session"] == session
-                                            && text(&note["source"]).starts_with("remember")
-                                    })
-                                    .collect();
-                            for (title, items) in [
-                                (
-                                    "already remembered",
-                                    remembered
-                                        .iter()
-                                        .map(|note| {
-                                            format!(
-                                                "{} \u{2014} {}",
-                                                text(&note["name"]),
-                                                text(&note["description"])
-                                            )
-                                        })
-                                        .collect(),
-                                ),
-                                (
-                                    "highlights",
-                                    highlights(&turns)
-                                        .into_iter()
-                                        .filter(|body| {
-                                            !remembered.iter().any(|note| {
-                                                one_line(text(&note["body"]), 4000) == *body
-                                            })
-                                        })
-                                        .collect::<Vec<_>>(),
-                                ),
-                            ] {
-                                if !items.is_empty() {
-                                    digest.extend([format!("# {title}\n")]);
-                                    digest.extend(items.iter().map(|line| format!("- {line}\n")));
-                                    digest.push('\n');
-                                }
-                            }
-                            digest.push_str("# transcript\n");
-                            digest.extend(
-                                turns
-                                    .iter()
-                                    .flat_map(parts)
-                                    .map(|(role, said)| format!("{role}: {said}\n")),
-                            );
-                            // the head and the tail, whole lines, the middle one line
-                            if digest.len() > budget {
-                                let half = budget.div_euclid(2);
-                                let head = digest
-                                    .get(..digest.floor_char_boundary(half))
-                                    .and_then(|kept| kept.rfind('\n'))
-                                    .map_or(0, |at| at.saturating_add(1));
-                                let from =
-                                    digest.ceil_char_boundary(digest.len().saturating_sub(half));
-                                let tail = digest
-                                    .get(from..)
-                                    .and_then(|kept| kept.find('\n'))
-                                    .map_or(digest.len(), |at| {
-                                        from.saturating_add(at).saturating_add(1)
-                                    });
-                                digest = format!(
-                                    "{}\u{2026} {} bytes omitted \u{2026}\n{}",
-                                    digest.get(..head).unwrap_or_default(),
-                                    tail.saturating_sub(head),
-                                    digest.get(tail..).unwrap_or_default()
-                                );
-                            }
-                            let Some(reply) = run(
+                            let (digest, cwd) = episode(&data, closing, budget);
+                            let reply = run(
                                 &data,
                                 "encode",
-                                ENCODE,
+                                None,
                                 &encoder,
                                 &digest,
                                 encode_limit,
                                 &noted,
-                            )?
-                            else {
-                                return Ok(None);
-                            };
+                            )?;
                             let traces = reply["traces"].as_array();
                             if let Some(bad) = traces.map_or(Some(&reply), |list| {
                                 list.iter().find(|trace| {
@@ -2452,7 +2680,7 @@ fn main() -> ExitCode {
                                 let bank = key(&project(
                                     &Some(PathBuf::from(about))
                                         .filter(|dir| dir.is_absolute() && dir.is_dir())
-                                        .or_else(|| cwd.map(PathBuf::from))
+                                        .or_else(|| cwd.as_ref().map(PathBuf::from))
                                         .unwrap_or_else(|| home.clone()),
                                 ));
                                 let file = slot(
@@ -2486,9 +2714,7 @@ fn main() -> ExitCode {
                                 );
                                 put(&file, &contents)?;
                             }
-                            Ok(Some(
-                                json!({"outcome": "encoded", "traces": traces.map_or(0, Vec::len)}),
-                            ))
+                            Ok(json!({"outcome": "encoded", "traces": traces.map_or(0, Vec::len)}))
                         };
                         (
                             "encode",
@@ -2497,113 +2723,29 @@ fn main() -> ExitCode {
                             json!({"traces": 0u8}),
                             encode(),
                         )
-                    } else {
-                        let cutoff = ago(calm);
-                        let traces = notes(&data, "traces");
-                        let mut banks: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
-                        for trace in &traces {
-                            banks.entry(text(&trace["bank"])).or_default().push(trace);
-                        }
-                        // quiet: its newest trace older than the window; a failed bank waits
-                        // for a trace newer than its failure
-                        let Some((bank, held)) = banks
-                            .into_iter()
-                            .filter(|pair| {
-                                let newest =
-                                    pair.1.iter().map(|trace| text(&trace["created"])).max();
-                                let failed = lines
-                                    .iter()
-                                    .filter(|line| {
-                                        line["kind"] == "consolidate"
-                                            && line["outcome"] == "failed"
-                                            && line["bank"] == pair.0
-                                    })
-                                    .filter_map(|line| line["at"].as_str())
-                                    .max();
-                                newest <= Some(cutoff.as_str()) && failed < newest
-                            })
-                            .min_by_key(|pair| {
-                                pair.1.iter().map(|trace| text(&trace["created"])).min()
-                            })
-                        else {
-                            continue;
-                        };
+                    } else if let Some((bank, inbound)) = ripe {
                         let memories: Vec<Value> = notes(&data, "memories")
                             .into_iter()
                             .filter(|memory| memory["bank"] == bank)
                             .collect();
-                        let consolidate = || -> io::Result<Option<Value>> {
-                            // whole memories while they fit the budget, the rest listed
-                            let mut used = 0usize;
-                            let (full, listed): (Vec<&Value>, Vec<&Value>) =
-                                memories.iter().partition(|memory| {
-                                    used = used.saturating_add(text(&memory["text"]).len());
-                                    used <= allowance
-                                });
-                            let block = |tag: &str, file: &Value| {
-                                format!(
-                                    "<{tag} file=\"{}\">\n{}\n</{tag}>\n",
-                                    text(&file["file"]),
-                                    text(&file["text"]).trim_end()
-                                )
-                            };
-                            let mut input = format!(
-                                "# bank\n{bank}\n\n# traces\n{}",
-                                held.iter()
-                                    .map(|trace| block("trace", trace))
-                                    .collect::<String>()
-                            );
-                            for (title, body) in [
-                                (
-                                    "memories",
-                                    full.iter()
-                                        .map(|memory| block("memory", memory))
-                                        .collect::<String>(),
-                                ),
-                                (
-                                    "listed",
-                                    listed
-                                        .iter()
-                                        .map(|memory| {
-                                            [
-                                                "- ",
-                                                text(&memory["file"]),
-                                                " \u{b7} ",
-                                                text(&memory["name"]),
-                                                " \u{b7} ",
-                                                text(&memory["description"]),
-                                                "\n",
-                                            ]
-                                            .concat()
-                                        })
-                                        .collect(),
-                                ),
-                            ] {
-                                if !body.is_empty() {
-                                    input.extend(["\n# ", title, "\n", &body]);
-                                }
-                            }
-                            let Some(reply) = run(
+                        let consolidate = || -> io::Result<Value> {
+                            let (input, full) = stack(bank, &inbound, &memories, allowance);
+                            let reply = run(
                                 &data,
                                 "consolidate",
-                                CONSOLIDATE,
+                                None,
                                 &consolidator,
                                 &input,
                                 consolidate_limit,
                                 &noted,
-                            )?
-                            else {
-                                return Ok(None);
-                            };
-                            let fed = |notes: &[&Value]| -> BTreeMap<String, Value> {
-                                notes
+                            )?;
+                            let fed = |found: &[&Value]| -> BTreeMap<String, Value> {
+                                found
                                     .iter()
-                                    .map(|found| {
-                                        (text(&found["file"]).to_owned(), (*found).clone())
-                                    })
+                                    .map(|one| (text(&one["file"]).to_owned(), (*one).clone()))
                                     .collect()
                             };
-                            let (given, held_memories) = (fed(&held), fed(&full));
+                            let (given, held_memories) = (fed(&inbound), fed(&full));
                             // every trace named once, a memory at most once, only whole ones
                             let ops = reply["ops"].as_array();
                             let mut named = BTreeSet::new();
@@ -2767,9 +2909,9 @@ fn main() -> ExitCode {
                                     .filter(|done| done["op"] == op)
                                     .count()
                             };
-                            Ok(Some(json!({
+                            Ok(json!({
                                 "kept": count("keep"), "merged": count("merge"), "outcome": "consolidated", "pruned": count("prune"),
-                            })))
+                            }))
                         };
                         (
                             "consolidate",
@@ -2778,10 +2920,350 @@ fn main() -> ExitCode {
                             json!({"kept": 0u8, "merged": 0u8, "pruned": 0u8}),
                             consolidate(),
                         )
+                    } else if due {
+                        let reflect = || -> io::Result<Value> {
+                            let mine = |kind: &str| -> Vec<&Value> {
+                                after
+                                    .iter()
+                                    .filter(|line| line["kind"] == kind && line["machine"] == this)
+                                    .collect()
+                            };
+                            let pruned = tree(&data.join(".pruned"), 4);
+                            let replies: Vec<&PathBuf> = pruned
+                                .iter()
+                                .filter(|path| name(path).ends_with("-ops.json"))
+                                .collect();
+                            // `<HHMMSS>-<bank>-ops.json`: the bank
+                            let bank_of = |path: &Path| {
+                                name(path)
+                                    .get(7..)
+                                    .and_then(|rest| rest.strip_suffix("-ops.json"))
+                                    .unwrap_or_default()
+                                    .to_owned()
+                            };
+                            let ops_of = |path: &Path| {
+                                serde_json::from_str::<Value>(
+                                    &fs::read_to_string(path).unwrap_or_default(),
+                                )
+                                .unwrap_or_default()["ops"]
+                                    .as_array()
+                                    .cloned()
+                                    .unwrap_or_default()
+                            };
+                            // each op since, its body cut
+                            let ops: Vec<(String, Value)> = replies
+                                .iter()
+                                .filter(|path| {
+                                    fs::metadata(path)
+                                        .and_then(|meta| meta.modified())
+                                        .is_ok_and(|time| utc(time).as_str() > text(&last["at"]))
+                                })
+                                .flat_map(|path| {
+                                    let bank = bank_of(path);
+                                    ops_of(path).into_iter().map(move |mut op| {
+                                        drop(
+                                            op.as_object_mut().map(|fields| fields.remove("body")),
+                                        );
+                                        (bank.clone(), op)
+                                    })
+                                })
+                                .collect();
+                            let merged: Vec<String> = ops
+                                .iter()
+                                .filter(|pair| pair.1["op"] == "merge")
+                                .map(|pair| format!("{}/{}", pair.0, text(&pair.1["memory"])))
+                                .collect();
+                            let again: BTreeSet<String> = merged
+                                .iter()
+                                .map(|file| {
+                                    (file, merged.iter().filter(|other| *other == file).count())
+                                })
+                                .filter(|pair| pair.1 > 1)
+                                .map(|pair| format!("{} \u{b7} merged {} times", pair.0, pair.1))
+                                .collect();
+                            // what an agent had to remember by hand: the trace, live or moved aside
+                            let remembered: Vec<String> = mine("remember")
+                                .into_iter()
+                                .map(|line| {
+                                    let file = text(&line["file"]);
+                                    let (bank, stem) = file
+                                        .strip_prefix("traces/")
+                                        .and_then(|rest| rest.split_once('/'))
+                                        .unwrap_or_default();
+                                    let aside = format!("-{bank}-{stem}");
+                                    let found = iter::once(data.join(file))
+                                        .chain(
+                                            pruned
+                                                .iter()
+                                                .filter(|path| name(path).ends_with(&aside))
+                                                .cloned(),
+                                        )
+                                        .find_map(|path| fs::read_to_string(path).ok())
+                                        .unwrap_or_default();
+                                    let trace = read(json!({}), found);
+                                    format!(
+                                        "{} \u{2014} {} ({file})",
+                                        text(&trace["name"]),
+                                        text(&trace["description"])
+                                    )
+                                })
+                                .collect();
+                            // recall's feedback: sent again and again, never read in the session
+                            let shown: BTreeSet<(&str, &str)> = mine("show")
+                                .into_iter()
+                                .map(|line| (text(&line["session"]), text(&line["file"])))
+                                .collect();
+                            let sends: Vec<(&str, &str)> =
+                                mine("recall")
+                                    .into_iter()
+                                    .flat_map(|line| {
+                                        line["sent"].as_array().into_iter().flatten().map(
+                                            move |one| (text(&line["session"]), text(&one["file"])),
+                                        )
+                                    })
+                                    .collect();
+                            let unread: BTreeSet<String> = sends
+                                .iter()
+                                .filter(|pair| {
+                                    !sends
+                                        .iter()
+                                        .any(|other| other.1 == pair.1 && shown.contains(other))
+                                })
+                                .map(|pair| {
+                                    (
+                                        pair.1,
+                                        sends.iter().filter(|other| other.1 == pair.1).count(),
+                                    )
+                                })
+                                .filter(|pair| pair.1 >= 3)
+                                .map(|pair| {
+                                    format!("{} \u{b7} sent {} times, never shown", pair.0, pair.1)
+                                })
+                                .collect();
+                            let input = format!(
+                                "<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n\n# since\n{}\n\n{}",
+                                guide(&data, "encode").trim_end(),
+                                guide(&data, "consolidate").trim_end(),
+                                last["at"].as_str().unwrap_or("the start"),
+                                cut(
+                                    sections(&[
+                                        (
+                                            "runs",
+                                            after
+                                                .iter()
+                                                .filter(ran)
+                                                .map(Value::to_string)
+                                                .collect()
+                                        ),
+                                        (
+                                            "ops",
+                                            ops.iter()
+                                                .map(|pair| format!("{}: {}", pair.0, pair.1))
+                                                .collect()
+                                        ),
+                                        ("merged again", again.into_iter().collect()),
+                                        ("remembered by hand", remembered),
+                                        ("sent, never read", unread.into_iter().collect()),
+                                    ]),
+                                    evidence
+                                )
+                            );
+                            let reply = run(
+                                &data,
+                                "reflect",
+                                None,
+                                &reflector,
+                                &input,
+                                reflect_limit,
+                                &noted,
+                            )?;
+                            let jobs = ["consolidate", "encode"];
+                            if !reply["reason"].is_string()
+                                || jobs
+                                    .iter()
+                                    .any(|job| !(reply[job].is_null() || reply[job].is_string()))
+                            {
+                                return Err(io::Error::other(format!(
+                                    "output: not a proposal: {}",
+                                    one_line(&reply.to_string(), 200)
+                                )));
+                            }
+                            if let Some(job) =
+                                jobs.iter().find(|job| text(&reply[**job]).len() > ceiling)
+                            {
+                                return Err(io::Error::other(format!(
+                                    "output: {job} guidance over {ceiling} bytes"
+                                )));
+                            }
+                            // each proposal replayed: the old and the new on the same recent
+                            // inputs, writing nothing, one judge per input under labels in a random
+                            // order; adopted unless the old wins one
+                            let (mut judged, mut adopted) = (Map::new(), Vec::new());
+                            for job in jobs {
+                                let Some(new) = reply[job].as_str() else {
+                                    continue;
+                                };
+                                let (model_command, limit, inputs): (&str, Duration, Vec<String>) =
+                                    if job == "encode" {
+                                        (
+                                            &encoder,
+                                            encode_limit,
+                                            lines
+                                                .iter()
+                                                .rev()
+                                                .filter(|line| {
+                                                    line["kind"] == "encode"
+                                                        && line["outcome"] == "encoded"
+                                                        && line["machine"] == this
+                                                })
+                                                .filter_map(|line| {
+                                                    story.get(text(&line["session"]))
+                                                })
+                                                .filter(|marks| {
+                                                    Path::new(text(&marks[1]["archived"])).is_file()
+                                                })
+                                                .take(replays)
+                                                .map(|marks| episode(&data, &marks[1], budget).0)
+                                                .collect(),
+                                        )
+                                    } else {
+                                        // a past consolidate rebuilt: the traces it consumed and the
+                                        // memories it changed as they stood, beside the bank's others
+                                        // now, less those its keeps wrote
+                                        (
+                                            &consolidator,
+                                            consolidate_limit,
+                                            replies
+                                                .iter()
+                                                .rev()
+                                                .take(replays)
+                                                .map(|path| {
+                                                    let stem = name(path)
+                                                        .strip_suffix("ops.json")
+                                                        .unwrap_or_default();
+                                                    let applied = ops_of(path);
+                                                    let aside = |field: &str| -> Vec<Value> {
+                                                        applied
+                                                            .iter()
+                                                            .filter_map(|op| op[field].as_str())
+                                                            .filter_map(|file| {
+                                                                let whole = fs::read_to_string(
+                                                                    path.with_file_name(format!(
+                                                                        "{stem}{file}"
+                                                                    )),
+                                                                )
+                                                                .ok()?;
+                                                                Some(read(
+                                                                    json!({"file": file}),
+                                                                    whole,
+                                                                ))
+                                                            })
+                                                            .collect()
+                                                    };
+                                                    let (consumed, mut stood) =
+                                                        (aside("trace"), aside("memory"));
+                                                    let bank = bank_of(path);
+                                                    let others: Vec<Value> =
+                                                        notes(&data, "memories")
+                                                            .into_iter()
+                                                            .filter(|memory| {
+                                                                memory["bank"] == bank.as_str()
+                                                            && !stood.iter().any(|earlier| {
+                                                                earlier["file"] == memory["file"]
+                                                            })
+                                                            && !consumed.iter().any(|trace| {
+                                                                trace["created"]
+                                                                    == memory["created"]
+                                                                    && trace["session"]
+                                                                        == memory["session"]
+                                                            })
+                                                            })
+                                                            .collect();
+                                                    stood.extend(others);
+                                                    stack(
+                                                        &bank,
+                                                        &consumed.iter().collect::<Vec<_>>(),
+                                                        &sorted(stood, "file"),
+                                                        allowance,
+                                                    )
+                                                    .0
+                                                })
+                                                .collect(),
+                                        )
+                                    };
+                                // new, same, old
+                                let mut tally = [0u8; 3];
+                                let judge = |asked: &str| {
+                                    run(
+                                        &data,
+                                        "judge",
+                                        None,
+                                        &reflector,
+                                        asked,
+                                        reflect_limit,
+                                        &noted,
+                                    )
+                                };
+                                for replayed in &inputs {
+                                    let ask = |given: Option<&str>| {
+                                        run(
+                                            &data,
+                                            job,
+                                            given,
+                                            model_command,
+                                            replayed,
+                                            limit,
+                                            &noted,
+                                        )
+                                    };
+                                    let pair = [ask(None)?, ask(Some(new))?];
+                                    let flip = usize::from(random().as_str() > "8");
+                                    let asked = format!(
+                                        "# job\n{job}\n\n# input\n{replayed}\n# a\n{}\n\n# b\n{}\n",
+                                        pair[flip],
+                                        pair[flip ^ 1]
+                                    );
+                                    let verdict = judge(&asked)?;
+                                    let pick = ["a", "b", "same"]
+                                        .iter()
+                                        .position(|label| verdict["better"] == *label)
+                                        .ok_or_else(|| {
+                                            io::Error::other(format!(
+                                                "output: not a verdict: {}",
+                                                one_line(&verdict.to_string(), 200)
+                                            ))
+                                        })?;
+                                    let at = [[2usize, 0, 1], [0, 2, 1]][flip][pick];
+                                    tally[at] = tally[at].saturating_add(1);
+                                }
+                                drop(judged.insert(
+                                    job.to_owned(),
+                                    json!({"new": tally[0], "old": tally[2], "same": tally[1]}),
+                                ));
+                                if !inputs.is_empty() && tally[2] == 0 {
+                                    adopted.push((job, new.to_owned()));
+                                }
+                            }
+                            let history = adopt(&data, &adopted)?;
+                            Ok(json!({
+                                "outcome": (["kept", "adopted"][usize::from(!history.is_empty())]),
+                                "reason": one_line(text(&reply["reason"]), 400), "replay": judged, "history": history,
+                            }))
+                        };
+                        (
+                            "reflect",
+                            "kind",
+                            "reflect".to_owned(),
+                            json!({"history": {}}),
+                            reflect(),
+                        )
+                    } else {
+                        continue;
                     };
                     let mut line = match done {
-                        Ok(None) => continue,
-                        Ok(Some(line)) => line,
+                        Ok(line) => line,
+                        // stopped: the group killed, no line; the job runs again after the next start
+                        Err(_) if STOP.get().is_some() => continue,
                         Err(error) => {
                             (zero["error"], zero["outcome"]) =
                                 (one_line(&error.to_string(), 400).into(), "failed".into());
