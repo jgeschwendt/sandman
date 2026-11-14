@@ -7,6 +7,10 @@
     {"cwd": "/work/beta", "encoded": null, "end": null, "interactive": true, "machine": "studio", "outcome": null, "seen": "2026-11-10T08:30:00Z", "session": "5a000000-0000-4000-8000-00000000000d", "start": "2026-11-10T07:45:00Z"}
   ],
   "at": "2026-11-10T12:00:00Z",
+  "guards": [
+    {"at": "2026-11-09T09:10:00Z", "rationale": "sample: never force-push", "session": "5a000000-0000-4000-8000-00000000000a", "tool": "Bash"},
+    {"at": "2026-11-10T07:50:00Z", "rationale": "sample: ask before deleting", "session": "5a000000-0000-4000-8000-00000000000g", "tool": null}
+  ],
   "intentions": [
     {"about": "/work/alpha", "after": null, "closed": null, "created": "2026-11-09T09:20:00Z", "due": "2026-11-12", "id": "1f2e3d4c", "session": "5a000000-0000-4000-8000-00000000000a", "state": "open", "what": "sample: rerun the alpha bench"},
     {"about": null, "after": null, "closed": "2026-11-10T08:00:00Z", "created": "2026-11-09T11:00:00Z", "due": "2026-11-10", "id": "5b6a7980", "session": null, "state": "done", "what": "sample: draft the beta notes"},
