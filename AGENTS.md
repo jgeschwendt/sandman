@@ -2,7 +2,7 @@
 
 ```stele
 kind: system
-purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `recall` seeds a session's start and serves the agent's pulls over the memories (episodic, by repository) and the knowledge store (knowledge pages and playbooks, by topic): a lexical gate, BM25 and cached embeddings fused, a local decision model on the top 10, fused again, `show` prints one, `remember` writes a trace at once, `defer` keeps work the person puts off as an intention (prospective memory, due a date or after an event) that the seed surfaces when due, `due` lists them, `done` and `drop` close one, `mcp` serves those to an agent as MCP tools, `serve` is the daemon under launchd, whose tick ends sessions that never ended, fills recall's embedding cache, settles held takes, encodes episodes into traces, a memory's by repository and a knowledge or playbook's by topic, consolidates a bank's traces into the bank and a topic's into its pages and, weekly, reflects: rewrites those two jobs' guidance from evidence, adopted after a judged replay, unattended, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
+purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end, or a denied tool call (a guard), to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `recall` seeds a session's start and serves the agent's pulls over the memories (episodic, by repository) and the knowledge store (knowledge pages and playbooks, by topic): a lexical gate, BM25 and cached embeddings fused, a local decision model on the top 10, fused again, `show` prints one, `remember` writes a trace at once, `defer` keeps work the person puts off as an intention (prospective memory, due a date or after an event) that the seed surfaces when due, `due` lists them, `done` and `drop` close one, `mcp` serves those to an agent as MCP tools, `serve` is the daemon under launchd, whose tick ends sessions that never ended, fills recall's embedding cache, settles held takes, encodes episodes into traces, a memory's by repository and a knowledge or playbook's by topic, consolidates a bank's traces into the bank and a topic's into its pages and, weekly, reflects: rewrites those two jobs' guidance from evidence, adopted after a judged replay, unattended, `status` asks it for its health, `setup` installs it under launchd and retires the old sandman's agents, `forget` erases one session from every store for good, `version` prints the build. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
 commands:
   check: mise run check
   cover: mise run cover
@@ -14,10 +14,11 @@ commands:
 
 | path                     | what                                                                                       |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
-| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `defer`, `done`, `drop`, `due`, `mcp`, `recall`, `remember`, `serve` and its tick (reconcile, embed, settle, encode, consolidate, reflect), `setup`, `show`, `status`; one file, recall's pipeline a closure in its arm (clippy's `single_call_fn` would fire on a module's entry), what recall and the tick share top-level |
+| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `defer`, `done`, `drop`, `due`, `forget`, `mcp`, `recall`, `remember`, `serve` and its tick (reconcile, embed, settle, encode, consolidate, reflect), `setup`, `show`, `status`, `version`; one file, recall's pipeline a closure in its arm (clippy's `single_call_fn` would fire on a module's entry), what recall and the tick share top-level |
+| `build.rs`               | the build identity, `SANDMAN_BUILD`: the short commit, `-dirty` over uncommitted work, `unknown` outside git |
 | `src/prompts/<job>.md`   | a model job's default guidance (`encode`, `consolidate`, `reflect`, `judge`), `<job>.contract.md` its fixed contract; both embedded with `include_str!` |
-| `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots and Claude homes via `SANDMAN_ROOT`, `SANDMAN_MACHINE`, `CLAUDE_CONFIG_DIR`, a fixed local day via `SANDMAN_TODAY`, stub shell model commands via `SANDMAN_ENCODER`, `SANDMAN_CONSOLIDATOR` and `SANDMAN_REFLECTOR` (`exit 9` unless a test names one, and no review unless a test lowers `SANDMAN_REFLECT_MIN` from the harness's 1000); every transport is curl, and the first `curl` on `PATH` is a stub: one that refuses unless a test plants `stub`'s, which logs each request by its URL and answers embeddings `[clock, deploy, beta, 1]` from the text (`SANDMAN_OLLAMA` `http://ollama.test`, `TYPESAFE_API_KEY` removed); a `Daemon` guard kills every `serve` it starts (SIGTERM one whose coverage counts: a SIGKILL writes no profile) |
-| `docs/index.html`        | the page, linking the recall, knowledge and intentions pages: data root, `mark`, `take`, `chart`, `serve`, `encode`, `consolidate`, `reflect`, next; two d3 charts and the daemon's lifecycle figure |
+| `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots and Claude homes via `SANDMAN_ROOT`, `SANDMAN_MACHINE`, `CLAUDE_CONFIG_DIR`, a fixed local day via `SANDMAN_TODAY`, stub shell model commands via `SANDMAN_ENCODER`, `SANDMAN_CONSOLIDATOR` and `SANDMAN_REFLECTOR` (`exit 9` unless a test names one, and no review unless a test lowers `SANDMAN_REFLECT_MIN` from the harness's 1000); `launchctl` a stub a test plants on `PATH`, `HOME` a temp dir (so `~/Library/LaunchAgents` is one too); every transport is curl, and the first `curl` on `PATH` is a stub: one that refuses unless a test plants `stub`'s, which logs each request by its URL and answers embeddings `[clock, deploy, beta, 1]` from the text (`SANDMAN_OLLAMA` `http://ollama.test`, `TYPESAFE_API_KEY` removed); a `Daemon` guard kills every `serve` it starts (SIGTERM one whose coverage counts: a SIGKILL writes no profile) |
+| `docs/index.html`        | the page, linking the recall, knowledge and intentions pages: data root, `mark`, `take`, `chart`, `forget`, `serve` (with `setup`, `status`, `version`), `encode`, `consolidate`, `reflect`, next; two d3 charts, the daemon's lifecycle figure and forget's order |
 | `docs/knowledge.html`    | the knowledge store's design page: the problem, the three memory systems and what maps to what, the store, how a page is written and revised (the split figure), the playbook's shape, recall, next, open questions |
 | `docs/intentions.html`   | prospective memory's design page: the problem, time- and event-based, the verbs, the store, what the seed shows (the timeline figure, the pinned due block), surfaced never acted on, next, open questions |
 | `docs/recall.html`       | `recall`'s design page: the problem, the flow (the seed and the agent's pull), one section per decision, the agent's tools (commands and MCP), the pane; the reach chart and the flow figure; what is built marked so |
@@ -32,21 +33,25 @@ The gate is `mise run check` (fmt, clippy `-D warnings`, `cover` at 100 % of lin
 
 ## Contracts
 
-Root: `$SANDMAN_ROOT`, else `$HOME/.sandman`. Machine id: `$SANDMAN_MACHINE`, else `<root>/machine` (one line, 32 lowercase hex from `/dev/urandom`), minted on first use by a hard link from a temp file so racing first runs agree. `sandman` with no or another verb: nine-line usage on stderr, exit 2. `--session` anywhere must be a session id (as `mark` checks), else one stderr line, exit 2. A command printed for an agent to run (the seed's instructions, the footer, `remember`'s line) names `<me>`, the file name the binary was invoked as, so `sandman-next` prints `sandman-next show …`; usage and error prefixes say `sandman`.
+Root: `$SANDMAN_ROOT`, else `$HOME/.sandman`. Machine id: `$SANDMAN_MACHINE`, else `<root>/machine` (one line, 32 lowercase hex from `/dev/urandom`), minted on first use by a hard link from a temp file so racing first runs agree. `sandman` with no or another verb: eleven-line usage on stderr, exit 2. `--session` anywhere must be a session id (as `mark` checks), else one stderr line, exit 2. A command printed for an agent to run (the seed's instructions, the footer, `remember`'s line) names `<me>`, the file name the binary was invoked as, so `sandman-next` prints `sandman-next show …`; usage and error prefixes say `sandman`.
 
 ### `sandman mark`
 
-Stdin, one object; `kind` and `session` (36 chars, hex and `-`) required, anything else missing is null:
+Stdin, one object; `kind` and `session` (36 chars, hex and `-`) required, anything else missing is null; a `guard` (a tool call the subether mod's guard denied) requires a string `rationale`:
 
 ```
 {"kind":"start"|"end","session":"<uuid>","cwd":"<path>"?,"surface":"<str>"?,"interactive":bool?,"reason":"<str>"?,"resume":"<str>"?}
+{"kind":"guard","session":"<uuid>","rationale":"<str>","tool":"<str>"?}
 ```
 
-Appends with `O_APPEND` to `<root>/ledger/<yyyy>/<mm>/<dd>.jsonl` (UTC), compact, keys alphabetical:
+Appends to `<root>/ledger/<yyyy>/<mm>/<dd>.jsonl` (UTC), compact, keys alphabetical, in one `O_APPEND` write under a shared `flock`, opened again when the file it waited on was replaced (`forget`); every ledger, log and embedding-cache append is this writer:
 
 ```
 {"at":"<RFC 3339 UTC, seconds, Z>","cwd":…,"interactive":…,"kind":…,"machine":…,"reason":…,"resume":…,"session":…,"surface":…}
+{"at","kind":"guard","machine","rationale":<one-lined, 1,000>,"session","tool":<str>|null}
 ```
+
+Every reader of sessions (`sessions()`: chart's `active`, take, reconcile, settle, encode) reads only `start`, `end` and `encode` lines, so a guard never opens, ends or encodes one; reflect's evidence reads its own kinds.
 
 Exit 0 silent; 2 on bad stdin, one stderr line, nothing written; 1 when the line cannot be written. Runs inside the subether mod's 1.5 s budget.
 
@@ -73,6 +78,7 @@ Stdout, one compact object, keys alphabetical; reads the root, writes nothing bu
 ```
 {"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"interactive":bool|null,"machine":str,"outcome":str|null,"seen":str|null,"session":str,"start":str|null}],
  "at":"<now, RFC 3339 UTC>",
+ "guards":[{"at":str,"rationale":str,"session":str,"tool":str|null}],
  "intentions":[{"about":str|null,"after":str|null,"closed":str|null,"created":str|null,"due":str|null,"id":str,"session":str|null,"state":str|null,"what":str}],
  "knowledge":[{"created":str|null,"file":str,"name":str,"session":str|null,"source":…,"topic":str,"type":str}],
  "machine":"<this machine's id>",
@@ -82,6 +88,7 @@ Stdout, one compact object, keys alphabetical; reads the root, writes nothing bu
 ```
 
 - `active` — per session in `ledger/*/*/*.jsonl`: `start` the `at` of its earliest start mark (a reload re-fires it), `end` and `outcome` of its latest end mark (null on an end line without one), both null when a start mark is later (resumed: running again); `cwd`, `machine` from that start mark, else the end mark; `encoded` the `outcome` of its latest encode line; `interactive` true when a start mark says true, else false when one says false, else null; `seen` the mtime of `<claude>/projects/*/<session>.jsonl` (`take`'s finder), null without one. By `start` (null first), then session.
+- `guards` — per `guard` line in the ledger, by `at`: what bifrost's portals page reads in place of the old `trail/`.
 - `taken` — per file `<root>/.archive/claude/<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` directly in a day dir; the latest per session wins. `taken` = that date and time as UTC, `bytes` = size; `title`, `cwd`, `highlights` (count, 0 without), `dreamed` from `<root>/memories/.recent/<session>.json` when it parses as an object. `state`: `waiting` pointer without `dreamed`, `dreamed` with it, `archived` no pointer. `memories` = memory entries naming the session. By `taken`, then session.
 - `memories` — per `<root>/memories/<bank>/<file>.md`, banks and files starting `.` or `_` and `MEMORY.md` skipped. Frontmatter: `key: value` lines between `---` fences; `name` (else the stem), `type` (else ""), `created`, `source` → `consolidate`/`dream`/`reflect`/`remember` by its first word, else `other`; `session` the uuid in a consolidate's or a dream's (`dream <ISO> · <uuid> · minds=…`). By bank, then file.
 - `intentions` — per `<root>/intentions/<id>.md` (`### sandman defer`), open or closed: its frontmatter's fields, `what` its body. By `created`, then id.
@@ -171,6 +178,16 @@ A push rewrites the file in that order: `due` or `after` set, the other gone, `s
 
 `sandman due [--all]` (`--all false`, as MCP passes it, is not all): the due block, else `nothing due`. A header, `due · deferred work: raise it with the person, never start it unasked`, then a row per open intention, `  · <id> <due | waiting: <after>> — <body one-lined to 160>[ (<label>)]`, `<label>` recall's repository label of `key(project(about))` when `about` is set: those with `due` at or before the local today by `due` (most overdue first), then every one with no `due` (an event, always listed), then with `--all` the rest by `due`; ties by `created`. Writes nothing.
 
+### `sandman forget`
+
+`sandman forget <session>`, the session id as `mark` checks it (else `sandman forget: takes a session id`, exit 2): erases the session so that nothing of it is kept, for real, unlike everything else here (no `.pruned/` copy), and records nothing naming it (no ledger line, no log line). The `/delete` skill and bridge's forget button run it twice, in-session and from a watcher once the CLI has exited, because the exit flush regrows the transcript. In order:
+
+1. the ledger: every day file, today's too, rewritten without each line holding the id, under an exclusive `flock` on the file (the writer's shared one, `### sandman mark`, so an append in flight finishes first and one waiting reopens the replacement), by temp + rename; first, so a `take` or a tick racing it finds no start mark and archives nothing;
+2. removed: `<claude>/projects/*/<session>.jsonl` and `<session>/` in every project; every `.archive/claude/**` entry whose name holds the id (the copy and its `-dir`); `memories/.recent/<session>.json`; every memory, knowledge page and trace whose `session` is the id (an encoded or remembered one, a consolidate's keep); every `.pruned/**` file whose frontmatter `session` is it; `run/<job>.in|out|err` holding the id, and `run/encode.*` when, of every encode line and this session's end lines, the latest names it (the last or next encode was this episode's);
+3. rewritten by temp + rename: a pruned reply `<HHMMSS>-<bank>-ops.json` without the ops on a trace whose copy `<HHMMSS>-<bank>-<trace>` went; every other memory, knowledge page, trace, pruned file and intention holding the id, its `session: <id>` line dropped and the id else `-` (a merge's `source` stamp; an intention stays, the person's, its session link gone); `embeddings.jsonl` without the removed notes' lines, `run/serve.log` and `serve.log.1` without lines holding it, each under the lock as the ledger is.
+
+What a consolidate merged into another memory stays in that memory's body: a merge cannot be unpicked, so only what `session:` attributes is removed. Claude Code's own stores (`history.jsonl`, `file-history/<session>/`, `session-env/<session>/`) are not sandman's. An encode in flight when it runs may still write its traces and line; the second run takes them. Stdout `forgot: <n> removed, <n> rewritten`, else `nothing to forget`, exit 0 (idempotent); a failed removal or write `sandman forget: <error>`, exit 1, the rest left for the next run.
+
 ### `sandman mcp`
 
 An MCP server over stdio for the agent's verbs, newline-delimited JSON-RPC 2.0, one compact reply line per request, keys alphabetical; the legacy era (an `initialize` handshake), which Claude Code falls back to when its `server/discover` probe gets an error. `initialize` answers `{"capabilities":{"tools":{}},"protocolVersion","serverInfo":{"name":"sandman","version":<crate version>}}`, the client's `protocolVersion` when it is `2025-11-25`, `2025-06-18`, `2025-03-26` or `2024-11-05`, else `2025-11-25`; `ping` `{}`; `tools/list` `{"tools":[…]}`, alpha-sorted, each description the seed's when-to-pull guidance:
@@ -194,7 +211,7 @@ The daemon, a foreground process under launchd. Start: a socket path over 103 by
 One newline-terminated JSON request and one reply per connection, compact, keys alphabetical; a connection silent for 1 s is dropped unanswered:
 
 ```
-{"op":"health"}   → {"machine":str,"ok":true,"pid":int,"since":"<RFC 3339 start>","state":"booting"|"ready"|"stopping","version":"<crate version>"}
+{"op":"health"}   → {"machine":str,"ok":true,"pid":int,"since":"<RFC 3339 start>","state":"booting"|"ready"|"stopping","version":"<crate version>-<build>"}
 {"op":"shutdown"} → {"ok":true}, written after the listener is dropped
 anything else     → {"code":"bad_request"|"unknown_op","ok":false}
 ```
@@ -280,14 +297,20 @@ One line through `mark`'s writer, logged to `serve.log` as `event` `reflect`; `h
 
 ### `sandman setup`
 
-Prints the launchd plist for `dev.gigantic.sandman` on stdout and writes nothing: `ProgramArguments` this executable and `serve`, `EnvironmentVariables` the caller's `PATH` (launchd's finds no `claude`) and the root it ran with, `KeepAlive`, `RunAtLoad`, `ThrottleInterval` 10, `ExitTimeOut` 2, `StandardErrorPath` `<root>/serve.err` for failures before the log (outside `run/`, which launchd would otherwise create 0744). Install, then swap after each `mise run install`:
+The plist for `dev.gigantic.sandman`: `ProgramArguments` this executable and `serve`, `EnvironmentVariables` the caller's `PATH` (launchd's finds no `claude`) and the root it ran with, `KeepAlive`, `RunAtLoad`, `ThrottleInterval` 10, `ExitTimeOut` 2, `StandardErrorPath` `<root>/serve.err` for failures before the log (outside `run/`, which launchd would otherwise create 0744). `setup --print` prints it and writes nothing. `setup` installs it, `launchctl` resolved from `PATH` (none, as on Linux: `sandman setup: launchctl: <error> (setup installs a launchd agent, macOS only; --print prints the plist)`, exit 1, before anything is written), `gui/<id -u>` the domain, each launchctl call that changes something printed as `launchctl <args>`:
 
-```
-sandman-next setup > ~/Library/LaunchAgents/dev.gigantic.sandman.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.plist
-launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman
-```
+1. the old sandman's agents, `dev.gigantic.sandman.breathe`, `.reflect`, `.report`, `.upgrade` (retired 2026-11-14): each loaded one booted out, then each plist removed (`removed <path>`); none is ever written;
+2. `~/Library/LaunchAgents/dev.gigantic.sandman.plist` by temp + rename (`wrote <path>`);
+3. the same plist already loaded: `kickstart -k`, the swap; else booted out when loaded, then `bootstrap`.
+
+A bootout returns before launchd lets go of the job, and a bootstrap before then fails, so after each bootout `launchctl print` is polled every 100 ms until it fails, at most `$SANDMAN_BOOTOUT_MS` (30 000, past a default `ExitTimeOut` of 20 s): `<label> still loaded <ms> ms after its bootout`, exit 1. A failed call: `sandman setup: launchctl <args>: <its stderr>`, exit 1. `setup --remove` boots `dev.gigantic.sandman` out and removes its plist. Idempotent; run it after each `mise run install`.
+
+There is no `upgrade`: this build has no release channel (`mise run install` builds the checkout), so a swap is `mise run install && sandman-next setup && sandman-next status`; the hotswap port waits for releases (docs/index.html#next).
 
 ### `sandman status`
 
-Sends `{"op":"health"}` and prints the daemon's reply on stdout, exit 0; when its `version` is not this client's, one stderr line names both and the `launchctl kickstart -k` fix. No socket, a refused connect, or no `"ok":true` reply within 1 s: `{"code":"down","ok":false}`, exit 1. No retries.
+Sends `{"op":"health"}` and prints the daemon's reply on stdout, exit 0; when its `version` is not this client's, one stderr line names both and the fix, `<me> setup`. No socket, a refused connect, or no `"ok":true` reply within 1 s: `{"code":"down","ok":false}`, exit 1. No retries.
+
+### `sandman version`
+
+Stdout `<crate version>-<build>` (`build.rs`: the short commit, `-dirty` over uncommitted work, else `unknown`), the daemon health's `version`; exit 0. An installer's smoke check.

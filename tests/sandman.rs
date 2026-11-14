@@ -89,6 +89,8 @@ mod tests {
     ];
     /// Session ids for the fixture: `5a000000-0000-4000-8000-00000000000<letter>`.
     const ID: &str = "5a000000-0000-4000-8000-00000000000";
+    /// The binary's version and build, as `version` prints it.
+    const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("SANDMAN_BUILD"));
     /// A test's fallible outcome.
     type Outcome = Result<(), Box<dyn Error>>;
 
@@ -376,6 +378,10 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             ),
             "not json".to_owned(),
             r#"{"kind":"start"}"#.to_owned(),
+            // a denied tool call: a guard, never a session's mark
+            format!(
+                r#"{{"at":"2026-11-09T09:10:00Z","kind":"guard","machine":"studio","rationale":"sample: never force-push","session":"{ID}a","tool":"Bash"}}"#
+            ),
         ];
         let files = [
             ("ledger/2026/11/09.jsonl", marks.join("\n")),
@@ -387,6 +393,9 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
                         "gone",
                     ),
                     mark("2026-11-10T07:45:00Z", "start", "d", "/work/beta", "studio"),
+                    format!(
+                        r#"{{"at":"2026-11-10T07:50:00Z","kind":"guard","machine":"studio","rationale":"sample: ask before deleting","session":"{ID}g","tool":null}}"#
+                    ),
                 ]
                 .join("\n"),
             ),
@@ -2486,8 +2495,256 @@ printf '{"ops":[],"under":"%s"}\n' $u
         )
     }
 
-    /// `mark` refuses bad stdin with exit 2 and no write, appends a good mark to today's file,
-    /// and exits 1 when the root cannot hold one.
+    /// `forget` erases every store's copy of one session and records nothing: its transcripts and
+    /// sidecars in every project, archived copies, pointer, its traces, memories and knowledge pages
+    /// (by `session:`) and their embeddings, its pruned copies and the ops on them, the ledger and
+    /// log lines naming it, encode's run files when they hold it and any other naming it; a merged
+    /// memory's source and an intention keep themselves, without it. Again: nothing to forget. A bad
+    /// id is exit 2, a failed removal exit 1.
+    #[test]
+    fn forget() -> Outcome {
+        let root = temp("forget")?;
+        let claude = format!("{root}/claude");
+        let envs = [
+            ("CLAUDE_CONFIG_DIR", claude.as_str()),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        let note = |session: &str, source: &str| {
+            format!(
+                "---\nname: sample\ntype: feedback\nsession: {session}\nsource: {source}\n---\n\nsample body\n"
+            )
+        };
+        let (mine, other) = (
+            note("@a", "remember 2026-11-09T09:00:00Z \u{b7} @a"),
+            note("@b", "encode \u{b7} @b"),
+        );
+        let merged = note(
+            "@b",
+            "consolidate 2026-11-10T04:00:00Z \u{b7} @a \u{b7} model=opus",
+        );
+        let ledger = [
+            r#"{"at":"2026-11-09T08:00:00Z","kind":"start","session":"@a"}"#,
+            r#"{"at":"2026-11-09T08:01:00Z","kind":"start","session":"@b"}"#,
+            r#"{"archived":"/r/.archive/claude/2026/11/09/093005-projects--work-alpha-@a.jsonl","at":"2026-11-09T09:30:00Z","kind":"end","outcome":"taken","session":"@a"}"#,
+            r#"{"at":"2026-11-09T09:31:00Z","kind":"encode","outcome":"encoded","session":"@a"}"#,
+            r#"{"at":"2026-11-09T09:32:00Z","kind":"guard","rationale":"sample","session":"@a","tool":null}"#,
+            r#"{"at":"2026-11-09T09:40:00Z","kind":"consolidate","outcome":"consolidated"}"#,
+        ]
+        .join("\n");
+        let embeddings = "{\"h\":\"1\",\"path\":\"traces/-work-alpha/feedback_a.md\"}\n{\"h\":\"2\",\"path\":\"traces/-work-alpha/feedback_b.md\"}\n{\"h\":\"3\",\"path\":\"-work-alpha/feedback_kept.md\"}\n{\"h\":\"4\",\"path\":\"knowledge/launchd/playbook_a.md\"}\n{\"h\":\"5\",\"path\":\"traces/@launchd/knowledge_a.md\"}\nnot json\n";
+        let ops = r#"{"ops":[{"op":"keep","trace":"feedback_a.md"},{"op":"merge","memory":"feedback_merged.md","trace":"feedback_b.md"},{"memory":"project_old.md","op":"prune","reason":"stale"}]}"#;
+        plant(
+            &root,
+            &[
+                ("claude/projects/-work-alpha/@a.jsonl", "{}\n"),
+                (
+                    "claude/projects/-work-alpha/@a/subagents/agent.jsonl",
+                    "{}\n",
+                ),
+                ("claude/projects/-work-alpha/@b.jsonl", "{}\n"),
+                ("claude/projects/-work-beta/@a.jsonl", "{}\n"),
+                (
+                    ".archive/claude/2026/11/09/093005-projects--work-alpha-@a.jsonl",
+                    "{}\n",
+                ),
+                (
+                    ".archive/claude/2026/11/09/093005-projects--work-alpha-@a-dir/agent.jsonl",
+                    "{}\n",
+                ),
+                (
+                    ".archive/claude/2026/11/09/120000-projects--work-alpha-@b.jsonl",
+                    "{}\n",
+                ),
+                (".pruned/2026/11/10/040000--work-alpha-feedback_a.md", &mine),
+                (
+                    ".pruned/2026/11/10/040000--work-alpha-feedback_b.md",
+                    &other,
+                ),
+                (".pruned/2026/11/10/040000--work-alpha-ops.json", ops),
+                (
+                    ".pruned/2026/11/10/040001--work-alpha-feedback_merged.md",
+                    &merged,
+                ),
+                ("embeddings.jsonl", embeddings),
+                (
+                    "intentions/1f2e3d4c.md",
+                    "---\ndue: 2026-11-12\nsession: @a\nstate: open\n---\n\nsample\n",
+                ),
+                (
+                    "intentions/9c8b7a6d.md",
+                    "---\ndue: 2026-11-12\nsession: @b\nstate: open\n---\n\nsample\n",
+                ),
+                ("knowledge/launchd/playbook_a.md", &mine),
+                ("ledger/2026/11/09.jsonl", &ledger),
+                (
+                    "ledger/2026/11/10.jsonl",
+                    r#"{"at":"2026-11-10T08:00:00Z","kind":"end","session":"@b"}"#,
+                ),
+                ("memories/.recent/@a.json", "{}\n"),
+                ("memories/.recent/@b.json", "{}\n"),
+                ("memories/-work-alpha/feedback_kept.md", &mine),
+                ("memories/-work-alpha/feedback_merged.md", &merged),
+                ("memories/-work-alpha/project_other.md", &other),
+                ("run/consolidate.in", "session: @a\n"),
+                ("run/consolidate.out", "{}\n"),
+                ("run/encode.err", ""),
+                ("run/encode.in", "# episode\n"),
+                ("run/encode.out", "{}\n"),
+                ("run/reflect.in", "sample\n"),
+                (
+                    "run/serve.log",
+                    "{\"event\":\"take\",\"session\":\"@a\"}\n{\"event\":\"take\",\"session\":\"@b\"}\n",
+                ),
+                (
+                    "run/serve.log.1",
+                    "{\"event\":\"take\",\"session\":\"@b\"}\n",
+                ),
+                ("run/serve.pid", "1"),
+                ("traces/-work-alpha/feedback_a.md", &mine),
+                ("traces/-work-alpha/feedback_b.md", &other),
+                ("traces/@launchd/knowledge_a.md", &mine),
+            ],
+        )?;
+        let forget = |letter: &str| sandman(&envs, &["forget", &format!("{ID}{letter}")], "");
+        same(&forget("a")?, "0\nforgot: 15 removed, 7 rewritten\n")?;
+        // what is left, each file under the root by path, and the rewritten ones' text
+        let mut left = Vec::new();
+        let mut dirs = vec![PathBuf::from(&root)];
+        while let Some(dir) = dirs.pop() {
+            for entry in fs::read_dir(dir)?.flatten() {
+                if entry.file_type()?.is_dir() {
+                    dirs.push(entry.path());
+                } else {
+                    left.push(
+                        entry
+                            .path()
+                            .to_string_lossy()
+                            .replace(&format!("{root}/"), "")
+                            .replace(ID, "@"),
+                    );
+                }
+            }
+        }
+        left.sort();
+        let read = |path: &str| {
+            fs::read_to_string(format!("{root}/{path}")).map(|held| held.replace(ID, "@"))
+        };
+        same(
+            &format!(
+                "{}\n{}{}{}{}{}{}{}",
+                left.join("\n"),
+                read("ledger/2026/11/09.jsonl")?,
+                read(".pruned/2026/11/10/040000--work-alpha-ops.json")?,
+                read(".pruned/2026/11/10/040001--work-alpha-feedback_merged.md")?,
+                read("memories/-work-alpha/feedback_merged.md")?,
+                read("intentions/1f2e3d4c.md")?,
+                read("embeddings.jsonl")?,
+                read("run/serve.log")?,
+            ),
+            &format!(
+                "{}\n{}\n{}{}{}{}{}{}",
+                [
+                    ".archive/claude/2026/11/09/120000-projects--work-alpha-@b.jsonl",
+                    ".pruned/2026/11/10/040000--work-alpha-feedback_b.md",
+                    ".pruned/2026/11/10/040000--work-alpha-ops.json",
+                    ".pruned/2026/11/10/040001--work-alpha-feedback_merged.md",
+                    "claude/projects/-work-alpha/@b.jsonl",
+                    "embeddings.jsonl",
+                    "intentions/1f2e3d4c.md",
+                    "intentions/9c8b7a6d.md",
+                    "ledger/2026/11/09.jsonl",
+                    "ledger/2026/11/10.jsonl",
+                    "memories/-work-alpha/feedback_merged.md",
+                    "memories/-work-alpha/project_other.md",
+                    "memories/.recent/@b.json",
+                    "run/consolidate.out",
+                    "run/reflect.in",
+                    "run/serve.log",
+                    "run/serve.log.1",
+                    "run/serve.pid",
+                    "traces/-work-alpha/feedback_b.md",
+                ]
+                .join("\n"),
+                r#"{"at":"2026-11-09T08:01:00Z","kind":"start","session":"@b"}"#,
+                r#"{"at":"2026-11-09T09:40:00Z","kind":"consolidate","outcome":"consolidated"}"#,
+                r#"{"ops":[{"memory":"feedback_merged.md","op":"merge","trace":"feedback_b.md"},{"memory":"project_old.md","op":"prune","reason":"stale"}]}"#,
+                note(
+                    "@b",
+                    "consolidate 2026-11-10T04:00:00Z \u{b7} - \u{b7} model=opus"
+                )
+                .repeat(2),
+                "---\ndue: 2026-11-12\nstate: open\n---\n\nsample\n",
+                "{\"h\":\"2\",\"path\":\"traces/-work-alpha/feedback_b.md\"}\nnot json\n",
+                "{\"event\":\"take\",\"session\":\"@b\"}\n",
+            ),
+        )?;
+        same(&forget("a")?, "0\nnothing to forget\n")?;
+        same(
+            &sandman(&envs, &["forget", "a"], "")?,
+            "2\nsandman forget: takes a session id\n",
+        )?;
+        let locked = format!("{claude}/projects/-work-alpha");
+        fs::set_permissions(&locked, Permissions::from_mode(0o555))?;
+        let failed = forget("b");
+        fs::set_permissions(&locked, Permissions::from_mode(0o755))?;
+        same(
+            &failed?,
+            "1\nsandman forget: Permission denied (os error 13)\n",
+        )
+    }
+
+    /// `forget` rewriting today's ledger while other processes append to it loses none of their
+    /// lines: each waits on the lock and writes to the file that replaced it.
+    #[test]
+    fn forget_race() -> Outcome {
+        let root = temp("forget-race")?;
+        let envs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        let mark = |letter: &str| {
+            sandman(
+                &envs,
+                &["mark"],
+                &format!(r#"{{"kind":"start","session":"{ID}{letter}"}}"#),
+            )
+        };
+        let marks = thread::scope(|scope| -> Result<usize, Box<dyn Error>> {
+            let writers = [(); 3].map(|()| {
+                scope.spawn(|| {
+                    (0u8..30)
+                        .filter(|_| mark("b").is_ok_and(|out| out == "0\n"))
+                        .count()
+                })
+            });
+            for _ in 0u8..20 {
+                same(&mark("a")?, "0\n")?;
+                same(
+                    sandman(&envs, &["forget", &format!("{ID}a")], "")?
+                        .get(..9)
+                        .unwrap_or_default(),
+                    "0\nforgot:",
+                )?;
+            }
+            Ok(writers
+                .into_iter()
+                .map(|writer| writer.join().unwrap_or_default())
+                .sum())
+        })?;
+        let lines = ledger(&root)?;
+        same(
+            &format!(
+                "{marks} {} {}",
+                lines.matches(&format!("{ID}b")).count(),
+                lines.matches(&format!("{ID}a")).count()
+            ),
+            "90 90 0",
+        )
+    }
+
+    /// `mark` refuses bad stdin with exit 2 and no write (a guard without a rationale too), appends
+    /// a good mark to today's file, a guard's rationale one-lined to 1,000 characters, and exits 1
+    /// when the root cannot hold one.
     #[test]
     fn mark() -> Outcome {
         let root = temp("mark")?;
@@ -2500,6 +2757,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             "{}",
             &format!(r#"{{"kind":"nap","session":"{ID}a"}}"#),
             r#"{"kind":"start","session":"short"}"#,
+            &format!(r#"{{"kind":"guard","session":"{ID}a","rationale":7}}"#),
         ] {
             same(
                 sandman(&envs, &["mark"], bad)?.get(..2).unwrap_or_default(),
@@ -2525,6 +2783,19 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     &envs,
                     &["mark"],
                     &format!(r#"{{"kind":"end","session":"{ID}a"}}"#)
+                )?
+            ),
+            "0\n0\n",
+        )?;
+        let denied = json!({"kind": "guard", "rationale": format!("never\n  force-push {}", "x".repeat(1200)), "session": format!("{ID}a"), "tool": "Bash"});
+        same(
+            &format!(
+                "{}{}",
+                sandman(&envs, &["mark"], &denied.to_string())?,
+                sandman(
+                    &envs,
+                    &["mark"],
+                    &format!(r#"{{"kind":"guard","rationale":"ask first","session":"{ID}a"}}"#)
                 )?
             ),
             "0\n0\n",
@@ -2557,9 +2828,12 @@ printf '{"ops":[],"under":"%s"}\n' $u
         same(
             &lines,
             &format!(
-                "{{\"at\":\"{}\",\"cwd\":\"/w\",\"interactive\":true,\"kind\":\"start\",\"machine\":\"studio\",\"reason\":\"startup\",\"resume\":\"r\",\"session\":\"{ID}a\",\"surface\":\"cli\"}}\n{{\"at\":\"{}\",\"cwd\":null,\"interactive\":null,\"kind\":\"end\",\"machine\":\"studio\",\"reason\":null,\"resume\":null,\"session\":\"{ID}a\",\"surface\":null}}\n",
+                "{{\"at\":\"{}\",\"cwd\":\"/w\",\"interactive\":true,\"kind\":\"start\",\"machine\":\"studio\",\"reason\":\"startup\",\"resume\":\"r\",\"session\":\"{ID}a\",\"surface\":\"cli\"}}\n{{\"at\":\"{}\",\"cwd\":null,\"interactive\":null,\"kind\":\"end\",\"machine\":\"studio\",\"reason\":null,\"resume\":null,\"session\":\"{ID}a\",\"surface\":null}}\n{{\"at\":\"{}\",\"kind\":\"guard\",\"machine\":\"studio\",\"rationale\":\"never force-push {}\",\"session\":\"{ID}a\",\"tool\":\"Bash\"}}\n{{\"at\":\"{}\",\"kind\":\"guard\",\"machine\":\"studio\",\"rationale\":\"ask first\",\"session\":\"{ID}a\",\"tool\":null}}\n",
                 stamps.first().ok_or("start")?,
-                stamps.get(1).ok_or("end")?
+                stamps.get(1).ok_or("end")?,
+                stamps.get(2).ok_or("guard")?,
+                "x".repeat(983),
+                stamps.get(3).ok_or("guard")?
             ),
         )?;
         fs::write(format!("{root}/file"), "")?;
@@ -3502,15 +3776,16 @@ printf '{"ops":[],"under":"%s"}\n' $u
             &String::from_utf8(found.stdout)?.lines().count().to_string(),
             "4",
         )?;
+        // each file's own `created`: under load the four writes can straddle a second
         let mut written = String::new();
         for file in &files {
-            written.push_str(&fs::read_to_string(format!("{root}/{file}"))?);
+            let held = fs::read_to_string(format!("{root}/{file}"))?;
+            let now = held
+                .lines()
+                .find_map(|line| line.strip_prefix("created: "))
+                .unwrap_or_default();
+            written.push_str(&held.replace(now, "<now>"));
         }
-        let now = written
-            .lines()
-            .find_map(|line| line.strip_prefix("created: "))
-            .unwrap_or_default()
-            .to_owned();
         // name, description and type; what follows `created`; the source's session; the body
         let note = |head: [&str; 3], rest: &str, id: &str, body: &str| {
             format!(
@@ -3520,7 +3795,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
         };
         let (elsewhere, homeless) = ("sample: elsewhere", "sample: homeless");
         same(
-            &written.replace(&now, "<now>"),
+            &written,
             &[
                 note(["sample: the person says pass a clock in,", "sample: the person says pass a clock in, never a mock", "feedback"], "", "-", "sample: the person says pass a clock in, never a mock\n  Why: a mock hid a bug"),
                 note(["Sample: terse commits", "sample: one line", "user"], &format!("about: {work}/repo\nsession: {session}\n"), &session, "sample: terse"),
@@ -3621,7 +3896,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             ("SANDMAN_ROOT", root.as_str()),
         ];
         let (mut daemon, ready) = serve(&root, &[("SANDMAN_LOG_CAP", "1")])?;
-        let (pid, version) = (daemon.0.id(), env!("CARGO_PKG_VERSION"));
+        let (pid, version) = (daemon.0.id(), VERSION);
         let health: Value = serde_json::from_str(&ready)?;
         same(
             &format!(
@@ -3961,20 +4236,25 @@ printf '{"ops":[],"under":"%s"}\n' $u
         )
     }
 
-    /// `setup` prints the launchd plist for `dev.gigantic.sandman` and writes nothing.
+    /// `setup --print` prints the launchd plist for `dev.gigantic.sandman` and writes nothing;
+    /// `setup`, against a stub `launchctl` (`launchctl.log` its calls, `loaded/` its jobs, a bootout
+    /// letting go one `print` later), boots out the old sandman's agents and removes their plists,
+    /// writes the plist and bootstraps it, kickstarts the same plist loaded, reloads a changed one,
+    /// fails on a failed bootstrap or a job still loaded past `$SANDMAN_BOOTOUT_MS`, and without a
+    /// `launchctl` fails before writing anything; `--remove` boots it out and removes its plist.
     #[test]
     fn setup() -> Outcome {
         let (root, path) = (temp("setup")?, env::var("PATH")?);
-        same(
-            &sandman(&[("PATH", &path), ("SANDMAN_ROOT", &root)], &["setup"], "")?,
-            &format!(
-                r#"0
-<?xml version="1.0" encoding="UTF-8"?>
+        let (home, bin) = (format!("{root}/home"), format!("{root}/bin"));
+        let agents = format!("{home}/Library/LaunchAgents");
+        let plist = |searched: &str| {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>{}</string><key>SANDMAN_ROOT</key><string>{root}</string></dict>
+  <dict><key>PATH</key><string>{searched}</string><key>SANDMAN_ROOT</key><string>{root}</string></dict>
   <key>ExitTimeOut</key>
   <integer>2</integer>
   <key>KeepAlive</key>
@@ -3982,7 +4262,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
   <key>Label</key>
   <string>dev.gigantic.sandman</string>
   <key>ProgramArguments</key>
-  <array><string>{}</string><string>serve</string></array>
+  <array><string>{exe}</string><string>serve</string></array>
   <key>RunAtLoad</key>
   <true/>
   <key>StandardErrorPath</key>
@@ -3992,11 +4272,161 @@ printf '{"ops":[],"under":"%s"}\n' $u
 </dict>
 </plist>
 "#,
-                path,
-                env!("CARGO_BIN_EXE_sandman")
+                exe = env!("CARGO_BIN_EXE_sandman")
+            )
+        };
+        same(
+            &sandman(
+                &[("HOME", &home), ("PATH", &path), ("SANDMAN_ROOT", &root)],
+                &["setup", "--print"],
+                "",
+            )?,
+            &format!("0\n{}", plist(&path)),
+        )?;
+        same(&fs::read_dir(&root)?.count().to_string(), "0")?;
+        // without launchctl (Linux), nothing is written
+        same(
+            &sandman(
+                &[
+                    ("HOME", &home),
+                    ("PATH", "/usr/bin"),
+                    ("SANDMAN_ROOT", &root),
+                ],
+                &["setup"],
+                "",
+            )?,
+            "1\nsandman setup: launchctl: No such file or directory (os error 2) (setup installs a launchd agent, macOS only; --print prints the plist)\n",
+        )?;
+        same(&fs::read_dir(&root)?.count().to_string(), "0")?;
+        plant(
+            &root,
+            &[
+                (
+                    "bin/launchctl",
+                    &format!(
+                        r#"#!/bin/sh
+printf '%s\n' "$*" >> {root}/launchctl.log
+job=${{2##*/}}
+case $1 in
+print) [ -f {root}/loaded/$job.going ] && {{ rm {root}/loaded/$job.going; exit 0; }}; [ -f {root}/loaded/$job ] || exit 113;;
+bootout) [ -f {root}/stuck ] || mv {root}/loaded/$job {root}/loaded/$job.going;;
+bootstrap) [ -f {root}/fail ] && {{ echo 'Bootstrap failed: 5: Input/output error' >&2; exit 5; }}; touch {root}/loaded/$(basename $3 .plist);;
+esac
+"#
+                    ),
+                ),
+                (
+                    "home/Library/LaunchAgents/dev.gigantic.sandman.breathe.plist",
+                    "",
+                ),
+                (
+                    "home/Library/LaunchAgents/dev.gigantic.sandman.report.plist",
+                    "",
+                ),
+                (
+                    "home/Library/LaunchAgents/dev.gigantic.sandman.upgrade.plist",
+                    "",
+                ),
+                ("home/Library/LaunchAgents/io.jlg.kev.plist", ""),
+                ("loaded/dev.gigantic.sandman.report", ""),
+                ("loaded/dev.gigantic.sandman.upgrade", ""),
+            ],
+        )?;
+        fs::set_permissions(format!("{bin}/launchctl"), Permissions::from_mode(0o755))?;
+        let stubbed = format!("{bin}:{path}");
+        let gui = format!(
+            "gui/{}",
+            String::from_utf8(Command::new("id").arg("-u").output()?.stdout)?.trim()
+        );
+        let label = format!("{gui}/dev.gigantic.sandman");
+        let file = format!("{agents}/dev.gigantic.sandman.plist");
+        let setup = |searched: &str, bound: &str, args: &[&str]| {
+            sandman(
+                &[
+                    ("HOME", &home),
+                    ("PATH", searched),
+                    ("SANDMAN_BOOTOUT_MS", bound),
+                    ("SANDMAN_ROOT", &root),
+                ],
+                &[&["setup"], args].concat(),
+                "",
+            )
+        };
+        let calls = || {
+            let log = fs::read_to_string(format!("{root}/launchctl.log"))?;
+            fs::remove_file(format!("{root}/launchctl.log")).map(|()| log)
+        };
+        // a bootout waits out one print that still finds the job
+        same(
+            &format!("{}{}", setup(&stubbed, "30000", &[])?, calls()?),
+            &format!(
+                "0
+removed {agents}/dev.gigantic.sandman.breathe.plist
+launchctl bootout {gui}/dev.gigantic.sandman.report
+removed {agents}/dev.gigantic.sandman.report.plist
+launchctl bootout {gui}/dev.gigantic.sandman.upgrade
+removed {agents}/dev.gigantic.sandman.upgrade.plist
+wrote {file}
+launchctl bootstrap {gui} {file}
+print {gui}/dev.gigantic.sandman.breathe
+print {gui}/dev.gigantic.sandman.breathe
+print {gui}/dev.gigantic.sandman.reflect
+print {gui}/dev.gigantic.sandman.reflect
+print {gui}/dev.gigantic.sandman.report
+bootout {gui}/dev.gigantic.sandman.report
+print {gui}/dev.gigantic.sandman.report
+print {gui}/dev.gigantic.sandman.report
+print {gui}/dev.gigantic.sandman.upgrade
+bootout {gui}/dev.gigantic.sandman.upgrade
+print {gui}/dev.gigantic.sandman.upgrade
+print {gui}/dev.gigantic.sandman.upgrade
+print {label}
+print {label}
+bootstrap {gui} {file}
+"
             ),
         )?;
-        same(&fs::read_dir(&root)?.count().to_string(), "0")
+        let kept: BTreeSet<String> = fs::read_dir(&agents)?
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        same(
+            &format!("{kept:?}{}", fs::read_to_string(&file)? == plist(&stubbed)),
+            r#"{"dev.gigantic.sandman.plist", "io.jlg.kev.plist"}true"#,
+        )?;
+        // the same plist loaded: one kickstart; a changed one (another PATH) reloaded
+        same(
+            &format!("{}{}", setup(&stubbed, "0", &[])?, calls()?),
+            &format!(
+                "0\nwrote {file}\nlaunchctl kickstart -k {label}\nprint {gui}/dev.gigantic.sandman.breathe\nprint {gui}/dev.gigantic.sandman.breathe\nprint {gui}/dev.gigantic.sandman.reflect\nprint {gui}/dev.gigantic.sandman.reflect\nprint {gui}/dev.gigantic.sandman.report\nprint {gui}/dev.gigantic.sandman.report\nprint {gui}/dev.gigantic.sandman.upgrade\nprint {gui}/dev.gigantic.sandman.upgrade\nprint {label}\nkickstart -k {label}\n"
+            ),
+        )?;
+        let moved = format!("{bin}:/moved:{path}");
+        same(
+            &setup(&moved, "30000", &[])?,
+            &format!(
+                "0\nwrote {file}\nlaunchctl bootout {label}\nlaunchctl bootstrap {gui} {file}\n"
+            ),
+        )?;
+        fs::write(format!("{root}/stuck"), "")?;
+        same(
+            &setup(&moved, "0", &["--remove"])?,
+            &format!(
+                "1\nlaunchctl bootout {label}\nsandman setup: dev.gigantic.sandman still loaded 0 ms after its bootout\n"
+            ),
+        )?;
+        fs::remove_file(format!("{root}/stuck"))?;
+        fs::write(format!("{root}/fail"), "")?;
+        same(
+            &setup(&moved, "30000", &["--remove"])?,
+            &format!("0\nlaunchctl bootout {label}\nremoved {file}\n"),
+        )?;
+        same(
+            &setup(&moved, "0", &[])?,
+            &format!(
+                "1\nwrote {file}\nsandman setup: launchctl bootstrap {gui} {file}: Bootstrap failed: 5: Input/output error\n"
+            ),
+        )
     }
 
     /// `show` prints a memory's or a trace's body under its name, type (a trace says so) and date,
@@ -4082,8 +4512,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
         same(
             &sandman(&[("SANDMAN_ROOT", &root)], &["status"], "")?,
             &format!(
-                "0\n{{\"ok\":true,\"version\":\"0.0.0\"}}\nsandman status: the daemon is 0.0.0, this client {}; swap it: launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman\n",
-                env!("CARGO_PKG_VERSION")
+                "0\n{{\"ok\":true,\"version\":\"0.0.0\"}}\nsandman status: the daemon is 0.0.0, this client {VERSION}; swap it: sandman setup\n"
             ),
         )
     }
@@ -4304,7 +4733,21 @@ printf '{"ops":[],"under":"%s"}\n' $u
         same(&earlier, &"earlier\n".repeat(4))
     }
 
-    /// No verb, or an unknown one, prints the nine-line usage and exits 2; `$HOME` stands in
+    /// `version` prints the crate version and the build (the commit, `-dirty` over uncommitted
+    /// work), one word, what the daemon's health carries.
+    #[test]
+    fn version() -> Outcome {
+        let build = VERSION
+            .strip_prefix(concat!(env!("CARGO_PKG_VERSION"), "-"))
+            .filter(|build| !build.is_empty() && !build.contains(' '))
+            .ok_or(VERSION)?;
+        same(
+            &sandman(&[], &["version"], "")?,
+            &format!("0\n{}-{build}\n", env!("CARGO_PKG_VERSION")),
+        )
+    }
+
+    /// No verb, or an unknown one, prints the eleven-line usage and exits 2; `$HOME` stands in
     /// for an unset `SANDMAN_ROOT`.
     #[test]
     fn usage() -> Outcome {
@@ -4317,7 +4760,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     out.get(..2).unwrap_or_default(),
                     out.lines().count()
                 ),
-                "2\n 10",
+                "2\n 12",
             )?;
         }
         Ok(())

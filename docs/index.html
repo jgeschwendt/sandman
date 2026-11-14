@@ -12,16 +12,16 @@
 <script type="module" src="charts/timeline.js"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23476349'/%3E%3Cpath d='M11.5 9.5A5 5 0 0 1 6.5 4.5 5 5 0 1 0 11.5 9.5Z' fill='white'/%3E%3C/svg%3E" />
 <style>
-/* the daemon's lifecycle: a static svg, tokens only */
-#lifecycle svg { display: block; font-size: 12px; max-width: none; }
-#lifecycle .life-box { fill: var(--ui-surface-raised); stroke: var(--ui-border-strong); }
-#lifecycle .life-box.is-accent { fill: var(--ui-accent); stroke: var(--ui-accent); }
-#lifecycle .life-name { fill: var(--ui-fg); font-family: var(--ui-font-mono); font-size: 13px; }
-#lifecycle .life-note { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); }
-#lifecycle .is-accent ~ text { fill: var(--ui-accent-fg); }
-#lifecycle .life-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
-#lifecycle .life-path.is-back { stroke-dasharray: 4 3; }
-#lifecycle marker path { fill: var(--ui-fg-muted); }
+/* the daemon's lifecycle and forget's order: static svgs, tokens only */
+.life svg { display: block; font-size: 12px; max-width: none; }
+.life .life-box { fill: var(--ui-surface-raised); stroke: var(--ui-border-strong); }
+.life .life-box.is-accent { fill: var(--ui-accent); stroke: var(--ui-accent); }
+.life .life-name { fill: var(--ui-fg); font-family: var(--ui-font-mono); font-size: 13px; }
+.life .life-note { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); }
+.life .is-accent ~ text { fill: var(--ui-accent-fg); }
+.life .life-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
+.life .life-path.is-back { stroke-dasharray: 4 3; }
+.life marker path { fill: var(--ui-fg-muted); }
 </style>
 </head>
 <body data-page="sandman">
@@ -57,20 +57,21 @@
   <p class="eyebrow">memory for agentic sessions</p>
   <p class="lead docs-lead"><code class="code">sandman</code> is being rewritten from scratch, one part
     at a time; this build carries <code class="code">mark</code>, <code class="code">take</code>,
-    <code class="code">chart</code>, the agent's <a class="link" href="recall.html"><code class="code">recall</code>, <code class="code">show</code> and <code class="code">remember</code></a>,
+    <code class="code">chart</code>, <a class="link" href="#forget"><code class="code">forget</code></a>, the agent's <a class="link" href="recall.html"><code class="code">recall</code>, <code class="code">show</code> and <code class="code">remember</code></a>,
     its <a class="link" href="intentions.html"><code class="code">defer</code>, <code class="code">due</code>, <code class="code">done</code> and <code class="code">drop</code></a>
     for work put off until later, and the daemon, <code class="code">serve</code>, which ends sessions that never ended, settles held takes,
     <a class="link" href="#encode">encodes</a> episodes, <a class="link" href="#consolidate">consolidates</a>
-    banks and <a class="link" href="knowledge.html">topics</a> and <a class="link" href="#reflect">reviews</a> its own guidance weekly, with its <code class="code">status</code> and <code class="code">setup</code>. Its memory follows
+    banks and <a class="link" href="knowledge.html">topics</a> and <a class="link" href="#reflect">reviews</a> its own guidance weekly, with its <code class="code">status</code>, <code class="code">setup</code> and <code class="code">version</code>. Its memory follows
     complementary learning systems: a fast, temporary store captures each session as an episode, and a slow
     store absorbs episodes through replay. The pipeline runs unattended: it may edit the memories and its own
     guidance, and every change is recorded in the ledger and recoverable from <code class="code">.pruned/</code>
-    or the prompt history.</p>
+    or the prompt history; only <code class="code">forget</code> deletes for good.</p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#root">root</a>
     <a class="pill" href="#mark">mark</a>
     <a class="pill" href="#take">take</a>
     <a class="pill" href="#chart">chart</a>
+    <a class="pill" href="#forget">forget</a>
     <a class="pill" href="#serve">serve</a>
     <a class="pill" href="#encode">encode</a>
     <a class="pill" href="#consolidate">consolidate</a>
@@ -90,7 +91,7 @@
   </header>
   <figure class="figure">
     <div class="chart" id="flow"><noscript><p class="docs-note">The data flow needs JavaScript; its data is <a class="link" href="data/flow.json">docs/data/flow.json</a>.</p></noscript></div>
-    <figcaption>The data flow, ①–④ a session's and ⑤ the weekly review, down the left edge: the verb each moment runs, what it writes under the root (<a href="data/flow.json">docs/data/flow.json</a>), and what <code class="code">chart</code> reads back. Dashed verbs are not built yet: today the subether mod runs <a class="link" href="#mark"><code class="code">sandman mark</code></a> at start and end, keeps its tool calls and prompts in its own daily tool log, and runs the earlier sandman's recall and take.</figcaption>
+    <figcaption>The data flow, ①–④ a session's and ⑤ the weekly review, down the left edge: the verb each moment runs, what it writes under the root (<a href="data/flow.json">docs/data/flow.json</a>), and what <code class="code">chart</code> reads back. Dashed verbs are not built yet: today the subether mod runs <a class="link" href="#mark"><code class="code">sandman mark</code></a> at start and end and on each denied tool call, keeps its tool calls and prompts in its own daily tool log, and runs the earlier sandman's recall and take.</figcaption>
   </figure>
   <div class="table-wrap">
   <table data-table>
@@ -99,17 +100,18 @@
     </thead>
     <tbody>
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
-      <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a> moved aside, never deleted: consumed traces, merged and pruned memories as they stood, each reply</td></tr>
+      <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a> moved aside, deleted only by <a class="link" href="#forget">forget</a>: consumed traces, merged and pruned memories as they stood, each reply</td></tr>
       <tr><td><code class="code">embeddings.jsonl</code></td><td><a class="link" href="recall.html#candidates">recall</a>'s embedding cache: <code class="code">{"h","path","v"}</code> a line, <code class="code">h</code> the SHA-256 of the model, 1024 and the text, the last line per hash winning; appended by recall and the tick, rewritten by the tick past twice its live size; about 14 MB for 635 memories, derived, so a synced root ignores it</td></tr>
       <tr><td><code class="code">intentions/&lt;id&gt;.md</code></td><td><a class="link" href="intentions.html">intentions</a>, work the person deferred: <code class="code">due</code> a date or <code class="code">after</code> an event, <code class="code">state</code> <code class="code">open</code>, <code class="code">done</code> or <code class="code">dropped</code>, the body what; written by <code class="code">defer</code>, <code class="code">done</code> and <code class="code">drop</code>, never by the daemon</td></tr>
       <tr><td><code class="code">knowledge/&lt;topic&gt;/&lt;file&gt;.md</code></td><td>the <a class="link" href="knowledge.html">knowledge store</a>: knowledge pages and playbooks filed by topic, each revised in place; a memory file's format, <code class="code">type</code> <code class="code">knowledge</code> or <code class="code">playbook</code></td></tr>
-      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>; <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code> and <code class="code">drop</code>; and the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code></td></tr>
+      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>, <code class="code">guard</code> (a denied tool call); <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code> and <code class="code">drop</code>; and the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code></td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>the banks, the long-term store's memories, filed by repository: memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
       <tr><td><code class="code">prompts/&lt;job&gt;.md</code></td><td>a model job's guidance (<code class="code">encode</code>, <code class="code">consolidate</code>, <code class="code">reflect</code>, <code class="code">judge</code>), read when present; written only by <a class="link" href="#reflect">reflect</a>, every version it replaced under <code class="code">.history/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;job&gt;.md</code></td></tr>
       <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>, each model run's <code class="code">&lt;job&gt;.in</code>, <code class="code">.out</code>, <code class="code">.err</code></td></tr>
       <tr><td><code class="code">traces/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>traces, newly encoded or remembered memories awaiting consolidation, one dir per bank; a topic's knowledge and playbook traces under <code class="code">@&lt;topic&gt;</code>, a name no bank key can take</td></tr>
       <tr><td><code class="code">machine</code></td><td>this machine's id: one line, 32 lowercase hex from <code class="code">/dev/urandom</code>, minted on first use; <code class="code">$SANDMAN_MACHINE</code> overrides it</td></tr>
+      <tr><td><code class="code">trail/</code>, <code class="code">shifts/</code>, <code class="code">breath/</code>, <code class="code">score/</code>, <code class="code">log/</code>, <code class="code">.dream/</code>, <code class="code">pending-takes/</code>, <code class="code">.trace/</code></td><td>the old sandman's, unread and unwritten by this build; <code class="code">forget</code> does not reach them</td></tr>
     </tbody>
   </table>
   </div>
@@ -118,17 +120,21 @@
 <section class="docs-section" id="mark" data-component="mark">
   <header>
     <h2 class="h2">mark</h2>
-    <p class="docs-note">Run by the subether mod inside its 1.5 s budget, so it does nothing slow. Today it writes the start and end marks; next it carries <code class="code">call</code> and <code class="code">prompt</code> while <code class="code">recall</code> (<a class="link" href="#next">Next</a>) and <a class="link" href="#take"><code class="code">take</code></a> take over start and end.</p>
+    <p class="docs-note">Run by the subether mod inside its 1.5 s budget, so it does nothing slow. Today it writes the start and end marks and a guard per tool call the mod's guard denies; next it carries <code class="code">call</code> and <code class="code">prompt</code> while <code class="code">recall</code> (<a class="link" href="#next">Next</a>) and <a class="link" href="#take"><code class="code">take</code></a> take over start and end.</p>
   </header>
   <p>One JSON object on stdin; <code class="code">kind</code> and <code class="code">session</code> are
     required, any other field missing is <code class="code">null</code>.</p>
-  <pre class="snippet">{"kind":"start"|"end","session":"&lt;uuid&gt;","cwd":"&lt;path&gt;"?,"surface":"&lt;str&gt;"?,"interactive":bool?,"reason":"&lt;str&gt;"?,"resume":"&lt;str&gt;"?}</pre>
+  <pre class="snippet">{"kind":"start"|"end","session":"&lt;uuid&gt;","cwd":"&lt;path&gt;"?,"surface":"&lt;str&gt;"?,"interactive":bool?,"reason":"&lt;str&gt;"?,"resume":"&lt;str&gt;"?}
+{"kind":"guard","session":"&lt;uuid&gt;","rationale":"&lt;str&gt;","tool":"&lt;str&gt;"?}</pre>
   <p>It appends one compact line, keys alphabetical, to today's (UTC)
-    <code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code> with
-    <code class="code">O_APPEND</code>, so concurrent writers interleave whole lines:</p>
-  <pre class="snippet">{"at":"2026-11-09T08:05:00Z","cwd":"/work/alpha","interactive":true,"kind":"start","machine":"studio","reason":"startup","resume":null,"session":"5a000000-0000-4000-8000-00000000000a","surface":"cli"}</pre>
+    <code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code> in one
+    <code class="code">O_APPEND</code> write under a shared <code class="code">flock</code>, so concurrent writers interleave whole lines
+    and <a class="link" href="#forget">forget</a>'s rewrite loses none; a guard's rationale is one-lined to 1,000 characters:</p>
+  <pre class="snippet">{"at":"2026-11-09T08:05:00Z","cwd":"/work/alpha","interactive":true,"kind":"start","machine":"studio","reason":"startup","resume":null,"session":"5a000000-0000-4000-8000-00000000000a","surface":"cli"}
+{"at":"2026-11-09T09:10:00Z","kind":"guard","machine":"studio","rationale":"sample: never force-push","session":"5a000000-0000-4000-8000-00000000000a","tool":"Bash"}</pre>
+  <p>A guard is never a session's mark: every reader of sessions (chart's <code class="code">active</code>, take, reconcile, settle, encode) reads only start, end and encode lines.</p>
   <p><strong>exit 0</strong> written, silent; <strong>exit 2</strong> stdin not JSON, or <code class="code">kind</code>
-    or <code class="code">session</code> missing or invalid: one stderr line, nothing written; <strong>exit 1</strong>
+    or <code class="code">session</code> missing or invalid, a guard without a string <code class="code">rationale</code>: one stderr line, nothing written; <strong>exit 1</strong>
     the root cannot hold the line: one stderr line.</p>
 </section>
 
@@ -189,6 +195,7 @@
   </header>
   <pre class="snippet">{"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"interactive":bool|null,"machine":str,"outcome":str|null,"seen":str|null,"session":str,"start":str|null}],
  "at":"&lt;now, RFC 3339 UTC&gt;",
+ "guards":[{"at":str,"rationale":str,"session":str,"tool":str|null}],
  "intentions":[{"about":str|null,"after":str|null,"closed":str|null,"created":str|null,"due":str|null,"id":str,"session":str|null,"state":str|null,"what":str}],
  "knowledge":[{"created":str|null,"file":str,"name":str,"session":str|null,"source":…,"topic":str,"type":str}],
  "machine":"&lt;this machine's id&gt;",
@@ -205,6 +212,7 @@
       <code class="code">interactive</code> true when a start mark says so, else false when one says false,
       else null; <code class="code">seen</code> the live transcript's mtime, null without one. By
       <code class="code">start</code>, then session.</li>
+    <li><strong>guards</strong> — one per guard line in the ledger, by <code class="code">at</code>: the denied tool calls bifrost's portals page lists.</li>
     <li><strong>taken</strong> — one per archived transcript, a file directly in a day dir named
       <code class="code">&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code>; the latest wins when a session
       has several. <code class="code">taken</code> is that day and time in UTC,
@@ -239,6 +247,56 @@
   </figure>
 </section>
 
+<section class="docs-section" id="forget" data-component="forget">
+  <header>
+    <h2 class="h2">forget</h2>
+    <p class="docs-note">The privacy ending, and the one verb that deletes for good: no <code class="code">.pruned/</code> copy, and nothing recorded that names the session.
+      The <code class="code">/delete</code> skill and bridge's forget button run it twice.</p>
+  </header>
+  <figure class="figure">
+    <div class="chart-frame life" id="forgetting">
+      <svg width="736" height="178" viewBox="0 0 736 178" role="img" aria-label="forget's order: the ledger first, then removals, then rewrites; the watcher runs it again after the CLI exits">
+        <defs>
+          <marker id="forget-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <g transform="translate(0,16)"><rect class="life-box is-accent" width="224" height="72" rx="8" /><text class="life-name" x="14" y="24">① the ledger</text><text class="life-note" x="14" y="44">every line naming it dropped</text><text class="life-note" x="14" y="60">under the writers' lock, first</text></g>
+        <g transform="translate(256,16)"><rect class="life-box" width="224" height="72" rx="8" /><text class="life-name" x="14" y="24">② removed</text><text class="life-note" x="14" y="44">transcripts, archive, pointer</text><text class="life-note" x="14" y="60">its traces, memories, run files</text></g>
+        <g transform="translate(512,16)"><rect class="life-box" width="224" height="72" rx="8" /><text class="life-name" x="14" y="24">③ rewritten</text><text class="life-note" x="14" y="44">a merge's source, an intention</text><text class="life-note" x="14" y="60">pruned ops, embeddings, log</text></g>
+        <g aria-hidden="true">
+          <path class="life-path" marker-end="url(#forget-head)" d="M224,52H256" />
+          <path class="life-path" marker-end="url(#forget-head)" d="M480,52H512" />
+          <path class="life-path is-back" marker-end="url(#forget-head)" d="M624,88V136H112V88" />
+        </g>
+        <text class="life-note" x="368" y="156" text-anchor="middle">once the CLI exits, a watcher runs it again: the exit flush regrows the transcript</text>
+      </svg>
+    </div>
+    <figcaption>forget's order, ①–③. The ledger goes first, so a <code class="code">take</code> or a tick racing it finds no start mark and archives nothing.</figcaption>
+  </figure>
+  <pre class="snippet">sandman forget &lt;session&gt;   # forgot: &lt;n&gt; removed, &lt;n&gt; rewritten | nothing to forget</pre>
+  <div class="table-wrap">
+  <table data-table>
+    <thead>
+      <tr><th>store</th><th>forget</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code class="code">ledger/**</code>, today's too</td><td>every line holding the id dropped, the file rewritten by temp + rename under an exclusive <code class="code">flock</code></td></tr>
+      <tr><td><code class="code">&lt;claude&gt;/projects/*/&lt;session&gt;.jsonl</code> and <code class="code">&lt;session&gt;/</code></td><td>removed, in every project</td></tr>
+      <tr><td><code class="code">.archive/claude/**</code></td><td>every copy and <code class="code">-dir</code> named for it removed</td></tr>
+      <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>removed</td></tr>
+      <tr><td>traces, memories, knowledge pages</td><td>those whose <code class="code">session</code> is it removed (an encoded or remembered trace, a consolidate's keep), their lines in <code class="code">embeddings.jsonl</code> too; any other holding the id rewritten without it (a merge's <code class="code">source</code>)</td></tr>
+      <tr><td><code class="code">.pruned/**</code></td><td>a copy whose <code class="code">session</code> is it removed, a reply's ops on that trace dropped, any other holding the id rewritten</td></tr>
+      <tr><td><code class="code">intentions/&lt;id&gt;.md</code></td><td>kept, its <code class="code">session</code> link dropped: deferred work is the person's, not the session's</td></tr>
+      <tr><td><code class="code">run/</code></td><td>a model run's <code class="code">.in</code>, <code class="code">.out</code>, <code class="code">.err</code> holding the id removed, and encode's when the last or next episode encoded was this one; <code class="code">serve.log</code> and <code class="code">serve.log.1</code> without its lines</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul class="stack claims" role="list">
+    <li><strong>today's file</strong> — every append (mark, take, recall, the tick, the daemon's log, the embedding cache) is one <code class="code">O_APPEND</code> write under a shared <code class="code">flock</code>; forget holds the exclusive one while it reads, writes the temp file and renames it over. An append in flight finishes first; one waiting on the old file wakes holding an inode no longer at the path, sees so, and opens the replacement. The suite races 90 marks against 20 rewrites and loses none; without the lock, 4 runs of 5 lost 4 or 5 (measured 2026-11-14). A CLI cannot take the daemon's tick lock, and needs none: the lock is on the file.</li>
+    <li><strong>what stays</strong> — what a consolidate already merged into another memory: a merge cannot be unpicked, so only what <code class="code">session:</code> attributes is removed, and the stamp naming the session is rewritten. Claude Code's own stores (<code class="code">history.jsonl</code>, <code class="code">file-history/</code>, <code class="code">session-env/</code>) are not sandman's; neither are the old sandman's directories (<a class="link" href="#root">data root</a>). An encode in flight may still write its traces and line; the second run takes them.</li>
+    <li><strong>exit</strong> — 0, idempotent: <code class="code">nothing to forget</code> once all is gone; 2 on an id that is not a session's; 1 on a failed removal or write, one stderr line, the rest left for the next run.</li>
+  </ul>
+</section>
+
 <section class="docs-section" id="serve" data-component="serve">
   <header>
     <h2 class="h2">serve</h2>
@@ -249,7 +307,7 @@
       neither waiting, once a week, <a class="link" href="#reflect">reflect</a> on the guidance.</p>
   </header>
   <figure class="figure">
-    <div class="chart-frame" id="lifecycle">
+    <div class="chart-frame life" id="lifecycle">
       <svg width="736" height="178" viewBox="0 0 736 178" role="img" aria-label="the daemon's lifecycle: start, ready, stopping, exit, and launchd starting it again">
         <defs>
           <marker id="life-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
@@ -278,7 +336,7 @@
     prints its health line on stdout, so whoever spawned it knows it is ready without polling.</p>
   <p>One newline-terminated JSON request and one reply per connection, compact, keys alphabetical; a
     connection silent for 1 s is dropped unanswered. Errors are typed codes.</p>
-  <pre class="snippet">{"op":"health"}   → {"machine":str,"ok":true,"pid":int,"since":"&lt;RFC 3339 start&gt;","state":"booting"|"ready"|"stopping","version":"&lt;crate version&gt;"}
+  <pre class="snippet">{"op":"health"}   → {"machine":str,"ok":true,"pid":int,"since":"&lt;RFC 3339 start&gt;","state":"booting"|"ready"|"stopping","version":"&lt;crate version&gt;-&lt;build&gt;"}
 {"op":"shutdown"} → {"ok":true}, written after the listener is dropped
 anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
   <ul class="stack claims" role="list">
@@ -319,18 +377,25 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       <code class="code">reason</code>),
       <code class="code">panic</code> from the panic hook. A line that finds it at <code class="code">$SANDMAN_LOG_CAP</code> bytes
       (1 MiB) first renames it to <code class="code">serve.log.1</code>.</li>
+    <li><strong>version</strong> — <code class="code">sandman version</code> prints <code class="code">&lt;crate version&gt;-&lt;build&gt;</code>, the build the commit
+      it was built from (<code class="code">-dirty</code> over uncommitted work), the same string health carries: an installer's smoke check.</li>
     <li><strong>status</strong> — sends health and prints the reply, exit 0, with one stderr line
-      naming both versions and <code class="code">launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman</code>
+      naming both versions and the fix, <code class="code">sandman setup</code>,
       when the daemon's is not the client's; no daemon prints
       <code class="code">{"code":"down","ok":false}</code>, exit 1.</li>
-    <li><strong>setup</strong> — prints the plist and writes nothing: this executable and
+    <li><strong>setup</strong> — installs the agent. The plist: this executable and
       <code class="code">serve</code>, the root it ran with and the caller's <code class="code">PATH</code> (launchd's
       finds no <code class="code">claude</code>), KeepAlive, RunAtLoad, ThrottleInterval 10,
-      ExitTimeOut 2, stderr to <code class="code">serve.err</code> beside <code class="code">run/</code> for failures before the log.</li>
+      ExitTimeOut 2, stderr to <code class="code">serve.err</code> beside <code class="code">run/</code> for failures before the log;
+      <code class="code">--print</code> prints it and writes nothing. <code class="code">setup</code> boots out the old sandman's agents
+      (<code class="code">dev.gigantic.sandman.breathe</code>, <code class="code">.reflect</code>, <code class="code">.report</code>, <code class="code">.upgrade</code>) and removes their plists,
+      writes <code class="code">~/Library/LaunchAgents/dev.gigantic.sandman.plist</code> by temp + rename, then kickstarts it when that plist was already
+      loaded and loads it afresh otherwise. After a bootout it polls <code class="code">launchctl print</code> until the job is gone
+      (at most <code class="code">$SANDMAN_BOOTOUT_MS</code>, 30 s): a bootstrap before then fails. Without <code class="code">launchctl</code> (Linux) it stops
+      before writing anything; <code class="code">--remove</code> boots the agent out and removes its plist.</li>
   </ul>
-  <pre class="snippet">sandman-next setup &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.plist
-launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after each install
+  <pre class="snippet">mise run install && sandman-next setup   # install, retire the old agents, load or swap
+sandman-next status                      # the daemon's health, its version this build's
 claude setup-token                                          # in a terminal: prints a year's token, stores nothing
 install -m 600 /dev/stdin ~/Codes/claude-oauth-token        # paste it, then Ctrl-D</pre>
 </section>
@@ -571,6 +636,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
     <p class="docs-note">Parts still to bring over.</p>
   </header>
   <ul class="stack" role="list">
+    <li>the cutover: the subether mod's guard hook moves from the old <code class="code">trail append --kind guard</code> to <code class="code">mark</code>'s guard, bifrost's portals page reads <code class="code">chart</code>'s <code class="code">guards</code> in place of <code class="code">trail/</code>, the <code class="code">/delete</code> skill and bridge's forget button call this <code class="code">forget</code>, and the old binary retires.</li>
+    <li><code class="code">upgrade</code>: not built. This build has no release channel, so a swap is the install, <code class="code">setup</code> and <code class="code">status</code> above. Once releases ship, it is <code class="code">mise upgrade --bump</code>, then <code class="code">setup</code> (whose kickstart is the swap), then the smoke checks <code class="code">version</code> and <code class="code">status</code> against the new build, and back to the previous version when either fails; no launchd agent of its own.</li>
     <li><code class="code">mark</code>: the mod's tool log moves into the ledger, which becomes every mod event: <code class="code">mark</code> writes a <code class="code">call</code> line per tool call and a <code class="code">prompt</code> line per typed prompt. Readers that need only sessions skip those kinds; encoding, consolidation and the end-of-day judge read a session's calls and prompts from it.</li>
     <li><code class="code">recall</code>: the seed, the agent's pull and <code class="code">show</code> are built; the mod wiring is next, all on <a class="link" href="recall.html">its own page</a>.</li>
     <li><code class="code">knowledge</code>: the store is built; rehoming the existing memories and promoting a playbook to a skill are next, on <a class="link" href="knowledge.html#next">its own page</a>.</li>
