@@ -1,8 +1,8 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's ledger
 //! file, `take` archives a marked session at its end, `chart` prints what the data root holds as
 //! one JSON object, `recall` scores the memories against an agent's cue and `show` prints one,
-//! `mcp` serves `recall`, `remember` and `show` as MCP tools, over the memories, the knowledge
-//! pages and the traces of both,
+//! over the memories, the knowledge pages and the traces of both, `defer`, `due`, `done` and
+//! `drop` keep work put off for later, `mcp` serves the agent's verbs as MCP tools,
 //! `serve` is the daemon (reconcile, settle, encode, consolidate, reflect), `status` asks it for its
 //! health, `setup` prints its launchd plist.
 
@@ -116,7 +116,7 @@ const QUESTION: &str = "Does the agent need this memory to carry out the request
 
 /// The seed's instructions, first in a session's context; `<id>` is the session's id, `<me>` the
 /// name the binary was invoked as.
-const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, with `--about <repository path>` when it holds in one repository, one fact per call.";
+const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, one fact per call, with `--about <repository path>` when it holds in one repository, `--type knowledge|playbook --topic <topic>` for general knowledge or a playbook. When the person defers work (later, tomorrow, after X), run `<me> defer \"<their words>\" --when <today|tomorrow|friday|YYYY-MM-DD|+3d|the event> --session <id>` at once; close it with `<me> done <its id>` once finished.";
 
 /// Recall's lexical gate: a cue whose every token is one of these asks for nothing.
 const STEER: &str = "go yes yeah yep ok okay continue next thanks thank done saved good great morning back hi hello signed sure fine cool nice where we are what now";
@@ -149,6 +149,71 @@ fn adopt(root: &Path, changes: &[(&str, String)]) -> io::Result<Map<String, Valu
         drop(history.insert(change.0.to_owned(), kept.into()));
     }
     Ok(history)
+}
+
+/// The due block `sandman due` and the seed print: a header, then a row per open intention, `<id>
+/// <due date | waiting: <event>> — <what>[ (<repository>)]`; the time-based ones due by the local
+/// today, most overdue first, then every event-based one (no date tells when an event happened),
+/// then with `all` the upcoming ones by date; past `cap` rows, `… <n> more: <me> due`. Empty
+/// without a row.
+fn agenda<F: Fn(&str) -> String>(root: &Path, all: bool, cap: usize, me: &str, label: F) -> String {
+    let now = today();
+    let mut open: Vec<(u8, Value)> = intentions(root)
+        .into_iter()
+        .filter(|held| held["state"] == "open")
+        .map(|held| {
+            let group = held["due"]
+                .as_str()
+                .map_or(1, |due| if due <= now.as_str() { 0 } else { 2 });
+            (group, held)
+        })
+        .filter(|pair| all || pair.0 < 2)
+        .collect();
+    open.sort_by_key(|pair| {
+        (
+            pair.0,
+            text(&pair.1["due"]).to_owned(),
+            text(&pair.1["created"]).to_owned(),
+        )
+    });
+    let more = open.len().saturating_sub(cap);
+    let shown: String = open
+        .into_iter()
+        .take(cap)
+        .map(|(_, held)| {
+            format!(
+                "  \u{b7} {} {} \u{2014} {}{}\n",
+                text(&held["id"]),
+                held["due"].as_str().map_or_else(
+                    || format!("waiting: {}", text(&held["after"])),
+                    str::to_owned
+                ),
+                one_line(text(&held["body"]), 160),
+                held["about"].as_str().map_or_else(String::new, |about| {
+                    format!(" ({})", label(&key(&project(Path::new(about)))))
+                })
+            )
+        })
+        .chain((more > 0).then(|| format!("  \u{2026} {more} more: {me} due\n")))
+        .collect();
+    if shown.is_empty() {
+        shown
+    } else {
+        format!(
+            "due \u{b7} deferred work: raise it with the person, never start it unasked\n{shown}"
+        )
+    }
+}
+
+/// `fields` with each of `changes` set in place, else appended; an empty value drops out when
+/// `note` writes it.
+fn amend<'text>(fields: &mut Vec<(&'text str, &'text str)>, changes: &[(&'text str, &'text str)]) {
+    for &(field, value) in changes {
+        match fields.iter_mut().find(|held| held.0 == field) {
+            Some(held) => held.1 = value,
+            None => fields.push((field, value)),
+        }
+    }
 }
 
 /// Appends `rows`, each `{"h","path","v"}`, to the embedding cache `<root>/embeddings.jsonl` in one
@@ -206,6 +271,15 @@ fn cut(whole: String, budget: usize) -> String {
     )
 }
 
+/// Day `at` since the epoch as `YYYY-MM-DD`.
+fn date(at: u64) -> String {
+    let time = UNIX_EPOCH.checked_add(Duration::from_secs(at.saturating_mul(86_400)));
+    utc(time.unwrap_or(UNIX_EPOCH))
+        .get(..10)
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// A free `<root>/<dir>/<yyyy>/<mm>/<dd>/<HHMMSS>-<file>` at this UTC second, claimed; a clash
 /// with a file or a claimed path takes `<HHMMSS>-<n>-<file>`, never the earlier one.
 fn dated(root: &Path, dir: &str, file: &str, claimed: &mut BTreeSet<PathBuf>) -> PathBuf {
@@ -222,6 +296,31 @@ fn dated(root: &Path, dir: &str, file: &str, claimed: &mut BTreeSet<PathBuf>) ->
             .chain((2u32..1000).map(|n| base.replacen('-', &format!("-{n}-"), 1))),
         claimed,
     )
+}
+
+/// `when`'s day since the epoch when it is a real `YYYY-MM-DD` from 1970 (Howard Hinnant's
+/// `days_from_civil`, held to `date`'s round trip).
+fn day(when: &str) -> Option<u64> {
+    let mut parts = when.split('-').map(|part| part.parse::<u64>().ok());
+    let (year, month, of) = (parts.next()??, parts.next()??, parts.next()??);
+    let shifted = year.checked_sub(u64::from(month <= 2))?;
+    let (era, yoe) = (shifted.div_euclid(400), shifted.rem_euclid(400));
+    let doy = month
+        .checked_add(9)?
+        .rem_euclid(12)
+        .checked_mul(153)?
+        .checked_add(2)?
+        .div_euclid(5)
+        .checked_add(of)?
+        .checked_sub(1)?;
+    let days = era
+        .checked_mul(146_097)?
+        .checked_add(yoe.checked_mul(365)?)?
+        .checked_add(yoe.div_euclid(4))?
+        .checked_sub(yoe.div_euclid(100))?
+        .checked_add(doy)?
+        .checked_sub(719_468)?;
+    (date(days) == when).then_some(days)
 }
 
 /// Each of `texts` embedded by `$SANDMAN_OLLAMA`'s `/api/embed`, 16 a request, as the reference
@@ -632,6 +731,20 @@ fn highlights(lines: &[Value]) -> Vec<String> {
         }
     }
     highlights.split_off(highlights.len().saturating_sub(20))
+}
+
+/// Every intention, `<root>/intentions/<id>.md`, as `read` gives it with its `id`, by id.
+fn intentions(root: &Path) -> Vec<Value> {
+    tree(&root.join("intentions"), 1)
+        .iter()
+        .filter(|path| path.extension() == Some("md".as_ref()))
+        .map(|path| {
+            read(
+                json!({"id": path.file_stem().and_then(OsStr::to_str)}),
+                fs::read_to_string(path).unwrap_or_default(),
+            )
+        })
+        .collect()
 }
 
 /// The background job under `<claude>/jobs/` that names `session`: its `resumeSessionId`, else
@@ -1307,6 +1420,18 @@ fn text(value: &Value) -> &str {
     value.as_str().unwrap_or_default()
 }
 
+/// The local date, `YYYY-MM-DD`: `$SANDMAN_TODAY` (the suite's fixed day), else `date +%F`, in the
+/// machine's time zone (`$TZ`, else `/etc/localtime`).
+fn today() -> String {
+    env::var("SANDMAN_TODAY").unwrap_or_else(|_| {
+        Command::new("date")
+            .arg("+%F")
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+            .unwrap_or_default()
+    })
+}
+
 /// Recall's tokens: `text`'s lowercase alphanumeric runs, a one-character run or a `STOPWORDS` word
 /// dropped, a final `s` dropped past four characters (a crude plural fold).
 fn toks(text: &str) -> Vec<String> {
@@ -1482,6 +1607,13 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    // remember's and defer's `--about`: canonical when it is a directory
+    let regarding = flag("--about").map(|given| {
+        fs::canonicalize(&given)
+            .ok()
+            .filter(|dir| dir.is_dir())
+            .map_or(given, |dir| dir.to_string_lossy().into_owned())
+    });
     let pipeline = env::var("CLAUDE_MEMORY_PIPELINE").as_deref() == Ok("1");
     // a start or end mark: mark's line, and the seed's first act
     let marked = |kind: Value| {
@@ -1618,15 +1750,183 @@ fn main() -> ExitCode {
                     })
                 })
                 .collect();
+            let intended = intentions(&root)
+                .iter()
+                .map(|held| {
+                    json!({
+                        "about": held["about"], "after": held["after"], "closed": held["closed"], "created": held["created"],
+                        "due": held["due"], "id": held["id"], "session": held["session"], "state": held["state"], "what": held["body"],
+                    })
+                })
+                .collect();
             // a closed stdout (`| head`) ends the chart quietly
             drop(writeln!(
                 io::stdout().lock(),
                 "{}",
                 json!({
-                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "knowledge": shelved("knowledge"),
+                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "intentions": sorted(intended, "created"),
+                    "knowledge": shelved("knowledge"),
                     "machine": machine(&root), "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
                 })
             ));
+            ExitCode::SUCCESS
+        }
+        "defer" | "done" | "drop" => {
+            // prospective memory: an intention written, pushed or closed; nothing acts on one
+            let change = || -> Result<String, (u8, String)> {
+                let deferring = verb == "defer";
+                let given = if deferring {
+                    flag("--id")
+                } else {
+                    Some(args.get(2).cloned().unwrap_or_default())
+                };
+                let what = args
+                    .get(2)
+                    .filter(|said| !said.starts_with("--"))
+                    .map_or("", |said| said.trim());
+                // a time is a date from the local today, a weekday the next one after it
+                // (1970-01-01 was a Thursday); any other words are an event's
+                let when = flag("--when").and_then(|asked| {
+                    let (spoken, now) = (
+                        asked.trim().to_lowercase(),
+                        day(&today()).unwrap_or_default(),
+                    );
+                    let ahead = match spoken.as_str() {
+                        "" => return None,
+                        "today" => Some(0),
+                        "tomorrow" => Some(1),
+                        _ => "sunday monday tuesday wednesday thursday friday saturday"
+                            .split(' ')
+                            .position(|name| name == spoken)
+                            .map(|at| {
+                                u64::try_from(at)
+                                    .unwrap_or_default()
+                                    .saturating_add(13)
+                                    .saturating_sub(now.saturating_add(4).rem_euclid(7))
+                                    .rem_euclid(7)
+                                    .saturating_add(1)
+                            })
+                            .or_else(|| {
+                                let count = spoken.strip_prefix('+')?;
+                                let (span, per) = count
+                                    .strip_suffix('d')
+                                    .map(|days| (days, 1))
+                                    .or_else(|| Some((count.strip_suffix('w')?, 7)))?;
+                                Some(u64::from(span.parse::<u16>().ok()?).saturating_mul(per))
+                            }),
+                    };
+                    Some(
+                        ahead
+                            .map(|days| now.saturating_add(days))
+                            .or_else(|| day(&spoken))
+                            .map_or_else(
+                                || ("after", one_line(&asked, 400)),
+                                |at| ("due", date(at)),
+                            ),
+                    )
+                });
+                if deferring && (when.is_none() || (given.is_none() && what.is_empty())) {
+                    return Err((
+                        2,
+                        "sandman defer: takes \"<what>\" first, or --id <id>, and --when today|tomorrow|<weekday>|YYYY-MM-DD|+<n>d|+<n>w|<event>".to_owned(),
+                    ));
+                }
+                let hits: Vec<Value> = intentions(&root)
+                    .into_iter()
+                    .filter(|held| {
+                        given.as_deref().is_some_and(|asked| {
+                            !asked.is_empty() && text(&held["id"]).starts_with(asked)
+                        })
+                    })
+                    .collect();
+                let found = hits.first().filter(|_| hits.len() == 1);
+                if let Some(asked) = given.as_deref().filter(|_| found.is_none()) {
+                    return Err((
+                        1,
+                        format!(
+                            "sandman {verb}: {asked} is not one intention's id ({} match)",
+                            hits.len()
+                        ),
+                    ));
+                }
+                let (now, (field, value), noted) = (
+                    utc(SystemTime::now()),
+                    when.unwrap_or_default(),
+                    flag("--note").unwrap_or_default(),
+                );
+                let id = found.map_or_else(
+                    || random().get(..8).unwrap_or_default().to_owned(),
+                    |hit| text(&hit["id"]).to_owned(),
+                );
+                // the store's fields in their order: a push files it anew and reopens it, a close
+                // stamps it
+                let held = found.cloned().unwrap_or_else(
+                    || json!({"about": regarding, "created": now, "session": pull}),
+                );
+                let mut fields = Vec::from(
+                    [
+                        "due", "after", "created", "about", "session", "state", "closed", "note",
+                    ]
+                    .map(|key| (key, text(&held[key]))),
+                );
+                let state = ["open", "done", "dropped"]
+                    [usize::from(!deferring).saturating_add(usize::from(verb == "drop"))];
+                let other = ["due", "after"][usize::from(field == "due")];
+                let closed = ["", now.as_str()][usize::from(!deferring)];
+                let changes = [
+                    (field, value.as_str()),
+                    (other, ""),
+                    ("state", state),
+                    ("closed", closed),
+                    ("note", noted.as_str()),
+                ];
+                amend(
+                    &mut fields,
+                    changes
+                        .get([0, 2][usize::from(!deferring)]..)
+                        .unwrap_or_default(),
+                );
+                put(
+                    &root.join(format!("intentions/{id}.md")),
+                    &note(&fields, found.map_or(what, |hit| text(&hit["body"]))),
+                )
+                .map_err(|error| (1, format!("sandman {verb}: {error}")))?;
+                let kind = ["push", verb][usize::from(!deferring || found.is_none())];
+                let mut line = json!({"id": id, "kind": kind, "session": pull});
+                for (key, said) in [(field, &value), ("note", &noted)] {
+                    if !said.is_empty() {
+                        line[key] = said.as_str().into();
+                    }
+                }
+                drop(record(&root, &mut line));
+                Ok(match (deferring, field) {
+                    (false, _) => format!("{id} {state}"),
+                    (true, "due") => format!("{id} {value}"),
+                    _ => format!("{id} waiting: {value}"),
+                })
+            };
+            change().map_or_else(
+                |(code, error)| {
+                    eprintln!("{error}");
+                    ExitCode::from(code)
+                },
+                |printed| {
+                    println!("{printed}");
+                    ExitCode::SUCCESS
+                },
+            )
+        }
+        "due" => {
+            let (_, _, label) = labels(&home, &claude);
+            let all =
+                args.iter().any(|arg| arg == "--all") && flag("--all").as_deref() != Some("false");
+            let shown = agenda(&root, all, usize::MAX, me, label);
+            print!(
+                "{}",
+                Some(shown)
+                    .filter(|listed| !listed.is_empty())
+                    .unwrap_or_else(|| "nothing due\n".to_owned())
+            );
             ExitCode::SUCCESS
         }
         "mcp" => {
@@ -1649,7 +1949,20 @@ fn main() -> ExitCode {
                 });
             let string = |about: &str| json!({"description": about, "type": "string"});
             let sessioned = string("this session's id, as the seed gives it; else the server's");
+            let closing = |named: &str, how: &str| {
+                json!({"description": format!("Close a deferred intention {how}, by the id `due` or the seed gives."),
+                 "inputSchema": {"properties": {"id": string("the intention's id, or its start"), "note": string("a line on how it ended"), "session": sessioned}, "required": ["id"], "type": "object"},
+                 "name": named})
+            };
             let tools = json!([
+                {"description": "Defer work at once when the person puts it off (later, tomorrow, after X), in their words: it is surfaced to the session it comes due in, never started on its own. With `id`, push that one to a new when.",
+                 "inputSchema": {"properties": {"about": string("the repository path, when it is in one"), "id": string("an intention's id, to push it to a new when"), "session": sessioned, "what": string("the person's words"), "when": string("today, tomorrow, a weekday, YYYY-MM-DD, +3d, +2w, or the event's words: after grove ships")}, "required": ["what", "when"], "type": "object"},
+                 "name": "defer"},
+                closing("done", "once it is finished"),
+                closing("drop", "the person no longer wants"),
+                {"description": "List deferred work that is due, and every one waiting on an event; `all` adds the upcoming. Raise it with the person; never start it unasked.",
+                 "inputSchema": {"properties": {"all": {"description": "add the upcoming ones", "type": "boolean"}, "session": sessioned}, "required": [], "type": "object"},
+                 "name": "due"},
                 {"description": "Pull memory from earlier sessions before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `show` before acting on it; a `~` marks one remembered but not yet consolidated.",
                  "inputSchema": {"properties": {"about": string("the repository path, when the work is in one"), "budget": {"description": "characters, 4000 by default", "type": "number"}, "cue": string("what you are about to do"), "session": sessioned}, "required": ["cue"], "type": "object"},
                  "name": "recall"},
@@ -2195,13 +2508,16 @@ fn main() -> ExitCode {
                 }
             }
             let foot = &*format!("read one in full: {me} show <path>\n");
-            // the seed opens with its instructions and the always-set, counted first
-            let opening: String = iter::once(format!(
-                "{}\n\nalways \u{b7} about the person, or pinned\n",
-                SEED.replace("<id>", sid).replace("<me>", me)
-            ))
-            .filter(|_| seed)
-            .collect();
+            // the seed opens with its instructions, what is due and the always-set, counted first
+            let opening = if seed {
+                format!(
+                    "{}\n\n{}always \u{b7} about the person, or pinned\n",
+                    SEED.replace("<id>", sid).replace("<me>", me),
+                    agenda(&root, false, 10, me, &label)
+                )
+            } else {
+                String::new()
+            };
             // one line a memory while the cut rule holds; what went into the ledger line
             let mut rows = || {
                 let mut used = [opening.as_str(), &head(candidates.len()), foot]
@@ -2295,17 +2611,11 @@ fn main() -> ExitCode {
                 );
                 return ExitCode::from(2);
             };
-            // homed as encode homes a trace: the directory --about names, else the cwd, else home
-            let about = flag("--about").map(|given| {
-                fs::canonicalize(&given)
-                    .ok()
-                    .filter(|dir| dir.is_dir())
-                    .map_or(given, |dir| dir.to_string_lossy().into_owned())
-            });
+            // homed as encode homes a trace: the directory --about names, else the cwd, else home;
             // a knowledge type by its topic
             let bank = if shelved.is_empty() {
                 key(&project(
-                    &about
+                    &regarding
                         .as_ref()
                         .map(PathBuf::from)
                         .filter(|dir| dir.is_dir())
@@ -2338,7 +2648,7 @@ fn main() -> ExitCode {
                     ("created", &now),
                     (
                         "about",
-                        &one_line(about.as_deref().unwrap_or_default(), 400),
+                        &one_line(regarding.as_deref().unwrap_or_default(), 400),
                     ),
                     ("topic", shelved),
                     ("session", session.unwrap_or_default()),
@@ -2943,19 +3253,14 @@ fn main() -> ExitCode {
                                         let description = one("description", 400);
                                         let mut fields =
                                             front(memory.map_or("", |found| text(&found["text"])));
-                                        for (field, value) in [
-                                            ("description", description.as_str()),
-                                            ("source", stamp.as_str()),
-                                            ("updated", now.as_str()),
-                                        ] {
-                                            match fields
-                                                .iter_mut()
-                                                .find(|held_field| held_field.0 == field)
-                                            {
-                                                Some(held_field) => held_field.1 = value,
-                                                None => fields.push((field, value)),
-                                            }
-                                        }
+                                        amend(
+                                            &mut fields,
+                                            &[
+                                                ("description", description.as_str()),
+                                                ("source", stamp.as_str()),
+                                                ("updated", now.as_str()),
+                                            ],
+                                        );
                                         writes.push((
                                             dir.join(
                                                 memory.map_or("", |found| text(&found["file"])),
@@ -3494,7 +3799,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman chart | mcp | serve | setup | status"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman chart | mcp | serve | setup | status"
             );
             ExitCode::from(2)
         }
