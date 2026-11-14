@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en" class="ui">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sandman — intentions</title>
+<link rel="stylesheet" href="https://gigantic.dev/ui/ui.css" />
+<link rel="stylesheet" href="https://gigantic.dev/ui/docs.css" />
+<link rel="stylesheet" href="charts/chart.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23476349'/%3E%3Cpath d='M11.5 9.5A5 5 0 0 1 6.5 4.5 5 5 0 1 0 11.5 9.5Z' fill='white'/%3E%3C/svg%3E" />
+<style>
+/* the timeline: a static svg, tokens only */
+#timeline .tl-axis { stroke: var(--ui-fg-muted); stroke-width: 1.5; }
+#timeline .tl-box { fill: var(--ui-surface-raised); stroke: var(--ui-border-strong); }
+#timeline .tl-box.is-over { stroke: var(--ui-warn); stroke-width: 2; }
+#timeline .tl-name { fill: var(--ui-fg); font-family: var(--ui-font-mono); font-size: 13px; }
+#timeline .tl-note { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); }
+#timeline .tl-now { stroke: var(--ui-accent); stroke-width: 2; }
+#timeline .tl-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
+#timeline .tl-path.is-over { stroke: var(--ui-warn); stroke-dasharray: 4 3; }
+#timeline .tl-session { fill: var(--ui-fg-muted); }
+#timeline .tl-tick { fill: var(--ui-fg-muted); font-family: var(--ui-font-mono); }
+#timeline marker path { fill: var(--ui-fg-muted); }
+#timeline marker.is-over path { fill: var(--ui-warn); }
+</style>
+</head>
+<body data-page="sandman">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<!-- Phosphor Icons (regular), MIT (c) 2023 Phosphor Icons — via jgeschwendt/ui icons/ -->
+<symbol id="ph-circle-half" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm8,16.37a86.4,86.4,0,0,1,16,3V212.67a86.4,86.4,0,0,1-16,3Zm32,9.26a87.81,87.81,0,0,1,16,10.54V195.83a87.81,87.81,0,0,1-16,10.54ZM40,128a88.11,88.11,0,0,1,80-87.63V215.63A88.11,88.11,0,0,1,40,128Zm160,50.54V77.46a87.82,87.82,0,0,1,0,101.08Z"/></symbol>
+<symbol id="ph-moon" viewBox="0 0 256 256" fill="currentColor"><path d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11a89,89,0,0,1,31.4-26A106,106,0,0,0,96,56,104.11,104.11,0,0,0,200,160a106,106,0,0,0,14.92-1.06A89,89,0,0,1,188.9,190.34Z"/></symbol>
+<symbol id="ph-sun" viewBox="0 0 256 256" fill="currentColor"><path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"/></symbol>
+</svg>
+<header class="appbar">
+  <h1 class="appbar-title">
+    <svg class="icon" aria-hidden="true"><use href="#ph-moon" /></svg>
+    sandman <small>· intentions</small>
+  </h1>
+  <span class="spacer"></span>
+  <div class="segmented" role="group" aria-label="theme">
+    <button type="button" data-theme-set="light" aria-pressed="false" title="light">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-sun" /></svg>light
+    </button>
+    <button type="button" data-theme-set="auto" aria-pressed="true" title="follow the system">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-circle-half" /></svg>auto
+    </button>
+    <button type="button" data-theme-set="dark" aria-pressed="false" title="dark">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-moon" /></svg>dark
+    </button>
+</div>
+</header>
+
+<main class="docs-shell" data-container>
+
+<header class="stack">
+  <p class="eyebrow">memory for agentic sessions · <a class="link" href="index.html">the main page</a> · <a class="link" href="recall.html">recall</a> · <a class="link" href="knowledge.html">knowledge</a></p>
+  <p class="lead docs-lead">Prospective memory is remembering to do something later. sandman keeps one place for work
+    the person defers — "do this later", "tomorrow", "after grove ships" — and surfaces it to the first session it
+    comes due in. It never does the work: due items are raised with the person.</p>
+  <p class="notice notice-warn"><span>Built: <code class="code">defer</code>, <code class="code">due</code>,
+    <code class="code">done</code>, <code class="code">drop</code>, the store, the seed's due block, the MCP tools and
+    <code class="code">chart</code>'s list. Not built: matching an event to a session, a timeline in bifrost
+    (<a class="link" href="#next">next</a>).</span></p>
+  <nav class="row docs-toc" aria-label="sections">
+    <a class="pill" href="#problem">problem</a>
+    <a class="pill" href="#kinds">kinds</a>
+    <a class="pill" href="#verbs">verbs</a>
+    <a class="pill" href="#store">store</a>
+    <a class="pill" href="#seed">seed</a>
+    <a class="pill" href="#surfaced">surfaced</a>
+    <a class="pill" href="#next">next</a>
+    <a class="pill" href="#open">open</a>
+  </nav>
+</header>
+
+<section class="docs-section" id="problem">
+  <header>
+    <h2 class="h2">The problem</h2>
+  </header>
+  <p>A deferred ask dies with the chat. "Let's do that tomorrow" is a turn in one transcript; the next session starts
+    without it, and a memory is the wrong home: memories record what holds, not what is owed, and recall pulls them
+    by relevance to the work at hand, never by date. The owner, 2026-11-14: "you should have a calendar or timeline
+    too, i'll often tell you things like well do this later or tmrw, you should have one place for these types of
+    turns".</p>
+</section>
+
+<section class="docs-section" id="kinds">
+  <header>
+    <h2 class="h2">Time-based and event-based</h2>
+    <p class="docs-note">Memory science splits prospective memory in two; a stored item is an intention.</p>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>kind</th><th>cue</th><th><code class="code">--when</code></th><th>stored</th><th>due</th></tr></thead>
+    <tbody>
+      <tr><td>time-based</td><td>a day arrives</td><td><code class="code">today</code>, <code class="code">tomorrow</code>, a weekday (the next one after today), <code class="code">YYYY-MM-DD</code>, <code class="code">+3d</code>, <code class="code">+2w</code></td><td><code class="code">due: &lt;date&gt;</code>, resolved once, from the local today</td><td>on and after that date</td></tr>
+      <tr><td>event-based</td><td>something happens</td><td>any other words: <code class="code">after grove ships</code>, verbatim, a malformed date's too</td><td><code class="code">after: &lt;the words&gt;</code></td><td>always listed, marked waiting: no date tells when an event happened</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>The local today is <code class="code">date +%F</code>, which reads the machine's time zone
+    (<code class="code">$TZ</code>, else <code class="code">/etc/localtime</code>), so "tomorrow" said at 11 pm is the
+    owner's tomorrow, not UTC's. No crate needed; the date arithmetic is the calendar's own (days since the epoch, the
+    day held to a round trip).</p>
+</section>
+
+<section class="docs-section" id="verbs">
+  <header>
+    <h2 class="h2">The verbs</h2>
+    <p class="docs-note">Plain words on the CLI; the same four as MCP tools.</p>
+  </header>
+  <ul class="stack claims" role="list">
+    <li><strong>defer</strong> — <code class="code">sandman defer "&lt;what&gt;" --when &lt;when&gt; [--about &lt;path&gt;] [--session &lt;uuid&gt;]</code>
+      writes one intention and prints <code class="code">&lt;id&gt; &lt;date&gt;</code> or
+      <code class="code">&lt;id&gt; waiting: &lt;event&gt;</code>. A missing what or when is refused, exit 2: a deferral
+      without a when is a todo, which this is not. <code class="code">--id &lt;id&gt; --when &lt;when&gt;</code>
+      pushes one to a new when and reopens it.</li>
+    <li><strong>due</strong> — <code class="code">sandman due [--all]</code>: the open ones due by today, most overdue
+      first, then every one waiting on an event; <code class="code">--all</code> adds the upcoming by date. One row
+      each: id, date or <code class="code">waiting: &lt;event&gt;</code>, what, and the repository when
+      <code class="code">--about</code> named one; <code class="code">nothing due</code> without a row.</li>
+    <li><strong>done</strong>, <strong>drop</strong> — <code class="code">sandman done &lt;id&gt; [--note "&lt;text&gt;"]</code>
+      closes one as finished, <code class="code">drop</code> as no longer wanted. An id is matched by its start; one
+      that matches none or several is one stderr line, exit 1.</li>
+    <li><strong>ledger</strong> — one line each through <code class="code">mark</code>'s writer,
+      <code class="code">kind</code> <code class="code">defer</code>, <code class="code">push</code>,
+      <code class="code">done</code> or <code class="code">drop</code>, with <code class="code">id</code>, the
+      <code class="code">due</code> or <code class="code">after</code> a defer or push set, the note, the session.</li>
+  </ul>
+  <p>Nothing expires or closes on its own: an intention stays open until the person's session closes it.</p>
+</section>
+
+<section class="docs-section" id="store">
+  <header>
+    <h2 class="h2">The store</h2>
+    <p class="docs-note">One file an intention, the memory file's shape; disk is the truth, nothing is cached.</p>
+  </header>
+  <pre class="snippet">&lt;root&gt;/intentions/0a1b2c3d.md
+---
+due: 2026-11-03                  or  after: after grove ships
+created: 2026-11-02T09:00:00Z
+about: /work/alpha               the repository, when given
+session: 5a000000-0000-4000-8000-00000000000a
+state: open                      open, done or dropped
+closed: …                        once closed
+note: …                          the close's note
+---
+
+sample: rerun the alpha bench on the new box</pre>
+  <p>The body is what was deferred, in the person's words. A push rewrites <code class="code">due</code> or
+    <code class="code">after</code> in place; a close sets <code class="code">state</code> and
+    <code class="code">closed</code>. Recall never reads <code class="code">intentions/</code>: an intention is
+    surfaced by date, not ranked by relevance. <code class="code">sandman chart</code> lists every one under
+    <code class="code">intentions</code> (id, what, due or after, state, created, closed, about, session) for a timeline
+    to draw.</p>
+</section>
+
+<section class="docs-section" id="seed">
+  <header>
+    <h2 class="h2">What the seed shows</h2>
+    <p class="docs-note">After the instructions, before the always-set, counted against the seed's budget as a fixed
+      part; absent when nothing is due.</p>
+  </header>
+  <p>The seed's instructions gain one sentence: when the person defers work (later, tomorrow, after X), run
+    <code class="code">sandman defer "&lt;their words&gt;" --when &lt;when&gt;</code> at once, and close it with
+    <code class="code">sandman done &lt;id&gt;</code> once finished. The block is <code class="code">sandman due</code>'s
+    own output, capped at ten rows and then <code class="code">… &lt;n&gt; more: sandman due</code>; its header carries
+    the rule. From the suite's seed (<a class="link" href="data/recall-seed.txt">docs/data/recall-seed.txt</a>, pinned
+    to the real output):</p>
+  <pre class="snippet">due · deferred work: raise it with the person, never start it unasked
+  · 0a1b2c3d 2026-11-03 — Rerun the alpha bench on the new box (/work/alpha)
+  · 6e7f8a9b 2026-11-10 — Draft the beta release notes
+  · 4e5f6a7b waiting: after grove ships — Cut sandman over to the rewrite
+</pre>
+  <figure class="figure">
+    <div class="chart-frame" id="timeline">
+      <svg width="964" height="250" viewBox="0 0 964 250" role="img" aria-label="a timeline of days: past sessions are dots left of now; right of now are the open intentions; two whose due dates fell before today are marked overdue, each carried from its date to now; one is due on a later date; one waits on an event and has no date">
+        <defs>
+          <marker id="tl-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+          <marker id="tl-over" class="is-over" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <line class="tl-axis" x1="20" y1="150" x2="840" y2="150" />
+        <text class="tl-tick" x="40" y="172" text-anchor="middle">11-01</text><text class="tl-tick" x="176" y="172" text-anchor="middle">11-05</text><text class="tl-tick" x="346" y="172" text-anchor="middle">11-10</text><text class="tl-tick" x="686" y="172" text-anchor="middle">11-20</text><text class="tl-tick" x="822" y="172" text-anchor="middle">11-24</text>
+        <line class="tl-now" x1="482" y1="8" x2="482" y2="214" />
+        <text class="tl-name" x="482" y="234" text-anchor="middle">now · 11-14 · the seed lists what is right of this line</text>
+        <circle class="tl-session" cx="74" cy="196" r="6" /><circle class="tl-session" cx="210" cy="196" r="6" /><circle class="tl-session" cx="312" cy="196" r="6" /><circle class="tl-session" cx="414" cy="196" r="6" /><circle class="tl-session" cx="448" cy="196" r="6" />
+        <text class="tl-note" x="40" y="224">past sessions</text>
+        <path class="tl-path is-over" marker-end="url(#tl-over)" d="M108,150V42H496" />
+        <path class="tl-path is-over" marker-end="url(#tl-over)" d="M346,150V94H496" />
+        <path class="tl-path" marker-end="url(#tl-head)" d="M686,150V66" />
+        <g transform="translate(496,20)"><rect class="tl-box is-over" width="144" height="44" rx="8" /><text class="tl-name" x="10" y="19">0a1b2c3d</text><text class="tl-note" x="10" y="36">due 11-03 · overdue</text></g>
+        <g transform="translate(496,72)"><rect class="tl-box is-over" width="144" height="44" rx="8" /><text class="tl-name" x="10" y="19">6e7f8a9b</text><text class="tl-note" x="10" y="36">due 11-10 · overdue</text></g>
+        <g transform="translate(646,20)"><rect class="tl-box" width="104" height="44" rx="8" /><text class="tl-name" x="10" y="19">8c9d0e1f</text><text class="tl-note" x="10" y="36">due 11-20</text></g>
+        <g transform="translate(796,72)"><rect class="tl-box" width="160" height="44" rx="8" /><text class="tl-name" x="10" y="19">4e5f6a7b</text><text class="tl-note" x="10" y="36">after grove ships</text></g>
+        <text class="tl-note" x="796" y="134">no date: waiting on an event</text>
+      </svg>
+    </div>
+    <figcaption>Sample. Sessions lie behind now; intentions ahead of it. An intention whose day has passed is overdue
+      and carried to now, listed first; one waiting on an event has no place on the axis, so every session sees it
+      until it is closed.</figcaption>
+  </figure>
+</section>
+
+<section class="docs-section" id="surfaced">
+  <header>
+    <h2 class="h2">Surfaced, never acted on</h2>
+    <p class="docs-note">Settled 2026-11-14.</p>
+  </header>
+  <p>A due intention is shown to the session and raised with the person; the daemon never acts on one and never starts
+    a session for one, and an agent never starts the work unasked. The owner: "it should be surfaced, routines run in
+    the bg, this is generally work we do together". Work that should run unattended is a routine's, not an
+    intention's; <code class="code">serve</code>'s tick has no job here.</p>
+</section>
+
+<section class="docs-section" id="next">
+  <header>
+    <h2 class="h2">Next</h2>
+    <p class="docs-note">Not built.</p>
+  </header>
+  <ul class="stack" role="list">
+    <li><strong>event matching</strong> — today every event-based intention is listed in every seed until closed.
+      Matching one to a session's cue (the first prompt, the repository) would show it only where it bears.</li>
+    <li><strong>bifrost</strong> — a timeline drawn from <code class="code">chart</code>'s
+      <code class="code">intentions</code>, the figure above with real data.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="open">
+  <header>
+    <h2 class="h2">Open questions</h2>
+  </header>
+  <ul class="stack claims" role="list">
+    <li>How an event-based intention is matched to a session: a lexical match on its words, the decision model as
+      recall asks it, or the person's word alone.</li>
+    <li>Whether a long-waiting event crowds the seed: unmeasured; the cap of ten bounds it.</li>
+    <li>Recurring items are out of scope: anything that repeats on a schedule is a routine.</li>
+  </ul>
+</section>
+
+<nav class="row link-row" aria-label="links">
+  <a class="pill" href="index.html">sandman · design</a>
+  <a class="pill" href="recall.html">sandman · recall</a>
+  <a class="pill" href="knowledge.html">sandman · knowledge</a>
+  <a class="pill" href="https://github.com/jgeschwendt/sandman">source · jgeschwendt/sandman</a>
+</nav>
+
+</main>
+<script>
+/* The theme contract, verbatim from jgeschwendt/ui docs.js — same localStorage
+   key, so a theme chosen on the ui pages is the theme this one opens in. */
+const THEME_KEY = "ui-theme";
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "auto") {
+    root.removeAttribute("data-theme");
+    localStorage.removeItem(THEME_KEY);
+  } else {
+    root.dataset.theme = mode;
+    localStorage.setItem(THEME_KEY, mode);
+  }
+  for (const b of document.querySelectorAll("[data-theme-set]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.themeSet === mode));
+  }
+}
+for (const b of document.querySelectorAll("[data-theme-set]")) {
+  b.addEventListener("click", () => applyTheme(b.dataset.themeSet));
+}
+applyTheme(localStorage.getItem(THEME_KEY) || "auto");
+</script>
+</body>
+</html>

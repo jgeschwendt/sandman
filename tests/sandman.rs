@@ -23,8 +23,29 @@ mod tests {
 
     /// Recall's corpus: candidates in two banks (one description past 160 characters, a tie on
     /// score broken by date, a remembered trace), and in a third a `user` memory, a pinned one and a
-    /// `user` trace (the always-set) and a muted one (nothing).
-    const CORPUS: [(&str, &str); 10] = [
+    /// `user` trace (the always-set) and a muted one (nothing); and intentions, never candidates:
+    /// two past due, one waiting on an event, one upcoming, one done.
+    const CORPUS: [(&str, &str); 15] = [
+        (
+            "intentions/0a1b2c3d.md",
+            "---\ndue: 2026-11-03\ncreated: 2026-11-02T09:00:00Z\nabout: /work/alpha\nsession: @a\nstate: open\n---\n\nRerun the alpha bench on the new box\n",
+        ),
+        (
+            "intentions/2a3b4c5d.md",
+            "---\ndue: 2026-11-01\ncreated: 2026-10-30T09:00:00Z\nstate: done\nclosed: 2026-11-01T10:00:00Z\n---\n\nPin the node version\n",
+        ),
+        (
+            "intentions/4e5f6a7b.md",
+            "---\nafter: after grove ships\ncreated: 2026-11-04T09:00:00Z\nstate: open\n---\n\nCut sandman over to the rewrite\n",
+        ),
+        (
+            "intentions/6e7f8a9b.md",
+            "---\ndue: 2026-11-10\ncreated: 2026-11-06T09:00:00Z\nstate: open\n---\n\nDraft the beta release notes\n",
+        ),
+        (
+            "intentions/8c9d0e1f.md",
+            "---\ndue: 2099-01-01\ncreated: 2026-11-06T09:00:00Z\nstate: open\n---\n\nRenew the signing key\n",
+        ),
         (
             "memories/-work-alpha/feedback_clock.md",
             "---\nname: Pass a clock in\ndescription: Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\u{e9} clocks lose\ntype: feedback\ncreated: 2026-11-02T00:00:00Z\n---\n\nInject the clock.\n",
@@ -488,6 +509,20 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             ),
             // d's live transcript: its `seen`
             ("claude/projects/-work-beta/@d.jsonl", String::new()),
+            // intentions: one due, one waiting on an event, one done; a stray file skipped
+            (
+                "intentions/1f2e3d4c.md",
+                format!("---\ndue: 2026-11-12\ncreated: 2026-11-09T09:20:00Z\nabout: /work/alpha\nsession: {ID}a\nstate: open\n---\n\nsample: rerun the alpha bench\n"),
+            ),
+            (
+                "intentions/5b6a7980.md",
+                "---\ndue: 2026-11-10\ncreated: 2026-11-09T11:00:00Z\nstate: done\nclosed: 2026-11-10T08:00:00Z\nnote: sample: shipped\n---\n\nsample: draft the beta notes\n".to_owned(),
+            ),
+            (
+                "intentions/9c8b7a6d.md",
+                format!("---\nafter: after the beta ships\ncreated: 2026-11-09T12:30:00Z\nsession: {ID}b\nstate: open\n---\n\nsample: cut the release\n"),
+            ),
+            ("intentions/notes.txt", String::new()),
         ];
         for (path, text) in files {
             let file = PathBuf::from(&root).join(path.replace('@', ID));
@@ -510,6 +545,280 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             serde_json::from_str(out.strip_prefix("0\n").ok_or_else(|| out.clone())?)?;
         got["at"] = want["at"].clone();
         same(&got.to_string(), &want.to_string())
+    }
+
+    /// Prospective memory against a fixed local today, Saturday 2026-11-14: `defer` resolves each
+    /// time form to a date and keeps any other words as an event, a malformed date's too; a
+    /// missing what or when is refused, a failed write is exit 1. `due` lists the due ones most
+    /// overdue first, then those waiting on an event, `--all` the upcoming after them by date;
+    /// `done`, `drop` and a push rewrite one in place, an unknown or ambiguous id refused; each a
+    /// ledger line. The seed lists ten and counts the rest. Without the fixed day, `today` is the
+    /// date in `$TZ`.
+    #[test]
+    fn defer() -> Outcome {
+        let root = fs::canonicalize(temp("defer")?)?
+            .to_str()
+            .ok_or("root")?
+            .to_owned();
+        let (session, work, odd) = (
+            format!("{ID}a"),
+            format!("{root}/work"),
+            format!("{root}/odd"),
+        );
+        fs::create_dir_all(&work)?;
+        let envs = [
+            ("HOME", root.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", &root),
+            ("SANDMAN_TODAY", "2026-11-14"),
+        ];
+        let (mut ids, mut got) = (Vec::new(), String::new());
+        for when in [
+            "today",
+            "Tomorrow",
+            "saturday",
+            "monday",
+            "2026-12-01",
+            "+3d",
+            "+2w",
+            "2026-11-02",
+            " after grove ships ",
+        ] {
+            let what = format!("sample: {}", when.trim());
+            let mut args = vec!["defer", &what, "--when", when, "--session", &session];
+            if when == "monday" {
+                args.extend(["--about", &work]);
+            }
+            let out = sandman(&envs, &args, "")?;
+            let id = out.get(2..10).unwrap_or_default().to_owned();
+            got.push_str(&out.replace(&id, "<id>"));
+            ids.push(id);
+        }
+        same(
+            &got,
+            &[
+                "2026-11-14",
+                "2026-11-15",
+                "2026-11-21",
+                "2026-11-16",
+                "2026-12-01",
+                "2026-11-17",
+                "2026-11-28",
+                "2026-11-02",
+                "waiting: after grove ships",
+            ]
+            .map(|shown| format!("0\n<id> {shown}\n"))
+            .concat(),
+        )?;
+        let refused = "2\nsandman defer: takes \"<what>\" first, or --id <id>, and --when today|tomorrow|<weekday>|YYYY-MM-DD|+<n>d|+<n>w|<event>\n";
+        for args in [
+            &["defer", "x"][..],
+            &["defer", "x", "--when", " "],
+            &["defer", "--when", "today"],
+            &["defer", "--id", "x"],
+        ] {
+            same(&sandman(&envs, args, "")?, refused)?;
+        }
+        let row = |at: usize, when: &str, about: &str| {
+            let what = [
+                "today",
+                "Tomorrow",
+                "saturday",
+                "monday",
+                "2026-12-01",
+                "+3d",
+                "+2w",
+                "2026-11-02",
+                "after grove ships",
+            ][at];
+            let id = ids.get(at).map_or("", String::as_str);
+            format!("  \u{b7} {id} {when} \u{2014} sample: {what}{about}\n")
+        };
+        let header = "due \u{b7} deferred work: raise it with the person, never start it unasked\n";
+        let due = [
+            row(7, "2026-11-02", ""),
+            row(0, "2026-11-14", ""),
+            row(8, "waiting: after grove ships", ""),
+        ]
+        .concat();
+        same(&sandman(&envs, &["due"], "")?, &format!("0\n{header}{due}"))?;
+        same(
+            &sandman(&envs, &["due", "--all"], "")?,
+            &format!(
+                "0\n{header}{due}{}",
+                [
+                    row(1, "2026-11-15", ""),
+                    row(3, "2026-11-16", " (~/work)"),
+                    row(5, "2026-11-17", ""),
+                    row(2, "2026-11-21", ""),
+                    row(6, "2026-11-28", ""),
+                    row(4, "2026-12-01", ""),
+                ]
+                .concat()
+            ),
+        )?;
+        // closed by its whole id or a unique start; pushed to a new when, an event to a date
+        plant(
+            &root,
+            &[
+                ("intentions/abc00001.md", ""),
+                ("intentions/abc00002.md", ""),
+            ],
+        )?;
+        let id = |at: usize| ids.get(at).map_or("", String::as_str);
+        let mut closes = String::new();
+        for args in [
+            &[
+                "done",
+                id(7),
+                "--note",
+                "sample: ran it",
+                "--session",
+                &session,
+            ][..],
+            &["drop", id(0).get(..7).unwrap_or_default()],
+            &["defer", "--id", id(8), "--when", "+5d"],
+            &["done", "zz"],
+            &["drop", "abc"],
+            &["done"],
+        ] {
+            closes.push_str(&sandman(&envs, args, "")?);
+        }
+        same(
+            &closes,
+            &format!(
+                "0\n{} done\n0\n{} dropped\n0\n{} 2026-11-19\n1\nsandman done: zz is not one intention's id (0 match)\n1\nsandman drop: abc is not one intention's id (2 match)\n1\nsandman done:  is not one intention's id (0 match)\n",
+                id(7),
+                id(0),
+                id(8)
+            ),
+        )?;
+        same(&sandman(&envs, &["due"], "")?, "0\nnothing due\n")?;
+        let mut files = String::new();
+        for at in [7, 8, 3] {
+            let whole = fs::read_to_string(format!("{root}/intentions/{}.md", id(at)))?;
+            for line in whole.lines() {
+                let stamped = ["created: ", "closed: "]
+                    .iter()
+                    .find(|key| line.starts_with(**key));
+                files.push_str(
+                    &stamped.map_or_else(|| line.to_owned(), |key| format!("{key}<now>")),
+                );
+                files.push('\n');
+            }
+        }
+        same(
+            &files,
+            &format!(
+                "---\ndue: 2026-11-02\ncreated: <now>\nsession: {session}\nstate: done\nclosed: <now>\nnote: sample: ran it\n---\n\nsample: 2026-11-02\n---\ndue: 2026-11-19\ncreated: <now>\nsession: {session}\nstate: open\n---\n\nsample: after grove ships\n---\ndue: 2026-11-16\ncreated: <now>\nabout: {work}\nsession: {session}\nstate: open\n---\n\nsample: monday\n"
+            ),
+        )?;
+        let mut lines = ledger(&root)?;
+        for (at, held) in ids.iter().enumerate() {
+            lines = lines.replace(held.as_str(), &format!("<{at}>"));
+        }
+        let deferred = |at: usize, field: &str, when: &str| {
+            let mut line = json!({"at": "A", "id": format!("<{at}>"), "kind": "defer", "machine": "studio", "session": session});
+            line[field] = when.into();
+            line.to_string()
+        };
+        same(
+            &lines,
+            &[
+                deferred(0, "due", "2026-11-14"),
+                deferred(1, "due", "2026-11-15"),
+                deferred(2, "due", "2026-11-21"),
+                deferred(3, "due", "2026-11-16"),
+                deferred(4, "due", "2026-12-01"),
+                deferred(5, "due", "2026-11-17"),
+                deferred(6, "due", "2026-11-28"),
+                deferred(7, "due", "2026-11-02"),
+                deferred(8, "after", "after grove ships"),
+                format!(r#"{{"at":"A","id":"<7>","kind":"done","machine":"studio","note":"sample: ran it","session":"{session}"}}"#),
+                r#"{"at":"A","id":"<0>","kind":"drop","machine":"studio","session":null}"#.to_owned(),
+                r#"{"at":"A","due":"2026-11-19","id":"<8>","kind":"push","machine":"studio","session":null}"#.to_owned(),
+            ]
+            .join("\n"),
+        )?;
+        // twelve due: the seed lists ten, then how many more
+        let many = format!("{root}/many");
+        for day in 1u8..=12 {
+            plant(
+                &many,
+                &[(
+                    &format!("intentions/{day:08}.md"),
+                    &format!(
+                        "---\ndue: 2026-11-{day:02}\ncreated: 2026-10-01T00:00:00Z\nstate: open\n---\n\nsample: {day}\n"
+                    ),
+                )],
+            )?;
+        }
+        let seeded = sandman(
+            &[
+                ("SANDMAN_MACHINE", "studio"),
+                ("SANDMAN_ROOT", &many),
+                ("SANDMAN_TODAY", "2026-11-14"),
+            ],
+            &["recall"],
+            &format!(r#"{{"session":"{session}"}}"#),
+        )?;
+        let block = seeded
+            .split_once("\n\n")
+            .and_then(|(_, rest)| rest.split_once("always \u{b7}"))
+            .map_or("", |(block, _)| block);
+        same(
+            block,
+            &format!(
+                "{header}{}  \u{2026} 2 more: sandman due\n",
+                (1u8..=10)
+                    .map(|day| format!(
+                        "  \u{b7} {day:08} 2026-11-{day:02} \u{2014} sample: {day}\n"
+                    ))
+                    .collect::<Vec<_>>()
+                    .concat()
+            ),
+        )?;
+        // a malformed date is an event's words; a blocked store fails the write
+        same(
+            sandman(
+                &[
+                    ("SANDMAN_MACHINE", "studio"),
+                    ("SANDMAN_ROOT", &odd),
+                    ("SANDMAN_TODAY", "2026-11-14"),
+                ],
+                &["defer", "x", "--when", "2026-02-30"],
+                "",
+            )?
+            .get(11..)
+            .unwrap_or_default(),
+            "waiting: 2026-02-30\n",
+        )?;
+        plant(&root, &[("blocked/intentions", "")])?;
+        let blocked = sandman(
+            &[("SANDMAN_ROOT", &format!("{root}/blocked"))],
+            &["defer", "x", "--when", "today"],
+            "",
+        )?;
+        same(blocked.get(..17).unwrap_or_default(), "1\nsandman defer: ")?;
+        // the local date: the zone's, each side of the date line
+        for zone in ["Pacific/Kiritimati", "Etc/GMT+12"] {
+            let local = Command::new("date").arg("+%F").env("TZ", zone).output()?;
+            same(
+                sandman(
+                    &[
+                        ("SANDMAN_MACHINE", "studio"),
+                        ("SANDMAN_ROOT", &odd),
+                        ("TZ", zone),
+                    ],
+                    &["defer", "x", "--when", "today"],
+                    "",
+                )?
+                .get(11..)
+                .unwrap_or_default(),
+                &String::from_utf8(local.stdout)?,
+            )?;
+        }
+        Ok(())
     }
 
     /// The tick encodes this machine's taken episodes one a tick, oldest first, through the stub
@@ -2061,10 +2370,11 @@ printf '{"ops":[],"under":"%s"}\n' $u
 
     /// `mcp` over stdio: a modern `server/discover` refused so Claude Code falls back to
     /// `initialize`, the client's version echoed when known, else the latest; notifications
-    /// unanswered; `tools/list` the three tools; each call the verb's stdout, a failure its stderr
-    /// line with `isError`; protocol errors for an unknown tool and for a line that is no request;
-    /// EOF exits 0. The session is `$CLAUDE_CODE_SESSION_ID`, a call's `session`, else one minted
-    /// for the process, and a pull repeats nothing the session was sent.
+    /// unanswered; `tools/list` the seven tools; each call the verb's stdout, a failure its stderr
+    /// line with `isError` (`due` with and without `all`, a close, an unknown id, a push);
+    /// protocol errors for an unknown tool and for a line that is no request; EOF exits 0. The
+    /// session is `$CLAUDE_CODE_SESSION_ID`, a call's `session`, else one minted for the process,
+    /// and a pull repeats nothing the session was sent.
     #[test]
     fn mcp() -> Outcome {
         let root = fs::canonicalize(temp("mcp")?)?
@@ -2093,6 +2403,11 @@ printf '{"ops":[],"under":"%s"}\n' $u
             call(9, "remember", json!({"body": "sample: by tool"})),
             call(10, "remember", json!({})),
             call(11, "nap", json!({})),
+            call(12, "due", json!({"all": true})),
+            call(13, "done", json!({"id": "0a1b", "note": "sample: by tool"})),
+            call(14, "due", json!({"all": false})),
+            call(15, "drop", json!({"id": "zz"})),
+            call(16, "defer", json!({"id": "6e7f", "when": "+1w"})),
             "not json".to_owned(),
             "[]".to_owned(),
             String::new(),
@@ -2103,6 +2418,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             ("SANDMAN_MACHINE", "studio"),
             ("SANDMAN_ROOT", &root),
             ("SANDMAN_SCORERS", ""),
+            ("SANDMAN_TODAY", "2026-11-14"),
         ];
         let out = ran(
             command(&envs, &["mcp"]).current_dir(&work),
@@ -2165,7 +2481,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             &got.join("\n")
                 .replace(&key, "<key>")
                 .replace(&root, "<root>"),
-            "0\n{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":\"probe\",\"jsonrpc\":\"2.0\"}\n{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":\"\\\"recall\\\" [\\\"cue\\\"] about,budget,cue,session | \\\"remember\\\" [\\\"body\\\"] about,body,session,topic,type | \\\"show\\\" [\\\"path\\\"] path,session\"}\n{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed failed\\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":5,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 1 of 6 \u{b7} lexical: embed failed\\n.00 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":6,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman: --session takes a session id\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":7,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Alpha deploys need the vpn (project) \u{b7} 2026-11-05T00:00:00Z\\nConnect first.\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":8,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show: no memory  (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under <root>)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":9,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show traces/<key>-work/feedback_sample_by_tool.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":10,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman remember: takes a non-empty \\\"<body>\\\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32602,\"message\":\"Unknown tool: nap\"},\"id\":11,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n\"recall\" c\n\"recall\" c\n\"show\" c\n\"remember\" c\n\"recall\" minted\n\"recall\" minted\n\"recall\" d",
+            "0\n{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":\"probe\",\"jsonrpc\":\"2.0\"}\n{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":\"\\\"defer\\\" [\\\"what\\\",\\\"when\\\"] about,id,session,what,when | \\\"done\\\" [\\\"id\\\"] id,note,session | \\\"drop\\\" [\\\"id\\\"] id,note,session | \\\"due\\\" [] all,session | \\\"recall\\\" [\\\"cue\\\"] about,budget,cue,session | \\\"remember\\\" [\\\"body\\\"] about,body,session,topic,type | \\\"show\\\" [\\\"path\\\"] path,session\"}\n{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed failed\\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":5,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 1 of 6 \u{b7} lexical: embed failed\\n.00 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":6,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman: --session takes a session id\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":7,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Alpha deploys need the vpn (project) \u{b7} 2026-11-05T00:00:00Z\\nConnect first.\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":8,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show: no memory  (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under <root>)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":9,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show traces/<key>-work/feedback_sample_by_tool.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":10,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman remember: takes a non-empty \\\"<body>\\\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32602,\"message\":\"Unknown tool: nap\"},\"id\":11,\"jsonrpc\":\"2.0\"}\n{\"id\":12,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"due \u{b7} deferred work: raise it with the person, never start it unasked\\n  \u{b7} 0a1b2c3d 2026-11-03 \u{2014} Rerun the alpha bench on the new box (~/work/alpha)\\n  \u{b7} 6e7f8a9b 2026-11-10 \u{2014} Draft the beta release notes\\n  \u{b7} 4e5f6a7b waiting: after grove ships \u{2014} Cut sandman over to the rewrite\\n  \u{b7} 8c9d0e1f 2099-01-01 \u{2014} Renew the signing key\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":13,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"0a1b2c3d done\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":14,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"due \u{b7} deferred work: raise it with the person, never start it unasked\\n  \u{b7} 6e7f8a9b 2026-11-10 \u{2014} Draft the beta release notes\\n  \u{b7} 4e5f6a7b waiting: after grove ships \u{2014} Cut sandman over to the rewrite\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":15,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman drop: zz is not one intention's id (0 match)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":16,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"6e7f8a9b 2026-11-21\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n\"recall\" c\n\"recall\" c\n\"show\" c\n\"remember\" c\n\"done\" c\n\"push\" c\n\"recall\" minted\n\"recall\" minted\n\"recall\" d",
         )
     }
 
@@ -2574,7 +2890,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 next.matches("`sandman-next ").count(),
                 next.lines().nth(4).unwrap_or_default()
             ),
-            "3 read one in full: sandman-next show <path>",
+            "5 read one in full: sandman-next show <path>",
         )
     }
 
@@ -3975,7 +4291,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
         same(&earlier, &"earlier\n".repeat(4))
     }
 
-    /// No verb, or an unknown one, prints the six-line usage and exits 2; `$HOME` stands in
+    /// No verb, or an unknown one, prints the nine-line usage and exits 2; `$HOME` stands in
     /// for an unset `SANDMAN_ROOT`.
     #[test]
     fn usage() -> Outcome {
@@ -3988,7 +4304,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     out.get(..2).unwrap_or_default(),
                     out.lines().count()
                 ),
-                "2\n 7",
+                "2\n 10",
             )?;
         }
         Ok(())

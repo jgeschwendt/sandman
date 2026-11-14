@@ -355,8 +355,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     tools. Nothing in the mod calls a model per prompt.</p>
   <p>The session's start is a seed, the one verb the mod runs there: ① the start mark, first and whatever follows, so
     <code class="code">mark</code> keeps only calls and prompts and the short-term pointer goes; ② short instructions
-    saying memory exists and when and how to pull it (<a class="link" href="#tool">as shipped</a>); ③ the always-set;
-    ④ memories for the first prompt, only when the gate finds a real ask.</p>
+    saying memory exists and when and how to pull it (<a class="link" href="#tool">as shipped</a>); what is
+    <a class="link" href="intentions.html#seed">due</a>; ③ the always-set; ④ memories for the first prompt, only when the gate finds a real ask.</p>
   <ul class="stack claims" role="list">
     <li>After <code class="code">/clear</code> the seed runs again for the same session: a second start mark (<code class="code">chart</code> keeps the earliest), and nothing an earlier recall sent is sent again.</li>
   </ul>
@@ -453,7 +453,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <ul class="stack claims" role="list">
     <li><strong><code class="code">sandman recall &lt; {"session","prompt"?,…}</code></strong>
       <span class="badge badge-ok">built</span> — the seed, once at the first prompt: ① the start mark, first and
-      whatever follows; then, within 9,000 characters, the instructions with the session id, the always-set, the
+      whatever follows; then, within 9,000 characters, the instructions with the session id, the <a class="link" href="intentions.html#seed">due block</a>, the always-set, the
       prompt's ranked lines when the gate finds an ask, and the footer; past 4 s, what the stages that answered allow.
       <code class="code">CLAUDE_MEMORY_PIPELINE=1</code>: the start mark only. Bad stdin: exit 2, nothing written.</li>
     <li><strong><code class="code">sandman recall --cue "…" [--about &lt;path&gt;] [--session &lt;uuid&gt;] [--budget &lt;chars&gt;]</code></strong>
@@ -476,7 +476,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       consolidation takes it like any other trace.</li>
     <li><strong><code class="code">sandman mcp</code></strong> <span class="badge badge-ok">built</span> — the three as
       MCP tools over stdio, <code class="code">recall {cue, about?, budget?}</code>, <code class="code">remember {body,
-      about?, topic?, type?}</code>, <code class="code">show {path}</code>, each description the seed's when-to-pull line; a call runs
+      about?, topic?, type?}</code>, <code class="code">show {path}</code>, beside
+      <a class="link" href="intentions.html#verbs"><code class="code">defer</code>, <code class="code">done</code>,
+      <code class="code">drop</code> and <code class="code">due</code></a>, each description the seed's when-to-pull line; a call runs
       the verb itself, so its text, ledger line and de-duplication are the command's, and a failure is a tool result
       flagged <code class="code">isError</code> carrying the verb's error line. The session is Claude Code's
       <code class="code">$CLAUDE_CODE_SESSION_ID</code>, which it gives every stdio server, unless a call passes
