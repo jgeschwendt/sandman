@@ -135,7 +135,7 @@
 <section class="docs-section" id="take" data-component="take">
   <header>
     <h2 class="h2">take</h2>
-    <p class="docs-note">The one verb the mod runs at a session's end, inside its 1.5 s budget: nothing slow, nothing spawned. A session is marked at its start and taken at its end; one without a start mark is outside this system.</p>
+    <p class="docs-note">The one verb the mod runs at a session's end, inside its 1.5 s budget: nothing slow, nothing spawned. A session is marked at its start and taken at its end; one without a start mark is outside this system, and the seed marks only an interactive one, so a headless <code class="code">claude -p</code> run (a routine) is never taken, reconciled or encoded.</p>
   </header>
   <p>One JSON object on stdin; <code class="code">session</code> is checked as in <a class="link" href="#mark">mark</a>.</p>
   <pre class="snippet">{"session":"&lt;uuid&gt;","cwd":"&lt;path&gt;"?,"reason":"&lt;str&gt;"?}</pre>
@@ -351,7 +351,7 @@ install -m 600 /dev/stdin ~/Codes/claude-oauth-token        # paste it, then Ctr
       <tr><th>when</th><th>outcome</th></tr>
     </thead>
     <tbody>
-      <tr><td>no start mark of the session says <code class="code">interactive</code> true: a headless run, most sessions</td><td><code class="code">skipped</code>, no model call</td></tr>
+      <tr><td>no start mark of the session says <code class="code">interactive</code> true: a start marked by <code class="code">mark</code> alone, since the seed never marks a headless run</td><td><code class="code">skipped</code>, no model call</td></tr>
       <tr><td>no file at the end line's <code class="code">archived</code></td><td><code class="code">gone</code></td></tr>
       <tr><td>the encoder exits non-zero, outlives <code class="code">$SANDMAN_ENCODE_MS</code> (300 000), or prints no valid object</td><td><code class="code">failed</code>, with <code class="code">error</code>; no trace written</td></tr>
       <tr><td>otherwise</td><td><code class="code">encoded</code>; <code class="code">traces</code> counts them, often 0</td></tr>

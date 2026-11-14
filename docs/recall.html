@@ -353,7 +353,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p>Whenever the agent needs it: recall is the agent's tool, pulled throughout a session with its own cue — what it
     is about to do, the repository it is entering, the decision it is about to make — through the CLI or the same verbs as MCP
     tools. Nothing in the mod calls a model per prompt.</p>
-  <p>The session's start is a seed, the one verb the mod runs there: ① the start mark, first and whatever follows, so
+  <p>The session's start is a seed, the one verb the mod runs there: ① the start mark, first and whatever follows, an interactive session's only (a headless <code class="code">claude -p</code> run, a routine, gets the seed's text and its recall line, never a mark, so nothing ever takes or encodes it), so
     <code class="code">mark</code> keeps only calls and prompts and the short-term pointer goes; ② short instructions
     saying memory exists and when and how to pull it (<a class="link" href="#tool">as shipped</a>); what is
     <a class="link" href="intentions.html#seed">due</a>; ③ the always-set; ④ memories for the first prompt, only when the gate finds a real ask.</p>
@@ -453,9 +453,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <ul class="stack claims" role="list">
     <li><strong><code class="code">sandman recall &lt; {"session","prompt"?,…}</code></strong>
       <span class="badge badge-ok">built</span> — the seed, once at the first prompt: ① the start mark, first and
-      whatever follows; then, within 9,000 characters, the instructions with the session id, the <a class="link" href="intentions.html#seed">due block</a>, the always-set, the
+      whatever follows, only when <code class="code">interactive</code> is true; then, within 9,000 characters, the instructions with the session id, the <a class="link" href="intentions.html#seed">due block</a>, the always-set, the
       prompt's ranked lines when the gate finds an ask, and the footer; past 4 s, what the stages that answered allow.
-      <code class="code">CLAUDE_MEMORY_PIPELINE=1</code>: the start mark only. Bad stdin: exit 2, nothing written.</li>
+      <code class="code">CLAUDE_MEMORY_PIPELINE=1</code>: that mark only. Bad stdin: exit 2, nothing written.</li>
     <li><strong><code class="code">sandman recall --cue "…" [--about &lt;path&gt;] [--session &lt;uuid&gt;] [--budget &lt;chars&gt;]</code></strong>
       <span class="badge badge-ok">built</span> — the pull: <a class="link" href="#proposed">the flow</a>, every
       transport curl (Jev's key as curl config on its stdin, never in an argv); stdout the header, the ranked lines and
