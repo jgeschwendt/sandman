@@ -2,7 +2,7 @@
 
 ```stele
 kind: system
-purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `recall` seeds a session's start and serves the agent's pulls: a lexical gate, BM25 and cached embeddings fused, a local decision model on the top 10, fused again, `show` prints one, `remember` writes a trace at once, `serve` is the daemon under launchd, whose tick ends sessions that never ended, fills recall's embedding cache, settles held takes, encodes episodes into traces and consolidates a bank's traces into the bank, unattended, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
+purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `recall` seeds a session's start and serves the agent's pulls: a lexical gate, BM25 and cached embeddings fused, a local decision model on the top 10, fused again, `show` prints one, `remember` writes a trace at once, `mcp` serves those three to an agent as MCP tools, `serve` is the daemon under launchd, whose tick ends sessions that never ended, fills recall's embedding cache, settles held takes, encodes episodes into traces and consolidates a bank's traces into the bank, unattended, `status` asks it for its health, `setup` prints its plist. The old sandman stays live at ~/.local/bin/sandman; this build installs as sandman-next.
 commands:
   check: mise run check
   cover: mise run cover
@@ -14,11 +14,11 @@ commands:
 
 | path                     | what                                                                                       |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
-| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `recall`, `remember`, `serve` and its tick (reconcile, embed, settle, encode, consolidate), `setup`, `show`, `status`; one file, recall's pipeline a closure in its arm (clippy's `single_call_fn` would fire on a module's entry), what recall and the tick share top-level |
+| `src/main.rs`            | the whole binary: the root, the machine id, `mark`, `take`, `chart`, `mcp`, `recall`, `remember`, `serve` and its tick (reconcile, embed, settle, encode, consolidate), `setup`, `show`, `status`; one file, recall's pipeline a closure in its arm (clippy's `single_call_fn` would fire on a module's entry), what recall and the tick share top-level |
 | `src/prompts/<job>.md`   | a tick job's default guidance, `<job>.contract.md` its fixed contract; both embedded with `include_str!` |
 | `tests/sandman.rs`       | end-to-end suite: the built binary over temp roots and Claude homes via `SANDMAN_ROOT`, `SANDMAN_MACHINE`, `CLAUDE_CONFIG_DIR`, stub shell model commands via `SANDMAN_ENCODER` and `SANDMAN_CONSOLIDATOR` (`exit 9` unless a test names one); every transport is curl, and the first `curl` on `PATH` is a stub: one that refuses unless a test plants `stub`'s, which logs each request by its URL and answers embeddings `[clock, deploy, beta, 1]` from the text (`SANDMAN_OLLAMA` `http://ollama.test`, `TYPESAFE_API_KEY` removed); a `Daemon` guard kills every `serve` it starts (SIGTERM one whose coverage counts: a SIGKILL writes no profile) |
 | `docs/index.html`        | the page: data root, `mark`, `take`, `chart`, `serve`, `encode`, `consolidate`, next; two d3 charts and the daemon's lifecycle figure |
-| `docs/recall.html`       | `recall`'s design page: the problem, the flow (the seed and the agent's pull), one section per decision, the agent's two tools, the pane; the reach chart and the flow figure; what is built marked so |
+| `docs/recall.html`       | `recall`'s design page: the problem, the flow (the seed and the agent's pull), one section per decision, the agent's tools (commands and MCP), the pane; the reach chart and the flow figure; what is built marked so |
 | `docs/charts/*.js`       | one ES module per chart over `lib.js`'s chrome and `chart.css`, both pages' chart styles; d3 7.9.0 is the page's global |
 | `docs/data/chart.json`   | the timeline's sample: `tests/sandman.rs` `chart` fails unless it is the verb's output     |
 | `docs/data/recall-reach.json` | the reach chart's counts per bank, banks unnamed, from `sandman-next chart` (2026-11-13) |
@@ -133,6 +133,18 @@ source: remember <now> · <uuid, else ->
 ### `sandman show`
 
 `sandman show <path> [--session <uuid>]`, `<path>` `<bank>/<file>.md` for a memory, `traces/<bank>/<file>.md` for a trace: the note the `notes` reader finds at exactly that path (so no `..`, absolute path, hidden or `_` name, or `MEMORY.md` resolves) as `<name> (<type>[ · trace]) · <updated, else created, else undated>` and its body, frontmatter stripped and trimmed; then `{"at","file","kind":"show","machine","session"}` through `mark`'s writer (a failed write ignored), the signal that a recalled note was read. No such note: `sandman show: no memory <arg> (want [traces/]<bank>/<file>.md under <root>)`, exit 1.
+
+### `sandman mcp`
+
+An MCP server over stdio for the agent's three verbs, newline-delimited JSON-RPC 2.0, one compact reply line per request, keys alphabetical; the legacy era (an `initialize` handshake), which Claude Code falls back to when its `server/discover` probe gets an error. `initialize` answers `{"capabilities":{"tools":{}},"protocolVersion","serverInfo":{"name":"sandman","version":<crate version>}}`, the client's `protocolVersion` when it is `2025-11-25`, `2025-06-18`, `2025-03-26` or `2024-11-05`, else `2025-11-25`; `ping` `{}`; `tools/list` `{"tools":[…]}`, alpha-sorted, each description the seed's when-to-pull guidance:
+
+```
+recall   {"cue":string, "about"?:string, "budget"?:number, "session"?:string}
+remember {"body":string, "about"?:string, "session"?:string}
+show     {"path":string, "session"?:string}
+```
+
+`tools/call` runs the verb as `<this executable> <tool> …`, stdin closed: the required argument positional (recall's as `--cue`, `""` when missing), every other given one `--<name> <value>` (a number as its digits), `--session` always: so the text, the ledger lines and the session's de-duplication are the verb's own. Result `{"content":[{"text","type":"text"}],"isError"}`: exit 0 → the verb's stdout, `isError` false; else its stderr (the verb's error line), `isError` true. The session: the call's `session`, else `$CLAUDE_CODE_SESSION_ID` when it is a session id (Claude Code sets it in a stdio server's env, measured 2026-11-13 · 2.1.325), else one minted from `/dev/urandom` for the process. Errors, `{"error":{"code","message"},"id","jsonrpc":"2.0"}`: a line that is not a JSON object `-32700` `Parse error` (`id` null); an unknown tool `-32602` `Unknown tool: <name>`; any other method `-32601` `Method not found`. A line without `id` is a notification, unanswered. EOF on stdin exits 0. Register (the owner's step): `claude mcp add --scope user sandman-next -- ~/.local/bin/sandman-next mcp`.
 
 ### `sandman serve`
 
