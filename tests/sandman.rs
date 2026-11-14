@@ -467,6 +467,16 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             ("memories/_archive/old.md", String::new()),
             ("memories/TOOLS.md", String::new()),
             (
+                "knowledge/launchd/playbook_swap_a_daemon.md",
+                memory(
+                    "Swap a launchd daemon",
+                    "playbook",
+                    "2026-11-09T09:45:00Z",
+                    &format!("consolidate 2026-11-10T04:00:00Z \u{b7} {ID}a \u{b7} model=opus"),
+                ),
+            ),
+            ("knowledge/launchd/MEMORY.md", String::new()),
+            (
                 "traces/-work-alpha/feedback_sample_spans.md",
                 format!(
                     "---\nname: Sample: spans\ntype: feedback\ncreated: 2026-11-09T09:40:00Z\nsession: {ID}a\nsource: encode 2026-11-09T09:40:00Z \u{b7} {ID}a \u{b7} model=opus\n---\n\nsample body\n"
@@ -1342,6 +1352,309 @@ esac
         )
     }
 
+    /// The knowledge store end to end. One episode's three traces split: the memory into the bank
+    /// of its cwd, the knowledge and the playbook into the topic's `traces/@launchd/`; a knowledge
+    /// type without a topic fails its episode. The topic consolidates as a bank does, into
+    /// `knowledge/launchd/`: keeps start its pages, then a later episode's playbook trace merges
+    /// into the page, rewritten whole. `remember` writes a playbook trace by topic (a topic alone
+    /// means knowledge) and refuses a bad topic; recall ranks pages and their traces under the
+    /// topic's label; `show` reads a page; `chart` lists it.
+    #[test]
+    fn knowledge() -> Outcome {
+        let root = fs::canonicalize(temp("knowledge")?)?
+            .to_str()
+            .ok_or("root")?
+            .to_owned();
+        let (work, encoder, consolidator) = (
+            format!("{root}/work"),
+            format!("{root}/encode.sh"),
+            format!("{root}/consolidate.sh"),
+        );
+        fs::create_dir_all(&work)?;
+        let card = |kind: &str, name: &str, body: &str, topic: &str| {
+            json!({"type": kind, "name": name, "description": format!("sample: {name}"), "body": body, "topic": topic}).to_string()
+        };
+        let (fact, steps, fixed) = (
+            card(
+                "knowledge",
+                "Launchd ExitTimeOut kills",
+                "sample: past ExitTimeOut the job is SIGKILLed.",
+                "launchd",
+            ),
+            card(
+                "playbook",
+                "Swap a launchd daemon",
+                "When: sample.\n\nSteps:\n1. sample: bootout, then bootstrap\n\nWatch for: sample.",
+                "launchd",
+            ),
+            card(
+                "playbook",
+                "Swap a launchd daemon",
+                "When: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10).",
+                "launchd",
+            ),
+        );
+        let memory = json!({"type": "feedback", "name": "Sample: terse", "description": "sample: terse", "body": "sample: terse", "about": null, "topic": "ignored"});
+        let page = r#"{"op":"keep","trace":"playbook_swap_a_launchd_daemon.md","type":"playbook","name":"Swap a launchd daemon","description":"launchd: swap a running daemon","body":"When: sample.\n\nSteps:\n1. sample: bootout, then bootstrap\n\nWatch for: sample."}"#;
+        let merge = r#"{"op":"merge","trace":"playbook_swap_a_launchd_daemon.md","memory":"playbook_swap_a_launchd_daemon.md","description":"launchd: swap a running daemon with kickstart -k","body":"When: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10)."}"#;
+        for (path, text) in [
+            (
+                encoder.clone(),
+                format!(
+                    "case $(sed -n 's/^user: case //p') in\n  a) printf '%s' '{{\"traces\":[{memory},{fact},{steps}]}}';;\n  b) printf '%s' '{{\"traces\":[{fixed}]}}';;\n  c) printf '%s' '{{\"traces\":[{{\"type\":\"knowledge\",\"name\":\"x\",\"description\":\"x\",\"body\":\"x\"}}]}}';;\nesac\n"
+                ),
+            ),
+            (
+                consolidator.clone(),
+                format!(
+                    "input=$(cat)\ncase $(printf '%s\\n' \"$input\" | sed -n '/^# bank$/{{n;p;}}' | tail -n 1) in\n  @launchd) case ${{input##*'# bank'}} in *'# memories'*) printf '%s' '{{\"ops\":[{merge}]}}';; *) printf '%s' '{{\"ops\":[{{\"op\":\"keep\",\"trace\":\"knowledge_launchd_exittimeout_kills.md\",\"type\":\"knowledge\",\"name\":\"Launchd ExitTimeOut\",\"description\":\"launchd: a job past ExitTimeOut is killed\",\"body\":\"sample: SIGKILL past ExitTimeOut.\"}},{page}]}}';; esac;;\n  *) printf '%s' '{{\"ops\":[{{\"op\":\"prune\",\"trace\":\"feedback_sample_terse.md\",\"reason\":\"x\"}}]}}';;\nesac\n"
+                ),
+            ),
+        ] {
+            fs::write(path, text)?;
+        }
+        let episode = |letter: &str, minute: u8| -> io::Result<String> {
+            let archived = format!("{root}/archive/{letter}.jsonl");
+            fs::create_dir_all(format!("{root}/archive"))?;
+            fs::write(
+                &archived,
+                json!({"type": "user", "cwd": work, "message": {"content": format!("case {letter}")}}).to_string(),
+            )?;
+            Ok(format!(
+                "{{\"at\":\"2026-11-09T08:{minute:02}:00Z\",\"interactive\":true,\"kind\":\"start\",\"machine\":\"studio\",\"session\":\"{ID}{letter}\"}}\n{{\"archived\":\"{archived}\",\"at\":\"2026-11-09T08:{minute:02}:30Z\",\"kind\":\"end\",\"machine\":\"studio\",\"outcome\":\"taken\",\"session\":\"{ID}{letter}\"}}\n"
+            ))
+        };
+        fs::create_dir_all(format!("{root}/ledger/2026/11"))?;
+        fs::write(
+            format!("{root}/ledger/2026/11/09.jsonl"),
+            [episode("a", 0)?, episode("c", 1)?].concat(),
+        )?;
+        let (encoding, consolidating) = (format!("sh {encoder}"), format!("sh {consolidator}"));
+        let (mut daemon, _) = serve(
+            &root,
+            &[
+                ("HOME", root.as_str()),
+                ("SANDMAN_CONSOLIDATE_QUIET_MS", "0"),
+                ("SANDMAN_CONSOLIDATOR", consolidating.as_str()),
+                ("SANDMAN_ENCODER", encoding.as_str()),
+                ("SANDMAN_TICK_MS", "10"),
+            ],
+        )?;
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        let today = format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        let consolidated = |count: usize| read(&today).matches("\"consolidate\"").count() == count;
+        until(|| consolidated(2))?;
+        // the next episode, once the first is consolidated
+        fs::write(format!("{root}/ledger/2026/11/10.jsonl"), episode("b", 2)?)?;
+        until(|| consolidated(3))?;
+        // TERM, not the guard's KILL: a killed daemon writes no coverage
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let lines = read(&today)
+            .lines()
+            .map(|line| {
+                let mut entry: Value = serde_json::from_str(line)?;
+                entry["at"] = "A".into();
+                Ok(entry.to_string())
+            })
+            .collect::<Result<Vec<_>, serde_json::Error>>()?;
+        let bank = work.replace(|letter: char| !letter.is_ascii_alphanumeric(), "-");
+        let line = |key: &str, counts: [u8; 3]| {
+            format!(
+                r#"{{"at":"A","bank":"{key}","kept":{},"kind":"consolidate","machine":"studio","merged":{},"outcome":"consolidated","pruned":{}}}"#,
+                counts[0], counts[1], counts[2]
+            )
+        };
+        same(
+            &lines.join("\n"),
+            &[
+                format!(r#"{{"at":"A","kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}a","traces":3}}"#),
+                format!(
+                    r#"{{"at":"A","error":"output: not a trace: {{\"body\":\"x\",\"description\":\"x\",\"name\":\"x\",\"type\":\"knowledge\"}}","kind":"encode","machine":"studio","outcome":"failed","session":"{ID}c","traces":0}}"#
+                ),
+                line(&bank, [0, 0, 1]),
+                line("@launchd", [2, 0, 0]),
+                format!(r#"{{"at":"A","kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}b","traces":1}}"#),
+                line("@launchd", [0, 1, 0]),
+            ]
+            .join("\n"),
+        )?;
+        // every file the pipeline left, `.pruned/<day>/<HHMMSS>-[<n>-]` cut to `.pruned/`
+        let aside_dir = format!(".pruned/{}/", date(&["+%Y/%m/%d"])?);
+        let found = Command::new("find")
+            .args(["knowledge", "memories", "traces", ".pruned", "-type", "f"])
+            .current_dir(&root)
+            .output()?;
+        let mut left: Vec<String> = String::from_utf8(found.stdout)?
+            .lines()
+            .map(|path| {
+                path.strip_prefix(&aside_dir)
+                    .and_then(|rest| rest.get(7..))
+                    .map_or_else(
+                        || path.to_owned(),
+                        |rest| {
+                            let unclashed = rest
+                                .split_once('-')
+                                .filter(|pair| pair.0.parse::<u8>().is_ok());
+                            format!(".pruned/{}", unclashed.map_or(rest, |pair| pair.1))
+                        },
+                    )
+            })
+            .collect();
+        left.sort();
+        let mut want = [
+            ".pruned/@launchd-knowledge_launchd_exittimeout_kills.md",
+            ".pruned/@launchd-ops.json",
+            ".pruned/@launchd-ops.json",
+            ".pruned/@launchd-playbook_swap_a_launchd_daemon.md",
+            ".pruned/@launchd-playbook_swap_a_launchd_daemon.md",
+            ".pruned/@launchd-playbook_swap_a_launchd_daemon.md",
+            "knowledge/launchd/knowledge_launchd_exittimeout.md",
+            "knowledge/launchd/playbook_swap_a_launchd_daemon.md",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        want.extend([
+            format!(".pruned/{bank}-feedback_sample_terse.md"),
+            format!(".pruned/{bank}-ops.json"),
+        ]);
+        want.sort();
+        same(&format!("{left:?}"), &format!("{want:?}"))?;
+        let playbook = read(&format!(
+            "{root}/knowledge/launchd/playbook_swap_a_launchd_daemon.md"
+        ));
+        let stamp = |field: &str| {
+            playbook
+                .lines()
+                .find_map(|said| said.strip_prefix(field))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let (created, updated) = (stamp("created: "), stamp("updated: "));
+        same(
+            &playbook
+                .replace(&format!("created: {created}"), "created: <created>")
+                .replace(&updated, "<updated>"),
+            &format!(
+                "---\nname: Swap a launchd daemon\ndescription: launchd: swap a running daemon with kickstart -k\ntype: playbook\ncreated: <created>\ntopic: launchd\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsource: consolidate <updated> \u{b7} {ID}b \u{b7} model=sh\nupdated: <updated>\n---\n\nWhen: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10).\n"
+            ),
+        )?;
+        let envs = [
+            ("HOME", root.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", &root),
+        ];
+        let mut out = String::new();
+        for args in [
+            &[
+                "remember",
+                "sample: drain on SIGTERM",
+                "--type",
+                "playbook",
+                "--topic",
+                "launchd",
+                "--name",
+                "Drain a daemon",
+            ][..],
+            &[
+                "remember",
+                "sample: bootout before bootstrap",
+                "--topic",
+                "launchd",
+            ],
+            &["remember", "x", "--type", "knowledge"],
+            &["remember", "x", "--topic", "Launch_D"],
+            &["remember", "x", "--type", "playbook", "--topic", "-launchd"],
+        ] {
+            out.push_str(&ran(command(&envs, args).current_dir(&work), "")?);
+        }
+        let refused = "2\nsandman remember: takes a non-empty \"<body>\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>\n";
+        same(
+            &out,
+            &format!(
+                "0\nsandman show traces/@launchd/playbook_drain_a_daemon.md\n0\nsandman show traces/@launchd/knowledge_sample_bootout_before_bootstrap.md\n{}",
+                refused.repeat(3)
+            ),
+        )?;
+        let remembered = read(&format!(
+            "{root}/traces/@launchd/playbook_drain_a_daemon.md"
+        ));
+        let now = remembered
+            .lines()
+            .find_map(|said| said.strip_prefix("created: "))
+            .unwrap_or_default();
+        same(
+            &remembered.replace(now, "<now>"),
+            "---\nname: Drain a daemon\ndescription: sample: drain on SIGTERM\ntype: playbook\ncreated: <now>\ntopic: launchd\nsource: remember <now> \u{b7} -\n---\n\nsample: drain on SIGTERM\n",
+        )?;
+        // recall: the pages and their traces under the topic's label, no repository's bonus
+        let path = stub(&root)?;
+        fs::write(
+            format!("{root}/answers"),
+            r#"{"answers":{"0":{"noul":0.9},"1":{"noul":0.8},"2":{"noul":0.2},"3":{"noul":0.1}},"usage":{"input_tokens":1}}"#,
+        )?;
+        let recalled = sandman(
+            &[&envs[..], &[("PATH", path.as_str())]].concat(),
+            &[
+                "recall",
+                "--cue",
+                "swap the launchd daemon",
+                "--about",
+                &work,
+            ],
+            "",
+        )?;
+        same(
+            recalled
+                .split_once("recall: scorer")
+                .map_or("", |pair| pair.0),
+            "0\nrecall \u{b7} swap the launchd daemon \u{b7} 4 of 4 \u{b7} pplx\n1.00 Swap a launchd daemon (playbook \u{b7} knowledge/launchd/playbook_swap_a_launchd_daemon.md) \u{2014} launchd: swap a running daemon with kickstart -k\n.98 Launchd ExitTimeOut (knowledge \u{b7} knowledge/launchd/knowledge_launchd_exittimeout.md) \u{2014} launchd: a job past ExitTimeOut is killed\n.97 ~Drain a daemon (playbook \u{b7} traces/@launchd/playbook_drain_a_daemon.md) \u{2014} sample: drain on SIGTERM\n.95 ~sample: bootout before bootstrap (knowledge \u{b7} traces/@launchd/knowledge_sample_bootout_before_bootstrap.md) \u{2014} sample: bootout before bootstrap\nread one in full: sandman show <path>\n",
+        )?;
+        same(
+            &read(&format!("{root}/pplx.in"))
+                .contains(
+                    "\"instructions\":\"Memory (knowledge \u{b7} launchd): Swap a launchd daemon",
+                )
+                .to_string(),
+            "true",
+        )?;
+        same(
+            &sandman(
+                &envs,
+                &[
+                    "show",
+                    "knowledge/launchd/playbook_swap_a_launchd_daemon.md",
+                ],
+                "",
+            )?
+            .replace(&updated, "<updated>"),
+            "0\nSwap a launchd daemon (playbook) \u{b7} <updated>\nWhen: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10).\n",
+        )?;
+        let chart: Value =
+            serde_json::from_str(sandman(&envs, &["chart"], "")?.get(2..).unwrap_or_default())?;
+        same(
+            &chart["knowledge"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|listed| {
+                    format!(
+                        "{} {} {} {}",
+                        listed["topic"], listed["file"], listed["type"], listed["source"]
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "\"launchd\" \"knowledge_launchd_exittimeout.md\" \"knowledge\" \"consolidate\"\n\"launchd\" \"playbook_swap_a_launchd_daemon.md\" \"playbook\" \"consolidate\"",
+        )
+    }
+
     /// The weekly review. With too little evidence it never runs; then, one review an idle tick: a
     /// failed run, a reply of the wrong shape, an oversize guidance, nothing proposed, a proposal
     /// the replay judges worse and one whose judge gives no verdict leave `prompts/` alone; one
@@ -1852,7 +2165,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             &got.join("\n")
                 .replace(&key, "<key>")
                 .replace(&root, "<root>"),
-            "0\n{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":\"probe\",\"jsonrpc\":\"2.0\"}\n{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":\"\\\"recall\\\" [\\\"cue\\\"] about,budget,cue,session | \\\"remember\\\" [\\\"body\\\"] about,body,session | \\\"show\\\" [\\\"path\\\"] path,session\"}\n{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed failed\\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":5,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 1 of 6 \u{b7} lexical: embed failed\\n.00 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":6,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman: --session takes a session id\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":7,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Alpha deploys need the vpn (project) \u{b7} 2026-11-05T00:00:00Z\\nConnect first.\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":8,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show: no memory  (want [traces/]<bank>/<file>.md under <root>)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":9,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show traces/<key>-work/feedback_sample_by_tool.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":10,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman remember: takes a non-empty \\\"<body>\\\" first and --type user|feedback|project|reference\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32602,\"message\":\"Unknown tool: nap\"},\"id\":11,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n\"recall\" c\n\"recall\" c\n\"show\" c\n\"remember\" c\n\"recall\" minted\n\"recall\" minted\n\"recall\" d",
+            "0\n{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":\"probe\",\"jsonrpc\":\"2.0\"}\n{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":\"\\\"recall\\\" [\\\"cue\\\"] about,budget,cue,session | \\\"remember\\\" [\\\"body\\\"] about,body,session,topic,type | \\\"show\\\" [\\\"path\\\"] path,session\"}\n{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed failed\\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":5,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 1 of 6 \u{b7} lexical: embed failed\\n.00 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":6,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman: --session takes a session id\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":7,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Alpha deploys need the vpn (project) \u{b7} 2026-11-05T00:00:00Z\\nConnect first.\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":8,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show: no memory  (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under <root>)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":9,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show traces/<key>-work/feedback_sample_by_tool.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":10,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman remember: takes a non-empty \\\"<body>\\\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32602,\"message\":\"Unknown tool: nap\"},\"id\":11,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n\"recall\" c\n\"recall\" c\n\"show\" c\n\"remember\" c\n\"recall\" minted\n\"recall\" minted\n\"recall\" d",
         )
     }
 
@@ -2825,7 +3138,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             &["remember", "x"],
             "",
         )?);
-        let refused = "2\nsandman remember: takes a non-empty \"<body>\" first and --type user|feedback|project|reference\n";
+        let refused = "2\nsandman remember: takes a non-empty \"<body>\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>\n";
         let files = [
             (
                 key(&work),
@@ -3414,7 +3727,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             same(
                 &sandman(&envs, &["show", wanted], "")?,
                 &format!(
-                    "1\nsandman show: no memory {wanted} (want [traces/]<bank>/<file>.md under {root})\n"
+                    "1\nsandman show: no memory {wanted} (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under {root})\n"
                 ),
             )?;
         }

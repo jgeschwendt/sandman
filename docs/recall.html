@@ -285,6 +285,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <li>The decision model sees each of the ten as <code class="code">Memory (&lt;label&gt;): &lt;name&gt; — &lt;description,
       160&gt;. &lt;question&gt;</code> beside the state.</li>
     <li>Traces are candidates too, from the moment they are written: a <a class="link" href="#tool"><code class="code">remember</code></a> made at 10:05 is recallable at 10:06, marked <code class="code">~</code> until consolidation keeps, merges or prunes it; a <code class="code">user</code> trace rides the always-set.</li>
+    <li>Knowledge pages and playbooks, and their traces, are candidates in the same pass under the label
+      <code class="code">knowledge · &lt;topic&gt;</code>: no repository's bonus, never the always-set
+      (<a class="link" href="knowledge.html#recall">the knowledge store</a>).</li>
   </ul>
 </section>
 
@@ -458,20 +461,22 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       transport curl (Jev's key as curl config on its stdin, never in an argv); stdout the header, the ranked lines and
       the footer, never the always-set; stderr one stats line; one ledger line; within a session nothing already sent,
       by the seed or a pull, is sent again.</li>
-    <li><strong><code class="code">sandman show [traces/]&lt;bank&gt;/&lt;file&gt;.md [--session &lt;uuid&gt;]</code></strong>
+    <li><strong><code class="code">sandman show &lt;path&gt; [--session &lt;uuid&gt;]</code></strong>
       <span class="badge badge-ok">built</span> — the memory's or trace's body under its name, type (a trace says so)
-      and date, and a ledger line; a memory is <code class="code">&lt;bank&gt;/&lt;file&gt;</code>, a trace
+      and date, and a ledger line; a memory is <code class="code">&lt;bank&gt;/&lt;file&gt;</code>, a knowledge page
+      <code class="code">knowledge/&lt;topic&gt;/&lt;file&gt;</code>, a trace
       <code class="code">traces/&lt;bank&gt;/&lt;file&gt;</code>, anything else refused.</li>
-    <li><strong><code class="code">sandman remember "&lt;body&gt;" [--type user|feedback|project|reference] [--name …] [--description …] [--about &lt;path&gt;] [--session &lt;uuid&gt;]</code></strong>
+    <li><strong><code class="code">sandman remember "&lt;body&gt;" [--type &lt;type&gt;] [--topic &lt;topic&gt;] [--name …] [--description …] [--about &lt;path&gt;] [--session &lt;uuid&gt;]</code></strong>
       <span class="badge badge-ok">built</span> — encodes on purpose: one trace written at once to
       <code class="code">traces/&lt;bank&gt;/</code>, source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>,
-      homed by <code class="code">--about</code> as an encoded trace is, else by the cwd (from the root: about the person,
+      a <code class="code">knowledge</code> or <code class="code">playbook</code> by its <code class="code">--topic</code>
+      (<a class="link" href="knowledge.html#write">the knowledge store</a>), else homed by <code class="code">--about</code> as an encoded trace is, else by the cwd (from the root: about the person,
       or true everywhere); defaults feedback, the body's first eight words, its first line. It prints the
       <code class="code">show</code> line to read it back and writes a ledger line; encode never writes it again, and
       consolidation takes it like any other trace.</li>
     <li><strong><code class="code">sandman mcp</code></strong> <span class="badge badge-ok">built</span> — the three as
       MCP tools over stdio, <code class="code">recall {cue, about?, budget?}</code>, <code class="code">remember {body,
-      about?}</code>, <code class="code">show {path}</code>, each description the seed's when-to-pull line; a call runs
+      about?, topic?, type?}</code>, <code class="code">show {path}</code>, each description the seed's when-to-pull line; a call runs
       the verb itself, so its text, ledger line and de-duplication are the command's, and a failure is a tool result
       flagged <code class="code">isError</code> carrying the verb's error line. The session is Claude Code's
       <code class="code">$CLAUDE_CODE_SESSION_ID</code>, which it gives every stdio server, unless a call passes

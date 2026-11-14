@@ -1,9 +1,9 @@
 ## Input
 
-Below come one bank's new traces and the memories the bank already holds. A bank is the long-term memory of one directory, keyed by its path with every byte that is not a letter or digit as `-`; an agent working there reads the bank at the start of every session. A trace is a candidate memory encoded from one finished session, not yet in the bank.
+Below come one bank's new traces and the memories the bank already holds. A bank is the long-term memory of one directory, keyed by its path with every byte that is not a letter or digit as `-`; an agent working there reads the bank at the start of every session. A bank whose key starts with `@` is a topic's instead (`@launchd`): its memories are the topic's knowledge pages and playbooks, read by any session whose work touches the topic. A trace is a candidate memory encoded from one finished session, not yet in the bank.
 
-- `# bank`: the bank's key.
-- `# traces`: every trace, as `<trace file="…">` around its whole file: frontmatter (`name`, `description`, `type`, `created`, `about` when the trace names a repository, `session`, `archived`, `source`), a blank line, the body.
+- `# bank`: the bank's key, or `@<topic>`.
+- `# traces`: every trace, as `<trace file="…">` around its whole file: frontmatter (`name`, `description`, `type`, `created`, `about` when the trace names a repository, `topic` for a topic's, `session`, `archived`, `source`), a blank line, the body.
 - `# memories`: every memory the bank holds, as `<memory file="…">` around its whole file. Absent when the bank holds none.
 - `# listed`: memories past the input budget, one line each, `- <file> · <name> · <description>`. Absent when everything fit.
 
@@ -15,14 +15,14 @@ A program applies your reply to the bank, and no person reviews it first. Reply 
 
 ```
 {"ops":[
-  {"op":"keep","trace":"<trace file>","type":"user"|"feedback"|"project"|"reference","name":"<short title>","description":"<one line, for an index>","body":"<markdown>"},
+  {"op":"keep","trace":"<trace file>","type":"user"|"feedback"|"project"|"reference"|"knowledge"|"playbook","name":"<short title>","description":"<one line, for an index>","body":"<markdown>"},
   {"op":"merge","trace":"<trace file>","memory":"<memory file>","description":"<one line, for an index>","body":"<markdown>"},
   {"op":"prune","trace":"<trace file>","reason":"<one line>"},
   {"op":"prune","memory":"<memory file>","reason":"<one line>"}
 ]}
 ```
 
-- `keep`: the trace becomes a new memory with your `type`, `name`, `description` and `body`.
+- `keep`: the trace becomes a new memory with your `type`, `name`, `description` and `body`. In a topic's bank the type is `knowledge` or `playbook`; in any other, one of the first four.
 - `merge`: the trace revises or extends the memory; your `description` and `body` replace the memory's, whole.
 - `prune` with `trace`: the trace does not enter the bank. `prune` with `memory`: the memory leaves the bank.
 - Name every trace in exactly one op. Name a memory in at most one op, and only one under `# memories`: you see too little of a listed memory to change it.

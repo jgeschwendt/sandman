@@ -33,6 +33,14 @@ Pruning a memory removes it from every future session, so the bar is direct evid
 - Rewrite only what the trace changes, and a description that breaks the rule above. A merge is not a chance to restyle the rest of the memory.
 - Secrets never: tokens, passwords, keys.
 
+## A topic's pages
+
+A bank whose key starts with `@` holds a topic's knowledge pages and playbooks. A page is one document per subject, revised in place as understanding grows, never one short note per fact:
+
+- `merge` is the common case: fold the trace into the page it belongs to and return the whole page, rewritten so it reads as one document, every dated finding kept. `keep` starts a page only for a subject no page covers.
+- A playbook keeps its shape: `When:`, numbered `Steps:`, `Watch for:`. A trace that shows a step was wrong replaces that step and adds what went wrong, dated, to `Watch for:`; the old step does not survive beside the new one.
+- Knowledge is what the work discovered; a trace that only restates the tool's docs is pruned.
+
 ## Give every prune a reason
 
 The reason is one line a later reader can check without the input: name the memory or trace that makes this one redundant, quote the words that contradict it, or say what makes it not durable. "duplicate" alone is no reason; "says what feedback_pass_a_clock_in.md says" is.
