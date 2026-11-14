@@ -96,6 +96,7 @@
     <tbody>
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
       <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a> moved aside, never deleted: consumed traces, merged and pruned memories as they stood, each reply</td></tr>
+      <tr><td><code class="code">embeddings.jsonl</code></td><td><a class="link" href="recall.html#candidates">recall</a>'s embedding cache: <code class="code">{"h","path","v"}</code> a line, <code class="code">h</code> the SHA-256 of the model, 1024 and the text, the last line per hash winning; appended by recall and the tick, rewritten by the tick past twice its live size; about 14 MB for 635 memories, derived, so a synced root ignores it</td></tr>
       <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>; <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code> and <code class="code">remember</code>; and the daemon's <code class="code">encode</code> and <code class="code">consolidate</code></td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>the banks, the long-term store: memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
@@ -229,8 +230,8 @@
   <header>
     <h2 class="h2">serve</h2>
     <p class="docs-note">The daemon, a foreground process launchd keeps alive as
-      <code class="code">dev.gigantic.sandman</code>. Its tick runs four jobs, in order: it reconciles sessions
-      that never ended, settles held takes, then <a class="link" href="#encode">encodes</a> one episode
+      <code class="code">dev.gigantic.sandman</code>. Its tick runs five jobs, in order: it reconciles sessions
+      that never ended, fills recall's embedding cache, settles held takes, then <a class="link" href="#encode">encodes</a> one episode
       or, with none waiting, <a class="link" href="#consolidate">consolidates</a> one bank.</p>
   </header>
   <figure class="figure">
@@ -279,6 +280,11 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       does, reason <code class="code">idle</code>, one a tick, so an abandoned session's memory is kept;
       otherwise it may be alive and is left. A session resumed later gets a new start mark and is open
       again.</li>
+    <li><strong>embed</strong> — the cache rewritten to its live lines once it passes twice their
+      size, then every candidate <a class="link" href="recall.html#candidates">recall</a> would embed
+      and the cache lacks, in reader order, at most 128 a tick (<code class="code">$SANDMAN_EMBED_TICK</code>),
+      16 a request to <code class="code">$SANDMAN_OLLAMA</code>; a first build of 635 takes about 22 s
+      of an idle Ollama, so it lands over a few ticks. A stop kills the request in hand.</li>
     <li><strong>settle</strong> — a session whose latest end is <code class="code">held</code> on this
       machine with no start since, no job naming it any more, its transcript untouched for 120 s
       (<code class="code">$SANDMAN_QUIET_MS</code>), is taken as <a class="link" href="#take">take</a> does:
@@ -292,7 +298,8 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
     <li><strong>log</strong> — <code class="code">run/serve.log</code>, one compact object per line
       with <code class="code">at</code>: <code class="code">start</code> (pid, version),
       <code class="code">exit</code> (reason: <code class="code">signal TERM</code>,
-      <code class="code">shutdown request</code>, an accept error), <code class="code">reconcile</code>, <code class="code">take</code>,
+      <code class="code">shutdown request</code>, an accept error), <code class="code">embed</code>
+      (<code class="code">embedded</code>, or the failure as <code class="code">reason</code>), <code class="code">reconcile</code>, <code class="code">take</code>,
       <code class="code">encode</code> and <code class="code">consolidate</code> (the tick's ledger line, or
       its <code class="code">session</code> or <code class="code">bank</code> and the write's error as
       <code class="code">reason</code>),
