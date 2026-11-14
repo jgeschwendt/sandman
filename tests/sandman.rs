@@ -153,9 +153,10 @@ mod tests {
         command
     }
 
-    /// `date -u` with `args`, trimmed.
+    /// `date -u` with `args`, trimmed; a failed `date` is an error, never an empty stamp.
     fn date(args: &[&str]) -> Result<String, Box<dyn Error>> {
         let out = Command::new("date").arg("-u").args(args).output()?;
+        out.status.success().then_some(()).ok_or("date failed")?;
         Ok(String::from_utf8(out.stdout)?.trim().to_owned())
     }
 
@@ -4171,13 +4172,19 @@ printf '{"ops":[],"under":"%s"}\n' $u
             )?;
         }
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        // `date -r` takes a file on GNU and BSD alike (seconds on BSD only)
+        let stamp = |second: u64| -> Result<String, Box<dyn Error>> {
+            let clock = format!("{root}/clock");
+            File::create(&clock)?.set_modified(UNIX_EPOCH + Duration::from_secs(second))?;
+            date(&["-r", &clock, "+%Y/%m/%d/%H%M%S"])
+        };
         for second in now..now + 4 {
             plant(
                 &root,
                 &[(
                     &format!(
                         ".archive/claude/{}-projects--work-alpha-@e.jsonl",
-                        date(&["-r", &second.to_string(), "+%Y/%m/%d/%H%M%S"])?
+                        stamp(second)?
                     ),
                     "earlier\n",
                 )],
@@ -4282,9 +4289,9 @@ printf '{"ops":[],"under":"%s"}\n' $u
         )?;
         let earlier = (now..now + 4)
             .map(|second| {
-                let at = date(&["-r", &second.to_string(), "+%Y/%m/%d/%H%M%S"])?;
                 Ok(fs::read_to_string(format!(
-                    "{root}/.archive/claude/{at}-projects--work-alpha-{ID}e.jsonl"
+                    "{root}/.archive/claude/{}-projects--work-alpha-{ID}e.jsonl",
+                    stamp(second)?
                 ))?)
             })
             .collect::<Result<String, Box<dyn Error>>>()?;
