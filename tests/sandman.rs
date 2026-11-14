@@ -208,8 +208,9 @@ mod tests {
         ))
     }
 
-    /// `sandman serve` over `root` with `envs` beside it (a model command never a real one), and
-    /// the health line it prints once ready.
+    /// `sandman serve` over `root` with `envs` beside it (a model command never a real one, no
+    /// weekly review unless a test lowers its evidence floor), and the health line it prints once
+    /// ready.
     fn serve(root: &str, envs: &[(&str, &str)]) -> Result<(Daemon, String), Box<dyn Error>> {
         let claude = format!("{root}/claude");
         let mut daemon = Daemon(
@@ -219,6 +220,8 @@ mod tests {
                     ("SANDMAN_CONSOLIDATOR", "exit 9"),
                     ("SANDMAN_ENCODER", "exit 9"),
                     ("SANDMAN_MACHINE", "studio"),
+                    ("SANDMAN_REFLECT_MIN", "1000"),
+                    ("SANDMAN_REFLECTOR", "exit 9"),
                     ("SANDMAN_ROOT", root),
                 ],
                 &["serve"],
@@ -1336,6 +1339,364 @@ esac
                     r#""user_m_listed.md" "other" null"#.to_owned(),
                 ]
             ),
+        )
+    }
+
+    /// The weekly review. With too little evidence it never runs; then, one review an idle tick: a
+    /// failed run, a reply of the wrong shape, an oversize guidance, nothing proposed, a proposal
+    /// the replay judges worse and one whose judge gives no verdict leave `prompts/` alone; one
+    /// judged no worse is adopted for both jobs, the defaults kept under `prompts/.history/`; a
+    /// stop mid-run writes no line. The reflector reads the guidance in force and the evidence since
+    /// the start, the consolidator a past bank rebuilt from `.pruned/`; the next encode runs on the
+    /// adopted guidance, and no review is due again within the week.
+    #[test]
+    fn reflect() -> Outcome {
+        let root = temp("reflect")?;
+        let note = |name: &str, extra: &str, body: &str| {
+            format!(
+                "---\nname: {name}\ndescription: sample: {name}\ntype: feedback\n{extra}---\n\n{body}\n"
+            )
+        };
+        let born = |at: &str, letter: &str| format!("created: {at}\nsession: @{letter}\n");
+        let runs = [
+            json!({"at": "2026-11-09T08:01:00Z", "kind": "encode", "machine": "studio", "outcome": "encoded", "session": "@a", "traces": 0u8}),
+            json!({"at": "2026-11-09T08:02:00Z", "kind": "encode", "machine": "studio", "outcome": "encoded", "session": "@b", "traces": 0u8}),
+            json!({"at": "2026-11-09T08:03:00Z", "bank": "-sample", "kept": 1u8, "kind": "consolidate", "machine": "studio", "merged": 1u8, "outcome": "consolidated", "pruned": 0u8}),
+            json!({"at": "2026-11-09T08:04:00Z", "error": "sample: broke", "kind": "encode", "machine": "studio", "outcome": "failed", "session": "@c", "traces": 0u8}),
+        ];
+        let sent = |letter: &str, files: &[&str]| json!({"at": "2026-11-09T09:00:00Z", "kind": "recall", "machine": "studio", "sent": files.iter().map(|file| json!({"file": file, "score": 1u8})).collect::<Vec<_>>(), "session": format!("@{letter}")});
+        let mut ledger: Vec<Value> = ["a", "b", "d"]
+            .iter()
+            .flat_map(|letter| {
+                [
+                    json!({"at": "2026-11-09T08:00:00Z", "interactive": *letter != "d", "kind": "start", "machine": "studio", "session": format!("@{letter}")}),
+                    json!({"archived": format!("{root}/archive/{letter}.jsonl"), "at": "2026-11-09T08:00:30Z", "kind": "end", "machine": "studio", "outcome": "taken", "session": format!("@{letter}")}),
+                ]
+            })
+            .collect();
+        ledger.extend(runs.clone());
+        ledger.extend([
+            json!({"at": "2026-11-09T08:05:00Z", "kind": "encode", "machine": "laptop", "outcome": "encoded", "session": "@f", "traces": 0u8}),
+            json!({"at": "2026-11-09T09:00:00Z", "file": "traces/-sample/feedback_t.md", "kind": "remember", "machine": "studio", "session": "@a", "type": "feedback"}),
+            sent("a", &["-sample/x.md", "-sample/y.md"]),
+            sent("b", &["-sample/x.md", "-sample/y.md"]),
+            sent("c", &["-sample/x.md", "-sample/y.md", "-sample/z.md"]),
+            json!({"at": "2026-11-09T09:01:00Z", "file": "-sample/y.md", "kind": "show", "machine": "studio", "session": "@b"}),
+        ]);
+        let day = |date: &str, file: &str| format!(".pruned/2026/11/{date}/120000--sample-{file}");
+        let merge = |trace: &str| {
+            format!(
+                r#"{{"op":"merge","trace":"{trace}","memory":"project_m.md","description":"sample: merged","body":"sample: body"}}"#
+            )
+        };
+        let files = [
+            ("archive/a.jsonl".to_owned(), json!({"type": "user", "message": {"content": "case a"}}).to_string()),
+            ("ledger/2026/11/09.jsonl".to_owned(), ledger.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")),
+            (day("01", "ops.json"), format!(r#"{{"ops":[{},{{"op":"prune","trace":"feedback_u.md","reason":"sample: the session's story"}}]}}"#, merge("feedback_t.md"))),
+            (day("01", "feedback_t.md"), note("T", &format!("{}source: remember 2026-11-01T11:00:00Z \u{b7} @a\n", born("2026-11-01T11:00:00Z", "a")), "sample: t")),
+            (day("01", "feedback_u.md"), note("U", &born("2026-11-01T11:00:00Z", "a"), "sample: u")),
+            (day("01", "project_m.md"), note("M", "", "sample: m first")),
+            (day("02", "ops.json"), format!(r#"{{"ops":[{},{{"op":"keep","trace":"feedback_w.md","type":"project","name":"Sample: kept","description":"sample: kept","body":"sample: kept"}}]}}"#, merge("feedback_v.md"))),
+            (day("02", "feedback_v.md"), note("V", &born("2026-11-02T10:00:00Z", "a"), "sample: v")),
+            (day("02", "feedback_w.md"), note("W", &born("2026-11-02T11:00:00Z", "b"), "sample: w")),
+            (day("02", "project_m.md"), note("M", "", "sample: m second")),
+            ("memories/-sample/project_m.md".to_owned(), note("M", "", "sample: m now")),
+            ("memories/-sample/project_sample_kept.md".to_owned(), note("Sample: kept", &born("2026-11-02T11:00:00Z", "b"), "sample: kept")),
+            ("memories/-sample/user_other.md".to_owned(), note("Other", "", "sample: other")),
+            ("reflector.sh.cases".to_owned(), "exit\nshape\nbig\nnone\nworse\nverdict\nadopt\nslow\n".to_owned()),
+            ("reflector.sh".to_owned(), r#"cat > "$0.stdin"
+if grep -qx '# b' "$0.stdin"; then
+  a=$(sed -n '/^# a$/{n;p;}' "$0.stdin")
+  case $(cat "$0.case") in
+    worse) case $a in *old*) echo '{"better":"a"}';; *) echo '{"better":"b"}';; esac;;
+    verdict) echo '{"better":"c"}';;
+    adopt) if grep -qx '# bank' "$0.stdin"; then echo '{"better":"same"}'
+      else case $a in *new*) echo '{"better":"a"}';; *) echo '{"better":"b"}';; esac; fi;;
+  esac
+  exit
+fi
+c=$(head -n 1 "$0.cases"); tail -n +2 "$0.cases" > "$0.rest"; mv "$0.rest" "$0.cases"; echo "$c" > "$0.case"
+case $c in
+  exit) cp "$0.stdin" "$0.first"; echo 'sample: broke' >&2; exit 3;;
+  shape) echo '{"encode":1,"consolidate":null,"reason":"x"}';;
+  big) echo '{"encode":"'$(printf '%0101d' 0)'","consolidate":null,"reason":"x"}';;
+  none) echo '{"encode":null,"consolidate":null,"reason":"sample: nothing repeats"}';;
+  worse) echo '{"encode":"sample: new worse","consolidate":null,"reason":"sample: worse"}';;
+  verdict) echo '{"encode":"sample: new verdict","consolidate":null,"reason":"x"}';;
+  adopt) echo '{"encode":"sample: new encode","consolidate":"sample: new consolidate","reason":"sample: both"}';;
+  slow) echo $$ > "$0.pid"; exec sleep 30;;
+esac
+"#.to_owned()),
+            ("encoder.sh".to_owned(), r#"g=$(head -n 1); echo "$g" >> "$0.log"
+case $g in 'sample: new'*) u=new;; *) u=old;; esac
+printf '{"traces":[],"under":"%s"}\n' $u
+"#.to_owned()),
+            ("consolidator.sh".to_owned(), r#"cat > "$0.in"
+case $(head -n 1 "$0.in") in 'sample: new'*) u=new;; *) u=old;; esac
+printf '{"ops":[],"under":"%s"}\n' $u
+"#.to_owned()),
+        ];
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|file| (file.0.as_str(), file.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let stub = |name: &str| format!("sh {root}/{name}.sh");
+        let (encoder, consolidator, reflector) =
+            (stub("encoder"), stub("consolidator"), stub("reflector"));
+        let envs = [
+            ("SANDMAN_CONSOLIDATOR", consolidator.as_str()),
+            ("SANDMAN_ENCODER", encoder.as_str()),
+            ("SANDMAN_GUIDANCE_BYTES", "100"),
+            ("SANDMAN_REFLECT_REPLAY", "1"),
+            ("SANDMAN_REFLECTOR", reflector.as_str()),
+            ("SANDMAN_TICK_MS", "10"),
+        ];
+        let read = |path: &str| fs::read_to_string(format!("{root}/{path}")).unwrap_or_default();
+        let today = format!("ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        let stop = |mut daemon: Daemon| -> Outcome {
+            same(
+                &format!(
+                    "{} {:?}",
+                    kill("-TERM", &daemon.0.id().to_string())?,
+                    daemon.0.wait()?.code()
+                ),
+                "true Some(0)",
+            )
+        };
+        // due by the clock, short of evidence: the tick passes the headless episode and stops there
+        let (first, _) = serve(&root, &[&envs[..], &[("SANDMAN_REFLECT_MS", "0")]].concat())?;
+        until(|| read(&today).contains("skipped"))?;
+        thread::sleep(Duration::from_millis(200));
+        stop(first)?;
+        same(
+            &format!(
+                "{} {}",
+                read(&today).lines().count(),
+                read("reflector.sh.case").is_empty()
+            ),
+            "1 true",
+        )?;
+        let (second, _) = serve(
+            &root,
+            &[
+                &envs[..],
+                &[("SANDMAN_REFLECT_MIN", "0"), ("SANDMAN_REFLECT_MS", "0")],
+            ]
+            .concat(),
+        )?;
+        until(|| !read("reflector.sh.pid").is_empty())?;
+        stop(second)?;
+        same(
+            &kill("-0", read("reflector.sh.pid").trim())?.to_string(),
+            "false",
+        )?;
+        let reviews = || -> Result<Vec<String>, Box<dyn Error>> {
+            read(&today)
+                .lines()
+                .filter(|line| line.contains(r#""kind":"reflect""#))
+                .map(|line| {
+                    let mut entry: Value = serde_json::from_str(line)?;
+                    entry["at"] = json!(entry["at"].as_str().map(str::len));
+                    for path in entry["history"]
+                        .as_object_mut()
+                        .into_iter()
+                        .flat_map(|history| history.values_mut())
+                    {
+                        *path = format!(
+                            "prompts/.history/<stamp>{}",
+                            path.as_str()
+                                .and_then(|held| held.get(34..))
+                                .unwrap_or_default()
+                        )
+                        .into();
+                    }
+                    Ok(entry.to_string())
+                })
+                .collect()
+        };
+        let review =
+            |rest: &str| format!(r#"{{"at":20,{rest}"kind":"reflect","machine":"studio","#);
+        let failed = |error: &str| {
+            format!(
+                r#"{}"outcome":"failed"}}"#,
+                review(&format!(r#""error":{},"history":{{}},"#, json!(error)))
+            )
+        };
+        let kept = |reason: &str, replay: &str| {
+            format!(
+                r#"{}"outcome":"kept","reason":"{reason}","replay":{{{replay}}}}}"#,
+                review(r#""history":{},"#)
+            )
+        };
+        let want = [
+            failed("exit status: 3: sample: broke"),
+            failed(r#"output: not a proposal: {"consolidate":null,"encode":1,"reason":"x"}"#),
+            failed("output: encode guidance over 100 bytes"),
+            kept("sample: nothing repeats", ""),
+            kept("sample: worse", r#""encode":{"new":0,"old":1,"same":0}"#),
+            failed(r#"output: not a verdict: {"better":"c"}"#),
+            format!(
+                r#"{}"outcome":"adopted","reason":"sample: both","replay":{{"consolidate":{{"new":0,"old":0,"same":1}},"encode":{{"new":1,"old":0,"same":0}}}}}}"#,
+                review(
+                    r#""history":{"consolidate":"prompts/.history/<stamp>-consolidate.md","encode":"prompts/.history/<stamp>-encode.md"},"#
+                )
+            ),
+        ];
+        same(&reviews()?.join("\n"), &want.join("\n"))?;
+        // what the reflector read first: the guidance in force, then the evidence since the start
+        let [encode, consolidate] = ["encode", "consolidate"].map(|job| {
+            [
+                ("encode", include_str!("../src/prompts/encode.md")),
+                ("consolidate", include_str!("../src/prompts/consolidate.md")),
+            ]
+            .iter()
+            .find(|prompt| prompt.0 == job)
+            .map_or("", |prompt| prompt.1)
+        });
+        let evidence = format!(
+            "# runs\n{}\n# ops\n- -sample: {{\"description\":\"sample: merged\",\"memory\":\"project_m.md\",\"op\":\"merge\",\"trace\":\"feedback_t.md\"}}\n- -sample: {{\"op\":\"prune\",\"reason\":\"sample: the session's story\",\"trace\":\"feedback_u.md\"}}\n- -sample: {{\"description\":\"sample: merged\",\"memory\":\"project_m.md\",\"op\":\"merge\",\"trace\":\"feedback_v.md\"}}\n- -sample: {{\"description\":\"sample: kept\",\"name\":\"Sample: kept\",\"op\":\"keep\",\"trace\":\"feedback_w.md\",\"type\":\"project\"}}\n\n# merged again\n- -sample/project_m.md \u{b7} merged 2 times\n\n# remembered by hand\n- T \u{2014} sample: T (traces/-sample/feedback_t.md)\n\n# sent, never read\n- -sample/x.md \u{b7} sent 3 times, never shown\n\n",
+            runs.iter()
+                .map(|run| ["- ", &run.to_string(), "\n"].concat())
+                .collect::<String>()
+        );
+        same(
+            &read("reflector.sh.first"),
+            &format!(
+                "{}\n{}\n<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n\n# since\nthe start\n\n{}",
+                include_str!("../src/prompts/reflect.md"),
+                include_str!("../src/prompts/reflect.contract.md"),
+                encode.trim_end(),
+                consolidate.trim_end(),
+                evidence.replace('@', ID)
+            ),
+        )?;
+        // the last consolidate replay, under the new guidance: the 11/02 run's traces and the
+        // memory it merged as it stood, beside the bank's other memory; its keep left out
+        same(
+            &read("consolidator.sh.in"),
+            &format!(
+                "sample: new consolidate\n{}\n# bank\n-sample\n\n# traces\n<trace file=\"feedback_v.md\">\n{}</trace>\n<trace file=\"feedback_w.md\">\n{}</trace>\n\n# memories\n<memory file=\"project_m.md\">\n{}</memory>\n<memory file=\"user_other.md\">\n{}</memory>\n",
+                include_str!("../src/prompts/consolidate.contract.md"),
+                files[7].1.replace('@', ID),
+                files[8].1.replace('@', ID),
+                files[9].1,
+                files[12].1
+            ),
+        )?;
+        let mut history: Vec<String> =
+            fs::read_dir(format!("{root}/prompts/.history/{}", date(&["+%Y/%m/%d"])?))?
+                .map(|entry| fs::read_to_string(entry?.path()))
+                .collect::<io::Result<_>>()?;
+        history.sort();
+        let mut defaults = [consolidate, encode].map(str::to_owned);
+        defaults.sort();
+        same(
+            &format!(
+                "{history:?} {} {}",
+                read("prompts/encode.md"),
+                read("prompts/consolidate.md")
+            ),
+            &format!("{defaults:?} sample: new encode sample: new consolidate"),
+        )?;
+        // the next episode encodes under the adopted guidance; the next review is a week off
+        let grown = format!(
+            "{}\n{}\n{}",
+            read("ledger/2026/11/09.jsonl"),
+            json!({"at": "2026-11-09T10:00:00Z", "interactive": true, "kind": "start", "machine": "studio", "session": format!("{ID}e")}),
+            json!({"archived": format!("{root}/archive/a.jsonl"), "at": "2026-11-09T10:00:30Z", "kind": "end", "machine": "studio", "outcome": "taken", "session": format!("{ID}e")})
+        );
+        fs::write(format!("{root}/ledger/2026/11/09.jsonl"), grown)?;
+        let (third, _) = serve(
+            &root,
+            &[&envs[..], &[("SANDMAN_REFLECT_MIN", "0")]].concat(),
+        )?;
+        until(|| read(&today).contains(&format!("{ID}e")))?;
+        thread::sleep(Duration::from_millis(200));
+        stop(third)?;
+        let old = encode.lines().next().unwrap_or_default();
+        same(
+            &format!("{}\n{}", reviews()?.len(), read("encoder.sh.log")),
+            &format!(
+                "7\n{}\n",
+                [
+                    old,
+                    "sample: new worse",
+                    old,
+                    "sample: new verdict",
+                    old,
+                    "sample: new encode",
+                    "sample: new encode"
+                ]
+                .join("\n")
+            ),
+        )
+    }
+
+    /// An adoption whose job's next two model runs both fail is rolled back once: the earlier
+    /// version restored from `prompts/.history/`, the failing one kept there beside it; a job
+    /// whose next run held is left.
+    #[test]
+    fn revert() -> Outcome {
+        let root = temp("revert")?;
+        let lines = [
+            json!({"at": "2026-11-01T00:00:00Z", "history": {"consolidate": "prompts/.history/c.md", "encode": "prompts/.history/e.md"}, "kind": "reflect", "machine": "studio", "outcome": "adopted"}),
+            json!({"at": "2026-11-01T00:01:00Z", "bank": "-x", "kind": "consolidate", "machine": "studio", "outcome": "consolidated"}),
+            json!({"at": "2026-11-01T00:02:00Z", "kind": "encode", "machine": "studio", "outcome": "skipped", "session": "@p"}),
+            json!({"at": "2026-11-01T00:03:00Z", "kind": "encode", "machine": "studio", "outcome": "failed", "session": "@p"}),
+            json!({"at": "2026-11-01T00:04:00Z", "kind": "encode", "machine": "studio", "outcome": "failed", "session": "@q"}),
+        ];
+        plant(
+            &root,
+            &[
+                (
+                    "ledger/2026/11/01.jsonl",
+                    &lines
+                        .iter()
+                        .map(Value::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+                ("prompts/.history/e.md", "sample: earlier\n"),
+                ("prompts/consolidate.md", "sample: consolidate\n"),
+                ("prompts/encode.md", "sample: adopted\n"),
+            ],
+        )?;
+        let (mut daemon, _) = serve(&root, &[("SANDMAN_TICK_MS", "10")])?;
+        let read = |path: &str| fs::read_to_string(format!("{root}/{path}")).unwrap_or_default();
+        let today = format!("ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        until(|| !read(&today).is_empty())?;
+        thread::sleep(Duration::from_millis(200));
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let mut line: Value = serde_json::from_str(&read(&today))?;
+        let kept = line["history"]["encode"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        (line["at"], line["history"]["encode"]) = (
+            json!(line["at"].as_str().map(str::len)),
+            json!(
+                kept.strip_prefix("prompts/.history/")
+                    .and_then(|file| file.get(17..))
+            ),
+        );
+        same(
+            &format!(
+                "{} {line} {}{}",
+                read(&today).lines().count(),
+                read(&kept),
+                read("prompts/encode.md")
+            ),
+            "1 {\"at\":20,\"history\":{\"encode\":\"-encode.md\"},\"kind\":\"reflect\",\"machine\":\"studio\",\"outcome\":\"reverted\",\"reason\":\"its next two runs failed\"} sample: adopted\nsample: earlier\n",
         )
     }
 
