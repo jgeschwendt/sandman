@@ -81,10 +81,10 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p class="lead docs-lead"><code class="code">recall</code> is the agent's tool: it pulls the memories that
     bear on what it is about to do, by its own cue, whenever it needs them. A session's start gets a seed.</p>
   <p class="notice notice-warn"><span>Partly built: <code class="code">sandman recall</code>, the seed and the pull,
-    <code class="code">sandman show</code> and <code class="code">sandman remember</code> run (<a class="link" href="#tool">the tools</a>), Jev
-    then local Kev then the lexical rank alone; the mod wiring and the pane are not, and the earlier sandman's recall
-    runs at every session's start. A decision is open until its badge says settled; the gate, the prefilter, what each
-    scorer sees, the blend and the cut are <a class="link" href="#chosen">the evaluation's choice</a>.</span></p>
+    <code class="code">sandman show</code> and <code class="code">sandman remember</code> run (<a class="link" href="#tool">the tools</a>), on one
+    local Ollama (<a class="link" href="#needs">needs</a>); the mod wiring and the pane are not, and the earlier sandman's
+    recall runs at every session's start. A decision is open until its badge says settled; the pipeline and its cut are
+    <a class="link" href="#chosen">the evaluation's choice</a>.</span></p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#problem">problem</a>
     <a class="pill" href="#proposed">flow</a>
@@ -103,6 +103,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <a class="pill" href="#tool">tools</a>
     <a class="pill" href="#old-sections">old sections</a>
     <a class="pill" href="#pane">pane</a>
+    <a class="pill" href="#needs">needs</a>
     <a class="pill" href="#risks">risks</a>
     <a class="pill" href="#open">open</a>
   </nav>
@@ -130,51 +131,60 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
 <section class="docs-section" id="proposed">
   <header>
     <h2 class="h2">The flow</h2>
-    <p class="docs-note">Two ways in, one scoring: the seed once at the first prompt, the agent's pull at any time.</p>
+    <p class="docs-note">Two ways in, one pass: the seed once at the first prompt, the agent's pull at any time.</p>
   </header>
   <figure class="figure">
     <div class="chart-frame" id="flow">
-      <svg width="932" height="336" viewBox="0 0 932 336" role="img" aria-label="recall's flow: the seed and the agent's pull bring a cue to the lexical gate, which ends a cue of steering words with nothing recalled; the prefilter ranks every memory and trace by BM25 over its whole text and keeps 39, 20 for the seed; Jev scores those in one request, Kev on the same candidates when Jev is down or fails, the lexical rank alone when both are; the blend and the cut rank the lines; the digest goes to the caller and one recall line to the ledger">
+      <svg width="964" height="460" viewBox="0 0 964 460" role="img" aria-label="recall's flow: the seed and the agent's pull bring a cue to the lexical gate, which ends a cue of steering words with nothing recalled; BM25 over every memory and trace and the cosine of its cached embedding against the embedded query are fused by reciprocal rank; the fused top 10 go in one request to pplx, else Kev, else Jev; the decision's order and the fused one are fused again and cut at 6 lines; with no decision model the hybrid cut, with no embeddings either the lexical cut; the digest goes to the caller and one recall line to the ledger">
         <defs>
           <marker id="flow-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
         </defs>
         <g transform="translate(0,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">① seed</text><text class="flow-note" x="12" y="46">first prompt; start</text><text class="flow-note" x="12" y="64">mark, always-set</text></g>
+        <g transform="translate(0,168)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">① agent's pull</text><text class="flow-note" x="12" y="46">its cue, any time,</text><text class="flow-note" x="12" y="64">--about its repo</text></g>
         <g transform="translate(196,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">② lexical gate</text><text class="flow-note" x="12" y="46">steering words only:</text><text class="flow-note" x="12" y="64">no model, nothing</text></g>
-        <g transform="translate(392,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ prefilter</text><text class="flow-note" x="12" y="46">bm25 over bodies,</text><text class="flow-note" x="12" y="64">its repo +4, top 39</text></g>
-        <g transform="translate(588,28)"><rect class="flow-box is-accent" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">④ jev scores</text><text class="flow-note" x="12" y="46">one request, a noul</text><text class="flow-note" x="12" y="64">each, with criteria</text></g>
-        <g transform="translate(784,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">kev, local</text><text class="flow-note" x="12" y="46">the same candidates,</text><text class="flow-note" x="12" y="64">no criteria</text></g>
-        <g transform="translate(0,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">① agent's pull</text><text class="flow-note" x="12" y="46">its cue, any time,</text><text class="flow-note" x="12" y="64">--about its repo</text></g>
-        <g transform="translate(196,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑦ recall line</text><text class="flow-note" x="12" y="46">to the ledger: scorer,</text><text class="flow-note" x="12" y="64">sent, any error</text></g>
-        <g transform="translate(392,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑥ digest</text><text class="flow-note" x="12" y="46">to the caller; the</text><text class="flow-note" x="12" y="64">seed's is injected</text></g>
-        <g transform="translate(588,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑤ blend, cut</text><text class="flow-note" x="12" y="46">noul with bm25;</text><text class="flow-note" x="12" y="64">a floor, a cap</text></g>
-        <g transform="translate(784,196)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">lexical only</text><text class="flow-note" x="12" y="46">both down: bm25's</text><text class="flow-note" x="12" y="64">top 5, unscored</text></g>
+        <g transform="translate(392,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ bm25</text><text class="flow-note" x="12" y="46">whole text, its repo</text><text class="flow-note" x="12" y="64">+4, a claim +0</text></g>
+        <g transform="translate(392,168)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ cosine</text><text class="flow-note" x="12" y="46">cached vectors, the</text><text class="flow-note" x="12" y="64">query embedded</text></g>
+        <g transform="translate(588,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">④ fuse</text><text class="flow-note" x="12" y="46">reciprocal rank,</text><text class="flow-note" x="12" y="64">a tie bm25's order</text></g>
+        <g transform="translate(784,28)"><rect class="flow-box is-accent" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑤ pplx decides</text><text class="flow-note" x="12" y="46">the top 10, one</text><text class="flow-note" x="12" y="64">request, a noul each</text></g>
+        <g transform="translate(784,168)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">kev, then jev</text><text class="flow-note" x="12" y="46">the same request,</text><text class="flow-note" x="12" y="64">their model's name</text></g>
+        <g transform="translate(0,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑧ recall line</text><text class="flow-note" x="12" y="46">to the ledger: path,</text><text class="flow-note" x="12" y="64">sent, any error</text></g>
+        <g transform="translate(196,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑦ digest</text><text class="flow-note" x="12" y="46">to the caller; the</text><text class="flow-note" x="12" y="64">seed's is injected</text></g>
+        <g transform="translate(392,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">lexical cut</text><text class="flow-note" x="12" y="46">no vectors, no</text><text class="flow-note" x="12" y="64">model: bm25's top 5</text></g>
+        <g transform="translate(588,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">hybrid cut</text><text class="flow-note" x="12" y="46">no model: ④'s order,</text><text class="flow-note" x="12" y="64">a floor, a band, 8</text></g>
+        <g transform="translate(784,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑥ fuse, cut</text><text class="flow-note" x="12" y="46">⑤'s order with ④'s,</text><text class="flow-note" x="12" y="64">2/66 or more, 6</text></g>
         <g aria-hidden="true">
           <path class="flow-path" marker-end="url(#flow-head)" d="M148,70H196" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M148,238H172V98H196" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M148,210H172V98H196" />
           <path class="flow-path" marker-end="url(#flow-head)" d="M344,70H392" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M300,112V152H440V196" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M368,70V210H392" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M300,112V308" />
           <path class="flow-path" marker-end="url(#flow-head)" d="M540,70H588" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M540,210H564V98H588" />
           <path class="flow-path" marker-end="url(#flow-head)" d="M736,70H784" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M630,112V196" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M820,112V160H694V196" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M896,112V196" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M784,238H736" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M588,238H540" />
-          <path class="flow-path" marker-end="url(#flow-head)" d="M392,238H344" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M858,112V168" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M932,70H950V350H932" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M858,252V308" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M784,232H662V308" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M588,350H540" />
+          <path class="flow-path" d="M858,392V416H270" />
+          <path class="flow-path" d="M662,392V416" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M392,350H344" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M270,416V392" />
+          <path class="flow-path" marker-end="url(#flow-head)" d="M196,350H148" />
         </g>
         <text class="flow-time" x="368" y="62" text-anchor="middle">ask</text>
-        <text class="flow-time" x="452" y="146" text-anchor="middle">no ask</text>
-        <text class="flow-time" x="564" y="62" text-anchor="middle">~75 ms</text>
-        <text class="flow-time" x="760" y="62" text-anchor="middle">down</text>
-        <text class="flow-time" x="622" y="152" text-anchor="end">7.5k tokens</text>
-        <text class="flow-time" x="760" y="186" text-anchor="middle">p50 3.7 s</text>
-        <text class="flow-time" x="904" y="152">both</text>
-        <text class="flow-note" x="466" y="318" text-anchor="middle">the seed keeps 20 and has 4 s for the whole pass; past it, the lexical rank, marked unscored</text>
+        <text class="flow-time" x="308" y="160">no ask</text>
+        <text class="flow-time" x="760" y="62" text-anchor="middle">top 10</text>
+        <text class="flow-time" x="866" y="146">down</text>
+        <text class="flow-time" x="866" y="286">answers</text>
+        <text class="flow-time" x="724" y="226" text-anchor="end">all down</text>
+        <text class="flow-time" x="956" y="200" text-anchor="end" transform="rotate(90 956 200)">p50 ~0.8 s</text>
+        <text class="flow-note" x="482" y="448" text-anchor="middle">the seed runs the same pass in 4 s, a pull in 10 s; a stage that has not answered by then is skipped</text>
       </svg>
 </div>
-    <figcaption>Every station runs today as <code class="code">sandman recall</code>; the mod does not run the seed
-      yet. Times are what the station before each edge takes over the real corpus: the prefilter's read and rank and
-      Kev's 39 questions measured (2026-11-13), Jev's single request not yet (<a class="link" href="#latency">latency</a>).</figcaption>
+    <figcaption>Every station runs today as <code class="code">sandman recall</code>, both models in one local Ollama;
+      the mod does not run the seed yet. pplx's p50 is the evaluation's over 98 cues
+      (<a class="link" href="#latency">latency</a>).</figcaption>
   </figure>
 </section>
 
@@ -182,30 +192,29 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <header class="decision-head">
     <h2 class="h2">What did the evaluation choose?</h2><span class="badge badge-ok">settled</span>
   </header>
-  <p>A hybrid: a free lexical gate, a free BM25 prefilter over each memory's whole text that keeps 39, one model
-    request over those 39 (Jev while hosted credit lasts, local Kev otherwise), the noul blended with the lexical
-    score, then a floor and a cap per scorer.</p>
+  <p>Lexical and embedding ranks fused, a local decision model on the fused top 10, the two orders fused again:
+    the best precision measured and, at cap 6, must-recall level with hosted Jev's, with nothing leaving the
+    machine.</p>
   <div class="table-wrap">
   <table data-table>
-    <thead><tr><th>configuration</th><th>lines</th><th>precision</th><th>must-recall</th><th>no-ask empty</th><th>cost or latency</th></tr></thead>
+    <thead><tr><th>pipeline</th><th>lines</th><th>precision</th><th>must-recall</th><th>no-ask empty</th><th>time or cost</th></tr></thead>
     <tbody>
-      <tr><td>first build: <code class="code">name — description</code>, floor .5, cap 8</td><td>7.3</td><td>.33</td><td>.51</td><td>23 %</td><td>64.6k tokens</td></tr>
-      <tr><td>Jev over all 628</td><td>4.0</td><td>.62</td><td>.61</td><td>92 %</td><td>121.5k tokens</td></tr>
-      <tr class="is-proposed"><td>hybrid, Jev on 39 <span class="badge badge-ok">built</span></td><td>5.8</td><td>.60</td><td>.70</td><td>100 %</td><td>7.5k tokens: 15,782 pulls per $5</td></tr>
-      <tr class="is-proposed"><td>hybrid, local Kev on 39 <span class="badge badge-ok">built</span></td><td>4.7</td><td>.59</td><td>.64</td><td>100 %</td><td>p50 3.7 s, p90 4.9 s</td></tr>
-      <tr class="is-proposed"><td>seed, Kev on 20 <span class="badge badge-ok">built</span></td><td>5.2</td><td>.56</td><td>.61</td><td>100 %</td><td>p50 1.9 s, p90 2.5 s</td></tr>
-      <tr><td>lexical only, no model <span class="badge badge-ok">built, the fallback</span></td><td>4.3</td><td>.58</td><td>.54</td><td>100 %</td><td>free</td></tr>
+      <tr><td>lexical top 39 → Kev-4B, blended</td><td>4.65</td><td>.592</td><td>.601</td><td>1.0</td><td>~3–5 s</td></tr>
+      <tr><td>lexical top 39 → hosted Jev, blended</td><td>5.81</td><td>.603</td><td>.663</td><td>1.0</td><td>~1 s, 7.5k tokens</td></tr>
+      <tr><td>lexical only <span class="badge badge-ok">built, the last fallback</span></td><td>4.34</td><td>.584</td><td>.510</td><td>1.0</td><td>2 ms</td></tr>
+      <tr><td>lexical ⊕ embeddings, no decision model <span class="badge badge-ok">built, the fallback</span></td><td>4.45</td><td>.622</td><td>.582</td><td>1.0</td><td>~30 ms</td></tr>
+      <tr><td>lexical ⊕ embeddings → pplx-decider-flash on the top 10, fused, cap 5</td><td>4.32</td><td>.648</td><td>.611</td><td>1.0</td><td>p50 772 ms, p90 832 ms</td></tr>
+      <tr class="is-proposed"><td>the same at cap 6 <span class="badge badge-ok">built</span></td><td>4.86</td><td>.630</td><td>.630</td><td>1.0</td><td>the same</td></tr>
+      <tr><td>hosted Jev over every memory</td><td>3.99</td><td>.619</td><td>.577</td><td>.923</td><td>121.5k tokens</td></tr>
     </tbody>
   </table>
 </div>
-  <p class="docs-note">98 cues over the real corpus (33 first prompts, 32 agent cues, 20 planted, 13 with no ask);
-    gold enlarged to 5,871 Opus-judged labels after pooling the lexical and Kev results; rules chosen on a dev half,
-    confirmed on the held-out half (measured 2026-11-13). The hosted credit is $5 a month and spent, so Kev is the
-    path in daily use.</p>
-  <p>Prefiltering helps the scorer: it removes the distractors a model would otherwise rank high, and the share of
-    must-have memories lost at the scorer falls from .38 over all 628 to .17. Where they are still lost: .13 never
-    reach the 39 (the prefilter), .17 with Jev and .23 with Kev rank past the cap (the scorer), and almost none fall
-    to the floor (the cut).</p>
+  <p class="docs-note">98 cues over the real corpus; one gold of 7,523 Opus-judged labels, 208 of them must-haves;
+    rules fit on a dev half, confirmed on the held-out half (measured 2026-11-13 · the recall evaluation's
+    union-final table). Embeddings add about 3 points of must-recall once the decision model is there, 7 without it.</p>
+  <p>Kev-4B as a second stage ranked worse than the free first stage alone, and rerankers and larger embedding
+    models did not beat the two-model pipeline. Hosted Jev over every memory is no better than it at 121.5k tokens a
+    pull.</p>
 </section>
 
 <section class="docs-section" id="quality">
@@ -218,8 +227,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     memories <span class="badge badge-ok">built</span>.</p>
   <ul class="stack claims" role="list">
     <li><strong>redescription</strong> — a dry run of a one-time rewrite exists: 303 names, 607 descriptions and 177
-      homes would change. On Kev it adds .03 precision and .01 must-recall; it is measured on Jev before any memory is
-      edited <span class="badge">planned</span>.</li>
+      homes would change. It is measured on this pipeline before any memory is edited <span class="badge">planned</span>.</li>
     <li><strong>stale and duplicated</strong> — the same pass flags 93 memories as stale and 62 as duplicated;
       listed, not acted on.</li>
   </ul>
@@ -233,16 +241,16 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <table data-table>
     <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
     <tbody>
-      <tr class="is-proposed"><td>the ask, led by its repository when one is known <span class="badge badge-ok">built</span></td><td><code class="code">state</code> is <code class="code">repository: &lt;owner/repo&gt;</code> and the first prompt or the agent's cue; known from a pull's <code class="code">--about</code> or a seed's cwd inside a repository</td><td>the ask leaves the machine with hosted Jev (<a class="link" href="#privacy">privacy</a>)</td></tr>
+      <tr class="is-proposed"><td>the ask, led by its repository when one is known <span class="badge badge-ok">built</span></td><td><code class="code">state</code> is <code class="code">repository: &lt;owner/repo&gt;</code> and the first prompt or the agent's cue; known from a pull's <code class="code">--about</code> or a seed's cwd inside a repository</td><td>the ask leaves the machine only with hosted Jev (<a class="link" href="#privacy">privacy</a>)</td></tr>
       <tr><td>the ask alone</td><td>no place in the state</td><td>a rule from the wrong repository ranks beside the right one</td></tr>
       <tr><td>nothing (today)</td><td>selection by place only</td><td>the 95 % in <a class="link" href="#problem">the problem</a></td></tr>
     </tbody>
   </table>
 </div>
   <p class="docs-note">The cwd is the grove root for nearly every session, which says nothing: only a cwd inside a
-    repository, or the agent naming it, leads the state. A repository the cue names (<code class="code">fix the grove
-    daemon</code>) is the prefilter's about, adding its name to the query and 4 to its bank, without leading the
-    state, as in the evaluation; of two named, the longest key wins.</p>
+    repository, or the agent naming it, leads the state and joins the BM25 query. A repository the cue names
+    (<code class="code">fix the grove daemon</code>) is the about, 4 to its bank, without leading the state or joining
+    the query, as in the evaluation; of two named, the longest key wins.</p>
 </section>
 
 <section class="docs-section" id="candidates">
@@ -253,14 +261,23 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <table data-table>
     <thead><tr><th>option</th><th>what it means</th><th>cost</th></tr></thead>
     <tbody>
-      <tr class="is-proposed"><td>every memory and trace, prefiltered to 39 <span class="badge badge-ok">built</span></td><td>BM25 over name, description, repository, file and body, the about's bank +4, home and the grove root +1; 20 for the seed</td><td>.13 of the must-haves never reach the scorer (<a class="link" href="#chosen">chosen</a>)</td></tr>
-      <tr><td>every memory, one noul each</td><td>628 questions in balanced requests</td><td>121.5k tokens a pull, and the distractors the prefilter removes</td></tr>
-      <tr><td>the cwd's chain (today)</td><td>the cwd's bank and its ancestors</td><td>2 of 49 banks from the root</td></tr>
+      <tr class="is-proposed"><td>every memory and trace, ranked twice, the fused top 10 decided <span class="badge badge-ok">built</span></td><td>BM25 over the whole text and the cosine of a cached embedding, fused; ten names to the decision model</td><td>a must-have past the fused 10 is never decided</td></tr>
+      <tr><td>every memory, one noul each</td><td>628 questions in balanced requests</td><td>121.5k tokens a pull, and the distractors the first stage removes</td></tr>
+      <tr><td>the cwd's chain (the earlier recall)</td><td>the cwd's bank and its ancestors</td><td>2 of 49 banks from the root</td></tr>
     </tbody>
   </table>
 </div>
   <ul class="stack claims" role="list">
-    <li>The prefilter reads whole bodies on this machine; a scorer sees each kept candidate's name, its description cut at 160 characters and its repository's label beside the fixed question. The labels come from the grove root's owner and repository dirs, so a worktree's bank reads as its repository and a bank matching no dir as a guessed path (AGENTS.md).</li>
+    <li>BM25 reads <code class="code">&lt;label&gt; · &lt;name&gt;</code>, the description one-lined to 400, the body and the
+      file's stem; the embedding the same head and the body's first 1,500 characters, with
+      <code class="code">qwen3-embedding:0.6b</code> (1,024 dimensions, 1,024 tokens). The labels come from the grove root's
+      owner and repository dirs, so a worktree's bank reads as its repository (AGENTS.md).</li>
+    <li>The vectors live in <code class="code">&lt;root&gt;/embeddings.jsonl</code>, keyed by the text's SHA-256, so the
+      evaluation's own cache reads here unchanged. <a class="link" href="index.html#serve">serve</a>'s tick embeds what
+      is missing, 128 a tick; a pull embeds at most 8 more, the lexically best, and one still missing ranks lexically
+      only.</li>
+    <li>The decision model sees each of the ten as <code class="code">Memory (&lt;label&gt;): &lt;name&gt; — &lt;description,
+      160&gt;. &lt;question&gt;</code> beside the state.</li>
     <li>Traces are candidates too, from the moment they are written: a <a class="link" href="#tool"><code class="code">remember</code></a> made at 10:05 is recallable at 10:06, marked <code class="code">~</code> until consolidation keeps, merges or prunes it; a <code class="code">user</code> trace rides the always-set.</li>
   </ul>
 </section>
@@ -292,9 +309,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     </tbody>
   </table>
 </div>
-  <p>The house rule for context injection: one line per item plus a verb to read one in full. A read through <code class="code">show</code> writes a ledger line, so line-then-read is also the use signal
-    <a class="link" href="#record">record</a> needs; a body sent whole leaves no trace of whether it helped. The bank
-    shows as its key, the path <code class="code">show</code> takes.</p>
+  <p>One line per item plus a verb to read one in full, the house rule. A read through <code class="code">show</code>
+    writes a ledger line, so line-then-read is also the use signal <a class="link" href="#record">record</a> needs; a
+    body sent whole leaves no trace of whether it helped.</p>
 </section>
 
 <section class="docs-section" id="budget">
@@ -303,20 +320,21 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </header>
   <div class="table-wrap">
   <table data-table>
-    <thead><tr><th>scorer</th><th>final score</th><th>floor</th><th>at most</th></tr></thead>
+    <thead><tr><th>path</th><th>order</th><th>kept</th><th>at most</th></tr></thead>
     <tbody>
-      <tr><td>Jev</td><td>.7 · noul + .3 · lexical</td><td>.30</td><td>8</td></tr>
-      <tr><td>Kev</td><td>.6 · noul + .4 · lexical</td><td>.40</td><td>6</td></tr>
-      <tr><td>lexical only</td><td>the lexical score</td><td>none</td><td>5</td></tr>
+      <tr><td>a decision model answered</td><td>its order fused with ④'s, a tie newer first</td><td>2/66 or more</td><td>6</td></tr>
+      <tr><td>no decision model</td><td>④'s fusion</td><td>.0284 or more, within .0063 of the top</td><td>8</td></tr>
+      <tr><td>no embeddings either</td><td>BM25 with its bonus, a tie newer first</td><td>all</td><td>5</td></tr>
     </tbody>
   </table>
 </div>
-  <p>The lexical score is a candidate's BM25 plus its bonus over the top one among the kept. The floor is on the
-    final score; a line shows the noul (the lexical score when unscored). Then the characters: 9,000 for the seed,
+  <p>Six, where the reference ships five: a missed must-have is the worse error, and the sixth line buys 1.9 points
+    of must-recall for 1.9 of precision. Each line shows one number in its order: a fused score over the best
+    possible, 2/61, so the top line reads <code class="code">1.00</code> and a kept one no less than
+    <code class="code">.92</code>; the lexical cut shows BM25 over the top one. Then the characters: 9,000 for the seed,
     4,000 for a pull, under the 10,000 session-start cap; a cue with no ask gets nothing.</p>
-  <p class="docs-note">The ledger tunes them next: how far down the ranking a read memory sat says whether they are
-    right. <code class="code">$SANDMAN_&lt;JEV|KEV|LEXICAL&gt;_&lt;W|FLOOR|MAX&gt;</code>, <code class="code">$SANDMAN_RECALL_N</code>,
-    <code class="code">$SANDMAN_SEED_N</code>, <code class="code">--budget</code> and <code class="code">$SANDMAN_SEED_BUDGET</code> move them.</p>
+  <p class="docs-note"><code class="code">$SANDMAN_RECALL_CAP</code>, <code class="code">--budget</code> and
+    <code class="code">$SANDMAN_SEED_BUDGET</code> move them.</p>
 </section>
 
 <section class="docs-section" id="when">
@@ -331,7 +349,6 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     saying memory exists and when and how to pull it (<a class="link" href="#tool">as shipped</a>); ③ the always-set;
     ④ memories for the first prompt, only when the gate finds a real ask.</p>
   <ul class="stack claims" role="list">
-    <li>Most detailed asks come later or out of the agent's own discovery, so the seed matters and the pulls carry the weight.</li>
     <li>After <code class="code">/clear</code> the seed runs again for the same session: a second start mark (<code class="code">chart</code> keeps the earliest), and nothing an earlier recall sent is sent again.</li>
   </ul>
 </section>
@@ -340,29 +357,29 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <header class="decision-head">
     <h2 class="h2">What does the seed wait for?</h2><span class="badge badge-ok">settled</span>
   </header>
-  <p>At most 4 s for the whole pass, gate, prefilter and every scorer tried (<code class="code">$SANDMAN_SEED_MS</code>),
-    inside the mod's 10 s; Kev on the seed's 20 measured p50 1.9 s, p90 2.5 s. A pull has
-    <code class="code">$SANDMAN_RECALL_MS</code>, 10 s; Kev on 39 measured p50 3.7 s, p90 4.9 s. The seed never fails
-    the prompt: past the bound it prints the instructions, the always-set and the lexical rank, marked unscored, exits
-    0 and records why. ① is written before any of it, so nothing loses the start mark.</p>
-  <p class="docs-note">Unmeasured until hosted credit returns: Jev's latency for one 39-question request, score
-    stability under reruns, and resistance to memories that argue for their own selection.</p>
+  <p>At most 4 s for the whole pass, every embedding and every scorer tried (<code class="code">$SANDMAN_SEED_MS</code>),
+    inside the mod's 10 s; a pull has <code class="code">$SANDMAN_RECALL_MS</code>, 10 s. Over the real corpus of 635
+    a pull takes about 0.95 s with pplx answering, 0.27 s with no decision model and 0.14 s with neither, the read of
+    the 14 MB cache included (measured 2026-11-13, an idle Ollama). The seed never fails the prompt: past the bound it
+    prints what the stages that answered allow, exits 0 and records why. ① is written before any of it, so nothing
+    loses the start mark.</p>
 </section>
 
 <section class="docs-section" id="fallback">
   <header class="decision-head">
-    <h2 class="h2">What happens when Jev is down?</h2><span class="badge badge-ok">settled</span>
+    <h2 class="h2">What happens when a model is down?</h2><span class="badge badge-ok">settled</span>
   </header>
-  <p>Kev scores the same candidates within the same bound, and when Kev fails too the lexical rank alone answers:
-    never an error to the agent. The header names the scorer (<code class="code">· jev</code>,
-    <code class="code">· kev</code>, <code class="code">· lexical, unscored: jev and kev failed</code>) and the ledger
-    line keeps each failure.</p>
+  <p>Each stage drops out within the same bound and the rest answer, never an error to the agent: the embeddings down,
+    the decision runs on BM25's order; a decision model down, the next in <code class="code">$SANDMAN_SCORERS</code>
+    (<code class="code">pplx,kev,jev</code>), each sent the same request; none, the hybrid cut; nothing, the lexical cut.
+    The header names the path and what failed (<code class="code">· pplx</code>,
+    <code class="code">· kev: pplx failed</code>, <code class="code">· hybrid, no decision model</code>,
+    <code class="code">· lexical: embed and pplx and kev and jev failed</code>) and the ledger line keeps each cause.</p>
   <ul class="stack claims" role="list">
-    <li>Down is a missing key, a transport failure, a timeout or an HTTP error. Out of credit or refused
-      (<code class="code">billing_error</code>, 401, 402, 403) holds Jev down for 6 hours, anything else for 60 s, in
-      <code class="code">&lt;root&gt;/jev-down.json</code>; while it holds, Kev goes first.</li>
-    <li><code class="code">$SANDMAN_SCORER</code> (<code class="code">jev</code>, <code class="code">kev</code>,
-      <code class="code">none</code>) forces one.</li>
+    <li>Down is a refused connection, a timeout, an HTTP error, a reply without a noul or an embedding per text, or
+      Jev without a key. A missing model in Ollama falls through the same way.</li>
+    <li>Jev out of credit or refused (<code class="code">billing_error</code>, 401, 402, 403) is held down for 6 hours,
+      anything else for 60 s, in <code class="code">&lt;root&gt;/jev-down.json</code>; while it holds, Jev is skipped.</li>
   </ul>
 </section>
 
@@ -370,9 +387,10 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <header class="decision-head">
     <h2 class="h2">Hosted or local?</h2><span class="badge badge-ok">settled</span>
   </header>
-  <p>Hosted first, local when hosted is down. Only the cue and about 39 names, descriptions and repository labels
-    leave the machine, and only while hosted credit lasts; bodies never do, and Kev sends nothing off it. The
-    <code class="code">user</code> memories and pinned ones are never candidates: they ride the seed unscored.</p>
+  <p>Local: both models run on this machine, and nothing leaves it unless hosted Jev is placed in the scorer order
+    and reached, which today needs pplx and Kev to fail first. Then the cue and ten names, descriptions and repository
+    labels go to <code class="code">api.typesafe.ai</code>; bodies never do. The <code class="code">user</code> memories
+    and pinned ones are never candidates: they ride the seed unscored.</p>
 </section>
 
 <section class="docs-section" id="record">
@@ -388,7 +406,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     </tbody>
   </table>
 </div>
-  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"error"?,"kind":"recall","machine":…,"ms":n,"prefilter":39,"scorer":"kev","seed"?:true,"sent":[{"file":"&lt;path&gt;","noul":0.91}],"session":…,"tokens":n}
+  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"embedded":true,"error"?,"kind":"recall","machine":…,"ms":n,"scorer":"pplx","seed"?:true,"sent":[{"file":"&lt;path&gt;","score":0.97}],"session":…,"tokens":n}
 {"at":…,"file":"&lt;path&gt;","kind":"show","machine":…,"session":…}
 {"at":…,"file":"traces/&lt;bank&gt;/&lt;file&gt;","kind":"remember","machine":…,"session":…,"type":"feedback"}</pre>
   <p class="docs-note"><strong>Proposed:</strong> sent, then read, then pinned or muted is the whole feedback loop, and two of its three parts exist already.</p>
@@ -427,13 +445,13 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <li><strong><code class="code">sandman recall &lt; {"session","prompt"?,…}</code></strong>
       <span class="badge badge-ok">built</span> — the seed, once at the first prompt: ① the start mark, first and
       whatever follows; then, within 9,000 characters, the instructions with the session id, the always-set, the
-      prompt's ranked lines when the gate finds an ask, and the footer; past 4 s, the lexical rank, marked unscored.
+      prompt's ranked lines when the gate finds an ask, and the footer; past 4 s, what the stages that answered allow.
       <code class="code">CLAUDE_MEMORY_PIPELINE=1</code>: the start mark only. Bad stdin: exit 2, nothing written.</li>
     <li><strong><code class="code">sandman recall --cue "…" [--about &lt;path&gt;] [--session &lt;uuid&gt;] [--budget &lt;chars&gt;]</code></strong>
-      <span class="badge badge-ok">built</span> — the pull: the gate, the prefilter, one request to Jev through
-      <code class="code">$SANDMAN_SYSTEMONE</code> (default: curl, the key as curl config on its stdin, never in an
-      argv), else Kev through <code class="code">$SANDMAN_KEV</code> (default: curl to the local server); stdout the header, the ranked lines and the footer, never the always-set; stderr one stats line; one
-      ledger line; within a session nothing already sent, by the seed or a pull, is sent again.</li>
+      <span class="badge badge-ok">built</span> — the pull: <a class="link" href="#proposed">the flow</a>, every
+      transport curl (Jev's key as curl config on its stdin, never in an argv); stdout the header, the ranked lines and
+      the footer, never the always-set; stderr one stats line; one ledger line; within a session nothing already sent,
+      by the seed or a pull, is sent again.</li>
     <li><strong><code class="code">sandman show [traces/]&lt;bank&gt;/&lt;file&gt;.md [--session &lt;uuid&gt;]</code></strong>
       <span class="badge badge-ok">built</span> — the memory's or trace's body under its name, type (a trace says so)
       and date, and a ledger line; a memory is <code class="code">&lt;bank&gt;/&lt;file&gt;</code>, a trace
@@ -443,9 +461,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       <code class="code">traces/&lt;bank&gt;/</code>, source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>,
       homed by <code class="code">--about</code> as an encoded trace is, else by the cwd (from the root: about the person,
       or true everywhere); defaults feedback, the body's first eight words, its first line. It prints the
-      <code class="code">show</code> line to read it back and writes a ledger line. The episode's encode lists what the
-      session remembered under <code class="code"># already remembered</code>, which the contract forbids writing again,
-      and drops a highlight with the same body; consolidation takes the trace like any other.</li>
+      <code class="code">show</code> line to read it back and writes a ledger line; encode never writes it again, and
+      consolidation takes it like any other trace.</li>
     <li>Every command printed for the agent names the binary as invoked: <code class="code">sandman-next</code> today.</li>
   </ul>
   <figure class="figure">
@@ -455,7 +472,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </figure>
   <figure class="figure">
     <pre class="snippet wrap" id="digest"><a class="link" href="data/recall-digest.txt">docs/data/recall-digest.txt</a></pre>
-    <figcaption>Sample: a pull of the same cue with <code class="code">--budget 560</code>, Jev answering, three lines
+    <figcaption>Sample: a pull of the same cue with <code class="code">--budget 560</code>, pplx answering, three lines
       before the budget; the suite fails unless this is the verb's output.</figcaption>
   </figure>
 </section>
@@ -512,10 +529,28 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <h2 class="h2">Risks</h2>
   </header>
   <ul class="stack claims" role="list">
-    <li><strong>injection</strong> — memories are written unattended from transcripts, so a name or description can argue for its own selection. The description is capped at 160 characters, the memory travels as data beside a question fixed in the binary that says so (its resistance is <a class="link" href="#chosen">unmeasured</a>), and <code class="code">reflect</code> watches for memories sent often and never used.</li>
-    <li><strong>the number</strong> — a noul ranks well but is not a calibrated probability: the floors and weights are where this corpus's scores fell, and move with it.</li>
-    <li><strong>hosted dependence</strong> — the best path needs <code class="code">api.typesafe.ai</code> and its credit; without them every pull is Kev's, .06 less must-recall.</li>
+    <li><strong>injection</strong> — memories are written unattended from transcripts, so a name or description can
+      argue for its own selection. Planted beside the corpus, a memory claiming it applies to every request came back in
+      5 of 15 robustness cues; withholding the bank bonus from any name or description that claims its own importance
+      cut that to 2 of 15 with the headline unchanged, and no real memory matches the pattern (measured 2026-11-13). The
+      description is capped at 160 characters, the question is fixed in the binary, and <code class="code">reflect</code>
+      watches for memories sent often and never used. A stricter question measured as noise and is not shipped.</li>
+    <li><strong>the number</strong> — a fused score ranks; it is not a probability, and the floors are where this
+      corpus's scores fell.</li>
+    <li><strong>one server</strong> — the best path needs the local Ollama and both models resident; without it every
+      pull is the lexical cut, .12 less must-recall (<a class="link" href="#needs">needs</a>).</li>
   </ul>
+</section>
+
+<section class="docs-section" id="needs">
+  <header>
+    <h2 class="h2">What must be running</h2>
+  </header>
+  <p>One Ollama at <code class="code">$SANDMAN_OLLAMA</code> (<code class="code">http://127.0.0.1:11434</code>) holding
+    <code class="code">qwen3-embedding:0.6b</code> (Q8_0) and <code class="code">pplx-decider-flash:4b</code>, a System One
+    decision model, about 6 GiB resident together; Kev on <code class="code">127.0.0.1:1703</code> is the next scorer,
+    hosted Jev the last. Without Ollama, recall answers from BM25 alone and says so; without the cache, a pull embeds 8
+    and the tick fills the rest.</p>
 </section>
 
 <section class="docs-section" id="open">
@@ -523,6 +558,10 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <h2 class="h2">Open questions</h2>
   </header>
   <ul class="stack claims" role="list">
+    <li>Hosted first or local first: <code class="code">$SANDMAN_SCORERS</code> is one setting, and the order is the
+      owner's call.</li>
+    <li>Jev on this pipeline's top 10, checked once its credit resets.</li>
+    <li>Redescription, measured before any memory is edited (<a class="link" href="#quality">misses</a>).</li>
     <li>Scores in the pane as numbers or as bars?</li>
   </ul>
 </section>
