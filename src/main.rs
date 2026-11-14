@@ -9,6 +9,7 @@ use serde_json::{Map, Value, json};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use signal_hook::low_level::signal_name;
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -913,7 +914,8 @@ fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
 /// A tick job's model run: `command` through `sh -c` in its own process group, flagged so a
 /// session it starts is never taken, stdin `run/<job>.in` (the guidance, `<root>/prompts/<job>.md`
 /// when it holds any text, else `prompt`'s default; the contract; `data`), stdout and stderr to
-/// `run/<job>.out` and `.err`. `Ok(None)`: stopped, the group killed.
+/// `run/<job>.out` and `.err`; the long-lived sign-in in `$CLAUDE_CODE_OAUTH_TOKEN` when its file
+/// passes, `noted` what the job's line says of it. `Ok(None)`: stopped, the group killed.
 fn run(
     root: &Path,
     job: &str,
@@ -921,6 +923,7 @@ fn run(
     command: &str,
     data: &str,
     limit: Duration,
+    noted: &Cell<Option<String>>,
 ) -> io::Result<Option<Value>> {
     let [guidance, contract] = prompt;
     let file = |ext: &str| root.join(format!("run/{job}.{ext}"));
@@ -931,10 +934,37 @@ fn run(
         &custom
     };
     fs::write(file("in"), format!("{chosen}\n{contract}\n{data}"))?;
+    // read at each run: a regular file no group or other can read, its trimmed text the token
+    let path = env::var_os("SANDMAN_CLAUDE_TOKEN_FILE").map_or_else(
+        || Path::new(&env::var_os("HOME").unwrap_or_default()).join("Codes/claude-oauth-token"),
+        PathBuf::from,
+    );
+    let opened = File::open(&path).and_then(|found| {
+        let mode = found.metadata()?.mode();
+        if mode & 0o170_077 != 0o100_000 {
+            return Err(io::Error::other(format!(
+                "mode {mode:o}, want a regular file of mode 600"
+            )));
+        }
+        io::read_to_string(found).map(|token| token.trim().to_owned())
+    });
+    let shown = path.display();
+    let (token, note) = match opened {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (None, None),
+        Err(error) => (None, Some(format!("refused: {shown}: {error}"))),
+        Ok(token) if token.is_empty() => (None, Some(format!("ignored: {shown} is empty"))),
+        Ok(token) => (Some(token), Some(shown.to_string())),
+    };
+    noted.set(note);
     let mut child = Command::new("sh")
         .args(["-c", command])
         .env("CLAUDE_MEMORY_PIPELINE", "1")
         .env("SANDMAN_NO_TAKE", "1")
+        .envs(
+            token
+                .iter()
+                .map(|secret| ("CLAUDE_CODE_OAUTH_TOKEN", secret)),
+        )
         .process_group(0)
         .stdin(File::open(file("in"))?)
         .stdout(File::create(file("out"))?)
@@ -2287,7 +2317,10 @@ fn main() -> ExitCode {
                                 && marks[2]["at"].as_str() < marks[1]["at"].as_str()
                         })
                         .min_by_key(|marks| marks[1]["at"].as_str());
-                    let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
+                    let (_busy, noted) = (
+                        BUSY.lock().unwrap_or_else(PoisonError::into_inner),
+                        Cell::new(None),
+                    );
                     // one job a tick: the oldest of this machine's episodes taken and not encoded
                     // since; with none waiting, the quiet bank whose oldest trace is oldest
                     let (kind, key, value, mut zero, done) = if let Some(marks) = oldest {
@@ -2381,8 +2414,15 @@ fn main() -> ExitCode {
                                     digest.get(tail..).unwrap_or_default()
                                 );
                             }
-                            let Some(reply) =
-                                run(&data, "encode", ENCODE, &encoder, &digest, encode_limit)?
+                            let Some(reply) = run(
+                                &data,
+                                "encode",
+                                ENCODE,
+                                &encoder,
+                                &digest,
+                                encode_limit,
+                                &noted,
+                            )?
                             else {
                                 return Ok(None);
                             };
@@ -2550,6 +2590,7 @@ fn main() -> ExitCode {
                                 &consolidator,
                                 &input,
                                 consolidate_limit,
+                                &noted,
                             )?
                             else {
                                 return Ok(None);
@@ -2748,6 +2789,9 @@ fn main() -> ExitCode {
                         }
                     };
                     (line["kind"], line[key]) = (kind.into(), value.as_str().into());
+                    if let Some(token) = noted.take() {
+                        line["token"] = token.into();
+                    }
                     logged(kind, key, &value, record(&data, &mut line).map(|()| line));
                 }
             }));

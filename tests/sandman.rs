@@ -116,10 +116,12 @@ mod tests {
         let _: &mut Command = command
             .args(args)
             // not env_clear: llvm-cov reaches the child through LLVM_PROFILE_FILE
+            .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
             .env_remove("CLAUDE_CODE_SESSION_ID")
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("CLAUDE_MEMORY_PIPELINE")
             .env_remove("HOME")
+            .env_remove("SANDMAN_CLAUDE_TOKEN_FILE")
             .env_remove("SANDMAN_MACHINE")
             .env_remove("SANDMAN_NO_TAKE")
             .env_remove("SANDMAN_ROOT")
@@ -810,6 +812,117 @@ esac
                     format!("about: {work}/missing")
                 ]
             ),
+        )
+    }
+
+    /// The model run reads its token file at each run, so the stub encoder rearranges it for the
+    /// next: absent, nothing set and nothing noted; mode 600, its trimmed text in
+    /// `$CLAUDE_CODE_OAUTH_TOKEN` and the file named on the line; mode 644, refused and the token
+    /// unset; empty, ignored. The token reaches no log, ledger or run file.
+    #[test]
+    fn token() -> Outcome {
+        let root = temp("token")?;
+        let (stub, file) = (format!("{root}/stub.sh"), format!("{root}/token"));
+        let mut files = vec![(
+            "stub.sh".to_owned(),
+            format!(
+                r#"case=$(sed -n 's/^user: case //p')
+echo "$case ${{CLAUDE_CODE_OAUTH_TOKEN-unset}}" >> "$0.log"
+case $case in
+  absent) printf ' sample-token \n' > {file}; chmod 600 {file};;
+  secret) chmod 644 {file};;
+  loose) : > {file}; chmod 600 {file};;
+esac
+printf '{{"traces":[]}}\n'
+"#
+            ),
+        )];
+        let mut ledger = Vec::new();
+        for (minute, (letter, case)) in [
+            ("a", "absent"),
+            ("b", "secret"),
+            ("c", "loose"),
+            ("d", "empty"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            files.push((
+                format!("archive/{letter}.jsonl"),
+                json!({"type": "user", "message": {"content": format!("case {case}")}}).to_string(),
+            ));
+            ledger.push(format!(
+                r#"{{"at":"2026-11-09T08:{minute:02}:00Z","interactive":true,"kind":"start","machine":"studio","session":"{ID}{letter}"}}
+{{"archived":"{root}/archive/{letter}.jsonl","at":"2026-11-09T08:{minute:02}:30Z","cwd":null,"kind":"end","machine":"studio","outcome":"taken","session":"{ID}{letter}"}}"#
+            ));
+        }
+        files.push(("ledger/2026/11/09.jsonl".to_owned(), ledger.join("\n")));
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|planted| (planted.0.as_str(), planted.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let (home, encoder) = (format!("{root}/home"), format!("sh {stub}"));
+        let (mut daemon, _) = serve(
+            &root,
+            &[
+                ("HOME", home.as_str()),
+                ("SANDMAN_CLAUDE_TOKEN_FILE", file.as_str()),
+                ("SANDMAN_ENCODER", encoder.as_str()),
+                ("SANDMAN_TICK_MS", "10"),
+            ],
+        )?;
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        let today = format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        until(|| read(&today).contains(&format!("{ID}d")))?;
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let lines: Vec<String> = read(&today)
+            .lines()
+            .map(|line| line.get(29..).unwrap_or_default().to_owned())
+            .collect();
+        let line = |letter: &str, token: &str| {
+            format!(
+                r#""kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}{letter}",{token}"traces":0}}"#
+            )
+        };
+        same(
+            &format!("{}\n{}", lines.join("\n"), read(&format!("{stub}.log"))),
+            &format!(
+                "{}\nabsent unset\nsecret sample-token\nloose unset\nempty unset\n",
+                [
+                    line("a", ""),
+                    line("b", &format!(r#""token":"{file}","#)),
+                    line(
+                        "c",
+                        &format!(r#""token":"refused: {file}: mode 100644, want a regular file of mode 600","#)
+                    ),
+                    line("d", &format!(r#""token":"ignored: {file} is empty","#)),
+                ]
+                .join("\n")
+            ),
+        )?;
+        let written = [
+            "run/encode.err",
+            "run/encode.in",
+            "run/encode.out",
+            "run/serve.log",
+        ]
+        .map(|path| read(&format!("{root}/{path}")))
+        .concat();
+        same(
+            &format!("{written}{}", read(&today))
+                .contains("sample-token")
+                .to_string(),
+            "false",
         )
     }
 

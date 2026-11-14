@@ -316,7 +316,9 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
   </ul>
   <pre class="snippet">sandman-next setup &gt; ~/Library/LaunchAgents/dev.gigantic.sandman.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.gigantic.sandman.plist
-launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after each install</pre>
+launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after each install
+claude setup-token                                          # in a terminal: prints a year's token, stores nothing
+install -m 600 /dev/stdin ~/Codes/claude-oauth-token        # paste it, then Ctrl-D</pre>
 </section>
 
 <section class="docs-section" id="encode" data-component="encode">
@@ -342,7 +344,7 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
     </tbody>
   </table>
   </div>
-  <pre class="snippet">{"at":…,"error":"&lt;one line&gt;"?,"kind":"encode","machine":…,"outcome":"encoded"|"skipped"|"gone"|"failed","session":…,"traces":&lt;count&gt;}</pre>
+  <pre class="snippet">{"at":…,"error":"&lt;one line&gt;"?,"kind":"encode","machine":…,"outcome":"encoded"|"skipped"|"gone"|"failed","session":…,"token":…?,"traces":&lt;count&gt;}</pre>
   <ul class="stack claims" role="list">
     <li><strong>digest</strong> — what the model reads, built from the archive:
       <code class="code"># episode</code> (the take's time, the cwd as the pointer finds it), <code class="code"># already remembered</code>
@@ -358,6 +360,13 @@ launchctl kickstart -k gui/$(id -u)/dev.gigantic.sandman   # the swap, after eac
       Claude Opus with no tools, no hooks, MCP servers or CLAUDE.md, and no saved session:
       <code class="code">claude -p --model opus --output-format text --safe-mode --tools "" --no-session-persistence</code>.
       Its stdin is the guidance, the contract and the data; its stdout one object, text around it ignored; exit 0.</li>
+    <li><strong>sign-in</strong> — the stored interactive login expires; a token file outlives it, a year.
+      Read at each run, so a replaced file needs no restart: <code class="code">$SANDMAN_CLAUDE_TOKEN_FILE</code>, else
+      <code class="code">~/Codes/claude-oauth-token</code>, a regular file no group or other can read, its trimmed
+      text set as <code class="code">CLAUDE_CODE_OAUTH_TOKEN</code> for the command alone. The line's
+      <code class="code">token</code> says which, never the value: absent without the file (the stored login, as before),
+      the path when used, <code class="code">refused: &lt;path&gt;: mode &lt;octal&gt;, want a regular file of mode 600</code>
+      or <code class="code">ignored: &lt;path&gt; is empty</code>, the run going ahead without it.</li>
     <li><strong>prompt</strong> — two parts. The contract (<a class="link" href="https://github.com/jgeschwendt/sandman/blob/main/src/prompts/encode.contract.md">src/prompts/encode.contract.md</a>)
       fixes the input layout and the reply's shape; it is built in and always sent, so no edit can break
       parsing. The guidance, what a trace is and how to word one, is <code class="code">&lt;root&gt;/prompts/encode.md</code>
@@ -457,7 +466,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
       files, never the index, and the earlier commit path regenerates it whole.</li>
     <li><strong>stop</strong> — as encode's: no line, the bank runs again after the next start.</li>
   </ul>
-  <pre class="snippet">{"at":…,"bank":…,"error":"&lt;one line&gt;"?,"kind":"consolidate","kept":n,"machine":…,"merged":n,"outcome":"consolidated"|"failed","pruned":n}</pre>
+  <pre class="snippet">{"at":…,"bank":…,"error":"&lt;one line&gt;"?,"kind":"consolidate","kept":n,"machine":…,"merged":n,"outcome":"consolidated"|"failed","pruned":n,"token":…?}</pre>
 </section>
 
 <section class="docs-section" id="next" data-component="next">
