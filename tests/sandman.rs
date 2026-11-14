@@ -2788,7 +2788,8 @@ printf '{"ops":[],"under":"%s"}\n' $u
     /// The seed never fails the session's first prompt: with no prompt, or one of steering words
     /// alone, it asks no model and prints no ranked part; when every transport outlasts the seed's
     /// bound it prints the lexical rank, its top five, and records why; a pipeline session gets
-    /// nothing. Each case's start mark is written first.
+    /// nothing. Only an interactive session's start mark is written, first; a headless one is never
+    /// marked, so its `take` writes nothing.
     #[test]
     fn seed() -> Outcome {
         let root = temp("seed")?;
@@ -2830,7 +2831,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     ("SANDMAN_SEED_MS", "300"),
                 ],
                 &["recall"],
-                &format!(r#"{{"session":"{session}","prompt":"{prompt}"}}"#),
+                &format!(r#"{{"session":"{session}","interactive":{ranks},"prompt":"{prompt}"}}"#),
             )?;
             let (head, tail) = out.split_once(" ms=").ok_or("no ms")?;
             let stderr = if ranks {
@@ -2850,9 +2851,9 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     u8::from(ranks)
                 ),
             )?;
-            want.push(format!(
-                r#"{{"at":"A","cwd":null,"interactive":null,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{session}","surface":null}}"#
-            ));
+            want.extend(ranks.then(|| format!(
+                r#"{{"at":"A","cwd":null,"interactive":true,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{session}","surface":null}}"#
+            )));
             want.push(format!(
                 r#"{{"always":["common/project_pinned.md","common/user_short.md","traces/common/user_terse.md"],"ask":{ranks},"at":"A","considered":6,"cue":"{prompt}","cut":{},"embedded":false,{}"kind":"recall","machine":"studio","ms":0,"scorer":null,"seed":true,"sent":[{sent}],"session":"{session}","tokens":0}}"#,
                 u8::from(ranks),
@@ -2875,9 +2876,14 @@ printf '{"ops":[],"under":"%s"}\n' $u
             )?,
             "0\n",
         )?;
-        want.push(format!(
-            r#"{{"at":"A","cwd":null,"interactive":null,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{ID}f","surface":null}}"#
-        ));
+        same(
+            &sandman(
+                &[("SANDMAN_MACHINE", "studio"), ("SANDMAN_ROOT", &root)],
+                &["take"],
+                &format!(r#"{{"session":"{ID}b"}}"#),
+            )?,
+            "0\n",
+        )?;
         same(&ledger(&root)?, &want.join("\n"))?;
         // invoked as sandman-next, every command it gives the agent names sandman-next
         let next = ran(

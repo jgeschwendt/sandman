@@ -2048,8 +2048,8 @@ fn main() -> ExitCode {
         "recall" => {
             let session = seed.then(|| sid.to_owned()).or_else(|| pull.clone());
             let cue = cued.unwrap_or_else(|| text(&got("prompt")).to_owned());
-            // first, so a slow or failed seed never loses the start; a pipeline run gets nothing
-            drop(seed.then(|| marked("start".into())));
+            // first, so a slow or failed seed never loses the start; a headless run is never marked
+            drop((seed && got("interactive") == true).then(|| marked("start".into())));
             if seed && pipeline {
                 return ExitCode::SUCCESS;
             }
