@@ -49,10 +49,6 @@ const ENCODE: [&str; 2] = [
     include_str!("prompts/encode.contract.md"),
 ];
 
-/// The request-level question, asked once a pass beside the candidates: a cue with no task (a
-/// greeting, "go", a choice among offered options) scores low and recalls nothing.
-const GATE: &str = "Does the request ask the agent to carry out, change, decide, or explain something specific, beyond acknowledging, greeting, choosing an offered option, or telling it to continue?";
-
 /// The four memory types, a trace's and a memory's `type`.
 const KINDS: [&str; 4] = ["feedback", "project", "reference", "user"];
 
@@ -70,9 +66,24 @@ const RECORD: fn(&Value) -> String = |memory| {
     )
 };
 
+/// Recall's scorers in the order tried, then the lexical rank alone: name, blend weight `w`
+/// (final = w·noul + (1 − w)·the lexical score), floor on the final, at most so many lines. The
+/// evaluation's choice (docs/recall.html#chosen).
+const SCORERS: [(&str, f64, f64, usize); 3] = [
+    ("jev", 0.7, 0.3, 8),
+    ("kev", 0.6, 0.4, 6),
+    ("lexical", 0.0, 0.0, 5),
+];
+
 /// The seed's instructions, first in a session's context; `<id>` is the session's id, `<me>` the
 /// name the binary was invoked as.
 const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, with `--about <repository path>` when it holds in one repository, one fact per call.";
+
+/// Recall's lexical gate: a cue whose every token is one of these asks for nothing.
+const STEER: &str = "go yes yeah yep ok okay continue next thanks thank done saved good great morning back hi hello signed sure fine cool nice where we are what now";
+
+/// The words `toks` drops.
+const STOPWORDS: &str = "a an and are as at be by can do for from has have i if in into is it its me my no not of on or our so that the then this to was we what when where which will with you your about should would could lets let im dont get going want need make use using also just like than them there these they";
 
 /// Held by the tick for each take; the drain takes it after setting `STOP`, so the take in hand
 /// finishes and no other starts.
@@ -515,10 +526,9 @@ fn record(root: &Path, line: &mut Value) -> io::Result<()> {
         .write_all(format!("{line}\n").as_bytes())
 }
 
-/// Waits on `child`, spawned in its own process group, for its status; past `limit` or on a stop
-/// signal the whole group is killed and the wait fails.
-fn reap(child: &mut Child, limit: Duration) -> io::Result<ExitStatus> {
-    let begun = Instant::now();
+/// Waits on `child`, spawned in its own process group, for its status; `limit` past `begun` or on
+/// a stop signal the whole group is killed and the wait fails.
+fn reap(child: &mut Child, begun: Instant, limit: Duration) -> io::Result<ExitStatus> {
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(status);
@@ -586,7 +596,7 @@ fn run(
         .stdout(File::create(file("out"))?)
         .stderr(File::create(file("err"))?)
         .spawn()?;
-    let status = match reap(&mut child, limit) {
+    let status = match reap(&mut child, Instant::now(), limit) {
         Err(_) if STOP.get().is_some() => return Ok(None),
         done => done?,
     };
@@ -671,6 +681,21 @@ fn staged(path: &Path) -> PathBuf {
 /// The string `value` holds, else "".
 fn text(value: &Value) -> &str {
     value.as_str().unwrap_or_default()
+}
+
+/// Recall's tokens: `text`'s lowercase alphanumeric runs, a one-character run or a `STOPWORDS` word
+/// dropped, a final `s` dropped past four characters (a crude plural fold).
+fn toks(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|letter: char| !letter.is_ascii_lowercase() && !letter.is_ascii_digit())
+        .filter(|word| word.len() > 1 && !STOPWORDS.split(' ').any(|stop| stop == *word))
+        .map(|word| {
+            word.strip_suffix('s')
+                .filter(|_| word.len() > 4)
+                .unwrap_or(word)
+                .to_owned()
+        })
+        .collect()
 }
 
 /// When `session`'s live transcript last changed, when it has one.
@@ -933,10 +958,11 @@ fn main() -> ExitCode {
             if seed && pipeline {
                 return ExitCode::SUCCESS;
             }
-            let (budget, millis) = if seed {
+            let (budget, millis, keep) = if seed {
                 (
                     setting("SANDMAN_SEED_BUDGET", 9000),
                     setting("SANDMAN_SEED_MS", 4000),
+                    setting("SANDMAN_SEED_N", 20),
                 )
             } else {
                 (
@@ -944,28 +970,17 @@ fn main() -> ExitCode {
                         .and_then(|chars| chars.parse().ok())
                         .unwrap_or(4000),
                     setting("SANDMAN_RECALL_MS", 10_000),
+                    setting("SANDMAN_RECALL_N", 39),
                 )
             };
-            let limit = Duration::from_millis(millis);
-            let engine =
-                env::var("SANDMAN_RECALL_MODEL").unwrap_or_else(|_| "jev-latest".to_owned());
-            // the cut rule the evaluation chose: a gate under its threshold recalls nothing; else a
-            // candidate under the floor is dropped, and past `max` ranked lines or the budget a
-            // line is cut, and every one after it
-            let (floor, max, threshold) = (
-                setting("SANDMAN_RECALL_FLOOR", 0.35f64),
-                setting("SANDMAN_RECALL_MAX", 6usize),
-                setting("SANDMAN_RECALL_GATE", 0.15f64),
-            );
-            let fits = |scored: usize, used: usize| scored < max && used <= budget;
+            // the bound covers the whole pass: gate, prefilter and every scorer tried
+            let (begun, limit) = (Instant::now(), Duration::from_millis(millis));
             let memories = [notes(&root, "memories"), notes(&root, "traces")].concat();
             // the always-set comes without a vote and never leaves the machine; muted, nothing
-            let (always, mut candidates): (Vec<&Value>, Vec<&Value>) = memories
+            let (always, candidates): (Vec<&Value>, Vec<&Value>) = memories
                 .iter()
                 .filter(|memory| memory["recall"] != "mute")
                 .partition(|memory| memory["type"] == "user" || memory["recall"] == "pin");
-            // a seed without a prompt scores nothing
-            candidates.retain(|_| !cue.trim().is_empty());
             let path = |memory: &Value| text(&memory["path"]).to_owned();
             // what this session's earlier recalls sent is not sent again
             let earlier: Vec<Value> = ledger(&root)
@@ -1004,14 +1019,14 @@ fn main() -> ExitCode {
                 })
                 .collect();
             repos.sort_by_key(|repo| usize::MAX.saturating_sub(repo.0.len()));
-            let homed = key(&home);
+            let (homed, general) = (key(&home), ["home (~)", "grove root (every repository)"]);
             let label = |bank: &str| {
                 let under = |dir: &str| bank.strip_prefix(dir)?.strip_prefix('-');
                 let readable = bank.replace("--", "/.").replace('-', "/");
                 if bank == homed {
-                    "home (~)".to_owned()
+                    general[0].to_owned()
                 } else if bank == key(&grove) {
-                    "grove root (every repository)".to_owned()
+                    general[1].to_owned()
                 } else if let Some(repo) = repos.iter().find(|repo| {
                     bank == repo.0 || (!repo.1.ends_with(owned) && under(&repo.0).is_some())
                 }) {
@@ -1035,7 +1050,7 @@ fn main() -> ExitCode {
             };
             // the repository the work is in: the pull's `--about`, the seed's cwd when it is
             // inside a repository under the grove root
-            let about = flag("--about")
+            let given = flag("--about")
                 .map(PathBuf::from)
                 .or_else(|| {
                     let cwd = PathBuf::from(text(&got("cwd")));
@@ -1044,191 +1059,304 @@ fn main() -> ExitCode {
                         .then_some(cwd)
                 })
                 .map(|dir| label(&key(&project(&dir))));
-            let state = about
+            let state = given
                 .as_ref()
                 .map_or_else(|| cue.clone(), |repo| format!("repository: {repo}\n{cue}"));
-            // the gate first, then one question a candidate; none without a candidate
-            let questions: Vec<(String, Value)> = iter::once((
-                "gate".to_owned(),
-                json!({"instructions": {"question": GATE}, "type": "noul"}),
-            ))
-            .filter(|_| !candidates.is_empty())
-            .chain(candidates.iter().enumerate().map(|(index, memory)| {
-                (
-                    index.to_string(),
-                    json!({
-                        "criteria": {"false": CRITERIA[1], "true": CRITERIA[0]},
-                        "instructions": {
-                            "memory": RECORD(memory), "question": QUESTION,
-                            "repository": label(text(&memory["bank"])),
-                        },
-                        "type": "noul",
-                    }),
-                )
-            }))
-            .collect();
-            // balanced requests of whole questions, each estimated at a token per 3 bytes under
-            // the cap: a request closes past its share of the whole (2 % slack) or the cap
-            let (cap, base) = (
-                setting("SANDMAN_RECALL_TOKENS", 60_000usize).saturating_mul(3),
-                json!({"model": engine, "questions": {}, "state": state})
-                    .to_string()
-                    .len(),
-            );
-            let sizes: Vec<usize> = questions
-                .iter()
-                .map(|question| question.1.to_string().len().saturating_add(10))
+            // else the first repository, longest key first, whose name the cue says
+            let lower = cue.to_lowercase();
+            let spoken: BTreeSet<&str> = lower
+                .split(|letter: char| !letter.is_ascii_alphanumeric() && letter != '.')
                 .collect();
-            let total = sizes
+            let about = given.or_else(|| {
+                repos.iter().find_map(|repo| {
+                    let (_, named) = repo.1.split_once('/')?;
+                    spoken
+                        .contains(named.to_lowercase().as_str())
+                        .then(|| repo.1.clone())
+                })
+            });
+            // the gate, free: a cue of steering words alone asks for nothing and calls no model
+            let ask = toks(&cue)
                 .iter()
-                .fold(0usize, |sum, size| sum.saturating_add(*size));
-            let share = total
-                .saturating_add(base)
-                .div_ceil(cap.saturating_sub(base).max(1))
-                .max(1);
-            let mut batches: Vec<(usize, Map<String, Value>)> = Vec::new();
-            for ((id, question), size) in questions.into_iter().zip(sizes) {
-                match batches.last_mut() {
-                    Some(batch)
-                        if batch
-                            .0
-                            .saturating_add(size)
-                            .saturating_mul(share)
-                            .saturating_mul(100)
-                            <= total.saturating_mul(102)
-                            && batch.0.saturating_add(size).saturating_add(base) <= cap =>
-                    {
-                        batch.0 = batch.0.saturating_add(size);
-                        drop(batch.1.insert(id, question));
-                    }
-                    _ => batches.push((size, Map::from_iter([(id, question)]))),
-                }
-            }
-            let begun = Instant::now();
+                .any(|word| !STEER.split(' ').any(|steer| steer == word));
+            // the prefilter, free: BM25 over each candidate's whole text and the cue with its
+            // about, plus 4 in the about's bank and 1 in home's and the grove root's
+            let query: BTreeSet<String> =
+                toks(&format!("{cue} {}", about.as_deref().unwrap_or_default()))
+                    .into_iter()
+                    .collect();
+            let docs: Vec<(Vec<String>, f64)> = candidates
+                .iter()
+                .filter(|_| ask)
+                .map(|memory| {
+                    let repo = label(text(&memory["bank"]));
+                    let file = text(&memory["file"]);
+                    let words = toks(&format!(
+                        "{} {} {repo} {} {}",
+                        text(&memory["name"]),
+                        text(&memory["description"]),
+                        file.strip_suffix(".md").unwrap_or(file),
+                        text(&memory["body"])
+                    ));
+                    let bonus = if about.as_ref() == Some(&repo) {
+                        4.0f64
+                    } else if general.contains(&repo.as_str()) {
+                        1.0f64
+                    } else {
+                        0.0f64
+                    };
+                    (words, bonus)
+                })
+                .collect();
+            // the top `keep` by BM25 (k1 1.2, b 0.75) plus the bonus, a tie in reader order, each
+            // as its index and its score over the top one
+            #[expect(clippy::float_arithmetic, reason = "BM25 is float math")]
+            let kept: Vec<(usize, f64)> = {
+                let count = |items: usize| f64::from(u32::try_from(items).unwrap_or(u32::MAX));
+                let total = count(docs.len());
+                let mean = count(docs.iter().map(|doc| doc.0.len()).sum()) / total;
+                let idf: Vec<(&String, f64)> = query
+                    .iter()
+                    .map(|word| {
+                        let df = count(docs.iter().filter(|doc| doc.0.contains(word)).count());
+                        (word, ((total - df + 0.5) / (df + 0.5)).ln_1p())
+                    })
+                    .collect();
+                let mut scored: Vec<(usize, f64)> = docs
+                    .iter()
+                    .map(|doc| {
+                        let words = &doc.0;
+                        let length = 1.2f64 * (0.25f64 + 0.75f64 * count(words.len()) / mean);
+                        idf.iter()
+                            .map(|&(word, weight)| {
+                                (
+                                    weight,
+                                    count(words.iter().filter(|token| *token == word).count()),
+                                )
+                            })
+                            .filter(|pair| pair.1 > 0.0f64)
+                            .map(|(weight, tf)| weight * tf * 2.2f64 / (tf + length))
+                            .sum::<f64>()
+                            + doc.1
+                    })
+                    .enumerate()
+                    .collect();
+                scored.sort_by(|left, right| right.1.total_cmp(&left.1));
+                scored.truncate(keep);
+                let top = scored.first().map_or(1.0f64, |best| best.1);
+                scored
+                    .into_iter()
+                    .map(|(index, score)| (index, score / top.max(f64::MIN_POSITIVE)))
+                    .collect()
+            };
             let secret = env::var("TYPESAFE_API_KEY")
                 .or_else(|_| fs::read_to_string(home.join(".config/typesafe/api_key")))
                 .map(|key| key.trim().to_owned())
                 .unwrap_or_default();
-            let transport = || match env::var("SANDMAN_SYSTEMONE") {
-                Ok(command) => Ok((command, "")),
-                Err(_) if secret.is_empty() => Err(
-                    "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
-                ),
-                // the key reaches curl as config on its stdin, the request on fd 3: never argv
-                Err(_) => Ok((
-                    format!(
-                        r#"{{ printf 'header = "Authorization: Bearer %s"\n' "$SANDMAN_SYSTEMONE_KEY" | SANDMAN_SYSTEMONE_KEY= curl -q -K - -sS --fail-with-body --max-time {} -H 'Content-Type: application/json' --data-binary @/dev/fd/3 https://api.typesafe.ai/v1/systemone; }} 3<&0"#,
-                        limit.as_secs_f64()
-                    ),
-                    secret.as_str(),
-                )),
+            let curl = |config: &str, data: &str, url: &str| {
+                format!(
+                    "curl -q {config}-sS --fail-with-body --max-time {} -H 'Content-Type: application/json' --data-binary @{data} {url}",
+                    limit.as_secs_f64()
+                )
             };
-            // every request at once, a thread each under the same bound; the answers merged
-            let shared = (&engine, &state, &transport);
-            let outcome = thread::scope(|scope| -> io::Result<(BTreeMap<String, f64>, u64)> {
-                let asked: Vec<_> = batches
+            // one request a scorer: the kept candidates' questions, keyed by rank; Jev's with
+            // `criteria`, which costs Kev 40 % more time for nothing; `true` past an auth or
+            // credit failure
+            let score = |index: usize| -> (io::Result<(Vec<f64>, u64)>, bool) {
+                let hosted = index == 0;
+                let questions: Map<String, Value> = kept
                     .iter()
-                    .map(|batch| {
-                        scope.spawn(move || -> io::Result<(Vec<(String, f64)>, u64)> {
-                            let (command, key) = shared.2().map_err(io::Error::other)?;
-                            let request =
-                                json!({"model": shared.0, "questions": batch.1, "state": shared.1});
-                            let (input, mut feed) = io::pipe()?;
-                            let mut child = Command::new("sh")
-                                .args(["-c", &command])
-                                .env("SANDMAN_SYSTEMONE_KEY", key)
-                                .process_group(0)
-                                .stdin(input)
-                                .stdout(Stdio::piped())
-                                .stderr(Stdio::piped())
-                                .spawn()?;
-                            // fed and drained beside the wait, so neither pipe can stall it
-                            drop(thread::spawn(move || {
-                                feed.write_all(request.to_string().as_bytes())
-                            }));
-                            let mut pipes = (child.stdout.take(), child.stderr.take());
-                            let out = thread::spawn(move || {
-                                let mut out = String::new();
-                                drop(pipes.0.as_mut().map(|pipe| pipe.read_to_string(&mut out)));
-                                out
-                            });
-                            let status = reap(&mut child, limit)?;
-                            let mut err = String::new();
-                            drop(pipes.1.as_mut().map(|pipe| pipe.read_to_string(&mut err)));
-                            let answer = reply(status, &out.join().unwrap_or_default(), &err)?;
-                            let nouls = batch.1.keys().map(|id| {
-                                answer["answers"][id]["noul"]
-                                    .as_f64()
-                                    .map(|noul| (id.clone(), noul))
-                                    .ok_or_else(|| {
-                                        io::Error::other(format!(
-                                            "reply: no noul for question {id}"
-                                        ))
-                                    })
-                            });
-                            Ok((
-                                nouls.collect::<io::Result<_>>()?,
-                                answer["usage"]["input_tokens"].as_u64().unwrap_or(0),
-                            ))
-                        })
+                    .enumerate()
+                    .map(|(rank, pair)| {
+                        let memory = candidates[pair.0];
+                        let mut question = json!({
+                            "instructions": {
+                                "memory": RECORD(memory), "question": QUESTION,
+                                "repository": label(text(&memory["bank"])),
+                            },
+                            "type": "noul",
+                        });
+                        if hosted {
+                            question["criteria"] =
+                                json!({"false": CRITERIA[1], "true": CRITERIA[0]});
+                        }
+                        (rank.to_string(), question)
                     })
                     .collect();
-                let (mut nouls, mut tokens) = (BTreeMap::new(), 0u64);
-                for request in asked {
-                    let panicked = Err(io::Error::other("a scoring thread panicked"));
-                    let (answers, used) = request.join().unwrap_or(panicked)?;
-                    nouls.extend(answers);
-                    tokens = tokens.saturating_add(used);
-                }
-                Ok((nouls, tokens))
+                let request = json!({
+                    "model": format!("{}-latest", SCORERS[index].0), "questions": questions, "state": state,
+                })
+                .to_string();
+                let command = match env::var(["SANDMAN_SYSTEMONE", "SANDMAN_KEV"][index]) {
+                    Ok(command) => command,
+                    Err(_) if !hosted => curl("", "-", "http://127.0.0.1:1703/v1/systemone"),
+                    Err(_) if secret.is_empty() => {
+                        return (
+                            Err(io::Error::other(
+                                "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
+                            )),
+                            false,
+                        );
+                    }
+                    // the key reaches curl as config on its stdin, the request on fd 3: never argv
+                    Err(_) => format!(
+                        r#"{{ printf 'header = "Authorization: Bearer %s"\n' "$SANDMAN_SYSTEMONE_KEY" | SANDMAN_SYSTEMONE_KEY= {}; }} 3<&0"#,
+                        curl("-K - ", "/dev/fd/3", "https://api.typesafe.ai/v1/systemone")
+                    ),
+                };
+                let mut pipes = (String::new(), String::new());
+                let answer = (|| {
+                    let (input, mut feed) = io::pipe()?;
+                    let mut child = Command::new("sh")
+                        .args(["-c", &command])
+                        .env("SANDMAN_SYSTEMONE_KEY", if hosted { &secret } else { "" })
+                        .process_group(0)
+                        .stdin(input)
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()?;
+                    // fed and drained beside the wait, so neither pipe can stall it
+                    drop(thread::spawn(move || feed.write_all(request.as_bytes())));
+                    let mut out = child.stdout.take();
+                    let read = thread::spawn(move || {
+                        let mut text = String::new();
+                        drop(out.as_mut().map(|pipe| pipe.read_to_string(&mut text)));
+                        text
+                    });
+                    let status = reap(&mut child, begun, limit)?;
+                    drop(
+                        child
+                            .stderr
+                            .as_mut()
+                            .map(|pipe| pipe.read_to_string(&mut pipes.1)),
+                    );
+                    pipes.0 = read.join().unwrap_or_default();
+                    let answer = reply(status, &pipes.0, &pipes.1)?;
+                    let nouls = (0..kept.len()).map(|rank| {
+                        answer["answers"][rank.to_string()]["noul"]
+                            .as_f64()
+                            .ok_or_else(|| {
+                                io::Error::other(format!("reply: no noul for question {rank}"))
+                            })
+                    });
+                    Ok((
+                        nouls.collect::<io::Result<_>>()?,
+                        answer["usage"]["input_tokens"].as_u64().unwrap_or(0),
+                    ))
+                })();
+                let replied = [pipes.0.as_str(), &pipes.1].concat();
+                let held = ["billing_error", "error: 401", "error: 402", "error: 403"]
+                    .iter()
+                    .any(|marker| replied.contains(marker));
+                (answer, held)
+            };
+            // hosted first, local while Jev is down or after it fails, in the same bound; past
+            // both, the lexical rank alone, never an error to the agent
+            let now = || {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |since| {
+                        u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+                    })
+            };
+            let down = root.join("jev-down.json");
+            let marked_down =
+                serde_json::from_str::<Value>(&fs::read_to_string(&down).unwrap_or_default())
+                    .ok()
+                    .and_then(|stamp| stamp["until"].as_u64())
+                    .is_some_and(|until| until > now());
+            let order: &[usize] = match env::var("SANDMAN_SCORER").as_deref() {
+                _ if kept.is_empty() => &[],
+                Ok("jev") => &[0],
+                Ok("kev") => &[1],
+                Ok("none") => &[],
+                _ if marked_down => &[1],
+                _ => &[0, 1],
+            };
+            let mut errors = Vec::new();
+            let (chosen, nouls, tokens) = order
+                .iter()
+                .find_map(|&index| match score(index) {
+                    (Ok((nouls, tokens)), _) => Some((index, nouls, tokens)),
+                    (Err(failure), held) => {
+                        let error = one_line(&failure.to_string(), 400);
+                        let expiry = setting(
+                            ["SANDMAN_JEV_DOWN_MS", "SANDMAN_JEV_HELD_MS"][usize::from(held)],
+                            [60_000, 21_600_000][usize::from(held)],
+                        );
+                        let until = json!({"error": error, "until": now().saturating_add(expiry)});
+                        drop((index == 0).then(|| put(&down, &until.to_string())));
+                        errors.push((SCORERS[index].0, error));
+                        None
+                    }
+                })
+                .unwrap_or((2, Vec::new(), 0));
+            // the cut rule the evaluation chose, per scorer (env overrides): final = w·noul +
+            // (1 − w)·the lexical score, ranked descending, a tie newer `updated`, else
+            // `created`, first; under the floor dropped, past `max` lines or the budget cut
+            let (by, knob) = (SCORERS[chosen], |what: &str| {
+                format!("SANDMAN_{}_{what}", SCORERS[chosen].0.to_uppercase())
             });
-            let failed = outcome
-                .as_ref()
-                .err()
-                .map(|error| one_line(&error.to_string(), 400));
-            let (answers, tokens) = outcome.unwrap_or_default();
-            // two places, as the ledger keeps a noul
-            let round = |noul: &f64| format!("{noul:.2}").parse::<f64>().unwrap_or_default();
-            let gate = answers.get("gate").map(round);
-            let open = gate.is_none_or(|noul| noul >= threshold);
-            let mut line = json!({
-                "considered": candidates.len(), "cue": one_line(&cue, 200), "cut": 0u8, "engine": engine,
-                "gate": gate, "kind": "recall", "ms": begun.elapsed().as_millis(), "sent": [], "session": session,
-                "tokens": tokens,
-            });
-            for (field, value) in [("about", &about), ("error", &failed)] {
-                if let Some(given) = value.as_ref() {
-                    line[field] = given.as_str().into();
-                }
-            }
-            if failed.is_some() && !seed {
-                drop(record(&root, &mut line));
-                eprintln!("sandman recall: {}", text(&line["error"]));
-                return ExitCode::FAILURE;
-            }
-            let mut nouls: Vec<(f64, &Value)> = candidates
+            let (weight, floor, max) = (
+                setting(&knob("W"), by.1),
+                setting(&knob("FLOOR"), by.2),
+                setting(&knob("MAX"), by.3),
+            );
+            #[expect(clippy::float_arithmetic, reason = "the blend is float math")]
+            let mut ranked: Vec<(f64, f64, &Value)> = kept
                 .iter()
                 .enumerate()
-                .map(|(index, memory)| {
+                .map(|(rank, &(index, lexical))| {
+                    let noul = nouls.get(rank).copied().unwrap_or(lexical);
                     (
-                        answers.get(&index.to_string()).copied().unwrap_or_default(),
-                        *memory,
+                        weight.mul_add(noul, (1.0f64 - weight) * lexical),
+                        noul,
+                        candidates[index],
                     )
                 })
                 .collect();
-            nouls.sort_by(|left, right| {
+            ranked.sort_by(|left, right| {
                 right
                     .0
                     .total_cmp(&left.0)
-                    .then_with(|| when(right.1).cmp(&when(left.1)))
+                    .then_with(|| when(right.2).cmp(&when(left.2)))
             });
+            let fits = |listed: usize, used: usize| listed < max && used <= budget;
+            let unscored = errors
+                .iter()
+                .map(|error| error.0)
+                .collect::<Vec<_>>()
+                .join(" and ");
+            let named = (!kept.is_empty()).then_some(by.0);
             let head = |sent: usize| {
                 format!(
-                    "recall \u{b7} {} \u{b7} {sent} of {}\n",
+                    "recall \u{b7} {} \u{b7} {sent} of {}{}\n",
                     one_line(&cue, 60),
-                    candidates.len()
+                    candidates.len(),
+                    named.map_or_else(String::new, |scorer| match (chosen, unscored.as_str()) {
+                        (2, "") => " \u{b7} lexical, unscored".to_owned(),
+                        (2, failed) => format!(" \u{b7} lexical, unscored: {failed} failed"),
+                        _ => format!(" \u{b7} {scorer}"),
+                    })
                 )
             };
+            let failed = (!errors.is_empty()).then(|| {
+                errors
+                    .iter()
+                    .map(|error| format!("{}: {}", error.0, error.1))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            });
+            let mut line = json!({
+                "ask": ask, "considered": candidates.len(), "cue": one_line(&cue, 200), "cut": 0u8,
+                "kind": "recall", "ms": begun.elapsed().as_millis(), "prefilter": kept.len(),
+                "scorer": named, "sent": [], "session": session, "tokens": tokens,
+            });
+            for (field, value) in [("about", &about), ("error", &failed)] {
+                if let Some(set) = value.as_ref() {
+                    line[field] = set.as_str().into();
+                }
+            }
             let foot = &*format!("read one in full: {me} show <path>\n");
             // the seed opens with its instructions and the always-set, counted first
             let opening: String = iter::once(format!(
@@ -1250,18 +1378,16 @@ fn main() -> ExitCode {
                     .filter(|_| seed)
                     .map(|memory| (None, *memory))
                     .chain(
-                        nouls
+                        ranked
                             .iter()
-                            .filter(|pair| {
-                                open && pair.0 >= floor && !before.contains(path(pair.1).as_str())
-                            })
-                            .map(|pair| (Some(format!("{:.2}", pair.0)), pair.1)),
+                            .filter(|row| row.0 >= floor && !before.contains(path(row.2).as_str()))
+                            .map(|row| (Some(format!("{:.2}", row.1)), row.2)),
                     )
                 {
                     let row = format!(
                         "{} {}{} ({} \u{b7} {}) \u{2014} {}\n",
                         noul.as_deref()
-                            .map_or("  \u{b7}", |score| score.trim_start_matches('0')),
+                            .map_or("  \u{b7}", |figure| figure.trim_start_matches('0')),
                         // a trace is provisional until consolidation keeps it
                         if path(memory).starts_with("traces/") {
                             "~"
@@ -1278,9 +1404,9 @@ fn main() -> ExitCode {
                         cut = cut.saturating_add(1);
                         continue;
                     }
-                    if let Some(score) = noul {
+                    if let Some(figure) = noul {
                         digest.push_str(&row);
-                        sent.push(json!({"file": path(memory), "noul": score.parse::<f64>().unwrap_or_default()}));
+                        sent.push(json!({"file": path(memory), "noul": figure.parse::<f64>().unwrap_or_default()}));
                     } else {
                         listed.push_str(&row);
                         carried.push(path(memory));
@@ -1295,33 +1421,27 @@ fn main() -> ExitCode {
             };
             let (listed, digest, sent) = rows();
             eprintln!(
-                "recall: engine={engine} ms={} requests={} input_tokens={tokens} considered={} sent={sent} cut={} gate={} floor={floor} max={max}",
+                "{}recall: scorer={} ask={ask} about={} ms={} tokens={tokens} considered={} prefilter={} sent={sent} cut={}",
+                failed
+                    .as_ref()
+                    .map_or_else(String::new, |error| format!("sandman recall: {error}\n")),
+                line["scorer"],
+                line["about"],
                 line["ms"],
-                batches.len(),
-                candidates.len(),
-                line["cut"],
-                line["gate"]
+                line["considered"],
+                line["prefilter"],
+                line["cut"]
             );
-            // a pull's lines, else `nothing recalled` and why when the gate closed; a seed's prompt:
-            // its lines, or why it was not scored, and nothing without one or with the gate closed
-            let tail = failed.as_ref().map_or_else(
-                || {
-                    if seed && (candidates.is_empty() || !open) {
-                        foot.to_owned()
-                    } else if seed || sent > 0 {
-                        [head(sent).as_str(), &digest, foot].concat()
-                    } else {
-                        let closed = if open { "" } else { ": no specific ask" };
-                        format!("{}nothing recalled{closed}\n", head(0))
-                    }
-                },
-                |error| {
-                    format!(
-                        "recall \u{b7} {} \u{b7} not scored ({error}); pull when the task is clear\n{foot}",
-                        one_line(&cue, 60)
-                    )
-                },
-            );
+            // a pull's lines, else `nothing recalled` and why when the gate closed; a seed's
+            // prompt: its lines, nothing without one or with the gate closed
+            let tail = if seed && kept.is_empty() {
+                foot.to_owned()
+            } else if seed || sent > 0 {
+                [head(sent).as_str(), &digest, foot].concat()
+            } else {
+                let closed = if ask { "" } else { ": no specific ask" };
+                format!("{}nothing recalled{closed}\n", head(0))
+            };
             print!("{opening}{listed}{tail}");
             drop(record(&root, &mut line));
             ExitCode::SUCCESS

@@ -1,6 +1,5 @@
-recall · add a clock to the alpha tests · 4 of 6
+recall · add a clock to the alpha tests · 3 of 6 · jev
 .91 Pass a clock in (feedback · -work-alpha/feedback_clock.md) — Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates — naïve caf
 .84 Alpha deploys need the vpn (project · -work-alpha/project_vpn.md) — the deploy host is private
 .84 Beta ties break by date (feedback · -work-beta/feedback_tie.md) — newer first
-.71 ~Beta retries back off twice (feedback · traces/-work-beta/feedback_retry.md) — a failed beta deploy retries twice, then stops
 read one in full: sandman show <path>
