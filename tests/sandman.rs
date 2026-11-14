@@ -116,6 +116,7 @@ mod tests {
         let _: &mut Command = command
             .args(args)
             // not env_clear: llvm-cov reaches the child through LLVM_PROFILE_FILE
+            .env_remove("CLAUDE_CODE_SESSION_ID")
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("CLAUDE_MEMORY_PIPELINE")
             .env_remove("HOME")
@@ -1268,6 +1269,116 @@ esac
                     .join(" ")
             ),
             &format!("true [] \"{id}\" [] [] [] \"{id}\" [] []"),
+        )
+    }
+
+    /// `mcp` over stdio: a modern `server/discover` refused so Claude Code falls back to
+    /// `initialize`, the client's version echoed when known, else the latest; notifications
+    /// unanswered; `tools/list` the three tools; each call the verb's stdout, a failure its stderr
+    /// line with `isError`; protocol errors for an unknown tool and for a line that is no request;
+    /// EOF exits 0. The session is `$CLAUDE_CODE_SESSION_ID`, a call's `session`, else one minted
+    /// for the process, and a pull repeats nothing the session was sent.
+    #[test]
+    fn mcp() -> Outcome {
+        let root = fs::canonicalize(temp("mcp")?)?
+            .to_str()
+            .ok_or("root")?
+            .to_owned();
+        plant(&root, &CORPUS)?;
+        let work = format!("{root}/work");
+        fs::create_dir_all(&work)?;
+        let call = |id: u8, name: &str, arguments: Value| {
+            json!({"id": id, "jsonrpc": "2.0", "method": "tools/call", "params": {"arguments": arguments, "name": name}}).to_string()
+        };
+        let cue = json!({"budget": 1000u16, "cue": "add a clock to the alpha tests"});
+        let lines = [
+            r#"{"id":"probe","jsonrpc":"2.0","method":"server/discover","params":{}}"#.to_owned(),
+            r#"{"id":0,"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#.to_owned(),
+            r#"{"id":1,"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"1900-01-01"}}"#.to_owned(),
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.to_owned(),
+            r#"{"id":2,"jsonrpc":"2.0","method":"ping"}"#.to_owned(),
+            r#"{"id":3,"jsonrpc":"2.0","method":"tools/list"}"#.to_owned(),
+            call(4, "recall", cue.clone()),
+            call(5, "recall", cue),
+            call(6, "recall", json!({"cue": "x", "session": "nope"})),
+            call(7, "show", json!({"path": "-work-alpha/project_vpn.md"})),
+            call(8, "show", Value::Null),
+            call(9, "remember", json!({"body": "sample: by tool"})),
+            call(10, "remember", json!({})),
+            call(11, "nap", json!({})),
+            "not json".to_owned(),
+            "[]".to_owned(),
+            String::new(),
+        ];
+        let session = format!("{ID}c");
+        let envs = [
+            ("CLAUDE_CODE_SESSION_ID", session.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", &root),
+            ("SANDMAN_SCORERS", ""),
+        ];
+        let out = ran(
+            command(&envs, &["mcp"]).current_dir(&work),
+            &lines.join("\n"),
+        )?;
+        let mut got = out.lines().take(1).map(str::to_owned).collect::<Vec<_>>();
+        for line in out.lines().skip(1) {
+            let mut reply: Value = serde_json::from_str(line)?;
+            if reply["id"] == 3u8 {
+                // the descriptions are prose; the names and their arguments are the contract
+                let tools = reply["result"]["tools"]
+                    .as_array()
+                    .ok_or("tools")?
+                    .iter()
+                    .map(|tool| {
+                        let schema = &tool["inputSchema"];
+                        format!(
+                            "{} {} {}",
+                            tool["name"],
+                            schema["required"],
+                            schema["properties"]
+                                .as_object()
+                                .map(|keys| keys.keys().cloned().collect::<Vec<_>>().join(","))
+                                .unwrap_or_default()
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                reply["result"] = tools.join(" | ").into();
+            }
+            got.push(reply.to_string());
+        }
+        // no session in the env: one minted, the same for every call; a call's own wins
+        let thanks = call(0, "recall", json!({"cue": "thanks"}));
+        let own = call(
+            1,
+            "recall",
+            json!({"cue": "thanks", "session": format!("{ID}d")}),
+        );
+        drop(sandman(
+            &envs[1..],
+            &["mcp"],
+            &[thanks.as_str(), &thanks, &own, ""].join("\n"),
+        )?);
+        let mut minted = BTreeSet::new();
+        for line in ledger(&root)?.lines() {
+            let entry: Value = serde_json::from_str(line)?;
+            let owner = entry["session"].as_str().ok_or("session")?;
+            let shown = owner.strip_prefix(ID).unwrap_or_else(|| {
+                let _: bool = minted.insert(owner.to_owned());
+                "minted"
+            });
+            got.push(format!("{} {shown}", entry["kind"]));
+        }
+        let key = root.replace(|letter: char| !letter.is_ascii_alphanumeric(), "-");
+        same(
+            &format!("{:?}", minted.iter().map(String::len).collect::<Vec<_>>()),
+            "[36]",
+        )?;
+        same(
+            &got.join("\n")
+                .replace(&key, "<key>")
+                .replace(&root, "<root>"),
+            "0\n{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":\"probe\",\"jsonrpc\":\"2.0\"}\n{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":\"\\\"recall\\\" [\\\"cue\\\"] about,budget,cue,session | \\\"remember\\\" [\\\"body\\\"] about,body,session | \\\"show\\\" [\\\"path\\\"] path,session\"}\n{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed failed\\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":5,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 1 of 6 \u{b7} lexical: embed failed\\n.00 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":6,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman: --session takes a session id\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":7,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Alpha deploys need the vpn (project) \u{b7} 2026-11-05T00:00:00Z\\nConnect first.\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":8,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show: no memory  (want [traces/]<bank>/<file>.md under <root>)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":9,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show traces/<key>-work/feedback_sample_by_tool.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":10,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman remember: takes a non-empty \\\"<body>\\\" first and --type user|feedback|project|reference\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32602,\"message\":\"Unknown tool: nap\"},\"id\":11,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n\"recall\" c\n\"recall\" c\n\"show\" c\n\"remember\" c\n\"recall\" minted\n\"recall\" minted\n\"recall\" d",
         )
     }
 

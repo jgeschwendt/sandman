@@ -342,8 +342,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <h2 class="h2">When does it run?</h2><span class="badge badge-ok">settled</span>
   </header>
   <p>Whenever the agent needs it: recall is the agent's tool, pulled throughout a session with its own cue — what it
-    is about to do, the repository it is entering, the decision it is about to make — through the CLI now and an MCP
-    tool later. Nothing in the mod calls a model per prompt.</p>
+    is about to do, the repository it is entering, the decision it is about to make — through the CLI or the same verbs as MCP
+    tools. Nothing in the mod calls a model per prompt.</p>
   <p>The session's start is a seed, the one verb the mod runs there: ① the start mark, first and whatever follows, so
     <code class="code">mark</code> keeps only calls and prompts and the short-term pointer goes; ② short instructions
     saying memory exists and when and how to pull it (<a class="link" href="#tool">as shipped</a>); ③ the always-set;
@@ -438,8 +438,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <header>
     <h2 class="h2">The tools</h2>
     <p class="docs-note">The seed is the mod's, <code class="code">recall</code> and <code class="code">show</code> the
-      agent's, <code class="code">remember</code> its write; the contracts are in AGENTS.md, and an MCP tool of the
-      mod's server carries the agent's three later.</p>
+      agent's, <code class="code">remember</code> its write, each a command and the agent's three also MCP tools; the
+      contracts are in AGENTS.md.</p>
   </header>
   <ul class="stack claims" role="list">
     <li><strong><code class="code">sandman recall &lt; {"session","prompt"?,…}</code></strong>
@@ -463,6 +463,14 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       or true everywhere); defaults feedback, the body's first eight words, its first line. It prints the
       <code class="code">show</code> line to read it back and writes a ledger line; encode never writes it again, and
       consolidation takes it like any other trace.</li>
+    <li><strong><code class="code">sandman mcp</code></strong> <span class="badge badge-ok">built</span> — the three as
+      MCP tools over stdio, <code class="code">recall {cue, about?, budget?}</code>, <code class="code">remember {body,
+      about?}</code>, <code class="code">show {path}</code>, each description the seed's when-to-pull line; a call runs
+      the verb itself, so its text, ledger line and de-duplication are the command's, and a failure is a tool result
+      flagged <code class="code">isError</code> carrying the verb's error line. The session is Claude Code's
+      <code class="code">$CLAUDE_CODE_SESSION_ID</code>, which it gives every stdio server, unless a call passes
+      <code class="code">session</code>. Registered once, by the owner:
+      <code class="code">claude mcp add --scope user sandman-next -- ~/.local/bin/sandman-next mcp</code>.</li>
     <li>Every command printed for the agent names the binary as invoked: <code class="code">sandman-next</code> today.</li>
   </ul>
   <figure class="figure">
@@ -551,6 +559,10 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     decision model, about 6 GiB resident together; Kev on <code class="code">127.0.0.1:1703</code> is the next scorer,
     hosted Jev the last. Without Ollama, recall answers from BM25 alone and says so; without the cache, a pull embeds 8
     and the tick fills the rest.</p>
+  <p class="docs-note"><span class="badge">next</span> Native inference, without Ollama: llama-cpp-2 matches it over 98
+    cues (precision .650 against .648, must-recall .620 against .611) at the same speed; candle has no
+    Qwen3.5 / Gated-DeltaNet model as of 0.11.1. The shape is a supervised <code class="code">sandman-infer</code> child
+    binary behind the same scorer seam, about 3–4 days, after the mod wiring; until then Ollama is the shipped path.</p>
 </section>
 
 <section class="docs-section" id="open">

@@ -1,6 +1,7 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's ledger
 //! file, `take` archives a marked session at its end, `chart` prints what the data root holds as
 //! one JSON object, `recall` scores the memories against an agent's cue and `show` prints one,
+//! `mcp` serves `recall`, `remember` and `show` as MCP tools,
 //! `serve` is the daemon (reconcile, settle, encode, consolidate), `status` asks it for its
 //! health, `setup` prints its launchd plist.
 
@@ -600,9 +601,7 @@ fn machine(root: &Path) -> String {
         let path = root.join("machine");
         let read = || fs::read_to_string(&path).map(|text| text.trim().to_owned());
         read().unwrap_or_else(|_| {
-            let mut bytes = [0u8; 16];
-            drop(File::open("/dev/urandom").and_then(|mut random| random.read_exact(&mut bytes)));
-            let hex = bytes.map(|byte| format!("{byte:02x}")).concat();
+            let hex = random();
             let tmp = staged(&path);
             drop(
                 fs::create_dir_all(root)
@@ -845,6 +844,13 @@ fn put(path: &Path, text: &str) -> io::Result<()> {
     path.parent().map_or(Ok(()), fs::create_dir_all)?;
     fs::write(staged(path), text)?;
     fs::rename(staged(path), path)
+}
+
+/// 32 lowercase hex digits from `/dev/urandom`.
+fn random() -> String {
+    let mut bytes = [0u8; 16];
+    drop(File::open("/dev/urandom").and_then(|mut source| source.read_exact(&mut bytes)));
+    bytes.map(|byte| format!("{byte:02x}")).concat()
 }
 
 /// Appends `line`, stamped with `at` and `machine`, to today's ledger file with `O_APPEND`.
@@ -1316,6 +1322,109 @@ fn main() -> ExitCode {
                     "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
                 })
             ));
+            ExitCode::SUCCESS
+        }
+        "mcp" => {
+            // the calling session: Claude Code's, in every stdio server's env, else this process's
+            let session = env::var("CLAUDE_CODE_SESSION_ID")
+                .ok()
+                .filter(|given| uuid(given))
+                .unwrap_or_else(|| {
+                    random()
+                        .chars()
+                        .enumerate()
+                        .flat_map(|(at, digit)| {
+                            [8, 12, 16, 20]
+                                .contains(&at)
+                                .then_some('-')
+                                .into_iter()
+                                .chain([digit])
+                        })
+                        .collect()
+                });
+            let string = |about: &str| json!({"description": about, "type": "string"});
+            let sessioned = string("this session's id, as the seed gives it; else the server's");
+            let tools = json!([
+                {"description": "Pull memory from earlier sessions before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `show` before acting on it; a `~` marks one remembered but not yet consolidated.",
+                 "inputSchema": {"properties": {"about": string("the repository path, when the work is in one"), "budget": {"description": "characters, 4000 by default", "type": "number"}, "cue": string("what you are about to do"), "session": sessioned}, "required": ["cue"], "type": "object"},
+                 "name": "recall"},
+                {"description": "Write a memory at once when the person states a preference, corrects you, or decides something a later session needs: their words, one fact per call.",
+                 "inputSchema": {"properties": {"about": string("the repository path, when it holds in one repository"), "body": string("the person's words"), "session": sessioned}, "required": ["body"], "type": "object"},
+                 "name": "remember"},
+                {"description": "Read one memory in full, by the path a recall line gives, before acting on it.",
+                 "inputSchema": {"properties": {"path": string("[traces/]<bank>/<file>.md, as recall prints it"), "session": sessioned}, "required": ["path"], "type": "object"},
+                 "name": "show"},
+            ]);
+            let exe = env::current_exe().unwrap_or_default();
+            // a reply per request, none for a notification
+            let respond = |said: String| {
+                let request: Value = serde_json::from_str(&said).unwrap_or_default();
+                let (params, known) = (
+                    &request["params"],
+                    ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"],
+                );
+                let called = text(&params["name"]);
+                let answer = match request["method"].as_str() {
+                    _ if !request.is_object() => Err((-32_700i32, "Parse error".to_owned())),
+                    // a notification: nothing to answer
+                    _ if request.get("id").is_none() => return None,
+                    Some("initialize") => {
+                        let asked = text(&params["protocolVersion"]);
+                        Ok(json!({
+                            "capabilities": {"tools": {}},
+                            "protocolVersion": known.into_iter().find(|version| *version == asked).unwrap_or(known[0]),
+                            "serverInfo": {"name": "sandman", "version": env!("CARGO_PKG_VERSION")},
+                        }))
+                    }
+                    Some("ping") => Ok(json!({})),
+                    Some("tools/list") => Ok(json!({"tools": tools})),
+                    Some("tools/call") => tools
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|tool| tool["name"] == called)
+                        .ok_or_else(|| (-32_602i32, format!("Unknown tool: {called}")))
+                        .map(|tool| {
+                            // the verb's own argv: the required argument positional (recall's
+                            // `--cue`), every other given one a flag, the session always
+                            let schema = &tool["inputSchema"];
+                            let required = text(&schema["required"][0]);
+                            let mut line = vec![called.to_owned()];
+                            let keys = schema["properties"].as_object().into_iter().flat_map(Map::keys);
+                            for key in iter::once(required).chain(keys.map(String::as_str).filter(|key| *key != required)) {
+                                let value = params["arguments"]
+                                    .get(key)
+                                    .map(|given| given.as_str().map_or_else(|| given.to_string(), str::to_owned))
+                                    .or_else(|| (key == required).then(String::new))
+                                    .or_else(|| (key == "session").then(|| session.clone()));
+                                let named = (key != required || called == "recall").then(|| format!("--{key}"));
+                                line.extend(value.into_iter().flat_map(|given| named.clone().into_iter().chain([given])));
+                            }
+                            let out = Command::new(&exe).args(&line).stdin(Stdio::null()).output().ok();
+                            let failed = !out.as_ref().is_some_and(|ran| ran.status.success());
+                            let shown = out.map(|ran| if failed { ran.stderr } else { ran.stdout });
+                            json!({
+                                "content": [{"text": String::from_utf8_lossy(&shown.unwrap_or_default()), "type": "text"}],
+                                "isError": failed,
+                            })
+                        }),
+                    _ => Err((-32_601i32, "Method not found".to_owned())),
+                };
+                let mut reply = answer.map_or_else(
+                    |(code, message)| json!({"error": {"code": code, "message": message}}),
+                    |result| json!({"result": result}),
+                );
+                (reply["id"], reply["jsonrpc"]) = (request["id"].clone(), "2.0".into());
+                Some(reply)
+            };
+            for reply in io::stdin()
+                .lock()
+                .lines()
+                .map_while(Result::ok)
+                .filter_map(respond)
+            {
+                drop(writeln!(io::stdout().lock(), "{reply}"));
+            }
             ExitCode::SUCCESS
         }
         "recall" => {
@@ -2783,7 +2892,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show [traces/]<bank>/<file>.md [--session <uuid>]\n       sandman chart | serve | setup | status"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show [traces/]<bank>/<file>.md [--session <uuid>]\n       sandman chart | mcp | serve | setup | status"
             );
             ExitCode::from(2)
         }
