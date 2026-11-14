@@ -204,7 +204,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       <tr><td>lexical only <span class="badge badge-ok">built, the last fallback</span></td><td>4.34</td><td>.584</td><td>.510</td><td>1.0</td><td>2 ms</td></tr>
       <tr><td>lexical ⊕ embeddings, no decision model <span class="badge badge-ok">built, the fallback</span></td><td>4.45</td><td>.622</td><td>.582</td><td>1.0</td><td>~30 ms</td></tr>
       <tr><td>lexical ⊕ embeddings → pplx-decider-flash on the top 10, fused, cap 5</td><td>4.32</td><td>.648</td><td>.611</td><td>1.0</td><td>p50 772 ms, p90 832 ms</td></tr>
-      <tr class="is-proposed"><td>the same at cap 6 <span class="badge badge-ok">built</span></td><td>4.86</td><td>.630</td><td>.630</td><td>1.0</td><td>the same</td></tr>
+      <tr class="is-proposed"><td>the same at cap 6 <span class="badge badge-ok">built</span></td><td>4.93</td><td>.629</td><td>.630</td><td>1.0</td><td>the same</td></tr>
+      <tr><td>the same, one question a request (cap 5)</td><td>4.31</td><td>.633</td><td>.596</td><td>1.0</td><td>p50 1,546 ms</td></tr>
+      <tr><td>the same, two requests of five (cap 5)</td><td>4.33</td><td>.637</td><td>.601</td><td>1.0</td><td>p50 919 ms</td></tr>
       <tr><td>hosted Jev over every memory</td><td>3.99</td><td>.619</td><td>.577</td><td>.923</td><td>121.5k tokens</td></tr>
     </tbody>
   </table>
@@ -215,6 +217,10 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p>Kev-4B as a second stage ranked worse than the free first stage alone, and rerankers and larger embedding
     models did not beat the two-model pipeline. Hosted Jev over every memory is no better than it at 121.5k tokens a
     pull.</p>
+  <p>The ten candidates go in one request. The decision model's card calls one question a request the safer
+    default; here it scored lower on every measure and took 1.8 times as long, since the local server answers one
+    request at a time. The request shape moves a candidate's score by .13 on average, and a rerun of either shape
+    is identical, so the gap is the shape's and not noise (measured 2026-11-13 · the evaluation's shape table).</p>
 </section>
 
 <section class="docs-section" id="quality">
