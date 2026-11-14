@@ -7,6 +7,9 @@
     {"cwd": "/work/beta", "encoded": null, "end": null, "interactive": true, "machine": "studio", "outcome": null, "seen": "2026-11-10T08:30:00Z", "session": "5a000000-0000-4000-8000-00000000000d", "start": "2026-11-10T07:45:00Z"}
   ],
   "at": "2026-11-10T12:00:00Z",
+  "knowledge": [
+    {"created": "2026-11-09T09:45:00Z", "file": "playbook_swap_a_daemon.md", "name": "Swap a launchd daemon", "session": "5a000000-0000-4000-8000-00000000000a", "source": "consolidate", "topic": "launchd", "type": "playbook"}
+  ],
   "machine": "studio",
   "memories": [
     {"bank": "-work-alpha", "created": "2026-11-09T22:00:00Z", "file": "feedback_parser_spans.md", "name": "Parser errors carry spans", "session": "5a000000-0000-4000-8000-00000000000a", "source": "dream", "type": "feedback"},

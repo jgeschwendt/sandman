@@ -1,7 +1,8 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end to the day's ledger
 //! file, `take` archives a marked session at its end, `chart` prints what the data root holds as
 //! one JSON object, `recall` scores the memories against an agent's cue and `show` prints one,
-//! `mcp` serves `recall`, `remember` and `show` as MCP tools,
+//! `mcp` serves `recall`, `remember` and `show` as MCP tools, over the memories, the knowledge
+//! pages and the traces of both,
 //! `serve` is the daemon (reconcile, settle, encode, consolidate, reflect), `status` asks it for its
 //! health, `setup` prints its launchd plist.
 
@@ -69,8 +70,12 @@ const EMBED: [&str; 2] = [
 /// The cross-repository banks' labels, which earn a candidate 1.
 const GENERAL: [&str; 2] = ["home (~)", "grove root (every repository)"];
 
-/// The four memory types, a trace's and a memory's `type`.
+/// The four memory types, a trace's and a memory's `type`, filed by repository.
 const KINDS: [&str; 4] = ["feedback", "project", "reference", "user"];
+
+/// The two knowledge types, filed by topic: a `knowledge` page (semantic memory, true beyond any
+/// one episode) and a `playbook` (procedural memory, how a recurring task is done).
+const KNOWN: [&str; 2] = ["knowledge", "playbook"];
 
 /// Each model job's default guidance and its fixed contract, sent before its data; `guide` reads
 /// `<root>/prompts/<job>.md` in place of the guidance.
@@ -323,8 +328,7 @@ fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<Strin
     let cwd = place(&turns, &closing["cwd"]);
     // what the session already remembered is done; a highlight it covers (the same body,
     // whitespace collapsed) is dropped
-    let remembered: Vec<Value> = [notes(root, "memories"), notes(root, "traces")]
-        .concat()
+    let remembered: Vec<Value> = every(root)
         .into_iter()
         .filter(|note| note["session"] == session && text(&note["source"]).starts_with("remember"))
         .collect();
@@ -365,6 +369,17 @@ fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<Strin
             .collect::<String>()
     );
     (cut(digest, budget), cwd.map(str::to_owned))
+}
+
+/// Every note recall and `show` read, in reader order: the memories, the knowledge pages, the
+/// traces.
+fn every(root: &Path) -> Vec<Value> {
+    [
+        notes(root, "memories"),
+        notes(root, "knowledge"),
+        notes(root, "traces"),
+    ]
+    .concat()
 }
 
 /// What is embedded of a candidate: its head and the first 1,500 characters of its body.
@@ -696,6 +711,8 @@ fn labels(home: &Path, claude: &Path) -> (PathBuf, Vec<(String, String)>, impl F
             GENERAL[0].to_owned()
         } else if bank == rooted {
             GENERAL[1].to_owned()
+        } else if let Some(topic) = bank.strip_prefix('@') {
+            format!("knowledge \u{b7} {topic}")
         } else if let Some(repo) = known
             .iter()
             .find(|repo| bank == repo.0 || (!repo.1.ends_with(owned) && under(&repo.0).is_some()))
@@ -777,10 +794,10 @@ fn note(fields: &[(&str, &str)], body: &str) -> String {
 }
 
 /// Every `<root>/<dir>/<bank>/<file>.md` but `MEMORY.md`, banks and files starting `.` or `_`
-/// skipped: its frontmatter as an object, with `bank`, `file`, `text` (the whole file), `body`
-/// (frontmatter stripped, trimmed), `path` (what `show` takes: `<bank>/<file>` for a memory,
-/// `<dir>/<bank>/<file>` else) and `name` when the frontmatter has none (the stem). By bank, then
-/// file.
+/// skipped: its frontmatter as an object, with `bank` (`@<topic>` for a knowledge page, its traces'
+/// bank), `file`, `text` (the whole file), `body` (frontmatter stripped, trimmed), `path` (what
+/// `show` takes: `<bank>/<file>` for a memory, `<dir>/<bank>/<file>` else) and `name` when the
+/// frontmatter has none (the stem). By bank, then file.
 fn notes(root: &Path, dir: &str) -> Vec<Value> {
     tree(&root.join(dir), 2)
         .iter()
@@ -798,7 +815,9 @@ fn notes(root: &Path, dir: &str) -> Vec<Value> {
                 );
                 let address = format!("{dir}/{bank}/{file}");
                 (note["bank"], note["file"], note["path"]) = (
-                    bank.into(),
+                    [if dir == "knowledge" { "@" } else { "" }, bank]
+                        .concat()
+                        .into(),
                     file.into(),
                     address.strip_prefix("memories/").unwrap_or(&address).into(),
                 );
@@ -861,14 +880,16 @@ fn place<'line>(lines: &'line [Value], fallback: &'line Value) -> Option<&'line 
         .find(|dir| !dir.is_empty() && !dir.contains(char::is_control))
 }
 
-/// Every note recall reads, memories then traces, muted ones dropped: the always-set (`user` or
-/// pinned), then the candidates, each in reader order.
+/// Every note recall reads, muted ones dropped: the always-set (a memory's or a memory trace's
+/// `user` or pinned, never knowledge), then the candidates, each in reader order.
 fn pool(root: &Path) -> (Vec<Value>, Vec<Value>) {
-    [notes(root, "memories"), notes(root, "traces")]
-        .concat()
+    every(root)
         .into_iter()
         .filter(|note| note["recall"] != "mute")
-        .partition(|note| note["type"] == "user" || note["recall"] == "pin")
+        .partition(|note| {
+            (note["type"] == "user" || note["recall"] == "pin")
+                && !text(&note["bank"]).starts_with('@')
+        })
 }
 
 /// `request` posted to `url` by curl through `sh -c` in its own process group, fed and drained
@@ -1177,6 +1198,19 @@ fn setting<T: FromStr>(key: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
+/// A bank's directory and its memories: a topic's (`@<topic>`) knowledge pages under
+/// `knowledge/<topic>/`, else `memories/<bank>/`.
+fn shelf(root: &Path, bank: &str) -> (PathBuf, Vec<Value>) {
+    let (tier, at) = bank
+        .strip_prefix('@')
+        .map_or(("memories", bank), |topic| ("knowledge", topic));
+    let held = notes(root, tier)
+        .into_iter()
+        .filter(|note| note["bank"] == bank)
+        .collect();
+    (root.join(tier).join(at), held)
+}
+
 /// A free `<dir>/<type>_<slug>.md` for a note named `name`, claimed: the bank format's slug
 /// (lowercase, non-alphanumeric runs `_`, trimmed, 60 characters), `_2`, `_3`… on a clash.
 fn slot(dir: &Path, kind: &str, name: &str, claimed: &mut BTreeSet<PathBuf>) -> PathBuf {
@@ -1286,6 +1320,21 @@ fn toks(text: &str) -> Vec<String> {
                 .to_owned()
         })
         .collect()
+}
+
+/// Where a note of `kind` files, `topic` given or not: a knowledge type's slug topic (lowercase
+/// letters, digits and `-`, a letter or digit first), `""` for a memory type (its topic ignored);
+/// none for another type, or a knowledge type without a slug.
+fn topic<'slug>(kind: &str, topic: Option<&'slug str>) -> Option<&'slug str> {
+    let slug = |letter: u8| letter.is_ascii_lowercase() || letter.is_ascii_digit();
+    if KNOWN.contains(&kind) {
+        topic.filter(|given| {
+            given.bytes().next().is_some_and(slug)
+                && given.bytes().all(|letter| slug(letter) || letter == b'-')
+        })
+    } else {
+        KINDS.contains(&kind).then_some("")
+    }
 }
 
 /// `values` summed as Python 3.12's `sum` does, with Neumaier's compensation, so a norm and a
@@ -1473,7 +1522,9 @@ fn main() -> ExitCode {
             }
         }
         "chart" => {
-            let memories: Vec<Value> = notes(&root, "memories")
+            // a memory or a knowledge page, the page's topic in place of a bank
+            let shelved = |dir: &str| -> Vec<Value> {
+                notes(&root, dir)
                 .iter()
                 .map(|note| {
                     let source = text(&note["source"]);
@@ -1482,13 +1533,21 @@ fn main() -> ExitCode {
                         .next()
                         .filter(|word| ["consolidate", "dream", "reflect", "remember"].contains(word))
                         .unwrap_or("other");
-                    json!({
-                        "bank": note["bank"], "created": note["created"], "file": note["file"], "name": note["name"],
+                    let mut row = json!({
+                        "created": note["created"], "file": note["file"], "name": note["name"],
                         "session": source.split_whitespace().find(|word| ["consolidate", "dream"].contains(&kind) && uuid(word)),
                         "source": kind, "type": text(&note["type"]),
-                    })
+                    });
+                    let bank = text(&note["bank"]);
+                    match bank.strip_prefix('@') {
+                        Some(topic) => row["topic"] = topic.into(),
+                        None => row["bank"] = bank.into(),
+                    }
+                    row
                 })
-                .collect();
+                .collect()
+            };
+            let memories = shelved("memories");
             let traces: Vec<Value> = notes(&root, "traces")
                 .iter()
                 .map(|note| {
@@ -1564,8 +1623,8 @@ fn main() -> ExitCode {
                 io::stdout().lock(),
                 "{}",
                 json!({
-                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "machine": machine(&root),
-                    "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
+                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "knowledge": shelved("knowledge"),
+                    "machine": machine(&root), "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
                 })
             ));
             ExitCode::SUCCESS
@@ -1594,11 +1653,11 @@ fn main() -> ExitCode {
                 {"description": "Pull memory from earlier sessions before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `show` before acting on it; a `~` marks one remembered but not yet consolidated.",
                  "inputSchema": {"properties": {"about": string("the repository path, when the work is in one"), "budget": {"description": "characters, 4000 by default", "type": "number"}, "cue": string("what you are about to do"), "session": sessioned}, "required": ["cue"], "type": "object"},
                  "name": "recall"},
-                {"description": "Write a memory at once when the person states a preference, corrects you, or decides something a later session needs: their words, one fact per call.",
-                 "inputSchema": {"properties": {"about": string("the repository path, when it holds in one repository"), "body": string("the person's words"), "session": sessioned}, "required": ["body"], "type": "object"},
+                {"description": "Write a memory at once when the person states a preference, corrects you, or decides something a later session needs: their words, one fact per call. Knowledge true beyond this project is type `knowledge`, the steps of a task done more than once type `playbook`, each with a topic.",
+                 "inputSchema": {"properties": {"about": string("the repository path, when it holds in one repository"), "body": string("the person's words"), "session": sessioned, "topic": string("a knowledge or playbook's topic, a slug: launchd, llama-cpp"), "type": string("user, feedback, project or reference (by repository), knowledge or playbook (by topic); feedback by default, knowledge with a topic")}, "required": ["body"], "type": "object"},
                  "name": "remember"},
                 {"description": "Read one memory in full, by the path a recall line gives, before acting on it.",
-                 "inputSchema": {"properties": {"path": string("[traces/]<bank>/<file>.md, as recall prints it"), "session": sessioned}, "required": ["path"], "type": "object"},
+                 "inputSchema": {"properties": {"path": string("the path a recall line gives"), "session": sessioned}, "required": ["path"], "type": "object"},
                  "name": "show"},
             ]);
             let exe = env::current_exe().unwrap_or_default();
@@ -2226,13 +2285,16 @@ fn main() -> ExitCode {
         }
         "remember" => {
             let body = args.get(2).map_or("", |said| said.trim());
-            let kind = flag("--type").unwrap_or_else(|| "feedback".to_owned());
-            if body.is_empty() || !KINDS.contains(&kind.as_str()) {
+            let asked = flag("--topic");
+            let kind = flag("--type").unwrap_or_else(|| {
+                ["feedback", "knowledge"][usize::from(asked.is_some())].to_owned()
+            });
+            let Some(shelved) = topic(&kind, asked.as_deref()).filter(|_| !body.is_empty()) else {
                 eprintln!(
-                    "sandman remember: takes a non-empty \"<body>\" first and --type user|feedback|project|reference"
+                    "sandman remember: takes a non-empty \"<body>\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>"
                 );
                 return ExitCode::from(2);
-            }
+            };
             // homed as encode homes a trace: the directory --about names, else the cwd, else home
             let about = flag("--about").map(|given| {
                 fs::canonicalize(&given)
@@ -2240,14 +2302,19 @@ fn main() -> ExitCode {
                     .filter(|dir| dir.is_dir())
                     .map_or(given, |dir| dir.to_string_lossy().into_owned())
             });
-            let bank = key(&project(
-                &about
-                    .as_ref()
-                    .map(PathBuf::from)
-                    .filter(|dir| dir.is_dir())
-                    .or_else(|| env::current_dir().ok())
-                    .unwrap_or_else(|| home.clone()),
-            ));
+            // a knowledge type by its topic
+            let bank = if shelved.is_empty() {
+                key(&project(
+                    &about
+                        .as_ref()
+                        .map(PathBuf::from)
+                        .filter(|dir| dir.is_dir())
+                        .or_else(|| env::current_dir().ok())
+                        .unwrap_or_else(|| home.clone()),
+                ))
+            } else {
+                format!("@{shelved}")
+            };
             let title = flag("--name").unwrap_or_else(|| {
                 body.split_whitespace()
                     .take(8)
@@ -2273,6 +2340,7 @@ fn main() -> ExitCode {
                         "about",
                         &one_line(about.as_deref().unwrap_or_default(), 400),
                     ),
+                    ("topic", shelved),
                     ("session", session.unwrap_or_default()),
                     (
                         "source",
@@ -2657,7 +2725,7 @@ fn main() -> ExitCode {
                             let traces = reply["traces"].as_array();
                             if let Some(bad) = traces.map_or(Some(&reply), |list| {
                                 list.iter().find(|trace| {
-                                    !KINDS.contains(&text(&trace["type"]))
+                                    topic(text(&trace["type"]), trace["topic"].as_str()).is_none()
                                         || ["body", "description", "name"]
                                             .iter()
                                             .any(|field| !trace[field].is_string())
@@ -2676,13 +2744,20 @@ fn main() -> ExitCode {
                                     text(&trace["name"]),
                                     text(&trace["about"]),
                                 );
-                                // the bank of the repository the trace is about, else the cwd's
-                                let bank = key(&project(
-                                    &Some(PathBuf::from(about))
-                                        .filter(|dir| dir.is_absolute() && dir.is_dir())
-                                        .or_else(|| cwd.as_ref().map(PathBuf::from))
-                                        .unwrap_or_else(|| home.clone()),
-                                ));
+                                let shelved =
+                                    topic(kind, trace["topic"].as_str()).unwrap_or_default();
+                                // a knowledge type's topic, else the bank of the repository the
+                                // trace is about, else the cwd's
+                                let bank = if shelved.is_empty() {
+                                    key(&project(
+                                        &Some(PathBuf::from(about))
+                                            .filter(|dir| dir.is_absolute() && dir.is_dir())
+                                            .or_else(|| cwd.as_ref().map(PathBuf::from))
+                                            .unwrap_or_else(|| home.clone()),
+                                    ))
+                                } else {
+                                    format!("@{shelved}")
+                                };
                                 let file = slot(
                                     &data.join("traces").join(bank),
                                     kind,
@@ -2699,6 +2774,7 @@ fn main() -> ExitCode {
                                         ("type", kind),
                                         ("created", now.as_str()),
                                         ("about", one_line(about, 400).as_str()),
+                                        ("topic", shelved),
                                         ("session", session),
                                         ("archived", archived.to_str().unwrap_or_default()),
                                         (
@@ -2724,10 +2800,8 @@ fn main() -> ExitCode {
                             encode(),
                         )
                     } else if let Some((bank, inbound)) = ripe {
-                        let memories: Vec<Value> = notes(&data, "memories")
-                            .into_iter()
-                            .filter(|memory| memory["bank"] == bank)
-                            .collect();
+                        // a topic's traces fold into its knowledge pages, a bank's into its memories
+                        let (dir, memories) = shelf(&data, bank);
                         let consolidate = || -> io::Result<Value> {
                             let (input, full) = stack(bank, &inbound, &memories, allowance);
                             let reply = run(
@@ -2758,7 +2832,9 @@ fn main() -> ExitCode {
                                     };
                                     !(match text(&op["op"]) {
                                         "keep" => {
-                                            KINDS.contains(&text(&op["type"]))
+                                            [KINDS.as_slice(), &KNOWN]
+                                                [usize::from(bank.starts_with('@'))]
+                                            .contains(&text(&op["type"]))
                                                 && has(&["body", "description", "name"])
                                                 && trace.is_some()
                                                 && memory.is_none()
@@ -2795,8 +2871,7 @@ fn main() -> ExitCode {
                                 )));
                             }
                             // stage every write, then move aside what goes, then rename the writes in
-                            let (now, dir) =
-                                (utc(SystemTime::now()), data.join("memories").join(bank));
+                            let now = utc(SystemTime::now());
                             let mut claimed = BTreeSet::new();
                             let (mut aside, mut writes) = (
                                 Vec::new(),
@@ -2815,12 +2890,15 @@ fn main() -> ExitCode {
                                 let memory = op["memory"]
                                     .as_str()
                                     .and_then(|file| held_memories.get(file));
-                                for (tier, file) in [("traces", trace), ("memories", memory)]
-                                    .into_iter()
-                                    .filter_map(|(tier, found)| Some((tier, text(&found?["file"]))))
+                                for (tier, file) in [
+                                    (data.join("traces").join(bank), trace),
+                                    (dir.clone(), memory),
+                                ]
+                                .into_iter()
+                                .filter_map(|(tier, found)| Some((tier, text(&found?["file"]))))
                                 {
                                     aside.push((
-                                        data.join(tier).join(bank).join(file),
+                                        tier.join(file),
                                         dated(
                                             &data,
                                             ".pruned",
@@ -2852,6 +2930,7 @@ fn main() -> ExitCode {
                                                     ("type", kind),
                                                     ("created", at("created")),
                                                     ("about", at("about")),
+                                                    ("topic", at("topic")),
                                                     ("session", at("session")),
                                                     ("archived", at("archived")),
                                                     ("source", stamp.as_str()),
@@ -3163,22 +3242,20 @@ fn main() -> ExitCode {
                                                     let (consumed, mut stood) =
                                                         (aside("trace"), aside("memory"));
                                                     let bank = bank_of(path);
-                                                    let others: Vec<Value> =
-                                                        notes(&data, "memories")
-                                                            .into_iter()
-                                                            .filter(|memory| {
-                                                                memory["bank"] == bank.as_str()
-                                                            && !stood.iter().any(|earlier| {
+                                                    let others: Vec<Value> = shelf(&data, &bank)
+                                                        .1
+                                                        .into_iter()
+                                                        .filter(|memory| {
+                                                            !stood.iter().any(|earlier| {
                                                                 earlier["file"] == memory["file"]
-                                                            })
-                                                            && !consumed.iter().any(|trace| {
+                                                            }) && !consumed.iter().any(|trace| {
                                                                 trace["created"]
                                                                     == memory["created"]
                                                                     && trace["session"]
                                                                         == memory["session"]
                                                             })
-                                                            })
-                                                            .collect();
+                                                        })
+                                                        .collect();
                                                     stood.extend(others);
                                                     stack(
                                                         &bank,
@@ -3362,13 +3439,12 @@ fn main() -> ExitCode {
         }
         "show" => {
             let wanted = args.get(2).cloned().unwrap_or_default();
-            let Some(memory) = [notes(&root, "memories"), notes(&root, "traces")]
-                .concat()
+            let Some(memory) = every(&root)
                 .into_iter()
                 .find(|note| note["path"] == wanted.as_str())
             else {
                 eprintln!(
-                    "sandman show: no memory {wanted} (want [traces/]<bank>/<file>.md under {})",
+                    "sandman show: no memory {wanted} (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under {})",
                     root.display()
                 );
                 return ExitCode::FAILURE;
@@ -3418,7 +3494,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show [traces/]<bank>/<file>.md [--session <uuid>]\n       sandman chart | mcp | serve | setup | status"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman chart | mcp | serve | setup | status"
             );
             ExitCode::from(2)
         }

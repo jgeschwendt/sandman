@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en" class="ui">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sandman — knowledge</title>
+<link rel="stylesheet" href="https://gigantic.dev/ui/ui.css" />
+<link rel="stylesheet" href="https://gigantic.dev/ui/docs.css" />
+<link rel="stylesheet" href="charts/chart.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23476349'/%3E%3Cpath d='M11.5 9.5A5 5 0 0 1 6.5 4.5 5 5 0 1 0 11.5 9.5Z' fill='white'/%3E%3C/svg%3E" />
+<style>
+/* the split: a static svg, tokens only */
+#split svg { display: block; font-size: 12px; max-width: none; }
+#split .split-box { fill: var(--ui-surface-raised); stroke: var(--ui-border-strong); }
+#split .split-box.is-accent { fill: var(--ui-accent); stroke: var(--ui-accent); }
+#split .split-name { fill: var(--ui-fg); font-family: var(--ui-font-mono); font-size: 13px; }
+#split .split-note { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); }
+#split .is-accent ~ text { fill: var(--ui-accent-fg); }
+#split .split-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
+#split .split-path.is-back { stroke-dasharray: 4 3; }
+#split .split-time { fill: var(--ui-fg-muted); font-family: var(--ui-font-mono); }
+#split marker path { fill: var(--ui-fg-muted); }
+.badge { font-size: 12px; }
+</style>
+</head>
+<body data-page="sandman">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<!-- Phosphor Icons (regular), MIT (c) 2023 Phosphor Icons — via jgeschwendt/ui icons/ -->
+<symbol id="ph-circle-half" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm8,16.37a86.4,86.4,0,0,1,16,3V212.67a86.4,86.4,0,0,1-16,3Zm32,9.26a87.81,87.81,0,0,1,16,10.54V195.83a87.81,87.81,0,0,1-16,10.54ZM40,128a88.11,88.11,0,0,1,80-87.63V215.63A88.11,88.11,0,0,1,40,128Zm160,50.54V77.46a87.82,87.82,0,0,1,0,101.08Z"/></symbol>
+<symbol id="ph-moon" viewBox="0 0 256 256" fill="currentColor"><path d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11a89,89,0,0,1,31.4-26A106,106,0,0,0,96,56,104.11,104.11,0,0,0,200,160a106,106,0,0,0,14.92-1.06A89,89,0,0,1,188.9,190.34Z"/></symbol>
+<symbol id="ph-sun" viewBox="0 0 256 256" fill="currentColor"><path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"/></symbol>
+</svg>
+<header class="appbar">
+  <h1 class="appbar-title">
+    <svg class="icon" aria-hidden="true"><use href="#ph-moon" /></svg>
+    sandman <small>· knowledge</small>
+  </h1>
+  <span class="spacer"></span>
+  <div class="segmented" role="group" aria-label="theme">
+    <button type="button" data-theme-set="light" aria-pressed="false" title="light">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-sun" /></svg>light
+    </button>
+    <button type="button" data-theme-set="auto" aria-pressed="true" title="follow the system">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-circle-half" /></svg>auto
+    </button>
+    <button type="button" data-theme-set="dark" aria-pressed="false" title="dark">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="#ph-moon" /></svg>dark
+    </button>
+</div>
+</header>
+
+<main class="docs-shell" data-container>
+
+<header class="stack">
+  <p class="eyebrow">memory for agentic sessions · <a class="link" href="index.html">the main page</a> · <a class="link" href="recall.html">recall</a></p>
+  <p class="lead docs-lead">The knowledge store holds what is true beyond one project, and how a recurring task is
+    done, filed by topic rather than by repository. The same unattended pipeline feeds it: encode homes a trace by its
+    type, consolidate folds a topic's traces into its pages, recall ranks the pages beside the memories.</p>
+  <p class="notice notice-warn"><span>Built: the store, encode's and consolidate's split, <code class="code">remember --topic</code>,
+    recall, <code class="code">show</code> and <code class="code">chart</code> over it. Not built: rehoming the existing
+    memories, promoting a playbook to a skill (<a class="link" href="#next">next</a>).</span></p>
+  <nav class="row docs-toc" aria-label="sections">
+    <a class="pill" href="#problem">problem</a>
+    <a class="pill" href="#systems">systems</a>
+    <a class="pill" href="#store">store</a>
+    <a class="pill" href="#write">write</a>
+    <a class="pill" href="#playbook">playbook</a>
+    <a class="pill" href="#recall">recall</a>
+    <a class="pill" href="#next">next</a>
+    <a class="pill" href="#open">open</a>
+  </nav>
+</header>
+
+<section class="docs-section" id="problem">
+  <header>
+    <h2 class="h2">The problem</h2>
+  </header>
+  <p>Every memory is filed under the repository a session worked in. That suits a preference or a project's decision;
+    it misfiles what the work discovered about a tool (how launchd stops a job, what a llama.cpp flag really does) and
+    the steps of a task done again and again. Such a fact lands in whichever bank the session happened to touch, one
+    short note per fact, and a session in another repository never earns it the bank's bonus. The owner, 2026-11-14:
+    "memories are good for my preferences and project recall, but i'm finding we should have a place for general
+    knowledge and playbook type structures".</p>
+</section>
+
+<section class="docs-section" id="systems">
+  <header>
+    <h2 class="h2">Three long-term systems</h2>
+    <p class="docs-note">Memory science names three; sandman stored one. On disk and in the CLI the words are the
+      owner's: <code class="code">knowledge</code> and <code class="code">playbook</code>.</p>
+  </header>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>system</th><th>holds</th><th>sandman</th><th>filed by</th></tr></thead>
+    <tbody>
+      <tr><td>episodic</td><td>what happened: a preference stated, a correction, a project's decision</td><td>memory types <code class="code">user</code>, <code class="code">feedback</code>, <code class="code">project</code>, <code class="code">reference</code></td><td>repository: <code class="code">memories/&lt;bank&gt;/</code></td></tr>
+      <tr><td>semantic</td><td>general knowledge, true independent of the episode it was learned in</td><td><code class="code">knowledge</code></td><td>topic: <code class="code">knowledge/&lt;topic&gt;/</code></td></tr>
+      <tr><td>procedural</td><td>how a recurring task is done</td><td><code class="code">playbook</code></td><td>topic: <code class="code">knowledge/&lt;topic&gt;/</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>A reviewed memory about one repository's decision stays a memory even when the tool is general: "grove sets
+    <code class="code">ExitTimeOut</code> 2" is grove's <code class="code">project</code> memory; "launchd kills a job past
+    its <code class="code">ExitTimeOut</code>" is <code class="code">knowledge</code> under <code class="code">launchd</code>.</p>
+</section>
+
+<section class="docs-section" id="store">
+  <header>
+    <h2 class="h2">The store</h2>
+    <p class="docs-note"><code class="code">&lt;topic&gt;</code> is a slug: lowercase letters, digits and
+      <code class="code">-</code>, a letter or digit first (<code class="code">launchd</code>, <code class="code">llama-cpp</code>,
+      <code class="code">grove-release</code>).</p>
+  </header>
+  <pre class="snippet">&lt;root&gt;/
+  knowledge/launchd/knowledge_launchd_exittimeout.md     a page
+  knowledge/launchd/playbook_swap_a_launchd_daemon.md    a playbook
+  traces/@launchd/playbook_drain_a_daemon.md             a trace awaiting consolidate
+  traces/-work-grove/project_exit_timeout_2.md           a memory trace, by repository
+  .pruned/2026/11/14/093000-@launchd-ops.json            consolidate's reply, as for a bank</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>pages</strong> — the memory file format: flat frontmatter, <code class="code">type</code>
+      <code class="code">knowledge</code> or <code class="code">playbook</code>, <code class="code">topic</code>,
+      <code class="code">created</code>, <code class="code">updated</code> once merged, <code class="code">source</code> the
+      consolidate stamp; the session and archive of the trace that started it.</li>
+    <li><strong>traces</strong> — a topic's wait in <code class="code">traces/@&lt;topic&gt;/</code>. A bank key is letters,
+      digits and <code class="code">-</code>, so <code class="code">@</code> never collides with one, and the
+      <code class="code">notes</code> reader, which skips only <code class="code">.</code> and <code class="code">_</code>, finds
+      them. Inside the pipeline a topic's bank is <code class="code">@&lt;topic&gt;</code> throughout: the ledger's
+      <code class="code">consolidate</code> lines, <code class="code">.pruned/</code> names, reflect's evidence.</li>
+    <li><strong>paths</strong> — <code class="code">show knowledge/&lt;topic&gt;/&lt;file&gt;.md</code> reads a page,
+      <code class="code">show traces/@&lt;topic&gt;/&lt;file&gt;.md</code> a trace; <code class="code">chart</code> lists pages
+      as <code class="code">knowledge</code>, <code class="code">memories</code>' shape with <code class="code">topic</code> for
+      <code class="code">bank</code>.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="write">
+  <header>
+    <h2 class="h2">How a page is written and revised</h2>
+    <p class="docs-note">One episode, two homes; one consolidate job, two targets.</p>
+  </header>
+  <figure class="figure">
+    <div class="chart-frame" id="split">
+      <svg width="964" height="344" viewBox="0 0 964 344" role="img" aria-label="one episode's traces split: encode types each trace; a memory type goes to traces under the repository's bank and consolidates into memories under that bank; a knowledge or playbook trace goes to traces under @ and its topic and consolidates into the topic's knowledge pages, where a later trace merges into the page, which is read whole and rewritten">
+        <defs>
+          <marker id="split-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <g transform="translate(0,112)"><rect class="split-box" width="148" height="84" rx="8" /><text class="split-name" x="12" y="24">① episode</text><text class="split-note" x="12" y="46">a taken session,</text><text class="split-note" x="12" y="64">its digest</text></g>
+        <g transform="translate(196,112)"><rect class="split-box" width="148" height="84" rx="8" /><text class="split-name" x="12" y="24">② encode</text><text class="split-note" x="12" y="46">each trace typed,</text><text class="split-note" x="12" y="64">homed by kind</text></g>
+        <g transform="translate(392,28)"><rect class="split-box" width="148" height="84" rx="8" /><text class="split-name" x="12" y="24">traces/&lt;bank&gt;/</text><text class="split-note" x="12" y="46">memory types, by</text><text class="split-note" x="12" y="64">repository (about)</text></g>
+        <g transform="translate(392,196)"><rect class="split-box" width="148" height="84" rx="8" /><text class="split-name" x="12" y="24">traces/@&lt;topic&gt;/</text><text class="split-note" x="12" y="46">knowledge, playbook,</text><text class="split-note" x="12" y="64">by topic</text></g>
+        <g transform="translate(588,28)"><rect class="split-box" width="148" height="84" rx="8" /><text class="split-name" x="12" y="24">③ consolidate</text><text class="split-note" x="12" y="46">keep, merge, prune</text><text class="split-note" x="12" y="64">into the bank</text></g>
+        <g transform="translate(588,196)"><rect class="split-box" width="148" height="84" rx="8" /><text class="split-name" x="12" y="24">③ consolidate</text><text class="split-note" x="12" y="46">the same job,</text><text class="split-note" x="12" y="64">another target</text></g>
+        <g transform="translate(784,28)"><rect class="split-box" width="168" height="84" rx="8" /><text class="split-name" x="12" y="24">memories/&lt;bank&gt;/</text><text class="split-note" x="12" y="46">episodic: what</text><text class="split-note" x="12" y="64">happened, decided</text></g>
+        <g transform="translate(784,196)"><rect class="split-box is-accent" width="168" height="84" rx="8" /><text class="split-name" x="12" y="24">knowledge/&lt;topic&gt;/</text><text class="split-note" x="12" y="46">pages and playbooks,</text><text class="split-note" x="12" y="64">revised in place</text></g>
+        <g aria-hidden="true">
+          <path class="split-path" marker-end="url(#split-head)" d="M148,154H196" />
+          <path class="split-path" marker-end="url(#split-head)" d="M344,154H368V70H392" />
+          <path class="split-path" marker-end="url(#split-head)" d="M368,154V238H392" />
+          <path class="split-path" marker-end="url(#split-head)" d="M540,70H588" />
+          <path class="split-path" marker-end="url(#split-head)" d="M540,238H588" />
+          <path class="split-path" marker-end="url(#split-head)" d="M736,70H784" />
+          <path class="split-path" marker-end="url(#split-head)" d="M736,238H784" />
+          <path class="split-path is-back" marker-end="url(#split-head)" d="M868,280V304H662V280" />
+        </g>
+        <text class="split-time" x="760" y="62" text-anchor="middle">keep</text>
+        <text class="split-time" x="760" y="230" text-anchor="middle">keep</text>
+        <text class="split-time" x="760" y="320" text-anchor="middle">a later trace: merge, the page read whole</text>
+      </svg>
+    </div>
+    <figcaption>An episode's traces split by type. The topic consolidates exactly as a bank does; only the target root
+      differs, and a page grows by merges.</figcaption>
+  </figure>
+  <ul class="stack claims" role="list">
+    <li><strong>encode</strong> — the contract gains the two types and <code class="code">topic</code>, required for them,
+      in place of <code class="code">about</code>; a knowledge type without a slug topic fails the episode. The guidance
+      says when a fact is knowledge (it holds for any project on the same tool), when a sequence is a playbook (a task
+      done more than once, or steps worth repeating), and that a later episode showing a step wrong writes a corrected
+      playbook trace under the same topic.</li>
+    <li><strong>consolidate</strong> — picks a quiet <code class="code">@&lt;topic&gt;</code> as it picks a bank and sends
+      the topic's pages as the bank's memories. <code class="code">merge</code> is the common case: the trace folds into
+      the page, the page comes back whole and replaces the old, <code class="code">updated</code> set, the old under
+      <code class="code">.pruned/</code>. <code class="code">keep</code> starts a page, and in a topic takes
+      <code class="code">knowledge</code> or <code class="code">playbook</code> only; <code class="code">prune</code> drops a
+      trace.</li>
+    <li><strong>by hand</strong> — <code class="code">sandman remember "&lt;body&gt;" --type playbook --topic launchd</code>
+      writes the trace at once; <code class="code">--topic</code> alone means <code class="code">knowledge</code>, and a type
+      without a slug topic is refused, exit 2. The MCP <code class="code">remember</code> tool takes
+      <code class="code">type</code> and <code class="code">topic</code>.</li>
+    <li><strong>reflect</strong> — no code of its own: it reviews the guidance that carries these rules, and its evidence
+      reads a topic's ops and remembers as a bank's. A page merged often is growing as it should; its guidance says so.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="playbook">
+  <header>
+    <h2 class="h2">The playbook's shape</h2>
+    <p class="docs-note">Fixed, so a reader finds the step and the hazard without reading the history.</p>
+  </header>
+  <ul class="stack claims" role="list">
+    <li><strong>When:</strong> the situation it is for.</li>
+    <li><strong>Steps:</strong> numbered, one action each, its command when there is one.</li>
+    <li><strong>Watch for:</strong> what went wrong before and how it showed, dated. A trace that proves a step wrong
+      replaces the step and adds the failure here; the old step does not survive beside the new.</li>
+  </ul>
+  <pre class="snippet">---
+name: Swap a launchd daemon
+description: launchd: swap a running daemon after an install with kickstart -k, never bootout then bootstrap
+type: playbook
+created: 2026-10-02T09:12:00Z
+topic: launchd
+source: consolidate 2026-11-14T09:30:00Z · 5a000000-0000-4000-8000-00000000000b · model=opus
+updated: 2026-11-14T09:30:00Z
+---
+
+When: sample: a new build of a daemon under launchd is installed and the running one must be replaced.
+
+Steps:
+1. Install the binary in place.
+2. `launchctl kickstart -k gui/$(id -u)/&lt;label&gt;`.
+3. `&lt;daemon&gt; status`: the version matches the build.
+
+Watch for: sample: bootout then bootstrap raced KeepAlive's respawn and left two instances (2026-11-11);
+kickstart -k is one atomic restart.</pre>
+</section>
+
+<section class="docs-section" id="recall">
+  <header>
+    <h2 class="h2">How recall treats it</h2>
+  </header>
+  <p>Pages and their traces are ordinary candidates in <a class="link" href="recall.html#proposed">the same pass</a>: the
+    gate, BM25, the embeddings, the decision model and the cap of 6. Their label is
+    <code class="code">knowledge · &lt;topic&gt;</code>, which is the head embedded and the decision model's
+    <code class="code">Memory (knowledge · launchd): …</code>; it matches no repository, so no bank bonus, and the line
+    shows the type: <code class="code">1.00 Swap a launchd daemon (playbook · knowledge/launchd/playbook_swap_a_launchd_daemon.md)</code>,
+    a trace marked <code class="code">~</code>. Knowledge is never in the always-set, even pinned. The tick's embed job
+    covers the pages as it covers memories. With no knowledge on disk, every pinned recall output is unchanged.</p>
+</section>
+
+<section class="docs-section" id="next">
+  <header>
+    <h2 class="h2">Next</h2>
+    <p class="docs-note">Not built.</p>
+  </header>
+  <ul class="stack" role="list">
+    <li><strong>rehoming</strong> — a one-time, reviewed pass over the 645 memories, starting with the 109
+      <code class="code">reference</code> ones (measured 2026-11-13, <a class="link" href="recall.html#problem">recall</a>): a model proposes per memory <code class="code">keep</code> (stays episodic),
+      <code class="code">knowledge</code> or <code class="code">playbook</code> with a topic, written as a plan file; the
+      owner reviews it; the apply step writes each moved one as a trace under <code class="code">traces/@&lt;topic&gt;/</code>
+      (its <code class="code">created</code>, <code class="code">session</code> and quotes kept) and moves the original to
+      <code class="code">.pruned/</code>, so consolidate builds the pages and every step is recoverable.</li>
+    <li><strong>promotion</strong> — a playbook that has proved itself becomes a skill, by hand for now.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="open">
+  <header>
+    <h2 class="h2">Open questions</h2>
+  </header>
+  <ul class="stack claims" role="list">
+    <li>When a proven playbook becomes a skill, and who decides: by hand until a signal (merged often, recalled and read)
+      is measured.</li>
+    <li>Whether knowledge crowds memories out under the shared cap of 6 lines: unmeasured.</li>
+    <li>Rehoming the existing <code class="code">reference</code> memories (<a class="link" href="#next">next</a>).</li>
+    <li>The <code class="code">reference</code> type's future once its general part moves: kept for a repository's
+      pointers, or folded into <code class="code">knowledge</code>.</li>
+  </ul>
+</section>
+
+<nav class="row link-row" aria-label="links">
+  <a class="pill" href="index.html">sandman · design</a>
+  <a class="pill" href="recall.html">sandman · recall</a>
+  <a class="pill" href="https://github.com/jgeschwendt/sandman">source · jgeschwendt/sandman</a>
+</nav>
+
+</main>
+<script>
+/* The theme contract, verbatim from jgeschwendt/ui docs.js — same localStorage
+   key, so a theme chosen on the ui pages is the theme this one opens in. */
+const THEME_KEY = "ui-theme";
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "auto") {
+    root.removeAttribute("data-theme");
+    localStorage.removeItem(THEME_KEY);
+  } else {
+    root.dataset.theme = mode;
+    localStorage.setItem(THEME_KEY, mode);
+  }
+  for (const b of document.querySelectorAll("[data-theme-set]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.themeSet === mode));
+  }
+}
+for (const b of document.querySelectorAll("[data-theme-set]")) {
+  b.addEventListener("click", () => applyTheme(b.dataset.themeSet));
+}
+applyTheme(localStorage.getItem(THEME_KEY) || "auto");
+</script>
+</body>
+</html>
