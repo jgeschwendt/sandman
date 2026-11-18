@@ -274,7 +274,7 @@
         <defs>
           <marker id="forget-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
         </defs>
-        <g transform="translate(0,16)"><rect class="life-box is-accent" width="224" height="72" rx="8" /><text class="life-name" x="14" y="24">① the ledger</text><text class="life-note" x="14" y="44">every line naming it dropped</text><text class="life-note" x="14" y="60">under the writers' lock, first</text></g>
+        <g transform="translate(0,16)"><rect class="life-box is-accent" width="224" height="72" rx="8" /><text class="life-name" x="14" y="24">① the ledger</text><text class="life-note" x="14" y="44">its lines dropped, rewrites kept</text><text class="life-note" x="14" y="60">under the writers' lock, first</text></g>
         <g transform="translate(256,16)"><rect class="life-box" width="224" height="72" rx="8" /><text class="life-name" x="14" y="24">② removed</text><text class="life-note" x="14" y="44">transcripts, archive, pointer</text><text class="life-note" x="14" y="60">its traces, memories, run files</text></g>
         <g transform="translate(512,16)"><rect class="life-box" width="224" height="72" rx="8" /><text class="life-name" x="14" y="24">③ rewritten</text><text class="life-note" x="14" y="44">a merge's source, an intention</text><text class="life-note" x="14" y="60">pruned ops, embeddings, log</text></g>
         <g aria-hidden="true">
@@ -294,7 +294,7 @@
       <tr><th>store</th><th>forget</th></tr>
     </thead>
     <tbody>
-      <tr><td><code class="code">ledger/**</code>, today's too</td><td>every line holding the id dropped, the file rewritten by temp + rename under an exclusive <code class="code">flock</code></td></tr>
+      <tr><td><code class="code">ledger/**</code>, today's too</td><td>every line holding the id dropped but a <a class="link" href="#cycle-rewrite">rewrite line</a>, kept with the id off its <code class="code">from</code> entries' <code class="code">sessions</code>; the file rewritten by temp + rename under an exclusive <code class="code">flock</code></td></tr>
       <tr><td><code class="code">&lt;claude&gt;/projects/*/&lt;session&gt;.jsonl</code> and <code class="code">&lt;session&gt;/</code></td><td>removed, in every project</td></tr>
       <tr><td><code class="code">.archive/claude/**</code></td><td>every copy and <code class="code">-dir</code> named for it removed</td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>removed</td></tr>
@@ -974,9 +974,8 @@ sandman check --release  # what the release job would delete now, with its bytes
     <code class="code">import</code>), prints <code class="code">check: fixed &lt;n&gt;</code>, writes
     <code class="code">{"at","fixed":n,"kind":"check","machine"}</code>, then checks. A bad word on a list, a
     <code class="code">strength:</code> and the ledger are left for a person. A rewrite line's violation reads
-    <code class="code">ledger &lt;its at&gt;: 5: …</code>, after every note's. A <code class="code">forget</code> drops each
-    rewrite line naming its session, other sessions' entries with it, so 4–5 can flag the notes such a line touched;
-    rewriting that line without the session instead is open.</p>
+    <code class="code">ledger &lt;its at&gt;: 5: …</code>, after every note's. <code class="code">forget</code> keeps a rewrite
+    line, its session taken off the entries, so 4–5 hold through it.</p>
 
   <h3 class="h3" id="cycle-chart">chart</h3>
   <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]   built, strength aside

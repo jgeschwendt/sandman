@@ -2333,30 +2333,48 @@ fn main() -> ExitCode {
             let session = args.get(2).map_or("", String::as_str);
             let erase = || -> io::Result<[usize; 2]> {
                 let mut done = [0usize; 2];
-                // a JSONL file without the lines `cut` picks, rewritten under an exclusive `flock`: an
-                // appender waiting on it finds the file replaced and opens the new one; 1 when it was
-                let purge = |path: &Path, cut: &dyn Fn(&str) -> bool| -> io::Result<usize> {
-                    let file = match File::open(path) {
-                        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
-                        opened => opened?,
+                // a JSONL file, each line as `keep` leaves it (none: dropped), rewritten under an
+                // exclusive `flock`: an appender waiting on it finds the file replaced and opens the
+                // new one; 1 when it was
+                let purge =
+                    |path: &Path, keep: &dyn Fn(&str) -> Option<String>| -> io::Result<usize> {
+                        let file = match File::open(path) {
+                            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+                            opened => opened?,
+                        };
+                        file.lock()?;
+                        let whole = io::read_to_string(&file)?;
+                        let kept: String = whole.split_inclusive('\n').filter_map(keep).collect();
+                        let changed = kept != whole;
+                        if changed {
+                            put(path, &kept)?;
+                        }
+                        Ok(usize::from(changed))
                     };
-                    file.lock()?;
-                    let whole = io::read_to_string(&file)?;
-                    let kept: String = whole
-                        .split_inclusive('\n')
-                        .filter(|line| !cut(line))
-                        .collect();
-                    let cut_any = kept.len() < whole.len();
-                    if cut_any {
-                        put(path, &kept)?;
-                    }
-                    Ok(usize::from(cut_any))
-                };
                 let lines = ledger(&root);
+                let unnamed = |line: &str| (!line.contains(session)).then(|| line.to_owned());
+                // a rewrite line stays, the session off its `from[].sessions`, so the notes it ended
+                // still hold invariants 4–5; any other line naming it goes, and so does one still
+                // naming it once rewritten
+                let ledgered = |line: &str| {
+                    unnamed(line).or_else(|| {
+                        let mut row = serde_json::from_str::<Value>(line)
+                            .ok()
+                            .filter(|row| row["kind"] == "rewrite")?;
+                        for held in row["from"]
+                            .as_array_mut()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|entry| entry["sessions"].as_array_mut())
+                        {
+                            held.retain(|id| id != session);
+                        }
+                        unnamed(&format!("{row}\n"))
+                    })
+                };
                 // first, so a take, a reconcile or an encode racing this finds no start mark to act on
-                let named = |line: &str| line.contains(session);
                 for day in tree(&root.join("ledger"), 3) {
-                    done[1] = done[1].saturating_add(purge(&day, &named)?);
+                    done[1] = done[1].saturating_add(purge(&day, &ledgered)?);
                 }
                 // encode's run files hold it when, of every encode line and its own ends, the latest
                 // names it
@@ -2484,12 +2502,13 @@ fn main() -> ExitCode {
                     done[1] = done[1].saturating_add(1);
                 }
                 let cached = |line: &str| {
-                    serde_json::from_str::<Value>(line)
-                        .is_ok_and(|row| paths.contains(text(&row["path"])))
+                    (!serde_json::from_str::<Value>(line)
+                        .is_ok_and(|row| paths.contains(text(&row["path"]))))
+                    .then(|| line.to_owned())
                 };
                 done[1] = done[1].saturating_add(purge(&root.join("embeddings.jsonl"), &cached)?);
                 for log in ["run/serve.log", "run/serve.log.1"] {
-                    done[1] = done[1].saturating_add(purge(&root.join(log), &named)?);
+                    done[1] = done[1].saturating_add(purge(&root.join(log), &unnamed)?);
                 }
                 Ok(done)
             };

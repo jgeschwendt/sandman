@@ -2914,6 +2914,9 @@ printf '{"ops":[],"under":"%s"}\n' $u
         )
         .replace("source:", "sessions: @a @c\nsource:");
         let backfilled = other.replace("source:", "sessions: @a\nsource:");
+        // a rewrite line keeps its other sessions, the line with it: the notes it ended stay
+        // accounted for; one naming it past `from` goes
+        let rewrite = r#"{"at":"2026-11-09T09:41:00Z","from":[{"digest":"d","id":"aaaaaaaaaaaa","path":"traces/-work-alpha/feedback_a.md","sessions":["@a"]},{"digest":"e","id":"bbbbbbbbbbbb","path":"-work-alpha/feedback_merged.md","sessions":["@a","@c"]}],"kind":"rewrite","op":"merge","reason":null,"to":{"id":"bbbbbbbbbbbb","path":"-work-alpha/feedback_merged.md"}}"#;
         let ledger = [
             r#"{"at":"2026-11-09T08:00:00Z","kind":"start","session":"@a"}"#,
             r#"{"at":"2026-11-09T08:01:00Z","kind":"start","session":"@b"}"#,
@@ -2921,6 +2924,8 @@ printf '{"ops":[],"under":"%s"}\n' $u
             r#"{"at":"2026-11-09T09:31:00Z","kind":"encode","outcome":"encoded","session":"@a"}"#,
             r#"{"at":"2026-11-09T09:32:00Z","kind":"guard","rationale":"sample","session":"@a","tool":null}"#,
             r#"{"at":"2026-11-09T09:40:00Z","kind":"consolidate","outcome":"consolidated"}"#,
+            rewrite,
+            r#"{"at":"2026-11-09T09:42:00Z","from":[{"digest":"f","id":"cccccccccccc","path":"-work-alpha/project_old.md","sessions":[]}],"kind":"rewrite","op":"prune","reason":"@a said so","to":null}"#,
         ]
         .join("\n");
         let embeddings = "{\"h\":\"1\",\"path\":\"traces/-work-alpha/feedback_a.md\"}\n{\"h\":\"2\",\"path\":\"traces/-work-alpha/feedback_b.md\"}\n{\"h\":\"3\",\"path\":\"-work-alpha/feedback_kept.md\"}\n{\"h\":\"4\",\"path\":\"knowledge/launchd/playbook_a.md\"}\n{\"h\":\"5\",\"path\":\"traces/@launchd/knowledge_a.md\"}\nnot json\n";
@@ -3035,7 +3040,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 read("run/serve.log")?,
             ),
             &format!(
-                "{}\n{}\n{}{}{}{}{}{}{}",
+                "{}\n{}\n{}\n{}\n{}{}{}{}{}{}",
                 [
                     ".archive/claude/2026/11/09/120000-projects--work-alpha-@b.jsonl",
                     ".pruned/2026/11/10/040000--work-alpha-feedback_b.md",
@@ -3060,6 +3065,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 .join("\n"),
                 r#"{"at":"2026-11-09T08:01:00Z","kind":"start","session":"@b"}"#,
                 r#"{"at":"2026-11-09T09:40:00Z","kind":"consolidate","outcome":"consolidated"}"#,
+                rewrite.replace(r#"["@a"]"#, "[]").replace(r#""@a","#, ""),
                 r#"{"ops":[{"memory":"feedback_merged.md","op":"merge","trace":"feedback_b.md"},{"memory":"project_old.md","op":"prune","reason":"stale"}]}"#,
                 note(
                     "@b",
