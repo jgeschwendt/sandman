@@ -1410,6 +1410,124 @@ esac
         )
     }
 
+    /// Encode's digest lists under `# recalled` each note the session's recall lines sent (by
+    /// path, else id) and no verdict of the session judged, shown or not; its reply's verdicts on
+    /// them are rethink lines by `encode`, a judged send an example. A verdict on an unlisted note,
+    /// two on one, or `verdicts` not a list fails the episode, nothing written.
+    #[test]
+    fn verdicts() -> Outcome {
+        let root = temp("verdicts")?;
+        let stub = format!("{root}/stub.sh");
+        let note = |name: &str| {
+            format!(
+                "---\nname: {name}\ndescription: sample: {name}\ntype: feedback\n---\n\nsample\n"
+            )
+        };
+        let (used, idle, judged) = (note("used"), note("idle"), note("judged"));
+        let mut files = vec![
+            ("memories/-sample/feedback_used.md".to_owned(), used),
+            ("memories/-sample/feedback_idle.md".to_owned(), idle.replace("---\nname", "---\nid: 0123456789ab\nname")),
+            ("memories/-sample/feedback_judged.md".to_owned(), judged),
+            (
+                "stub.sh".to_owned(),
+                r#"V='{"file":"-sample/feedback_used.md","verdict":"used","why":"sample: acted on"}'
+case $(tee -a "$0.log" | sed -n 's/^user: case //p') in
+  judge) printf '{"traces":[],"verdicts":[%s,{"file":"-sample/feedback_idle.md","verdict":"irrelevant"}]}\n' "$V";;
+  unlisted) printf '{"traces":[],"verdicts":[{"file":"-sample/feedback_judged.md","verdict":"wrong"}]}\n';;
+  twice) printf '{"traces":[],"verdicts":[%s,%s]}\n' "$V" "$V";;
+  shape) printf '{"traces":[],"verdicts":"sample"}\n';;
+esac
+"#
+                .to_owned(),
+            ),
+        ];
+        let mut ledger = vec![
+            // p sent all three, read one, judged one in session; the idle one by its id, under an
+            // older path; a gone note is no candidate
+            r#"{"at":"2026-11-09T07:00:00Z","cue":"sample: first","kind":"recall","sent":[{"file":"-sample/feedback_used.md","id":null},{"file":"-sample/feedback_old.md","id":"0123456789ab"},{"file":"-sample/feedback_gone.md","id":null}],"session":"@p"}"#.to_owned(),
+            r#"{"at":"2026-11-09T07:01:00Z","cue":"sample: second","kind":"recall","sent":[{"file":"-sample/feedback_judged.md","id":null}],"session":"@p"}"#.to_owned(),
+            r#"{"at":"2026-11-09T07:02:00Z","file":"-sample/feedback_used.md","kind":"show","session":"@p"}"#.to_owned(),
+            r#"{"at":"2026-11-09T07:03:00Z","by":"agent","file":"-sample/feedback_judged.md","id":null,"kind":"rethink","session":"@p"}"#.to_owned(),
+            r#"{"at":"2026-11-09T07:04:00Z","cue":"sample: third","kind":"recall","sent":[{"file":"-sample/feedback_used.md","id":null}],"session":"@q"}"#.to_owned(),
+            r#"{"at":"2026-11-09T07:05:00Z","cue":"sample: third","kind":"recall","sent":[{"file":"-sample/feedback_used.md","id":null}],"session":"@r"}"#.to_owned(),
+        ];
+        for (minute, (letter, case)) in [
+            ("p", "judge"),
+            ("q", "unlisted"),
+            ("r", "twice"),
+            ("s", "shape"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            files.push((
+                format!("archive/{letter}.jsonl"),
+                json!({"type": "user", "message": {"content": format!("case {case}")}}).to_string(),
+            ));
+            ledger.push(format!(
+                r#"{{"at":"2026-11-09T08:{minute:02}:00Z","interactive":true,"kind":"start","machine":"studio","session":"@{letter}"}}
+{{"archived":"{root}/archive/{letter}.jsonl","at":"2026-11-09T08:{minute:02}:30Z","cwd":null,"kind":"end","machine":"studio","outcome":"taken","session":"@{letter}"}}"#
+            ));
+        }
+        files.push(("ledger/2026/11/09.jsonl".to_owned(), ledger.join("\n")));
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|file| (file.0.as_str(), file.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let encoder = format!("sh {stub}");
+        let (mut daemon, _) = serve(
+            &root,
+            &[
+                ("SANDMAN_ENCODER", encoder.as_str()),
+                ("SANDMAN_TICK_MS", "10"),
+            ],
+        )?;
+        let today = format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        until(|| read(&today).matches(r#""kind":"encode""#).count() == 4)?;
+        // SIGTERM, so the daemon's coverage counts
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let seen = read(&format!("{stub}.log"));
+        let mut got: Vec<String> = seen
+            .split_once("date: 2026-11-09T08:00:30Z")
+            .and_then(|(_, rest)| rest.split_once("# transcript"))
+            .map(|(digest, _)| vec![digest.to_owned()])
+            .unwrap_or_default();
+        for path in [today, format!("{root}/eval/recall.jsonl")] {
+            for line in read(&path).lines() {
+                let mut entry: Value = serde_json::from_str(line)?;
+                entry["at"] = "A".into();
+                entry["digest"] = json!(entry["digest"].as_str().map(str::len));
+                got.push(entry.to_string());
+            }
+        }
+        same(
+            &got.join("\n").replace(ID, "@"),
+            &[
+                "\ncwd: unknown\n\n# recalled\n- -sample/feedback_idle.md \u{b7} idle \u{2014} sample: idle \u{b7} not shown\n- -sample/feedback_used.md \u{b7} used \u{2014} sample: used \u{b7} shown\n\n",
+                r#"{"at":"A","by":"encode","cue":"sample: first","digest":null,"file":"-sample/feedback_used.md","id":null,"kind":"rethink","machine":"studio","session":"@p","verdict":"used","why":"sample: acted on"}"#,
+                r#"{"at":"A","by":"encode","cue":"sample: first","digest":null,"file":"-sample/feedback_idle.md","id":"0123456789ab","kind":"rethink","machine":"studio","session":"@p","verdict":"irrelevant","why":null}"#,
+                r#"{"at":"A","digest":null,"ids":[],"kind":"encode","machine":"studio","outcome":"encoded","session":"@p","traces":0}"#,
+                r#"{"at":"A","digest":null,"error":"output: not a verdict: {\"file\":\"-sample/feedback_judged.md\",\"verdict\":\"wrong\"}","kind":"encode","machine":"studio","outcome":"failed","session":"@q","traces":0}"#,
+                r#"{"at":"A","digest":null,"error":"output: not a verdict: {\"file\":\"-sample/feedback_used.md\",\"verdict\":\"used\",\"why\":\"sample: acted on\"}","kind":"encode","machine":"studio","outcome":"failed","session":"@r","traces":0}"#,
+                r#"{"at":"A","digest":null,"error":"output: not a verdict: \"sample\"","kind":"encode","machine":"studio","outcome":"failed","session":"@s","traces":0}"#,
+                r#"{"about":null,"at":"A","cue":"sample: first","digest":64,"id":null,"label":1,"path":"-sample/feedback_used.md","session":"@p","verdict":"used"}"#,
+                r#"{"about":null,"at":"A","cue":"sample: first","digest":64,"id":"0123456789ab","label":0,"path":"-sample/feedback_idle.md","session":"@p","verdict":"irrelevant"}"#,
+            ]
+            .join("\n"),
+        )
+    }
+
     /// The model run reads its token file at each run, so the stub encoder rearranges it for the
     /// next: absent, nothing set and nothing noted; mode 600, its trimmed text in
     /// `$CLAUDE_CODE_OAUTH_TOKEN` and the file named on the line; mode 644, refused and the token

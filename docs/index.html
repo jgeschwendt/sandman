@@ -465,7 +465,8 @@ install -m 600 /dev/stdin ~/Codes/claude-oauth-token        # paste it, then Ctr
     <li><strong>digest</strong> — what the model reads, built from the archive:
       <code class="code"># episode</code> (the take's time, the cwd as the pointer finds it), <code class="code"># already remembered</code>
       (what the session saved with <a class="link" href="recall.html#tool"><code class="code">remember</code></a>, one name and description each, which the contract says never to write again), <code class="code"># highlights</code>
-      (take's, those no remembered note already holds word for word), <code class="code"># transcript</code>: a <code class="code">user:</code> or
+      (take's, those no remembered note already holds word for word), <code class="code"># recalled</code> (the notes
+      recall sent and the session left unjudged, <a class="link" href="#cycle-rethink">for its verdicts</a>), <code class="code"># transcript</code>: a <code class="code">user:</code> or
       <code class="code">assistant:</code> line per message text and a <code class="code">tool:</code> line per tool
       call (its name and command or file, 200 characters); tool results dropped. Over
       <code class="code">$SANDMAN_DIGEST_BYTES</code> (300 000) it keeps the head and the tail, whole lines, and the
@@ -489,7 +490,8 @@ install -m 600 /dev/stdin ~/Codes/claude-oauth-token        # paste it, then Ctr
       when that file holds any text, else the built-in default
       (<a class="link" href="https://github.com/jgeschwendt/sandman/blob/main/src/prompts/encode.md">src/prompts/encode.md</a>),
       so it changes without a rebuild. A local model replaces Opus with any command that keeps the contract:
-      <pre class="snippet">{"traces":[{"type":"user"|"feedback"|"project"|"reference"|"knowledge"|"playbook","name":str,"description":str,"body":str,"about":str|null,"topic":str|null}]}</pre></li>
+      <pre class="snippet">{"traces":[{"type":"user"|"feedback"|"project"|"reference"|"knowledge"|"playbook","name":str,"description":str,"body":str,"about":str|null,"topic":str|null}],
+ "verdicts"?:[{"file":str,"verdict":"used"|"wrong"|"stale"|"irrelevant","why":str|null}]}</pre></li>
     <li><strong>homing</strong> — sessions start from one root directory and dispatch work into many repositories,
       so a session's cwd says little about what a fact concerns. A <code class="code">knowledge</code> or
       <code class="code">playbook</code> trace names its <code class="code">topic</code>, a slug (lowercase letters, digits,
@@ -686,7 +688,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
     note's <code class="code">id</code>, <code class="code">from</code> and <code class="code">origin</code> and
     <code class="code">check</code>'s invariants 1–3 (stage 1); consolidate's ops as rewrite lines, the ids on recall,
     show, remember and encode lines, chart's <code class="code">ended</code> and <code class="code">lineage</code>, invariants
-    4–5 (stage 2); <code class="code">rethink</code> in session, its MCP tool and <code class="code">eval/recall.jsonl</code> (stage 3). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
+    4–5 (stage 2); <code class="code">rethink</code> in session, its MCP tool and <code class="code">eval/recall.jsonl</code> (stage 3);
+    encode's <code class="code"># recalled</code> and <code class="code">verdicts</code> (stage 4). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -698,7 +701,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <g transform="translate(392,16)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">③ trace</text><text class="life-note" x="14" y="44">encoded or remembered,</text><text class="life-note" x="14" y="60">awaits consolidate</text></g>
         <g transform="translate(588,16)"><rect class="life-box is-accent" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">④ memory|knowledge</text><text class="life-note" x="14" y="44">id, sessions, from:</text><text class="life-note" x="14" y="60">the active store</text></g>
         <g transform="translate(588,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑤ recall</text><text class="life-note" x="14" y="44">a pointer sent,</text><text class="life-note" x="14" y="60">one ledger line</text></g>
-        <g transform="translate(392,152)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑥ rethink</text><text class="life-note" x="14" y="44">one verdict a send,</text><text class="life-note" x="14" y="60">in session or at encode</text></g>
+        <g transform="translate(392,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑥ rethink</text><text class="life-note" x="14" y="44">one verdict a send,</text><text class="life-note" x="14" y="60">in session or at encode</text></g>
         <g transform="translate(196,152)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑦ strength</text><text class="life-note" x="14" y="44">counted from lines,</text><text class="life-note" x="14" y="60">never stored</text></g>
         <g transform="translate(0,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑨ release</text><text class="life-note" x="14" y="44">unheld for 7 days:</text><text class="life-note" x="14" y="60">the transcript goes</text></g>
         <g transform="translate(196,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ decay</text><text class="life-note" x="14" y="44">under the floor:</text><text class="life-note" x="14" y="60">pruned, an end</text></g>
@@ -827,11 +830,12 @@ updated: &lt;now&gt;                   as today
   <pre class="snippet">sandman rethink &lt;path&gt; --irrelevant|--used|--wrong|--stale [--why "&lt;text&gt;"] [--session &lt;uuid&gt;]
 rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}       # the MCP tool, passed as --&lt;verdict&gt;</pre>
   <ul class="stack claims" role="list">
-    <li><strong>at encode</strong> — the default, a cleanup on encode's one read of the transcript: the digest gains
+    <li><strong>at encode</strong> <span class="badge badge-ok">built</span> — the default, a cleanup on encode's one read of the transcript: the digest gains
       <code class="code"># recalled</code>, <code class="code">- &lt;path&gt; · &lt;name&gt; — &lt;description&gt; · shown|not shown</code>
-      per note the session's recall lines sent and no in-session verdict judged; the reply gains
-      <code class="code">"verdicts":[{"file","verdict","why"}]</code>, one per listed note at most, a file not listed failing
-      the episode. A send nobody judged counts for nothing.</li>
+      per note on disk (by path, else id) the session's recall lines sent and no verdict of the session judged; the reply gains
+      <code class="code">"verdicts":[{"file","verdict","why"}]</code>, one per listed note at most, optional; a file not listed, one judged twice or a
+      verdict outside the four fails the episode (<code class="code">output: not a verdict: …</code>), nothing written. Each
+      is a rethink line, <code class="code">by</code> <code class="code">encode</code>. A send nobody judged counts for nothing.</li>
     <li><strong>in session</strong> <span class="badge badge-ok">built</span> — optional, and it outranks encode's verdict for the same session and note. The path as
       <code class="code">show</code> takes it; stdout <code class="code">rethink: &lt;verdict&gt; &lt;path&gt;</code>; no verdict or two,
       exit 2; no note there, exit 1. <code class="code">cue</code> is the session's latest send of the note, by path,
@@ -1011,7 +1015,7 @@ sandman check --release  # what the release job would delete now, with its bytes
       lines, <code class="code">ids</code> on encode's; chart's <code class="code">ended</code> and <code class="code">lineage</code>; invariants 4–5.</li>
     <li><strong>rethink in session</strong> <span class="badge badge-ok">built</span> — the verb, the MCP tool, the seed's sentence, <code class="code">eval/recall.jsonl</code>,
       <code class="code">forget</code> over it.</li>
-    <li><strong>rethink at encode</strong> — <code class="code"># recalled</code>, encode's contract and <code class="code">verdicts</code>.</li>
+    <li><strong>rethink at encode</strong> <span class="badge badge-ok">built</span> — <code class="code"># recalled</code>, encode's contract and <code class="code">verdicts</code>.</li>
     <li><strong>strength</strong> — the count, chart's <code class="code">strength</code>, the knobs.</li>
     <li><strong>order in a bank</strong> — consolidate's merge of notes, <code class="code"># judged</code> (revise, prune),
       retitle; the order measure and its revert.</li>

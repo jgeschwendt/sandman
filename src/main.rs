@@ -467,19 +467,49 @@ fn end(
     record(root, &mut line).map(|()| line)
 }
 
-/// An episode's digest from its end line (AGENTS.md `### encode`), cut to `budget` bytes, and the
-/// directory it ran in.
-fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<String>) {
-    let (session, turns) = (
+/// An episode's digest from its end line and the ledger's `lines` (AGENTS.md `### encode`), cut to
+/// `budget` bytes, the directory it ran in, and the notes its `# recalled` lists.
+fn episode(
+    root: &Path,
+    lines: &[Value],
+    closing: &Value,
+    budget: usize,
+) -> (String, Option<String>, Vec<Value>) {
+    let (session, turns, all) = (
         text(&closing["session"]),
         jsonl(Path::new(text(&closing["archived"]))),
+        every(root),
     );
     let cwd = place(&turns, &closing["cwd"]);
     // what the session already remembered is done; a highlight it covers (the same body,
     // whitespace collapsed) is dropped
-    let remembered: Vec<Value> = every(root)
-        .into_iter()
+    let remembered: Vec<&Value> = all
+        .iter()
         .filter(|note| note["session"] == session && text(&note["source"]).starts_with("remember"))
+        .collect();
+    // the notes its recall lines sent and no verdict of the session judged, each shown or not
+    let (named, mine) = (
+        |line: &Value, note: &Value| {
+            line["file"] == note["path"] || (note["id"].is_string() && line["id"] == note["id"])
+        },
+        |kind: &'static str| {
+            lines
+                .iter()
+                .filter(move |line| line["kind"] == kind && line["session"] == session)
+        },
+    );
+    let recalled: Vec<Value> = all
+        .iter()
+        .filter(|note| {
+            mine("recall").any(|line| {
+                line["sent"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|entry| named(entry, note))
+            }) && !mine("rethink").any(|line| named(line, note))
+        })
+        .cloned()
         .collect();
     let digest = format!(
         "# episode\ndate: {}\ncwd: {}\n\n{}# transcript\n{}",
@@ -510,6 +540,22 @@ fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<Strin
                     })
                     .collect(),
             ),
+            (
+                "recalled",
+                recalled
+                    .iter()
+                    .map(|note| {
+                        format!(
+                            "{} \u{b7} {} \u{2014} {} \u{b7} {}",
+                            text(&note["path"]),
+                            text(&note["name"]),
+                            one_line(text(&note["description"]), 160),
+                            ["not shown", "shown"]
+                                [usize::from(mine("show").any(|line| named(line, note)))]
+                        )
+                    })
+                    .collect(),
+            ),
         ]),
         turns
             .iter()
@@ -517,7 +563,7 @@ fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<Strin
             .map(|(role, said)| [role, ": ", &said, "\n"].concat())
             .collect::<String>()
     );
-    (cut(digest, budget), cwd.map(str::to_owned))
+    (cut(digest, budget), cwd.map(str::to_owned), recalled)
 }
 
 /// Every note recall and `show` read, in reader order: the memories, the knowledge pages, the
@@ -1163,6 +1209,37 @@ fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
             .unwrap_or_default(),
     )
     .map_err(|error| io::Error::other(format!("output: {error}")))
+}
+
+/// One verdict on `note` (docs/index.html#cycle-rethink): `line`, holding `by`, `session`,
+/// `verdict` and `why`, completed as a `rethink` line, `cue` the latest of the session's recall
+/// lines that sent the note (by path, else id); a send judged also appends an example to
+/// `eval/recall.jsonl`, `irrelevant` label 0, the rest 1.
+fn rethink(root: &Path, lines: &[Value], note: &Value, mut line: Value) -> io::Result<()> {
+    let recalled = lines.iter().rev().find(|sent| {
+        sent["kind"] == "recall"
+            && sent["session"] == line["session"]
+            && sent["sent"].as_array().into_iter().flatten().any(|entry| {
+                entry["file"] == note["path"]
+                    || (note["id"].is_string() && entry["id"] == note["id"])
+            })
+    });
+    (line["cue"], line["file"], line["id"], line["kind"]) = (
+        recalled.map_or(Value::Null, |sent| sent["cue"].clone()),
+        note["path"].clone(),
+        note["id"].clone(),
+        "rethink".into(),
+    );
+    record(root, &mut line)?;
+    recalled.map_or(Ok(()), |sent| {
+        let example = json!({
+            "about": sent["about"], "at": line["at"], "cue": sent["cue"], "digest": sha256(text(&note["text"])),
+            "id": note["id"], "label": u8::from(line["verdict"] != "irrelevant"), "path": note["path"],
+            "session": line["session"], "verdict": line["verdict"],
+        });
+        fs::create_dir_all(root.join("eval"))?;
+        append(&root.join("eval/recall.jsonl"), &format!("{example}\n"))
+    })
 }
 
 /// A tick job's model run: `command` through `sh -c` in its own process group, flagged so a
@@ -3306,38 +3383,9 @@ fn main() -> ExitCode {
                 );
                 return ExitCode::FAILURE;
             };
-            // the session's latest send of the note, by path, else by id (docs/index.html#cycle-rethink)
-            let (lines, mut line) = (
-                ledger(&root),
-                json!({"by": "agent", "session": pull, "verdict": verdict, "why": flag("--why")}),
-            );
-            let mut judge = || -> io::Result<()> {
-                let recalled = lines.iter().rev().find(|sent| {
-                    sent["kind"] == "recall"
-                        && sent["session"] == line["session"]
-                        && sent["sent"].as_array().into_iter().flatten().any(|entry| {
-                            entry["file"] == memory["path"]
-                                || (memory["id"].is_string() && entry["id"] == memory["id"])
-                        })
-                });
-                (line["cue"], line["file"], line["id"], line["kind"]) = (
-                    recalled.map_or(Value::Null, |sent| sent["cue"].clone()),
-                    memory["path"].clone(),
-                    memory["id"].clone(),
-                    "rethink".into(),
-                );
-                record(&root, &mut line)?;
-                recalled.map_or(Ok(()), |sent| {
-                    let example = json!({
-                        "about": sent["about"], "at": line["at"], "cue": sent["cue"], "digest": sha256(text(&memory["text"])),
-                        "id": memory["id"], "label": u8::from(line["verdict"] != "irrelevant"), "path": memory["path"],
-                        "session": line["session"], "verdict": line["verdict"],
-                    });
-                    fs::create_dir_all(root.join("eval"))?;
-                    append(&root.join("eval/recall.jsonl"), &format!("{example}\n"))
-                })
-            };
-            if let Err(error) = judge() {
+            let line =
+                json!({"by": "agent", "session": pull, "verdict": verdict, "why": flag("--why")});
+            if let Err(error) = rethink(&root, &ledger(&root), &memory, line) {
                 eprintln!("sandman rethink: {error}");
                 return ExitCode::FAILURE;
             }
@@ -3693,7 +3741,7 @@ fn main() -> ExitCode {
                             if !archived.is_file() {
                                 return Ok(json!({"outcome": "gone", "traces": 0}));
                             }
-                            let (digest, cwd) = episode(&data, closing, budget);
+                            let (digest, cwd, recalled) = episode(&data, &lines, closing, budget);
                             let reply = run(
                                 &data,
                                 "encode",
@@ -3715,6 +3763,38 @@ fn main() -> ExitCode {
                             }) {
                                 return Err(io::Error::other(format!(
                                     "output: not a trace: {}",
+                                    one_line(&bad.to_string(), 200)
+                                )));
+                            }
+                            // at most one verdict per note `# recalled` lists, none on another
+                            let (listed, mut judged, none): (BTreeMap<&str, &Value>, _, _) = (
+                                recalled
+                                    .iter()
+                                    .map(|note| (text(&note["path"]), note))
+                                    .collect(),
+                                BTreeSet::new(),
+                                Vec::new(),
+                            );
+                            let verdicts = if reply["verdicts"].is_null() {
+                                Some(&none)
+                            } else {
+                                reply["verdicts"].as_array()
+                            };
+                            if let Some(bad) = verdicts.map_or_else(
+                                || Some(&reply["verdicts"]),
+                                |list| {
+                                    list.iter().find(|verdict| {
+                                        let file = text(&verdict["file"]);
+                                        !(listed.contains_key(file)
+                                            && VERDICTS.contains(&text(&verdict["verdict"]))
+                                            && (verdict["why"].is_null()
+                                                || verdict["why"].is_string())
+                                            && judged.insert(file))
+                                    })
+                                },
+                            ) {
+                                return Err(io::Error::other(format!(
+                                    "output: not a verdict: {}",
                                     one_line(&bad.to_string(), 200)
                                 )));
                             }
@@ -3773,7 +3853,21 @@ fn main() -> ExitCode {
                                 );
                                 put(&file, &contents)?;
                             }
-                            Ok(json!({"ids": ids, "outcome": "encoded", "traces": ids.len()}))
+                            verdicts
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|verdict| {
+                                    Some((*listed.get(text(&verdict["file"]))?, verdict))
+                                })
+                                .try_for_each(|(note, verdict)| {
+                                    rethink(
+                                        &data,
+                                        &lines,
+                                        note,
+                                        json!({"by": "encode", "session": session, "verdict": verdict["verdict"], "why": verdict["why"]}),
+                                    )
+                                })
+                                .map(|()| json!({"ids": ids, "outcome": "encoded", "traces": ids.len()}))
                         };
                         (
                             "encode",
@@ -4231,7 +4325,9 @@ fn main() -> ExitCode {
                                                     Path::new(text(&marks[1]["archived"])).is_file()
                                                 })
                                                 .take(replays)
-                                                .map(|marks| episode(&data, &marks[1], budget).0)
+                                                .map(|marks| {
+                                                    episode(&data, &lines, &marks[1], budget).0
+                                                })
                                                 .collect(),
                                         )
                                     } else {
