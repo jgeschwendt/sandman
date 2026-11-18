@@ -4675,10 +4675,19 @@ bootstrap {gui} {file}
                 ("projects/-work-alpha/@e.jsonl", bare),
                 ("projects/-work-alpha/@0.jsonl", bare),
                 ("projects/-work-locked/@f.jsonl", bare),
-                ("jobs/j1/state.json", r#"{"sessionId":"@b","state":"done"}"#),
+                // a finished job holds nothing: a's and e's end past theirs
+                ("jobs/j0/state.json", r#"{"sessionId":"@e","state":"done"}"#),
+                (
+                    "jobs/j1/state.json",
+                    r#"{"sessionId":"@b","state":"working"}"#,
+                ),
                 (
                     "jobs/j2/state.json",
                     r#"{"resumeSessionId":"@9","sessionId":"@c","state":"running"}"#,
+                ),
+                (
+                    "jobs/j3/state.json",
+                    r#"{"resumeSessionId":"@a","state":"stopped"}"#,
                 ),
                 ("jobs/pins.json", "[]"),
             ],
