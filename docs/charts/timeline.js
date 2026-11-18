@@ -9,7 +9,7 @@ const data = await load("chart.json");
 const LABEL = 90;
 const LANE = 14;
 const DOT = 26;
-const STATE = { archived: "var(--kind-7)", dreamed: "var(--kind-3)", waiting: "var(--kind-1)" };
+const STATE = { archived: "var(--kind-7)", dreamed: "var(--kind-3)", released: "var(--kind-4)", waiting: "var(--kind-1)" };
 const SOURCE = { dream: "var(--kind-2)", other: "var(--kind-6)", reflect: "var(--kind-4)", remember: "var(--kind-5)" };
 const time = d3.utcParse("%Y-%m-%dT%H:%M:%SZ");
 const short = (id) => id.slice(-4);
@@ -49,6 +49,6 @@ redraw(root, frame, 560, (width) => {
   const banked = dots(memories, rows[2][1], (m) => m.created, (m) => SOURCE[m.source]);
 
   hover(bars, (event, a) => show(event.currentTarget, `session …${short(a.session)}`, [["start", a.start ?? "no start mark"], ["end", a.end ?? "open"], ["machine", a.machine], ["cwd", a.cwd ?? "—"]]), hide);
-  hover(taken, (event, t) => show(event.currentTarget, t.title ?? `session …${short(t.session)}`, [["taken", t.taken], ["state", t.state], ["bytes", String(t.bytes)], ["highlights", String(t.highlights)], ["memories", String(t.memories)], ["dreamed", t.dreamed ?? "—"]]), hide);
+  hover(taken, (event, t) => show(event.currentTarget, t.title ?? `session …${short(t.session)}`, [["taken", t.taken], ["state", t.state], ["bytes", String(t.bytes)], ["highlights", String(t.highlights)], ["memories", String(t.memories)], ["dreamed", t.dreamed ?? "—"], ["held", String(t.held)], ["released", t.released ?? "—"]]), hide);
   hover(banked, (event, m) => show(event.currentTarget, m.name, [["bank", m.bank], ["file", m.file], ["source", m.source], ["session", m.session ? `…${short(m.session)}` : "—"], ["created", m.created]]), hide);
 });

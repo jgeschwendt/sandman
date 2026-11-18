@@ -16,6 +16,17 @@ You review the guidance of a memory pipeline for an AI coding agent, once a week
 - Leave a guidance alone when the evidence is thin or mixed. `null` is the usual answer: most weeks change nothing.
 - Name the pattern and its count in `reason` ("5 of 7 trace prunes: the session's story"), so a later reader can check it against the ledger.
 
+## Rewrite the question only for its misses
+
+- `# irrelevant` sends that share a cause the question could rule out (a note about the same tool sent for a different task) point at the question; sends whose names or descriptions mislead point at the naming rule instead.
+- A question is one sentence asking whether the agent needs the memory to carry out the request correctly; keep it general, never naming a repository or a note.
+
+## Propose a graduation only when it earns its cost
+
+- Rung 2, standing guidance: a `# standing` note an agent should know in every session of its scope becomes one line in the most specific artifact that is read there (a repository's `AGENTS.md`, a rules file, a skill, `CLAUDE.md`). A line costs context in every session: name the line it `replaces`, or say in `why` what its characters buy.
+- Rung 3, a mechanism: a `# relearned` note whose lesson keeps being needed becomes a hook, a lint, a test, a gate or a tool default, so no session has to remember it. `line` says what to build and where.
+- Propose nothing when no note clearly earns it; most weeks propose nothing.
+
 ## Edit, do not grow
 
 - Prefer sharpening or removing a line to adding one. Guidance that grows every week buries its own rules.

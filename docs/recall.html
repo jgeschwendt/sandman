@@ -415,14 +415,14 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     </tbody>
   </table>
 </div>
-  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"embedded":true,"error"?,"kind":"recall","machine":…,"ms":n,"scorer":"pplx","seed"?:true,"sent":[{"file":"&lt;path&gt;","score":0.97}],"session":…,"tokens":n}
-{"at":…,"file":"&lt;path&gt;","kind":"show","machine":…,"session":…}
-{"at":…,"file":"traces/&lt;bank&gt;/&lt;file&gt;","kind":"remember","machine":…,"session":…,"type":"feedback"}</pre>
+  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"embedded":true,"error"?,"kind":"recall","machine":…,"ms":n,"scorer":"pplx","seed"?:true,"sent":[{"file":"&lt;path&gt;","id":"&lt;its id&gt;","score":0.97}],"session":…,"tokens":n}
+{"at":…,"file":"&lt;path&gt;","id":"&lt;its id&gt;","kind":"show","machine":…,"session":…}
+{"at":…,"file":"traces/&lt;bank&gt;/&lt;file&gt;","id":"&lt;its id&gt;","kind":"remember","machine":…,"session":…,"type":"feedback"}</pre>
   <p class="docs-note"><strong>Proposed:</strong> sent, then read, then pinned or muted is the whole feedback loop, and two of its three parts exist already.</p>
   <ul class="stack claims" role="list">
     <li><strong>use</strong> — a <code class="code">show</code> line of a sent memory in the same session; before the seed and the pulls pass <code class="code">--session</code>, a read of the file in the tool log (194 on record).</li>
     <li><strong>pin, mute</strong> — from the pane: the memory's <code class="code">recall:</code> field and a ledger line.</li>
-    <li><strong><a class="link" href="index.html#reflect">reflect</a></strong> reads memories sent three times or more and never read as evidence that their names and descriptions miss when they apply, and may rewrite encode's and consolidate's guidance for it; the selection question stays fixed in the binary.</li>
+    <li><strong><a class="link" href="index.html#reflect">reflect</a></strong> reads memories sent three times or more and never read as evidence that their names and descriptions miss when they apply, and may rewrite encode's and consolidate's guidance for it, and the selection question when the recall evaluation scores the rewrite no worse (<a class="link" href="index.html#reflect">reflect</a>).</li>
   </ul>
 </section>
 
@@ -468,7 +468,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       <code class="code">traces/&lt;bank&gt;/&lt;file&gt;</code>, anything else refused.</li>
     <li><strong><code class="code">sandman remember "&lt;body&gt;" [--type &lt;type&gt;] [--topic &lt;topic&gt;] [--name …] [--description …] [--about &lt;path&gt;] [--session &lt;uuid&gt;]</code></strong>
       <span class="badge badge-ok">built</span> — encodes on purpose: one trace written at once to
-      <code class="code">traces/&lt;bank&gt;/</code>, source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>,
+      <code class="code">traces/&lt;bank&gt;/</code>, a new <code class="code">id</code>, source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>
+      (<code class="code">origin: hand</code> without one),
       a <code class="code">knowledge</code> or <code class="code">playbook</code> by its <code class="code">--topic</code>
       (<a class="link" href="knowledge.html#write">the knowledge store</a>), else homed by <code class="code">--about</code> as an encoded trace is, else by the cwd (from the root: about the person,
       or true everywhere); defaults feedback, the body's first eight words, its first line. It prints the
@@ -478,7 +479,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       MCP tools over stdio, <code class="code">recall {cue, about?, budget?}</code>, <code class="code">remember {body,
       about?, topic?, type?}</code>, <code class="code">show {path}</code>, beside
       <a class="link" href="intentions.html#verbs"><code class="code">defer</code>, <code class="code">done</code>,
-      <code class="code">drop</code> and <code class="code">due</code></a>, each description the seed's when-to-pull line; a call runs
+      <code class="code">drop</code> and <code class="code">due</code></a> and <a class="link" href="index.html#cycle-rethink"><code class="code">rethink</code></a>, each description the seed's when-to-pull line; a call runs
       the verb itself, so its text, ledger line and de-duplication are the command's, and a failure is a tool result
       flagged <code class="code">isError</code> carrying the verb's error line. The session is Claude Code's
       <code class="code">$CLAUDE_CODE_SESSION_ID</code>, which it gives every stdio server, unless a call passes
@@ -554,8 +555,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       argue for its own selection. Planted beside the corpus, a memory claiming it applies to every request came back in
       5 of 15 robustness cues; withholding the bank bonus from any name or description that claims its own importance
       cut that to 2 of 15 with the headline unchanged, and no real memory matches the pattern (measured 2026-11-13). The
-      description is capped at 160 characters, the question is fixed in the binary, and <code class="code">reflect</code>
-      watches for memories sent often and never used. A stricter question measured as noise and is not shipped.</li>
+      description is capped at 160 characters, the question is the binary's until a rewrite scores no worse on
+      the judged sends, and <code class="code">reflect</code> watches for memories sent often and never used. A stricter question measured as noise and is not shipped.</li>
     <li><strong>the number</strong> — a fused score ranks; it is not a probability, and the floors are where this
       corpus's scores fell.</li>
     <li><strong>one server</strong> — the best path needs the local Ollama and both models resident; without it every
