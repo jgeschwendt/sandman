@@ -1,7 +1,7 @@
 // The data flow, ①–④ marking the order a session passes it: a session timeline down the left edge, broken before the
 // later consolidation; its moments → recall at ①, mark and remember during, take at ②, serve's encode at ③ and consolidate at ④ →
-// the files under the root, directories first; all of them → chart → its consumer. The verbs are not built yet in this
-// rewrite (mark only for start and end): dashed.
+// the files under the root, directories first; all of them → chart → its consumer. A `next` node (mark, built for start,
+// end and guard marks, not yet for calls and prompts) is dashed.
 // Nodes and edges from docs/data/flow.json, each node at its column and row; a moment is a dot on the timeline, every
 // other node a box. An edge running back a column (a verb reading a file) is drawn on the forward curve 8px lower, its
 // head at the verb.

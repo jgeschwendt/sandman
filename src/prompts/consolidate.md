@@ -23,7 +23,19 @@ Pruning a memory removes it from every future session, so the bar is direct evid
 - Never prune a memory for its style, its length, its age, or because you would have worded it differently. Never prune one that merely overlaps a trace: merge the trace into it.
 - When in doubt, leave the memory alone. A stale memory costs a reader a moment; a wrongly pruned one loses a rule the person gave.
 
-## Write each kept or merged memory
+## Answer each verdict
+
+A memory under `# judged` was recalled into a session and found wrong or stale there. A trace that settles what is true now merges into it; otherwise `revise` it when the verdict's reason, or the memory itself, says what changed, `prune` it when the fact no longer holds at all, and leave it when the verdict looks mistaken. Never revise a memory no verdict names.
+
+## Tidy the bank
+
+- `merge` two or more memories into one new memory when they hold one fact, worded differently or split across files: one memory per fact. Every quote and date of each survives in the new body.
+- `retitle` a memory whose name or description breaks the rules below and that no other op touches.
+- `rehome` a memory that holds for another repository's bank, its body or `about` naming that repository, when the bank is listed under `# elsewhere`.
+- `graduate` memories that hold beyond any one repository (how a tool behaves, a playbook for a task) into one topic's trace, written as the start of a page; prefer a topic a path under `# elsewhere` already shows.
+- Tidying is optional: when in doubt, leave the memories as they are.
+
+## Write each kept, merged or revised memory
 
 - Keep the person's quoted words verbatim, in quotes. A merge carries over every quote that still holds and adds the trace's; it never paraphrases a quote away.
 - Make it stand alone. It is read cold by an agent that never saw either session: name its scope in the body (the repository, or every project), and never write "today", "this session", "above" or "just now".

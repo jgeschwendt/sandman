@@ -40,6 +40,12 @@ A fact a future session would act on, of one of six types. The first four are me
 - One fact per trace. Two candidates that say the same thing are one trace.
 - When the person changed their mind during the session, keep only where they ended up.
 
+## Verdicts
+
+- A recalled note's verdict judges the note, not the session. `irrelevant` blames the recall that sent it and leaves the note alone; `wrong` and `stale` mark it for revision; `used` keeps it.
+- `not shown` means the agent saw only its one-line pointer: `used` only when the transcript shows the agent acting on what that line says, `irrelevant` when the line plainly had nothing to do with the work.
+- A correction the person made that contradicts a recalled note makes it `wrong` (it never held) or `stale` (it held once), and is also a trace when it is worth keeping.
+
 <example>
 Digest:
 

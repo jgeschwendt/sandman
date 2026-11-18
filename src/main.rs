@@ -1,8 +1,9 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end, or a guard, to the
 //! day's ledger file, `take` archives a marked session at its end, `chart` prints what the data
-//! root holds as one JSON object, `recall` scores the memories against an agent's cue and `show`
-//! prints one, over the memories, the knowledge pages and the traces of both, `defer`, `due`,
-//! `done` and `drop` keep work put off for later, `mcp` serves the agent's verbs as MCP tools,
+//! root holds as one JSON object, `check` holds every note to the memory cycle's invariants,
+//! `recall` scores the memories against an agent's cue and `show` prints one, over the memories,
+//! the knowledge pages and the traces of both, `rethink` records a verdict on one, `defer`, `due`, `done` and `drop` keep work put off
+//! for later, `mcp` serves the agent's verbs as MCP tools,
 //! `serve` is the daemon (reconcile, settle, encode, consolidate, reflect), `status` asks it for its
 //! health, `setup` installs its launchd agent, `forget` erases one session from every store,
 //! `version` prints the build.
@@ -78,9 +79,19 @@ const KINDS: [&str; 4] = ["feedback", "project", "reference", "user"];
 /// one episode) and a `playbook` (procedural memory, how a recurring task is done).
 const KNOWN: [&str; 2] = ["knowledge", "playbook"];
 
-/// Each model job's default guidance and its fixed contract, sent before its data; `guide` reads
-/// `<root>/prompts/<job>.md` in place of the guidance.
-const PROMPTS: [(&str, [&str; 2]); 4] = [
+/// A rewrite line's `op` (docs/index.html#cycle-rewrite).
+const OPS: [&str; 9] = [
+    "graduate", "keep", "merge", "prune", "rehome", "release", "retitle", "revert", "revise",
+];
+
+/// A note's `origin`, its source when it descends from no session and no note: `hand` (remembered
+/// without a session), `import` (brought in from elsewhere), `routine` (a pipeline's).
+const ORIGINS: [&str; 3] = ["hand", "import", "routine"];
+
+/// Each model job's default guidance and its fixed contract, sent before its data, and recall's
+/// selection question (no contract); `guide` reads `<root>/prompts/<job>.md` in place of the
+/// default.
+const PROMPTS: [(&str, [&str; 2]); 5] = [
     (
         "consolidate",
         [
@@ -102,6 +113,7 @@ const PROMPTS: [(&str, [&str; 2]); 4] = [
             include_str!("prompts/judge.contract.md"),
         ],
     ),
+    ("question", [QUESTION, ""]),
     (
         "reflect",
         [
@@ -111,8 +123,9 @@ const PROMPTS: [(&str, [&str; 2]); 4] = [
     ),
 ];
 
-/// Recall's fixed question, after each candidate's record: never read from a memory. The
-/// reference's, byte for byte (docs/recall.html#chosen).
+/// Recall's default selection question, after each candidate's record: never read from a memory.
+/// The reference's, byte for byte (docs/recall.html#chosen); the weekly review may put another in
+/// force, `<root>/prompts/question.md`, once the recall evaluation judges it no worse.
 const QUESTION: &str = "Does the agent need this memory to carry out the request correctly?";
 
 /// The old sandman's launchd agents, retired with the cutover (2026-11-14): `setup` boots each out
@@ -126,7 +139,7 @@ const RETIRED: [&str; 3] = [
 
 /// The seed's instructions, first in a session's context; `<id>` is the session's id, `<me>` the
 /// name the binary was invoked as.
-const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, one fact per call, with `--about <repository path>` when it holds in one repository, `--type knowledge|playbook --topic <topic>` for general knowledge or a playbook. When the person defers work (later, tomorrow, after X), run `<me> defer \"<their words>\" --when <today|tomorrow|friday|YYYY-MM-DD|+3d|the event> --session <id>` at once; close it with `<me> done <its id>` once finished.";
+const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, one fact per call, with `--about <repository path>` when it holds in one repository, `--type knowledge|playbook --topic <topic>` for general knowledge or a playbook. When the person defers work (later, tomorrow, after X), run `<me> defer \"<their words>\" --when <today|tomorrow|friday|YYYY-MM-DD|+3d|the event> --session <id>` at once; close it with `<me> done <its id>` once finished. Once a recalled note proves used, wrong, stale or irrelevant, run `<me> rethink <path> --used|--wrong|--stale|--irrelevant --session <id>`.";
 
 /// Recall's lexical gate: a cue whose every token is one of these asks for nothing.
 const STEER: &str = "go yes yeah yep ok okay continue next thanks thank done saved good great morning back hi hello signed sure fine cool nice where we are what now";
@@ -134,12 +147,35 @@ const STEER: &str = "go yes yeah yep ok okay continue next thanks thank done sav
 /// The words `toks` drops.
 const STOPWORDS: &str = "a an and are as at be by can do for from has have i if in into is it its me my no not of on or our so that the then this to was we what when where which will with you your about should would could lets let im dont get going want need make use using also just like than them there these they";
 
+/// The three stores of notes, in reader order.
+const STORES: [&str; 3] = ["memories", "knowledge", "traces"];
+
+/// A `rethink` verdict: `irrelevant` blames the recall that sent the note, `stale` and `wrong`
+/// the note, `used` raises it (docs/index.html#cycle-rethink).
+const VERDICTS: [&str; 4] = ["irrelevant", "stale", "used", "wrong"];
+
 /// The release (else the crate version) and the build, the commit it was built from (`build.rs`):
 /// what `version` prints, the daemon's health carries and `status` compares.
 const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"));
 
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
+
+/// A scorer's answer: its name, its nouls and its input tokens.
+type Decision = Option<(String, (Vec<f64>, u64))>;
+
+/// One order op to revert: the note it wrote, and each note it moved aside as (where, the copy).
+type Undo = (Option<PathBuf>, Vec<(PathBuf, PathBuf)>);
+
+/// What the release job would do now (docs/index.html#cycle-release).
+struct Plan {
+    /// The sessions with a transcript on disk that are held.
+    held: BTreeSet<String>,
+    /// Per unheld session past the grace, oldest first: its archived transcripts.
+    release: Vec<(String, Vec<PathBuf>)>,
+    /// The `.pruned/` copies past depth 1 and its grace.
+    sweep: Vec<PathBuf>,
+}
 
 /// Puts each `(job, guidance)` in force: the guidance in force first copied to
 /// `<root>/prompts/.history/<yyyy>/<mm>/<dd>/<HHMMSS>-<job>.md` (UTC, `dated`), then the new one
@@ -237,6 +273,287 @@ fn append(path: &Path, text: &str) -> io::Result<()> {
             return (&file).write_all(text.as_bytes());
         }
     }
+}
+
+/// Every archived transcript, `(session, path, taken)`, by path: a file `stamped` reads.
+fn archived(root: &Path) -> Vec<(String, PathBuf, String)> {
+    tree(&root.join(".archive/claude"), 4)
+        .into_iter()
+        .filter(|path| path.is_file())
+        .filter_map(|path| {
+            let (session, at) = stamped(&path)?;
+            Some((session, path, at))
+        })
+        .collect()
+}
+
+/// The memory cycle's invariants over the root (docs/index.html#cycle-check), read only: per
+/// violation `(its invariant, "<path>: <n>: <detail>")`, the notes' in reader order, then each
+/// rewrite line's, then `.pruned/`'s and the archive's; and the counts of notes and of sessions
+/// released.
+fn audit(root: &Path, lines: &[Value], plan: &Plan) -> (usize, usize, Vec<(u8, String)>) {
+    let (all, mut ids, gone, takes) = (
+        every(root),
+        BTreeMap::new(),
+        released(lines),
+        archived(root),
+    );
+    // a session released since its latest take
+    let freed: BTreeSet<&str> = gone
+        .iter()
+        .filter(|pair| {
+            !takes
+                .iter()
+                .any(|take| take.0 == *pair.0 && take.2 > pair.1.0)
+        })
+        .map(|pair| pair.0.as_str())
+        .collect();
+    let ends = ended(lines);
+    let over: BTreeSet<&str> = ends.iter().filter_map(|end| end.2["id"].as_str()).collect();
+    let mut found: Vec<(u8, String)> = all
+        .iter()
+        .flat_map(|note| {
+            let (path, field) = (text(&note["path"]), |key: &str| {
+                note.get(key).and_then(Value::as_str)
+            });
+            let id = field("id").unwrap_or_default();
+            let twin = ids.get(id).copied();
+            if twin.is_none() {
+                let _: Option<&str> = ids.insert(id, path);
+            }
+            let listed = |key: &str| -> Vec<&str> {
+                field(key).unwrap_or_default().split_whitespace().collect()
+            };
+            let unsorted = |key: &str| {
+                listed(key)
+                    .windows(2)
+                    .any(|pair| matches!(pair, [left, right] if left >= right))
+                    .then(|| format!("{key} is not sorted once"))
+            };
+            let origin = field("origin").filter(|value| !["", "-"].contains(value));
+            [
+                (1u8, field("id").is_none().then(|| "no id".to_owned())),
+                (
+                    1,
+                    (field("id").is_some() && !hexid(id))
+                        .then(|| format!("id {id} is not 12 lowercase hex")),
+                ),
+                (
+                    1,
+                    twin.filter(|_| hexid(id))
+                        .map(|first| format!("id {id} is also {first}'s")),
+                ),
+            ]
+            .into_iter()
+            .chain(["from", "origin", "sessions"].map(|key| {
+                let bare = field(key).filter(|value| ["", "-"].contains(value));
+                (2, bare.map(|value| format!("{key} is {value:?}")))
+            }))
+            .chain([
+                (
+                    2,
+                    origin
+                        .filter(|value| !ORIGINS.contains(value))
+                        .map(|value| format!("origin {value} is not hand, import or routine")),
+                ),
+                (
+                    2,
+                    (lineage([note]).is_empty()
+                        && words(field("from")).is_empty()
+                        && !origin.is_some_and(|value| ORIGINS.contains(&value)))
+                    .then(|| "no source".to_owned()),
+                ),
+                (
+                    3,
+                    listed("from")
+                        .into_iter()
+                        .find(|word| !hexid(word))
+                        .map(|word| format!("from: {word} is not an id")),
+                ),
+                (3, unsorted("from")),
+                (
+                    3,
+                    listed("sessions")
+                        .into_iter()
+                        .find(|word| !uuid(word))
+                        .map(|word| format!("sessions: {word} is not a session id")),
+                ),
+                (3, unsorted("sessions")),
+                (
+                    3,
+                    field("strength").map(|_| "strength is counted, never stored".to_owned()),
+                ),
+                (
+                    4,
+                    words(field("from"))
+                        .into_iter()
+                        .find(|parent| !over.contains(parent))
+                        .map(|parent| format!("from {parent} was never ended")),
+                ),
+                (4, over.contains(id).then(|| format!("id {id} was ended"))),
+                (
+                    7,
+                    lineage([note])
+                        .into_iter()
+                        .find(|session| freed.contains(session))
+                        .map(|session| format!("names released {session}")),
+                ),
+            ])
+            .filter_map(|(rule, detail)| Some((rule, format!("{path}: {rule}: {}", detail?))))
+            .collect::<Vec<_>>()
+        })
+        .collect();
+    // then each rewrite line: its shape, an id ended once, its `to` still or later accounted for
+    let active: BTreeSet<&str> = all.iter().filter_map(|note| note["id"].as_str()).collect();
+    let mut counted = BTreeSet::new();
+    let twice: Vec<(usize, &str)> = ends
+        .iter()
+        .filter_map(|&(at, _, entry)| {
+            let id = text(&entry["id"]);
+            (!counted.insert(id)).then_some((at, id))
+        })
+        .collect();
+    for (at, line) in lines
+        .iter()
+        .enumerate()
+        .filter(|pair| pair.1["kind"] == "rewrite")
+    {
+        let (maybe, to) = (
+            |value: &Value| value.is_null() || value.is_string(),
+            &line["to"],
+        );
+        let shaped = line["from"].as_array().is_some_and(|entries| {
+            entries.iter().all(|entry| {
+                entry["digest"].is_string()
+                    && maybe(&entry["id"])
+                    && entry["path"].is_string()
+                    && entry["sessions"]
+                        .as_array()
+                        .is_some_and(|held| held.iter().all(Value::is_string))
+            })
+        }) && OPS.contains(&text(&line["op"]))
+            && maybe(&line["model"])
+            && maybe(&line["reason"])
+            && (to.is_null()
+                || (to["id"].is_string() && to["path"].is_string())
+                || to["artifact"].is_string());
+        let lost = to["id"].as_str().filter(|into| {
+            !active.contains(into)
+                && !ends
+                    .iter()
+                    .any(|&(later, _, entry)| later > at && entry["id"] == *into)
+        });
+        found.extend(
+            [
+                (!shaped).then(|| "not a rewrite line".to_owned()),
+                lost.map(|into| format!("to {into} is neither active nor ended later")),
+            ]
+            .into_iter()
+            .chain(
+                twice
+                    .iter()
+                    .filter(|pair| pair.0 == at)
+                    .map(|pair| Some(format!("id {} ended again", pair.1))),
+            )
+            .flatten()
+            .map(|detail| (5, format!("ledger {}: 5: {detail}", text(&line["at"])))),
+        );
+    }
+    // release's: no copy past depth 1 and its grace, no released transcript on disk
+    found.extend(plan.sweep.iter().map(|copy| {
+        (
+            6,
+            format!("{}: 6: past depth 1 and its grace", shown(root, copy)),
+        )
+    }));
+    found.extend(takes.iter().filter_map(|take| {
+        let when = &gone.get(&take.0).filter(|release| release.0 >= take.2)?.0;
+        Some((
+            7,
+            format!(
+                "{}: 7: released {when}, still on disk",
+                shown(root, &take.1)
+            ),
+        ))
+    }));
+    (all.len(), freed.len(), found)
+}
+
+/// Recall's BM25 (k1 1.2, b .75) per candidate, `labelled` its bank's label: its head, body and
+/// file stem against `query`'s distinct tokens, plus 4 in `about`'s bank, else 1 in home's or the
+/// grove root's, unless it claims its own importance (docs/recall.html#chosen).
+#[expect(clippy::float_arithmetic, reason = "BM25 is float math")]
+fn bm25(candidates: &[Value], labelled: &[String], query: &str, about: Option<&str>) -> Vec<f64> {
+    let count = |items: usize| f64::from(u32::try_from(items).unwrap_or(u32::MAX));
+    let docs: Vec<Vec<String>> = candidates
+        .iter()
+        .zip(labelled)
+        .map(|(memory, repo)| {
+            let file = text(&memory["file"]);
+            toks(&format!(
+                "{}\n{} {}",
+                head(memory, repo),
+                text(&memory["body"]),
+                file.strip_suffix(".md").unwrap_or(file)
+            ))
+        })
+        .collect();
+    let size = count(docs.len());
+    let mean = count(docs.iter().map(Vec::len).sum()) / size;
+    let idf: Vec<(String, f64)> = toks(query)
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|word| {
+            let df = count(docs.iter().filter(|doc| doc.contains(&word)).count());
+            let weight = ((size - df + 0.5) / (df + 0.5)).ln_1p();
+            (word, weight)
+        })
+        .collect();
+    docs.iter()
+        .zip(candidates.iter().zip(labelled))
+        .map(|(doc, (memory, repo))| {
+            let told = format!("{} {}", text(&memory["name"]), text(&memory["description"]))
+                .to_lowercase();
+            let ends = |tail: &str| {
+                !tail.starts_with(|letter: char| letter.is_alphanumeric() || letter == '_')
+            };
+            let claims = CLAIM.iter().any(|phrase| told.contains(phrase))
+                || ["every request", "any request", "all request"]
+                    .iter()
+                    .any(|phrase| {
+                        told.match_indices(phrase).any(|(at, _)| {
+                            let tail = told
+                                .get(at.saturating_add(phrase.len())..)
+                                .unwrap_or_default();
+                            ends(tail) || tail.strip_prefix('s').is_some_and(ends)
+                        })
+                    });
+            let bonus = if claims {
+                0.0f64
+            } else if about == Some(repo.as_str()) {
+                4.0f64
+            } else if GENERAL.contains(&repo.as_str()) {
+                1.0f64
+            } else {
+                0.0f64
+            };
+            let length = count(doc.len());
+            idf.iter()
+                .map(|pair| {
+                    (
+                        pair.1,
+                        count(doc.iter().filter(|token| **token == pair.0).count()),
+                    )
+                })
+                .filter(|pair| pair.1 > 0.0f64)
+                .fold(0.0f64, |sum, (weight, tf)| {
+                    sum + weight * tf * 2.2f64
+                        / 1.2f64.mul_add(0.75f64.mul_add(length / mean, 0.25f64), tf)
+                })
+                + bonus
+        })
+        .collect()
 }
 
 /// The common git dir of the linked worktree at `dir`: its `.git` a file naming
@@ -361,6 +678,37 @@ fn embed(texts: &[String], begun: Instant, limit: Duration) -> io::Result<Vec<Ve
     })
 }
 
+/// Each note a `rewrite` line of `lines` ended, in ledger order: `(the line's index, the line, its
+/// from entry)` per entry with an id that is not the line's `to` id (a keep continues the note).
+fn ended(lines: &[Value]) -> Vec<(usize, &Value, &Value)> {
+    let rewrites = || {
+        lines
+            .iter()
+            .enumerate()
+            .filter(|pair| pair.1["kind"] == "rewrite")
+    };
+    // a revert's `to` puts the note back: no end before it counts
+    let restored: Vec<(usize, &Value)> = rewrites()
+        .filter(|pair| pair.1["op"] == "revert" && pair.1["to"]["id"].is_string())
+        .map(|pair| (pair.0, &pair.1["to"]["id"]))
+        .collect();
+    rewrites()
+        .flat_map(|(at, line)| {
+            line["from"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(move |entry| entry["id"].is_string() && entry["id"] != line["to"]["id"])
+                .map(move |entry| (at, line, entry))
+        })
+        .filter(|end| {
+            !restored
+                .iter()
+                .any(|back| back.0 > end.0 && *back.1 == end.2["id"])
+        })
+        .collect()
+}
+
 /// Ends `session`'s ledger story with one end line, returned as written: `decided` (skipped,
 /// held) as is, else the take — the transcript and its sidecar renamed into the archive, then the
 /// pointer — or `gone` when there is no transcript.
@@ -389,13 +737,9 @@ fn end(
             let ended = utc(fs::metadata(&path)?.modified()?);
             archived.parent().map_or(Ok(()), fs::create_dir_all)?;
             fs::rename(&path, &archived)?;
-            let sidecar = path.with_extension("");
-            if sidecar.is_dir() {
-                let beside = format!(
-                    "{}-dir",
-                    archived.to_string_lossy().trim_end_matches(".jsonl")
-                );
-                fs::rename(sidecar, beside)?;
+            let session_dir = path.with_extension("");
+            if session_dir.is_dir() {
+                fs::rename(session_dir, sidecar(&archived))?;
             }
             let lines = jsonl(&archived);
             let title = lines
@@ -425,19 +769,49 @@ fn end(
     record(root, &mut line).map(|()| line)
 }
 
-/// An episode's digest from its end line (AGENTS.md `### encode`), cut to `budget` bytes, and the
-/// directory it ran in.
-fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<String>) {
-    let (session, turns) = (
+/// An episode's digest from its end line and the ledger's `lines` (AGENTS.md `### encode`), cut to
+/// `budget` bytes, the directory it ran in, and the notes its `# recalled` lists.
+fn episode(
+    root: &Path,
+    lines: &[Value],
+    closing: &Value,
+    budget: usize,
+) -> (String, Option<String>, Vec<Value>) {
+    let (session, turns, all) = (
         text(&closing["session"]),
         jsonl(Path::new(text(&closing["archived"]))),
+        every(root),
     );
     let cwd = place(&turns, &closing["cwd"]);
     // what the session already remembered is done; a highlight it covers (the same body,
     // whitespace collapsed) is dropped
-    let remembered: Vec<Value> = every(root)
-        .into_iter()
+    let remembered: Vec<&Value> = all
+        .iter()
         .filter(|note| note["session"] == session && text(&note["source"]).starts_with("remember"))
+        .collect();
+    // the notes its recall lines sent and no verdict of the session judged, each shown or not
+    let (named, mine) = (
+        |line: &Value, note: &Value| {
+            line["file"] == note["path"] || (note["id"].is_string() && line["id"] == note["id"])
+        },
+        |kind: &'static str| {
+            lines
+                .iter()
+                .filter(move |line| line["kind"] == kind && line["session"] == session)
+        },
+    );
+    let recalled: Vec<Value> = all
+        .iter()
+        .filter(|note| {
+            mine("recall").any(|line| {
+                line["sent"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|entry| named(entry, note))
+            }) && !mine("rethink").any(|line| named(line, note))
+        })
+        .cloned()
         .collect();
     let digest = format!(
         "# episode\ndate: {}\ncwd: {}\n\n{}# transcript\n{}",
@@ -468,6 +842,22 @@ fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<Strin
                     })
                     .collect(),
             ),
+            (
+                "recalled",
+                recalled
+                    .iter()
+                    .map(|note| {
+                        format!(
+                            "{} \u{b7} {} \u{2014} {} \u{b7} {}",
+                            text(&note["path"]),
+                            text(&note["name"]),
+                            one_line(text(&note["description"]), 160),
+                            ["not shown", "shown"]
+                                [usize::from(mine("show").any(|line| named(line, note)))]
+                        )
+                    })
+                    .collect(),
+            ),
         ]),
         turns
             .iter()
@@ -475,18 +865,41 @@ fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<Strin
             .map(|(role, said)| [role, ": ", &said, "\n"].concat())
             .collect::<String>()
     );
-    (cut(digest, budget), cwd.map(str::to_owned))
+    (cut(digest, budget), cwd.map(str::to_owned), recalled)
+}
+
+/// A rewrite line's `from` entry for `note` as it stands: its file's digest, its id, its path and
+/// the sessions it descends from.
+fn entry(note: &Value) -> Value {
+    json!({"digest": sha256(text(&note["text"])), "id": note["id"], "path": note["path"], "sessions": lineage([note])})
+}
+
+/// The recall evaluation's examples, `<root>/eval/recall.jsonl`, each with the candidate it
+/// judges now: by id, followed through the rewrite lines to the note it went into, else by path.
+fn examples(root: &Path, candidates: &[Value]) -> Vec<(Value, Option<usize>)> {
+    let lines = ledger(root);
+    let into: BTreeMap<&str, &str> = ended(&lines)
+        .into_iter()
+        .filter_map(|end| Some((end.2["id"].as_str()?, end.1["to"]["id"].as_str()?)))
+        .collect();
+    jsonl(&root.join("eval/recall.jsonl"))
+        .into_iter()
+        .map(|example| {
+            let id = iter::successors(example["id"].as_str(), |held| into.get(held).copied())
+                .take(into.len().saturating_add(1))
+                .last();
+            let at = candidates.iter().position(|note| {
+                id.map_or(note["path"] == example["path"], |held| note["id"] == held)
+            });
+            (example, at)
+        })
+        .collect()
 }
 
 /// Every note recall and `show` read, in reader order: the memories, the knowledge pages, the
 /// traces.
 fn every(root: &Path) -> Vec<Value> {
-    [
-        notes(root, "memories"),
-        notes(root, "knowledge"),
-        notes(root, "traces"),
-    ]
-    .concat()
+    STORES.iter().flat_map(|dir| notes(root, dir)).collect()
 }
 
 /// What is embedded of a candidate: its head and the first 1,500 characters of its body.
@@ -539,136 +952,9 @@ fn guide(root: &Path, job: &str) -> String {
     }
 }
 
-/// An embedding's cache key, the reference's: SHA-256 (FIPS 180-4) hex of
-/// `<model>\n1024\n<text>`.
+/// An embedding's cache key, the reference's: the SHA-256 of `<model>\n1024\n<text>`.
 fn hash(text: &str) -> String {
-    const ROUND: [u32; 64] = [
-        0x428a_2f98,
-        0x7137_4491,
-        0xb5c0_fbcf,
-        0xe9b5_dba5,
-        0x3956_c25b,
-        0x59f1_11f1,
-        0x923f_82a4,
-        0xab1c_5ed5,
-        0xd807_aa98,
-        0x1283_5b01,
-        0x2431_85be,
-        0x550c_7dc3,
-        0x72be_5d74,
-        0x80de_b1fe,
-        0x9bdc_06a7,
-        0xc19b_f174,
-        0xe49b_69c1,
-        0xefbe_4786,
-        0x0fc1_9dc6,
-        0x240c_a1cc,
-        0x2de9_2c6f,
-        0x4a74_84aa,
-        0x5cb0_a9dc,
-        0x76f9_88da,
-        0x983e_5152,
-        0xa831_c66d,
-        0xb003_27c8,
-        0xbf59_7fc7,
-        0xc6e0_0bf3,
-        0xd5a7_9147,
-        0x06ca_6351,
-        0x1429_2967,
-        0x27b7_0a85,
-        0x2e1b_2138,
-        0x4d2c_6dfc,
-        0x5338_0d13,
-        0x650a_7354,
-        0x766a_0abb,
-        0x81c2_c92e,
-        0x9272_2c85,
-        0xa2bf_e8a1,
-        0xa81a_664b,
-        0xc24b_8b70,
-        0xc76c_51a3,
-        0xd192_e819,
-        0xd699_0624,
-        0xf40e_3585,
-        0x106a_a070,
-        0x19a4_c116,
-        0x1e37_6c08,
-        0x2748_774c,
-        0x34b0_bcb5,
-        0x391c_0cb3,
-        0x4ed8_aa4a,
-        0x5b9c_ca4f,
-        0x682e_6ff3,
-        0x748f_82ee,
-        0x78a5_636f,
-        0x84c8_7814,
-        0x8cc7_0208,
-        0x90be_fffa,
-        0xa450_6ceb,
-        0xbef9_a3f7,
-        0xc671_78f2,
-    ];
-    let mut state: [u32; 8] = [
-        0x6a09_e667,
-        0xbb67_ae85,
-        0x3c6e_f372,
-        0xa54f_f53a,
-        0x510e_527f,
-        0x9b05_688c,
-        0x1f83_d9ab,
-        0x5be0_cd19,
-    ];
-    let mut data = format!("{}\n1024\n{text}", EMBED[0]).into_bytes();
-    let bits = u64::try_from(data.len())
-        .unwrap_or_default()
-        .wrapping_mul(8);
-    data.push(0x80);
-    while data.len() & 63 != 56 {
-        data.push(0);
-    }
-    data.extend(bits.to_be_bytes());
-    for block in data.chunks_exact(64) {
-        let mut w = [0u32; 64];
-        for (slot, word) in w.iter_mut().zip(block.chunks_exact(4)) {
-            *slot = u32::from_be_bytes(<[u8; 4]>::try_from(word).unwrap_or_default());
-        }
-        for i in 16..64usize {
-            let (early, late) = (w[i.wrapping_sub(15)], w[i.wrapping_sub(2)]);
-            w[i] = w[i.wrapping_sub(16)]
-                .wrapping_add(
-                    early.rotate_right(7) ^ early.rotate_right(18) ^ early.wrapping_shr(3),
-                )
-                .wrapping_add(w[i.wrapping_sub(7)])
-                .wrapping_add(
-                    late.rotate_right(17) ^ late.rotate_right(19) ^ late.wrapping_shr(10),
-                );
-        }
-        let mut round = state;
-        for (constant, word) in ROUND.iter().zip(w) {
-            let [ra, rb, rc, rd, re, rf, rg, rh] = round;
-            let one = rh
-                .wrapping_add(re.rotate_right(6) ^ re.rotate_right(11) ^ re.rotate_right(25))
-                .wrapping_add((re & rf) ^ (!re & rg))
-                .wrapping_add(*constant)
-                .wrapping_add(word);
-            let two = (ra.rotate_right(2) ^ ra.rotate_right(13) ^ ra.rotate_right(22))
-                .wrapping_add((ra & rb) ^ (ra & rc) ^ (rb & rc));
-            round = [
-                one.wrapping_add(two),
-                ra,
-                rb,
-                rc,
-                rd.wrapping_add(one),
-                re,
-                rf,
-                rg,
-            ];
-        }
-        for (held, add) in state.iter_mut().zip(round) {
-            *held = held.wrapping_add(add);
-        }
-    }
-    state.map(|word| format!("{word:08x}")).concat()
+    sha256(&format!("{}\n1024\n{text}", EMBED[0]))
 }
 
 /// A candidate's head as the reference writes it: `<label> · <name>\n<description, one-lined to
@@ -679,6 +965,14 @@ fn head(memory: &Value, label: &str) -> String {
         text(&memory["name"]),
         one_line(text(&memory["description"]), 400)
     )
+}
+
+/// Whether `text` is a note's id: 12 lowercase hex digits.
+fn hexid(text: &str) -> bool {
+    text.len() == 12
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// The quoted bodies after `sandman remember ` and `orrery attend ` in the commands a transcript's
@@ -756,7 +1050,8 @@ fn intentions(root: &Path) -> Vec<Value> {
 }
 
 /// The background job under `<claude>/jobs/` that names `session`: its `resumeSessionId`, else
-/// its `sessionId` (a `/clear` moves a job on to a new id and leaves the old one in `sessionId`).
+/// its `sessionId` (a `/clear` moves a job on to a new id and leaves the old one in `sessionId`);
+/// a finished one (`state` `done` or `stopped`, which Claude Code keeps on disk) holds nothing.
 fn job(claude: &Path, session: &str) -> Option<String> {
     tree(&claude.join("jobs"), 1).into_iter().find_map(|dir| {
         let state: Value =
@@ -764,7 +1059,8 @@ fn job(claude: &Path, session: &str) -> Option<String> {
         (state["resumeSessionId"]
             .as_str()
             .or_else(|| state["sessionId"].as_str())
-            == Some(session))
+            == Some(session)
+            && !["done", "stopped"].contains(&text(&state["state"])))
         .then(|| name(&dir).to_owned())
     })
 }
@@ -774,6 +1070,21 @@ fn jsonl(path: &Path) -> Vec<Value> {
     String::from_utf8_lossy(&fs::read(path).unwrap_or_default())
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// The `wrong` and `stale` verdicts on `note` since its body last changed (docs/index.html#cycle-strength),
+/// by path, else id.
+fn judged<'line>(lines: &'line [Value], note: &Value) -> Vec<&'line Value> {
+    lines
+        .iter()
+        .filter(|line| {
+            line["kind"] == "rethink"
+                && ["stale", "wrong"].contains(&text(&line["verdict"]))
+                && line["at"].as_str() > when(note)
+                && (line["file"] == note["path"]
+                    || (note["id"].is_string() && line["id"] == note["id"]))
+        })
         .collect()
 }
 
@@ -859,6 +1170,26 @@ fn labels(home: &Path, claude: &Path) -> (PathBuf, Vec<(String, String)>, impl F
     (grove, repos, label)
 }
 
+/// Whether a pass with an order op fails its measure (docs/index.html#cycle-rewrite): it lowers
+/// the recall evaluation's score, or lowers neither notes nor characters and raises no score.
+fn worse(before: &Value, after: &Value) -> bool {
+    let (score, lower) = (
+        |side: &Value| side["eval"].as_f64(),
+        |key: &str| after[key].as_u64() < before[key].as_u64(),
+    );
+    score(after) < score(before)
+        || !(lower("notes") || lower("chars") || score(after) > score(before))
+}
+
+/// A file's bytes, a directory's files' summed; 0 for what is not there.
+fn weight(path: &Path) -> u64 {
+    if path.is_dir() {
+        tree(path, 1).iter().map(|kid| weight(kid)).sum()
+    } else {
+        fs::metadata(path).map_or(0, |meta| meta.len())
+    }
+}
+
 /// Every line of `<root>/ledger/*/*/*.jsonl` that parses, oldest file first; a staged `.` file
 /// skipped.
 fn ledger(root: &Path) -> Vec<Value> {
@@ -889,6 +1220,156 @@ fn lineage<'note, I: IntoIterator<Item = &'note Value>>(notes: I) -> BTreeSet<&'
         .flat_map(str::split_whitespace)
         .filter(|word| uuid(word))
         .collect()
+}
+
+/// `questions` (keyed by rank) and `state` to each of `$SANDMAN_SCORERS` until one answers a noul
+/// per question, Jev skipped while `<root>/jev-down.json` holds it down: the scorer, its nouls and
+/// its input tokens; and each failure, `(scorer, cause)` (AGENTS.md `### sandman recall`).
+fn decide(
+    root: &Path,
+    home: &Path,
+    questions: &Map<String, Value>,
+    state: &str,
+    begun: Instant,
+    limit: Duration,
+) -> (Decision, Vec<(String, String)>) {
+    let secret = env::var("TYPESAFE_API_KEY")
+        .or_else(|_| fs::read_to_string(home.join(".config/typesafe/api_key")))
+        .map(|key| key.trim().to_owned())
+        .unwrap_or_default();
+    let now = || {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            })
+    };
+    let (down, tried, mut errors) = (
+        root.join("jev-down.json"),
+        setting("SANDMAN_SCORERS", "pplx,kev,jev".to_owned()),
+        Vec::new(),
+    );
+    let held_down = serde_json::from_str::<Value>(&fs::read_to_string(&down).unwrap_or_default())
+        .ok()
+        .and_then(|stamp| stamp["until"].as_u64())
+        .is_some_and(|until| until > now());
+    let ollama = setting("SANDMAN_OLLAMA", "http://127.0.0.1:11434".to_owned());
+    let decided = tried
+        .split(',')
+        .filter(|scorer| !(*scorer == "jev" && held_down))
+        .find_map(|scorer| {
+            let (url, model) = match scorer {
+                "pplx" => (format!("{ollama}/v1/systemone"), "pplx-decider-flash:4b"),
+                "kev" => ("http://127.0.0.1:1703/v1/systemone".to_owned(), "kev-latest"),
+                "jev" => ("https://api.typesafe.ai/v1/systemone".to_owned(), "jev-latest"),
+                _ => return None,
+            };
+            let key = if scorer == "jev" { secret.as_str() } else { "" };
+            let request = json!({"model": model, "questions": questions, "state": state});
+            let (answer, replied) = if scorer == "jev" && secret.is_empty() {
+                (
+                    Err(io::Error::other(
+                        "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
+                    )),
+                    String::new(),
+                )
+            } else {
+                post(&url, &request.to_string(), key, begun, limit)
+            };
+            let scored = answer.and_then(|reply| {
+                let nouls = (0..questions.len()).map(|rank| {
+                    reply["answers"][rank.to_string()]["noul"]
+                        .as_f64()
+                        .ok_or_else(|| {
+                            io::Error::other(format!("reply: no noul for question {rank}"))
+                        })
+                });
+                Ok((
+                    nouls.collect::<io::Result<Vec<f64>>>()?,
+                    reply["usage"]["input_tokens"].as_u64().unwrap_or(0),
+                ))
+            });
+            scored
+                .map_err(|error| {
+                    // out of credit or refused: down for 6 h, else for 60 s
+                    let refused = ["billing_error", "error: 401", "error: 402", "error: 403"]
+                        .iter()
+                        .any(|marker| replied.contains(marker));
+                    let expiry = setting(
+                        ["SANDMAN_JEV_DOWN_MS", "SANDMAN_JEV_HELD_MS"][usize::from(refused)],
+                        [60_000, 21_600_000][usize::from(refused)],
+                    );
+                    let until = json!({"error": one_line(&error.to_string(), 400), "until": now().saturating_add(expiry)});
+                    drop((scorer == "jev").then(|| put(&down, &until.to_string())));
+                    errors.push((scorer.to_owned(), one_line(&error.to_string(), 400)));
+                })
+                .ok()
+                .map(|found| (scorer.to_owned(), found))
+        });
+    (decided, errors)
+}
+
+/// `question` as recall's selection question, scored over the recall evaluation's latest
+/// `$SANDMAN_EVAL_CAP` (50) examples whose note is a candidate now: per example one question to
+/// `decide`, its state the example's repository and cue, right when the noul is at least .5 for a
+/// label 1 and under it for a label 0; the share to 3 places, none without such an example, the
+/// scorers' failures when none answers one.
+fn questioned(
+    root: &Path,
+    home: &Path,
+    label: &dyn Fn(&str) -> String,
+    question: &str,
+) -> io::Result<Option<f64>> {
+    let candidates = pool(root).1;
+    let judged: Vec<(Value, usize)> = examples(root, &candidates)
+        .into_iter()
+        .rev()
+        .filter_map(|pair| Some((pair.0, pair.1?)))
+        .take(setting("SANDMAN_EVAL_CAP", 50))
+        .collect();
+    let limit = Duration::from_millis(setting("SANDMAN_RECALL_MS", 10_000));
+    let mut right = 0usize;
+    for pair in &judged {
+        let (example, note) = (&pair.0, &candidates[pair.1]);
+        let instructions = format!(
+            "Memory ({}): {} \u{2014} {}. {question}",
+            label(text(&note["bank"])),
+            text(&note["name"]),
+            one_line(text(&note["description"]), 160)
+        );
+        let cue = text(&example["cue"]);
+        let state = example["about"].as_str().map_or_else(
+            || cue.to_owned(),
+            |about| format!("repository: {about}\n{cue}"),
+        );
+        let questions: Map<String, Value> = iter::once((
+            "0".to_owned(),
+            json!({"instructions": instructions, "type": "noul"}),
+        ))
+        .collect();
+        let (decided, failures) = decide(root, home, &questions, &state, Instant::now(), limit);
+        let noul = decided
+            .and_then(|found| found.1.0.first().copied())
+            .ok_or_else(|| {
+                let causes: Vec<String> = failures
+                    .iter()
+                    .map(|failure| format!("{}: {}", failure.0, failure.1))
+                    .collect();
+                io::Error::other(format!("question: {}", causes.join("; ")))
+            })?;
+        right = right.saturating_add(usize::from((noul >= 0.5f64) == (example["label"] == 1u8)));
+    }
+    Ok((!judged.is_empty()).then(|| share(right, judged.len())))
+}
+
+/// Where `note` is on disk: its path under the root, a memory's under `memories/`.
+fn located(root: &Path, note: &Value) -> PathBuf {
+    let path = text(&note["path"]);
+    if path.starts_with("knowledge/") || path.starts_with("traces/") {
+        root.join(path)
+    } else {
+        root.join("memories").join(path)
+    }
 }
 
 /// This machine's id: `$SANDMAN_MACHINE`, else `<root>/machine`, created on first use by a hard
@@ -934,6 +1415,49 @@ fn manifest() -> hotswap::Manifest {
         ],
         ..hotswap::Manifest::default()
     }
+}
+
+/// A bank's order, else the store's (docs/index.html#cycle-rewrite): its active notes, its traces
+/// among them, their characters, and the store's recall evaluation when it has an example.
+fn measure(root: &Path, bank: Option<&str>, label: &dyn Fn(&str) -> String) -> Value {
+    let held: Vec<Value> = every(root)
+        .into_iter()
+        .filter(|note| bank.is_none_or(|one| note["bank"] == one))
+        .collect();
+    let mut order = json!({"chars": held.iter().map(|note| text(&note["text"]).chars().count()).sum::<usize>(), "notes": held.len()});
+    // the share of the examples recall's lexical rank now gets right: a label-1 one's note among
+    // the top 5 scoring above 0, a label-0 one's not
+    let candidates = pool(root).1;
+    let labelled: Vec<String> = candidates
+        .iter()
+        .map(|note| label(text(&note["bank"])))
+        .collect();
+    let judged = examples(root, &candidates);
+    let right = judged.iter().filter(|pair| {
+        let scores = bm25(
+            &candidates,
+            &labelled,
+            text(&pair.0["cue"]),
+            pair.0["about"].as_str(),
+        );
+        let mut ranked: Vec<usize> = (0..candidates.len())
+            .filter(|&at| scores[at] > 0.0f64)
+            .collect();
+        ranked.sort_by(|left, right| scores[*right].total_cmp(&scores[*left]));
+        let sent = pair
+            .1
+            .is_some_and(|at| ranked.iter().take(5).any(|&top| top == at));
+        sent == (pair.0["label"] == 1u8)
+    });
+    if !judged.is_empty() {
+        order["eval"] = share(right.count(), judged.len()).into();
+    }
+    order
+}
+
+/// A new note's id: 12 lowercase hex digits from `/dev/urandom`.
+fn mint() -> String {
+    random().get(..12).unwrap_or_default().to_owned()
 }
 
 /// The model a command names: the word after `--model`, else its first word.
@@ -1048,6 +1572,170 @@ fn place<'line>(lines: &'line [Value], fallback: &'line Value) -> Option<&'line 
         .chain([fallback])
         .filter_map(Value::as_str)
         .find(|dir| !dir.is_empty() && !dir.contains(char::is_control))
+}
+
+/// Release's plan over the ledger's `lines` (docs/index.html#cycle-release). A transcript is held
+/// while its session runs, is held by a job, waits for encode (or, with no ledger story, for the
+/// earlier sandman's dream), or a note names it (a note without an id: anywhere in its text);
+/// unheld, since the latest of its takes, its encode line and the rewrite line that last named it,
+/// it goes past `$SANDMAN_RELEASE_DAYS` (7). `.pruned/` keeps, past the latest reflect line's
+/// files and those the next review replays, the newest copy of each active note, of each active
+/// note's parent and of a note pruned or graduated within the grace; a copy without an id stays.
+fn plan(root: &Path, lines: &[Value]) -> Plan {
+    let days = setting("SANDMAN_RELEASE_DAYS", 7u64).saturating_mul(86_400);
+    let cutoff = utc(SystemTime::now()
+        .checked_sub(Duration::from_secs(days))
+        .unwrap_or(UNIX_EPOCH));
+    let (story, all) = (sessions(lines), every(root));
+    let named = lineage(&all);
+    let unplaced: Vec<&str> = all
+        .iter()
+        .filter(|note| !hexid(text(&note["id"])))
+        .map(|note| text(&note["text"]))
+        .collect();
+    // the latest line each session or id was last ended on, a release's aside
+    let (mut last, mut ends): (BTreeMap<&str, &str>, BTreeMap<&str, &str>) = Default::default();
+    for line in lines
+        .iter()
+        .filter(|line| line["kind"] == "rewrite" && line["op"] != "release")
+    {
+        let at = text(&line["at"]);
+        for entry in line["from"].as_array().into_iter().flatten() {
+            for session in entry["sessions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                let _: Option<&str> = last.insert(session, at);
+            }
+            if !line["to"]["id"].is_string() {
+                let _: Option<&str> = ends.insert(text(&entry["id"]), at);
+            }
+        }
+    }
+    let mut takes: BTreeMap<String, Vec<(PathBuf, String)>> = BTreeMap::new();
+    for (session, path, at) in archived(root) {
+        takes.entry(session).or_default().push((path, at));
+    }
+    let (mut held, mut release) = (BTreeSet::new(), Vec::new());
+    for (session, files) in takes {
+        let waiting = story.get(&session).map_or_else(
+            || {
+                fs::read_to_string(root.join(format!("memories/.recent/{session}.json")))
+                    .ok()
+                    .and_then(|pointer| serde_json::from_str::<Value>(&pointer).ok())
+                    .is_some_and(|pointer| pointer.is_object() && pointer["dreamed"].is_null())
+            },
+            |marks| {
+                marks[3]["at"].as_str() > marks[1]["at"].as_str()
+                    || marks[1]["outcome"] == "held"
+                    || (marks[1]["outcome"] == "taken"
+                        && marks[2]["at"].as_str() < marks[1]["at"].as_str())
+            },
+        );
+        let since = files
+            .iter()
+            .map(|file| file.1.as_str())
+            .chain(
+                story
+                    .get(&session)
+                    .and_then(|marks| marks[2]["at"].as_str()),
+            )
+            .chain(last.get(session.as_str()).copied())
+            .max()
+            .unwrap_or_default()
+            .to_owned();
+        if waiting
+            || named.contains(session.as_str())
+            || unplaced
+                .iter()
+                .any(|whole| whole.contains(session.as_str()))
+        {
+            let _: bool = held.insert(session);
+            continue;
+        }
+        if since <= cutoff {
+            release.push((
+                since,
+                session,
+                files.into_iter().map(|file| file.0).collect(),
+            ));
+        }
+    }
+    release.sort();
+    // the sweep: the next review's files stay, then the newest copy of each note in lineage
+    let review = lines
+        .iter()
+        .rev()
+        .find(|line| line["kind"] == "reflect")
+        .and_then(|line| line["at"].as_str());
+    let copies: Vec<PathBuf> = tree(&root.join(".pruned"), 4)
+        .into_iter()
+        .filter(|path| path.is_file())
+        .collect();
+    let replies: Vec<&PathBuf> = copies
+        .iter()
+        .filter(|path| name(path).ends_with("-ops.json"))
+        .collect();
+    let mut next: BTreeSet<PathBuf> = BTreeSet::new();
+    for reply in replies
+        .iter()
+        .rev()
+        .take(setting("SANDMAN_REFLECT_REPLAY", 3))
+    {
+        let stem = name(reply).strip_suffix("ops.json").unwrap_or_default();
+        let ops: Value = serde_json::from_str(&fs::read_to_string(reply).unwrap_or_default())
+            .unwrap_or_default();
+        next.extend(ops["ops"].as_array().into_iter().flatten().flat_map(|op| {
+            ["trace", "memory"]
+                .map(|field| reply.with_file_name(format!("{stem}{}", text(&op[field]))))
+        }));
+        let _: bool = next.insert((*reply).clone());
+    }
+    let ids: BTreeSet<&str> = all.iter().filter_map(|note| note["id"].as_str()).collect();
+    let parents = words(all.iter().map(|note| text(&note["from"])));
+    let bodies: Vec<(&PathBuf, Value)> = copies
+        .iter()
+        .filter(|path| path.extension() == Some("md".as_ref()))
+        .map(|path| {
+            (
+                path,
+                read(json!({}), fs::read_to_string(path).unwrap_or_default()),
+            )
+        })
+        .collect();
+    let newest: BTreeMap<&str, &PathBuf> = bodies
+        .iter()
+        .map(|body| (text(&body.1["id"]), body.0))
+        .collect();
+    let sweep = copies
+        .iter()
+        .filter(|path| {
+            let fresh = fs::metadata(path)
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|time| Some(utc(time).as_str()) > review);
+            let body = bodies
+                .iter()
+                .find(|body| body.0 == *path)
+                .map(|body| text(&body.1["id"]));
+            !(fresh || next.contains(*path))
+                && (name(path).ends_with("-ops.json")
+                    || body.is_some_and(|id| {
+                        hexid(id)
+                            && !(newest.get(id) == Some(path)
+                                && (ids.contains(id)
+                                    || parents.contains(id)
+                                    || ends.get(id).is_some_and(|at| *at > cutoff.as_str())))
+                    }))
+        })
+        .cloned()
+        .collect();
+    Plan {
+        held,
+        release: release.into_iter().map(|row| (row.1, row.2)).collect(),
+        sweep,
+    }
 }
 
 /// Every note recall reads, muted ones dropped: the always-set (a memory's or a memory trace's
@@ -1224,6 +1912,31 @@ fn reap(child: &mut Child, begun: Instant, limit: Duration) -> io::Result<ExitSt
     }
 }
 
+/// Each released session's latest `release` line: its `at` and that line's entries for it.
+fn released(lines: &[Value]) -> BTreeMap<String, (String, Vec<Value>)> {
+    let mut gone = BTreeMap::new();
+    for line in lines
+        .iter()
+        .filter(|line| line["kind"] == "rewrite" && line["op"] == "release")
+    {
+        for entry in line["from"].as_array().into_iter().flatten() {
+            for session in entry["sessions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                let held: &mut (String, Vec<Value>) = gone.entry(session.to_owned()).or_default();
+                if held.0 != text(&line["at"]) {
+                    *held = (text(&line["at"]).to_owned(), Vec::new());
+                }
+                held.1.push(entry.clone());
+            }
+        }
+    }
+    gone
+}
+
 /// A command's reply: `<status>: <stderr>` unless it exited 0, else the object from its stdout's
 /// first `{` to its last `}`, so a fence around it passes.
 fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
@@ -1238,6 +1951,56 @@ fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
             .unwrap_or_default(),
     )
     .map_err(|error| io::Error::other(format!("output: {error}")))
+}
+
+/// Ends `note` outside consolidate (decay, a graduation approved): its file moved aside to
+/// `<root>/.pruned/<yyyy>/<mm>/<dd>/<HHMMSS>-<bank>-<file>`, then one `rewrite` line of `op`; the
+/// copy's path.
+fn retire(root: &Path, note: &Value, op: &str, reason: &Value, to: &Value) -> io::Result<PathBuf> {
+    let aside = dated(
+        root,
+        ".pruned",
+        &format!("{}-{}", text(&note["bank"]), text(&note["file"])),
+        &mut BTreeSet::new(),
+    );
+    aside.parent().map_or(Ok(()), fs::create_dir_all)?;
+    fs::rename(located(root, note), &aside)?;
+    record(
+        root,
+        &mut json!({"from": [entry(note)], "kind": "rewrite", "model": null, "op": op, "reason": reason, "to": to}),
+    )
+    .map(|()| aside)
+}
+
+/// One verdict on `note` (docs/index.html#cycle-rethink): `line`, holding `by`, `session`,
+/// `verdict` and `why`, completed as a `rethink` line, `cue` the latest of the session's recall
+/// lines that sent the note (by path, else id); a send judged also appends an example to
+/// `eval/recall.jsonl`, `irrelevant` label 0, the rest 1.
+fn rethink(root: &Path, lines: &[Value], note: &Value, mut line: Value) -> io::Result<()> {
+    let recalled = lines.iter().rev().find(|sent| {
+        sent["kind"] == "recall"
+            && sent["session"] == line["session"]
+            && sent["sent"].as_array().into_iter().flatten().any(|entry| {
+                entry["file"] == note["path"]
+                    || (note["id"].is_string() && entry["id"] == note["id"])
+            })
+    });
+    (line["cue"], line["file"], line["id"], line["kind"]) = (
+        recalled.map_or(Value::Null, |sent| sent["cue"].clone()),
+        note["path"].clone(),
+        note["id"].clone(),
+        "rethink".into(),
+    );
+    record(root, &mut line)?;
+    recalled.map_or(Ok(()), |sent| {
+        let example = json!({
+            "about": sent["about"], "at": line["at"], "cue": sent["cue"], "digest": sha256(text(&note["text"])),
+            "id": note["id"], "label": u8::from(line["verdict"] != "irrelevant"), "path": note["path"],
+            "session": line["session"], "verdict": line["verdict"],
+        });
+        fs::create_dir_all(root.join("eval"))?;
+        append(&root.join("eval/recall.jsonl"), &format!("{example}\n"))
+    })
 }
 
 /// A tick job's model run: `command` through `sh -c` in its own process group, flagged so a
@@ -1364,6 +2127,137 @@ fn setting<T: FromStr>(key: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
+/// SHA-256 (FIPS 180-4) of `text`, hex.
+fn sha256(text: &str) -> String {
+    const ROUND: [u32; 64] = [
+        0x428a_2f98,
+        0x7137_4491,
+        0xb5c0_fbcf,
+        0xe9b5_dba5,
+        0x3956_c25b,
+        0x59f1_11f1,
+        0x923f_82a4,
+        0xab1c_5ed5,
+        0xd807_aa98,
+        0x1283_5b01,
+        0x2431_85be,
+        0x550c_7dc3,
+        0x72be_5d74,
+        0x80de_b1fe,
+        0x9bdc_06a7,
+        0xc19b_f174,
+        0xe49b_69c1,
+        0xefbe_4786,
+        0x0fc1_9dc6,
+        0x240c_a1cc,
+        0x2de9_2c6f,
+        0x4a74_84aa,
+        0x5cb0_a9dc,
+        0x76f9_88da,
+        0x983e_5152,
+        0xa831_c66d,
+        0xb003_27c8,
+        0xbf59_7fc7,
+        0xc6e0_0bf3,
+        0xd5a7_9147,
+        0x06ca_6351,
+        0x1429_2967,
+        0x27b7_0a85,
+        0x2e1b_2138,
+        0x4d2c_6dfc,
+        0x5338_0d13,
+        0x650a_7354,
+        0x766a_0abb,
+        0x81c2_c92e,
+        0x9272_2c85,
+        0xa2bf_e8a1,
+        0xa81a_664b,
+        0xc24b_8b70,
+        0xc76c_51a3,
+        0xd192_e819,
+        0xd699_0624,
+        0xf40e_3585,
+        0x106a_a070,
+        0x19a4_c116,
+        0x1e37_6c08,
+        0x2748_774c,
+        0x34b0_bcb5,
+        0x391c_0cb3,
+        0x4ed8_aa4a,
+        0x5b9c_ca4f,
+        0x682e_6ff3,
+        0x748f_82ee,
+        0x78a5_636f,
+        0x84c8_7814,
+        0x8cc7_0208,
+        0x90be_fffa,
+        0xa450_6ceb,
+        0xbef9_a3f7,
+        0xc671_78f2,
+    ];
+    let mut state: [u32; 8] = [
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    let mut data = text.as_bytes().to_vec();
+    let bits = u64::try_from(data.len())
+        .unwrap_or_default()
+        .wrapping_mul(8);
+    data.push(0x80);
+    while data.len() & 63 != 56 {
+        data.push(0);
+    }
+    data.extend(bits.to_be_bytes());
+    for block in data.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (slot, word) in w.iter_mut().zip(block.chunks_exact(4)) {
+            *slot = u32::from_be_bytes(<[u8; 4]>::try_from(word).unwrap_or_default());
+        }
+        for i in 16..64usize {
+            let (early, late) = (w[i.wrapping_sub(15)], w[i.wrapping_sub(2)]);
+            w[i] = w[i.wrapping_sub(16)]
+                .wrapping_add(
+                    early.rotate_right(7) ^ early.rotate_right(18) ^ early.wrapping_shr(3),
+                )
+                .wrapping_add(w[i.wrapping_sub(7)])
+                .wrapping_add(
+                    late.rotate_right(17) ^ late.rotate_right(19) ^ late.wrapping_shr(10),
+                );
+        }
+        let mut round = state;
+        for (constant, word) in ROUND.iter().zip(w) {
+            let [ra, rb, rc, rd, re, rf, rg, rh] = round;
+            let one = rh
+                .wrapping_add(re.rotate_right(6) ^ re.rotate_right(11) ^ re.rotate_right(25))
+                .wrapping_add((re & rf) ^ (!re & rg))
+                .wrapping_add(*constant)
+                .wrapping_add(word);
+            let two = (ra.rotate_right(2) ^ ra.rotate_right(13) ^ ra.rotate_right(22))
+                .wrapping_add((ra & rb) ^ (ra & rc) ^ (rb & rc));
+            round = [
+                one.wrapping_add(two),
+                ra,
+                rb,
+                rc,
+                rd.wrapping_add(one),
+                re,
+                rf,
+                rg,
+            ];
+        }
+        for (held, add) in state.iter_mut().zip(round) {
+            *held = held.wrapping_add(add);
+        }
+    }
+    state.map(|word| format!("{word:08x}")).concat()
+}
+
 /// A bank's directory and its memories: a topic's (`@<topic>`) knowledge pages under
 /// `knowledge/<topic>/`, else `memories/<bank>/`.
 fn shelf(root: &Path, bank: &str) -> (PathBuf, Vec<Value>) {
@@ -1375,6 +2269,22 @@ fn shelf(root: &Path, bank: &str) -> (PathBuf, Vec<Value>) {
         .filter(|note| note["bank"] == bank)
         .collect();
     (root.join(tier).join(at), held)
+}
+
+/// `path` under the root, as `show` and `check` print it.
+fn shown(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// An archived transcript's sidecar, the session's directory moved beside it: its stem + `-dir`.
+fn sidecar(archived: &Path) -> PathBuf {
+    PathBuf::from(format!(
+        "{}-dir",
+        archived.to_string_lossy().trim_end_matches(".jsonl")
+    ))
 }
 
 /// A free `<dir>/<type>_<slug>.md` for a note named `name`, claimed: the bank format's slug
@@ -1404,12 +2314,14 @@ fn sorted(mut rows: Vec<Value>, key: &str) -> Vec<Value> {
 }
 
 /// Consolidate's input for `bank` (AGENTS.md `### consolidate`): the traces whole, the memories
-/// whole while their bytes fit `allowance`, the rest listed; and the whole ones.
+/// whole while their bytes fit `allowance`, the rest listed, then each of `more` that has items;
+/// and the whole ones.
 fn stack<'note>(
     bank: &str,
     traces: &[&Value],
     memories: &'note [Value],
     allowance: usize,
+    more: &[(&str, Vec<String>)],
 ) -> (String, Vec<&'note Value>) {
     let mut used = 0usize;
     let (full, listed): (Vec<&Value>, Vec<&Value>) = memories.iter().partition(|memory| {
@@ -1455,7 +2367,17 @@ fn stack<'note>(
                 })
                 .collect(),
         ),
-    ] {
+    ]
+    .into_iter()
+    .chain(more.iter().map(|list| {
+        (
+            list.0,
+            list.1
+                .iter()
+                .map(|item| ["- ", item, "\n"].concat())
+                .collect(),
+        )
+    })) {
         if !body.is_empty() {
             input.extend(["\n# ", title, "\n", &body]);
         }
@@ -1463,9 +2385,89 @@ fn stack<'note>(
     (input, full)
 }
 
+/// `part` of `whole` to 3 places.
+#[expect(clippy::float_arithmetic, reason = "a share is float math")]
+fn share(part: usize, whole: usize) -> f64 {
+    let count = |items: usize| f64::from(u32::try_from(items).unwrap_or(u32::MAX));
+    (count(part) / count(whole) * 1000.0f64).round() / 1000.0f64
+}
+
 /// `.<file>.<pid>` beside `path`: a temp name every reader skips.
 fn staged(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{}.{}", name(path), id()))
+}
+
+/// An archived transcript's session and UTC take time from its path,
+/// `<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` (under `.archive/claude/`, where `archived` looks);
+/// none for any other shape.
+fn stamped(path: &Path) -> Option<(String, String)> {
+    let stem = name(path).strip_suffix(".jsonl")?;
+    let (head, session) = stem.split_at_checked(stem.len().checked_sub(36)?)?;
+    let digits = |part: &str, count: usize| {
+        part.len() == count && part.bytes().all(|byte| byte.is_ascii_digit())
+    };
+    let [dd, mm, yyyy] = [1, 2, 3].map(|up| path.ancestors().nth(up).map_or("", name));
+    (head.len() > 7
+        && head.ends_with('-')
+        && head.get(6..7) == Some("-")
+        && [(head.get(..6)?, 6), (dd, 2), (mm, 2), (yyyy, 4)]
+            .iter()
+            .all(|part| digits(part.0, part.1))
+        && uuid(session))
+    .then_some(())?;
+    let clock = [head.get(..2), head.get(2..4), head.get(4..6)].map(Option::unwrap_or_default);
+    Some((
+        session.to_owned(),
+        format!("{yyyy}-{mm}-{dd}T{}Z", clock.join(":")),
+    ))
+}
+
+/// A note's strength on day `now`, counted from the ledger's `lines`, never stored
+/// (docs/index.html#cycle-strength): its used verdicts and shows, its wrong and stale verdicts since
+/// its body last changed, decayed by the days since the latest of its dates, used verdicts and
+/// shows (none: 0), to 3 places.
+#[expect(clippy::float_arithmetic, reason = "strength is float math")]
+fn strength(lines: &[Value], note: &Value, now: u64) -> f64 {
+    let [used, shown, blame, half] = [
+        ("SANDMAN_USED_WEIGHT", 3.0f64),
+        ("SANDMAN_SHOWN_WEIGHT", 1.0f64),
+        ("SANDMAN_JUDGED_WEIGHT", 4.0f64),
+        ("SANDMAN_HALF_LIFE_DAYS", 30.0f64),
+    ]
+    .map(|(key, default)| setting(key, default));
+    let about: Vec<&Value> = lines
+        .iter()
+        .filter(|line| {
+            line["file"] == note["path"] || (note["id"].is_string() && line["id"] == note["id"])
+        })
+        .collect();
+    let (read, acted) = (
+        |line: &Value| line["kind"] == "show",
+        |line: &Value| line["kind"] == "rethink" && line["verdict"] == "used",
+    );
+    let count = |items: usize| u32::try_from(items).map_or(f64::MAX, f64::from);
+    let tally =
+        |pick: &dyn Fn(&Value) -> bool| count(about.iter().filter(|line| pick(line)).count());
+    let idle = about
+        .iter()
+        .filter(|line| read(line) || acted(line))
+        .filter_map(|line| line["at"].as_str())
+        .chain(
+            [note["created"].as_str(), note["updated"].as_str()]
+                .into_iter()
+                .flatten(),
+        )
+        .max()
+        .and_then(|at| day(at.get(..10)?))
+        .map_or(0, |then| now.saturating_sub(then));
+    let score = used.mul_add(
+        tally(&acted),
+        shown.mul_add(
+            tally(&read),
+            blame.mul_add(-count(judged(lines, note).len()), 1.0),
+        ),
+    ) * (-u32::try_from(idle).map_or(f64::MAX, f64::from) / half).exp2();
+    (score * 1000.0f64).round() / 1000.0f64
 }
 
 /// The string `value` holds, else "".
@@ -1576,6 +2578,40 @@ fn tree(path: &Path, depth: usize) -> Vec<PathBuf> {
     kids.iter().flat_map(|kid| tree(kid, next)).collect()
 }
 
+/// Reverts a pass's order ops (docs/index.html#cycle-rewrite), each `(the note it wrote, the notes
+/// it moved aside as (where, the copy))`: the note written removed, a `revert` line ending it, then
+/// each moved one put back, a `revert` line whose `to` is it (one with an id).
+fn unwind(root: &Path, undo: &[Undo], reason: &Value) -> io::Result<()> {
+    let line = |from: Value, to: Value| {
+        record(
+            root,
+            &mut json!({"from": from, "kind": "rewrite", "model": null, "op": "revert", "reason": reason, "to": to}),
+        )
+    };
+    let shown_note = |path: &Path| -> io::Result<Value> {
+        let mut note = read(json!({}), fs::read_to_string(path)?);
+        let under = shown(root, path);
+        note["path"] = under.strip_prefix("memories/").unwrap_or(&under).into();
+        Ok(note)
+    };
+    for step in undo {
+        if let Some(path) = step.0.as_ref() {
+            let gone = shown_note(path)?;
+            fs::remove_file(path)?;
+            line(json!([entry(&gone)]), Value::Null)?;
+        }
+        for pair in &step.1 {
+            fs::rename(&pair.1, &pair.0)?;
+            let back = shown_note(&pair.0)?;
+            let to = back["id"]
+                .as_str()
+                .map(|id| json!({"id": id, "path": back["path"]}));
+            to.map_or(Ok(()), |restored| line(json!([]), restored))?;
+        }
+    }
+    Ok(())
+}
+
 /// `time` as RFC 3339 UTC to the second (Howard Hinnant's `civil_from_days`).
 #[expect(
     clippy::arithmetic_side_effects,
@@ -1616,6 +2652,15 @@ fn vectors(root: &Path) -> BTreeMap<String, Value> {
     jsonl(&root.join("embeddings.jsonl"))
         .into_iter()
         .map(|line| (text(&line["h"]).to_owned(), line))
+        .collect()
+}
+
+/// The words of `lines` but `-`, sorted, once each: a note's `from` ids, its `sessions:`.
+fn words<'line, I: IntoIterator<Item = &'line str>>(lines: I) -> BTreeSet<&'line str> {
+    lines
+        .into_iter()
+        .flat_map(str::split_whitespace)
+        .filter(|word| *word != "-")
         .collect()
 }
 
@@ -1716,7 +2761,161 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "check" => {
+            // `--fix` first repairs what is mechanical (AGENTS.md `### sandman check`), each note by
+            // temp + rename, then says so in the ledger: an empty or `-` `from:` or `sessions:`
+            // dropped, else its words sorted and once; an `origin:` none of `ORIGINS` dropped; a
+            // minted `id:` first for a note without a valid one of its own (an earlier note's is
+            // taken); a note left without a source given `origin:` by its stamp's first word
+            let mend = |whole: &str, taken: &mut BTreeSet<String>| -> String {
+                let (head, rest) = whole
+                    .strip_prefix("---\n")
+                    .and_then(|rest| rest.split_once("\n---"))
+                    .map_or_else(
+                        || ("", format!("\n\n{whole}")),
+                        |(head, rest)| (head, rest.to_owned()),
+                    );
+                let mut lines: Vec<String> = head
+                    .lines()
+                    .filter_map(|line| {
+                        let (key, value) = line.split_once(':').unwrap_or_default();
+                        match key.trim() {
+                            listed @ ("from" | "sessions") => {
+                                let kept = words([value]);
+                                (!kept.is_empty()).then(|| {
+                                    format!("{listed}: {}", Vec::from_iter(kept).join(" "))
+                                })
+                            }
+                            "origin" => ORIGINS.contains(&value.trim()).then(|| line.to_owned()),
+                            _ => Some(line.to_owned()),
+                        }
+                    })
+                    .collect();
+                let joined = |kept: &[String]| {
+                    format!(
+                        "---\n{}---{rest}",
+                        kept.iter()
+                            .map(|line| [line, "\n"].concat())
+                            .collect::<String>()
+                    )
+                };
+                let note = read(json!({}), joined(&lines));
+                let id = text(&note["id"]).to_owned();
+                if !(hexid(&id) && taken.insert(id)) {
+                    let minted = mint();
+                    lines.retain(|line| {
+                        line.split_once(':')
+                            .is_none_or(|(key, _)| key.trim() != "id")
+                    });
+                    lines.insert(0, format!("id: {minted}"));
+                    let _: bool = taken.insert(minted);
+                }
+                if lineage([&note]).is_empty() && note["from"].is_null() && note["origin"].is_null()
+                {
+                    let origin = match text(&note["source"]).split_whitespace().next() {
+                        Some("remember") => "hand",
+                        Some("consolidate" | "dream" | "reconsolidate" | "reflect") => "routine",
+                        _ => "import",
+                    };
+                    let at = lines
+                        .iter()
+                        .position(|line| {
+                            line.starts_with("sessions:") || line.starts_with("source:")
+                        })
+                        .unwrap_or(lines.len());
+                    lines.insert(at, format!("origin: {origin}"));
+                }
+                joined(&lines)
+            };
+            let fix = || -> io::Result<()> {
+                let (mut taken, mut fixed) = (BTreeSet::new(), 0u32);
+                for note in every(&root) {
+                    let (whole, mended) =
+                        (text(&note["text"]), mend(text(&note["text"]), &mut taken));
+                    if mended != whole {
+                        put(&located(&root, &note), &mended)?;
+                        fixed = fixed.saturating_add(1);
+                    }
+                }
+                println!("check: fixed {fixed}");
+                record(&root, &mut json!({"fixed": fixed, "kind": "check"}))
+            };
+            // the invariants, read only: per note in reader order, `<path>: <n>: <detail>`
+            let checked = || -> io::Result<_> {
+                let _: Option<()> = args
+                    .iter()
+                    .any(|arg| arg == "--fix")
+                    .then(fix)
+                    .transpose()?;
+                let lines = ledger(&root);
+                let planned = plan(&root, &lines);
+                Ok((audit(&root, &lines, &planned), planned))
+            };
+            // `--release`: what the job would delete now, every violation but its own backlog's (6)
+            // holding it back; else every violation, or the clean line
+            let releasing = args.iter().any(|arg| arg == "--release");
+            checked().map_or_else(
+                |error| {
+                    eprintln!("sandman check: {error}");
+                    ExitCode::FAILURE
+                },
+                |((count, freed, found), planned)| {
+                    let holding: Vec<String> = found
+                        .into_iter()
+                        .filter(|violation| !releasing || violation.0 != 6)
+                        .map(|violation| violation.1)
+                        .collect();
+                    let rows: Vec<(String, u64)> = planned
+                        .release
+                        .iter()
+                        .flat_map(|pair| {
+                            pair.1.iter().map(|file| {
+                                (
+                                    format!("{}: release \u{b7} {}", shown(&root, file), pair.0),
+                                    weight(file).saturating_add(weight(&sidecar(file))),
+                                )
+                            })
+                        })
+                        .chain(
+                            planned.sweep.iter().map(|copy| {
+                                (format!("{}: sweep", shown(&root, copy)), weight(copy))
+                            }),
+                        )
+                        .filter(|_| releasing)
+                        .collect();
+                    let back = format!("; held back: {} violations", holding.len());
+                    let summary = releasing.then(|| {
+                        format!(
+                            "release: {} transcripts, {} copies, {} bytes{}",
+                            rows.len().saturating_sub(planned.sweep.len()),
+                            planned.sweep.len(),
+                            rows.iter().map(|row| row.1).sum::<u64>(),
+                            ["", back.as_str()][usize::from(!holding.is_empty())]
+                        )
+                    });
+                    let clean = (!releasing && holding.is_empty()).then(|| {
+                        format!(
+                            "check: {count} notes, {} held, {freed} released: clean",
+                            planned.held.len()
+                        )
+                    });
+                    let out: Vec<String> = holding
+                        .iter()
+                        .cloned()
+                        .chain(
+                            rows.iter()
+                                .map(|row| format!("{} \u{b7} {} bytes", row.0, row.1)),
+                        )
+                        .chain(summary)
+                        .chain(clean)
+                        .collect();
+                    println!("{}", out.join("\n"));
+                    ExitCode::from(u8::from(!holding.is_empty()))
+                },
+            )
+        }
         "chart" => {
+            let (lines, now) = (ledger(&root), day(&today()).unwrap_or_default());
             // a memory or a knowledge page, the page's topic in place of a bank
             let shelved = |dir: &str| -> Vec<Value> {
                 notes(&root, dir)
@@ -1729,9 +2928,10 @@ fn main() -> ExitCode {
                         .filter(|word| ["consolidate", "dream", "reflect", "remember"].contains(word))
                         .unwrap_or("other");
                     let mut row = json!({
-                        "created": note["created"], "file": note["file"], "name": note["name"],
+                        "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
+                        "id": note["id"], "name": note["name"], "origin": note["origin"],
                         "session": source.split_whitespace().find(|word| ["consolidate", "dream"].contains(&kind) && uuid(word)),
-                        "sessions": lineage([note]), "source": kind, "type": text(&note["type"]),
+                        "sessions": lineage([note]), "source": kind, "state": "active", "strength": strength(&lines, note, now), "type": text(&note["type"]),
                     });
                     let bank = text(&note["bank"]);
                     match bank.strip_prefix('@') {
@@ -1747,31 +2947,16 @@ fn main() -> ExitCode {
                 .iter()
                 .map(|note| {
                     json!({
-                        "bank": note["bank"], "created": note["created"], "file": note["file"], "name": note["name"],
-                        "session": note["session"], "sessions": lineage([note]), "type": text(&note["type"]),
+                        "bank": note["bank"], "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
+                        "id": note["id"], "name": note["name"], "origin": note["origin"], "session": note["session"],
+                        "sessions": lineage([note]), "state": "active", "strength": strength(&lines, note, now), "type": text(&note["type"]),
                     })
                 })
                 .collect();
+            // the archive's, the latest per session, held or not; then each session released since
+            let holds = plan(&root, &lines).held;
             let mut taken: BTreeMap<String, Value> = BTreeMap::new();
-            for path in tree(&root.join(".archive/claude"), 4) {
-                let Some((head, session)) = name(&path)
-                    .strip_suffix(".jsonl")
-                    .and_then(|stem| stem.split_at_checked(stem.len().checked_sub(36)?))
-                else {
-                    continue;
-                };
-                let day: Vec<&str> = path.ancestors().skip(1).take(3).map(name).collect();
-                let (&[dd, mm, yyyy], true) = (
-                    day.as_slice(),
-                    head.len() > 7
-                        && head.ends_with('-')
-                        && head.get(6..7) == Some("-")
-                        && head.bytes().take(6).all(|byte| byte.is_ascii_digit())
-                        && uuid(session)
-                        && path.is_file(),
-                ) else {
-                    continue;
-                };
+            for (session, path, at) in archived(&root) {
                 let pointer =
                     fs::read_to_string(root.join(format!("memories/.recent/{session}.json")))
                         .ok()
@@ -1785,18 +2970,46 @@ fn main() -> ExitCode {
                 } else {
                     "waiting"
                 };
-                let clock =
-                    [head.get(..2), head.get(2..4), head.get(4..6)].map(Option::unwrap_or_default);
-                drop(taken.insert(session.to_owned(), json!({
+                let named = memories.iter().chain(&knowledge).filter(|row| {
+                    row["sessions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|id| *id == session.as_str())
+                });
+                drop(taken.insert(session.clone(), json!({
                     "bytes": fs::metadata(&path).map_or(0, |meta| meta.len()), "cwd": pointer["cwd"],
-                    "dreamed": pointer["dreamed"],
+                    "dreamed": pointer["dreamed"], "held": holds.contains(&session),
                     "highlights": pointer["highlights"].as_array().map_or(0, Vec::len),
-                    "memories": memories.iter().chain(&knowledge).filter(|row| row["sessions"].as_array().into_iter().flatten().any(|id| *id == session)).count(),
-                    "session": session, "state": state,
-                    "taken": format!("{yyyy}-{mm}-{dd}T{}Z", clock.join(":")), "title": pointer["title"],
+                    "memories": named.count(), "released": null, "session": session, "state": state, "taken": at, "title": pointer["title"],
                 })));
             }
-            let lines = ledger(&root);
+            let freed: Vec<(String, Value)> = released(&lines)
+                .into_iter()
+                .filter(|pair| !taken.contains_key(&pair.0))
+                .filter_map(|(session, (at, entries))| {
+                    let first = entries.first().map_or("", |entry| text(&entry["path"]));
+                    let took = stamped(Path::new(first))?.1;
+                    let bytes: u64 = entries.iter().filter_map(|entry| entry["bytes"].as_u64()).sum();
+                    let row = json!({
+                        "bytes": bytes, "cwd": null, "dreamed": null, "held": false, "highlights": 0u8, "memories": 0u8,
+                        "released": at, "session": session, "state": "released", "taken": took, "title": null,
+                    });
+                    Some((session, row))
+                })
+                .collect();
+            taken.extend(freed);
+            // the notes rewrite lines ended, and each edge from a parent to the note it went into
+            let ends = ended(&lines);
+            let gone: Vec<Value> = ends
+                .iter()
+                .map(|&(_, line, entry)| json!({"at": line["at"], "id": entry["id"], "into": line["to"]["id"], "op": line["op"], "path": entry["path"], "sessions": entry["sessions"], "state": "ended"}))
+                .collect();
+            let edges: Vec<Value> = ends
+                .iter()
+                .filter(|end| end.1["to"]["id"].is_string())
+                .map(|&(_, line, entry)| json!({"at": line["at"], "from": entry["id"], "op": line["op"], "to": line["to"]["id"]}))
+                .collect();
             let guards = lines
                 .iter()
                 .filter(|line| line["kind"] == "guard")
@@ -1833,9 +3046,9 @@ fn main() -> ExitCode {
                 io::stdout().lock(),
                 "{}",
                 json!({
-                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "guards": sorted(guards, "at"),
+                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "ended": sorted(gone, "at"), "guards": sorted(guards, "at"),
                     "intentions": sorted(intended, "created"),
-                    "knowledge": knowledge,
+                    "knowledge": knowledge, "lineage": sorted(edges, "at"),
                     "machine": machine(&root), "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
                 })
             ));
@@ -1935,7 +3148,8 @@ fn main() -> ExitCode {
                 );
                 let mut fields = Vec::from(
                     [
-                        "due", "after", "created", "about", "session", "state", "closed", "note",
+                        "due", "after", "created", "about", "session", "graduate", "artifact",
+                        "state", "closed", "note",
                     ]
                     .map(|key| (key, text(&held[key]))),
                 );
@@ -1956,11 +3170,32 @@ fn main() -> ExitCode {
                         .get([0, 2][usize::from(!deferring)]..)
                         .unwrap_or_default(),
                 );
+                let failed = |error: io::Error| (1, format!("sandman {verb}: {error}"));
+                // done on a graduation's proposal first ends its note, into the artifact
+                let graduated = found
+                    .filter(|_| verb == "done")
+                    .and_then(|hit| {
+                        let wanted = hit["graduate"].as_str()?;
+                        let ending = every(&root).into_iter().find(|one| one["id"] == wanted)?;
+                        let artifact = text(&hit["artifact"]);
+                        let to = json!({"artifact": artifact});
+                        Some(
+                            retire(&root, &ending, "graduate", &Value::Null, &to).map(|_| {
+                                format!(
+                                    "\ngraduated: {} \u{2192} {artifact}",
+                                    text(&ending["path"])
+                                )
+                            }),
+                        )
+                    })
+                    .transpose()
+                    .map_err(failed)?
+                    .unwrap_or_default();
                 put(
                     &root.join(format!("intentions/{id}.md")),
                     &note(&fields, found.map_or(what, |hit| text(&hit["body"]))),
                 )
-                .map_err(|error| (1, format!("sandman {verb}: {error}")))?;
+                .map_err(failed)?;
                 let kind = ["push", verb][usize::from(!deferring || found.is_none())];
                 let mut line = json!({"id": id, "kind": kind, "session": pull});
                 for (key, said) in [(field, &value), ("note", &noted)] {
@@ -1970,7 +3205,7 @@ fn main() -> ExitCode {
                 }
                 drop(record(&root, &mut line));
                 Ok(match (deferring, field) {
-                    (false, _) => format!("{id} {state}"),
+                    (false, _) => format!("{id} {state}{graduated}"),
                     (true, "due") => format!("{id} {value}"),
                     _ => format!("{id} waiting: {value}"),
                 })
@@ -2004,30 +3239,48 @@ fn main() -> ExitCode {
             let session = args.get(2).map_or("", String::as_str);
             let erase = || -> io::Result<[usize; 2]> {
                 let mut done = [0usize; 2];
-                // a JSONL file without the lines `cut` picks, rewritten under an exclusive `flock`: an
-                // appender waiting on it finds the file replaced and opens the new one; 1 when it was
-                let purge = |path: &Path, cut: &dyn Fn(&str) -> bool| -> io::Result<usize> {
-                    let file = match File::open(path) {
-                        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
-                        opened => opened?,
+                // a JSONL file, each line as `keep` leaves it (none: dropped), rewritten under an
+                // exclusive `flock`: an appender waiting on it finds the file replaced and opens the
+                // new one; 1 when it was
+                let purge =
+                    |path: &Path, keep: &dyn Fn(&str) -> Option<String>| -> io::Result<usize> {
+                        let file = match File::open(path) {
+                            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+                            opened => opened?,
+                        };
+                        file.lock()?;
+                        let whole = io::read_to_string(&file)?;
+                        let kept: String = whole.split_inclusive('\n').filter_map(keep).collect();
+                        let changed = kept != whole;
+                        if changed {
+                            put(path, &kept)?;
+                        }
+                        Ok(usize::from(changed))
                     };
-                    file.lock()?;
-                    let whole = io::read_to_string(&file)?;
-                    let kept: String = whole
-                        .split_inclusive('\n')
-                        .filter(|line| !cut(line))
-                        .collect();
-                    let cut_any = kept.len() < whole.len();
-                    if cut_any {
-                        put(path, &kept)?;
-                    }
-                    Ok(usize::from(cut_any))
-                };
                 let lines = ledger(&root);
+                let unnamed = |line: &str| (!line.contains(session)).then(|| line.to_owned());
+                // a rewrite line stays, the session off its `from[].sessions`, so the notes it ended
+                // still hold invariants 4–5; any other line naming it goes, and so does one still
+                // naming it once rewritten
+                let ledgered = |line: &str| {
+                    unnamed(line).or_else(|| {
+                        let mut row = serde_json::from_str::<Value>(line)
+                            .ok()
+                            .filter(|row| row["kind"] == "rewrite")?;
+                        for held in row["from"]
+                            .as_array_mut()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|entry| entry["sessions"].as_array_mut())
+                        {
+                            held.retain(|id| id != session);
+                        }
+                        unnamed(&format!("{row}\n"))
+                    })
+                };
                 // first, so a take, a reconcile or an encode racing this finds no start mark to act on
-                let named = |line: &str| line.contains(session);
                 for day in tree(&root.join("ledger"), 3) {
-                    done[1] = done[1].saturating_add(purge(&day, &named)?);
+                    done[1] = done[1].saturating_add(purge(&day, &ledgered)?);
                 }
                 // encode's run files hold it when, of every encode line and its own ends, the latest
                 // names it
@@ -2061,23 +3314,18 @@ fn main() -> ExitCode {
                 // embedding cache; one naming it otherwise (a merge's source, an intention's link) is
                 // rewritten without it
                 let (mut paths, mut scrub) = (BTreeSet::new(), Vec::new());
-                for dir in ["memories", "knowledge", "traces"] {
-                    for note in notes(&root, dir) {
-                        let address = Path::new(text(&note["path"]));
-                        let file = root
-                            .join(dir)
-                            .join(address.strip_prefix(dir).unwrap_or(address));
-                        match (
-                            note["session"] == session,
-                            text(&note["text"]).contains(session),
-                        ) {
-                            (true, _) => {
-                                let _: bool = paths.insert(address.to_string_lossy().into_owned());
-                                gone.push(file);
-                            }
-                            (false, true) => scrub.push(file),
-                            (false, false) => {}
+                for note in every(&root) {
+                    let file = located(&root, &note);
+                    match (
+                        note["session"] == session,
+                        text(&note["text"]).contains(session),
+                    ) {
+                        (true, _) => {
+                            let _: bool = paths.insert(text(&note["path"]).to_owned());
+                            gone.push(file);
                         }
+                        (false, true) => scrub.push(file),
+                        (false, false) => {}
                     }
                 }
                 let pruned = tree(&root.join(".pruned"), 4);
@@ -2157,12 +3405,13 @@ fn main() -> ExitCode {
                     done[1] = done[1].saturating_add(1);
                 }
                 let cached = |line: &str| {
-                    serde_json::from_str::<Value>(line)
-                        .is_ok_and(|row| paths.contains(text(&row["path"])))
+                    (!serde_json::from_str::<Value>(line)
+                        .is_ok_and(|row| paths.contains(text(&row["path"]))))
+                    .then(|| line.to_owned())
                 };
                 done[1] = done[1].saturating_add(purge(&root.join("embeddings.jsonl"), &cached)?);
-                for log in ["run/serve.log", "run/serve.log.1"] {
-                    done[1] = done[1].saturating_add(purge(&root.join(log), &named)?);
+                for log in ["eval/recall.jsonl", "run/serve.log", "run/serve.log.1"] {
+                    done[1] = done[1].saturating_add(purge(&root.join(log), &unnamed)?);
                 }
                 Ok(done)
             };
@@ -2225,6 +3474,9 @@ fn main() -> ExitCode {
                 {"description": "Write a memory at once when the person states a preference, corrects you, or decides something a later session needs: their words, one fact per call. Knowledge true beyond this project is type `knowledge`, the steps of a task done more than once type `playbook`, each with a topic.",
                  "inputSchema": {"properties": {"about": string("the repository path, when it holds in one repository"), "body": string("the person's words"), "session": sessioned, "topic": string("a knowledge or playbook's topic, a slug: launchd, llama-cpp"), "type": string("user, feedback, project or reference (by repository), knowledge or playbook (by topic); feedback by default, knowledge with a topic")}, "required": ["body"], "type": "object"},
                  "name": "remember"},
+                {"description": "Judge a note a recall sent, once you know: `used` when you acted on it, `wrong` or `stale` when it is untrue or out of date, `irrelevant` when it was not about what you were doing.",
+                 "inputSchema": {"properties": {"path": string("the path the recall line gave"), "session": sessioned, "verdict": string("used, wrong, stale or irrelevant"), "why": string("a line on why")}, "required": ["path", "verdict"], "type": "object"},
+                 "name": "rethink"},
                 {"description": "Read one memory in full, by the path a recall line gives, before acting on it.",
                  "inputSchema": {"properties": {"path": string("the path a recall line gives"), "session": sessioned}, "required": ["path"], "type": "object"},
                  "name": "show"},
@@ -2266,12 +3518,14 @@ fn main() -> ExitCode {
                             let mut line = vec![called.to_owned()];
                             let keys = schema["properties"].as_object().into_iter().flat_map(Map::keys);
                             for key in iter::once(required).chain(keys.map(String::as_str).filter(|key| *key != required)) {
+                                // a verdict is its own flag: `--used`
                                 let value = params["arguments"]
                                     .get(key)
                                     .map(|given| given.as_str().map_or_else(|| given.to_string(), str::to_owned))
+                                    .map(|given| if key == "verdict" { format!("--{given}") } else { given })
                                     .or_else(|| (key == required).then(String::new))
                                     .or_else(|| (key == "session").then(|| session.clone()));
-                                let named = (key != required || called == "recall").then(|| format!("--{key}"));
+                                let named = ((key != required && key != "verdict") || called == "recall").then(|| format!("--{key}"));
                                 line.extend(value.into_iter().flat_map(|given| named.clone().into_iter().chain([given])));
                             }
                             let out = Command::new(&exe).args(&line).stdin(Stdio::null()).output().ok();
@@ -2372,21 +3626,6 @@ fn main() -> ExitCode {
             let ask = toks(&cue)
                 .iter()
                 .any(|word| !STEER.split(' ').any(|steer| steer == word));
-            let secret = env::var("TYPESAFE_API_KEY")
-                .or_else(|_| fs::read_to_string(home.join(".config/typesafe/api_key")))
-                .map(|key| key.trim().to_owned())
-                .unwrap_or_default();
-            let now = || {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(0, |since| {
-                        u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
-                    })
-            };
-            let (down, tried) = (
-                root.join("jev-down.json"),
-                setting("SANDMAN_SCORERS", "pplx,kev,jev".to_owned()),
-            );
             // the pass, the reference's (docs/recall.html#proposed): BM25 and cosine ranks fused,
             // the fused top 10 to one decision model, the two orders fused again and cut; each
             // line `(its score, its candidate)`, at most so many, the path taken, the scorer, the
@@ -2396,7 +3635,7 @@ fn main() -> ExitCode {
                 reason = "BM25, cosine and reciprocal-rank fusion are float math"
             )]
             let pass = || {
-                let mut errors: Vec<(&str, String)> = Vec::new();
+                let mut errors: Vec<(String, String)> = Vec::new();
                 let count = |items: usize| f64::from(u32::try_from(items).unwrap_or(u32::MAX));
                 let reciprocal = |rank: usize| 1.0f64 / count(rank.saturating_add(61));
                 // descending, a tie in the order given
@@ -2412,83 +3651,12 @@ fn main() -> ExitCode {
                     .iter()
                     .map(|memory| label(text(&memory["bank"])))
                     .collect();
-                // BM25 (k1 1.2, b .75) of the head, the body and the file's stem for the cue's
-                // distinct tokens and the given repository's, plus 4 in the about's bank, else 1
-                // in home's or the grove root's, unless the memory claims its own importance
-                let docs: Vec<Vec<String>> = candidates
-                    .iter()
-                    .zip(&labelled)
-                    .map(|(memory, repo)| {
-                        let file = text(&memory["file"]);
-                        toks(&format!(
-                            "{}\n{} {}",
-                            head(memory, repo),
-                            text(&memory["body"]),
-                            file.strip_suffix(".md").unwrap_or(file)
-                        ))
-                    })
-                    .collect();
-                let size = count(docs.len());
-                let mean = count(docs.iter().map(Vec::len).sum()) / size;
-                let idf: Vec<(String, f64)> =
-                    toks(&format!("{cue} {}", given.as_deref().unwrap_or_default()))
-                        .into_iter()
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .map(|word| {
-                            let df = count(docs.iter().filter(|doc| doc.contains(&word)).count());
-                            let weight = ((size - df + 0.5) / (df + 0.5)).ln_1p();
-                            (word, weight)
-                        })
-                        .collect();
-                let lexical: Vec<f64> = docs
-                    .iter()
-                    .zip(candidates.iter().zip(&labelled))
-                    .map(|(doc, (memory, repo))| {
-                        let told =
-                            format!("{} {}", text(&memory["name"]), text(&memory["description"]))
-                                .to_lowercase();
-                        let ends = |tail: &str| {
-                            !tail.starts_with(|letter: char| {
-                                letter.is_alphanumeric() || letter == '_'
-                            })
-                        };
-                        let claims = CLAIM.iter().any(|phrase| told.contains(phrase))
-                            || ["every request", "any request", "all request"].iter().any(
-                                |phrase| {
-                                    told.match_indices(phrase).any(|(at, _)| {
-                                        let tail = told
-                                            .get(at.saturating_add(phrase.len())..)
-                                            .unwrap_or_default();
-                                        ends(tail) || tail.strip_prefix('s').is_some_and(ends)
-                                    })
-                                },
-                            );
-                        let bonus = if claims {
-                            0.0f64
-                        } else if about.as_ref() == Some(repo) {
-                            4.0f64
-                        } else if GENERAL.contains(&repo.as_str()) {
-                            1.0f64
-                        } else {
-                            0.0f64
-                        };
-                        let length = count(doc.len());
-                        idf.iter()
-                            .map(|pair| {
-                                (
-                                    pair.1,
-                                    count(doc.iter().filter(|token| **token == pair.0).count()),
-                                )
-                            })
-                            .filter(|pair| pair.1 > 0.0f64)
-                            .fold(0.0f64, |sum, (weight, tf)| {
-                                sum + weight * tf * 2.2f64
-                                    / 1.2f64.mul_add(0.75f64.mul_add(length / mean, 0.25f64), tf)
-                            })
-                            + bonus
-                    })
-                    .collect();
+                let lexical = bm25(
+                    &candidates,
+                    &labelled,
+                    &format!("{cue} {}", given.as_deref().unwrap_or_default()),
+                    about.as_deref(),
+                );
                 let by_word = order(&lexical, (0..candidates.len()).collect());
                 // the cosine rank: the query embedded, each candidate's vector from the cache,
                 // at most `$SANDMAN_RECALL_EMBED` missing ones (the lexically best) embedded and
@@ -2514,8 +3682,8 @@ fn main() -> ExitCode {
                     .collect();
                 let query = embed(&[format!("{}{state}", EMBED[1])], begun, limit)
                     .map(|mut found| found.pop().unwrap_or_default());
-                let mut fail = |scorer, error: io::Error| {
-                    errors.push((scorer, one_line(&error.to_string(), 400)));
+                let mut fail = |error: io::Error| {
+                    errors.push(("embed".to_owned(), one_line(&error.to_string(), 400)));
                 };
                 let missing: Vec<usize> = by_word
                     .iter()
@@ -2543,7 +3711,7 @@ fn main() -> ExitCode {
                         append(&root.join("embeddings.jsonl"), &rows.concat())
                     })
                 {
-                    fail("embed", error);
+                    fail(error);
                 }
                 let fused = match query {
                     Ok(vector) => {
@@ -2552,7 +3720,7 @@ fn main() -> ExitCode {
                             .map(|found| {
                                 found.as_ref().map_or(0.0f64, |memory| {
                                     total(
-                                        vector.iter().zip(memory).map(|(left, right)| left * right),
+                                        vector.iter().zip(memory).map(|(mine, other)| mine * other),
                                     )
                                 })
                             })
@@ -2572,7 +3740,7 @@ fn main() -> ExitCode {
                         Some(fused)
                     }
                     Err(error) => {
-                        fail("embed", error);
+                        fail(error);
                         None
                     }
                 };
@@ -2582,17 +3750,21 @@ fn main() -> ExitCode {
                     .map_or_else(|| by_word.clone(), |scores| order(scores, by_word.clone()));
                 // the decision: the first order's top 10 in one request, keyed by rank, to each
                 // scorer in `$SANDMAN_SCORERS` until one answers; Jev skipped while it is down
-                let shortlist: Vec<usize> = first.iter().copied().take(10).collect();
+                let (shortlist, asked) = (
+                    first.iter().copied().take(10).collect::<Vec<usize>>(),
+                    guide(&root, "question"),
+                );
                 let questions: Map<String, Value> = shortlist
                     .iter()
                     .enumerate()
                     .map(|(rank, &index)| {
                         let memory = &candidates[index];
                         let instructions = format!(
-                            "Memory ({}): {} \u{2014} {}. {QUESTION}",
+                            "Memory ({}): {} \u{2014} {}. {}",
                             labelled[index],
                             text(&memory["name"]),
-                            one_line(text(&memory["description"]), 160)
+                            one_line(text(&memory["description"]), 160),
+                            asked.trim()
                         );
                         (
                             rank.to_string(),
@@ -2600,64 +3772,8 @@ fn main() -> ExitCode {
                         )
                     })
                     .collect();
-                let held_down =
-                    serde_json::from_str::<Value>(&fs::read_to_string(&down).unwrap_or_default())
-                        .ok()
-                        .and_then(|stamp| stamp["until"].as_u64())
-                        .is_some_and(|until| until > now());
-                let ollama = setting("SANDMAN_OLLAMA", "http://127.0.0.1:11434".to_owned());
-                let decided = tried
-                    .split(',')
-                    .filter(|scorer| !(*scorer == "jev" && held_down))
-                    .find_map(|scorer| {
-                        let (url, model) = match scorer {
-                            "pplx" => (format!("{ollama}/v1/systemone"), "pplx-decider-flash:4b"),
-                            "kev" => ("http://127.0.0.1:1703/v1/systemone".to_owned(), "kev-latest"),
-                            "jev" => ("https://api.typesafe.ai/v1/systemone".to_owned(), "jev-latest"),
-                            _ => return None,
-                        };
-                        let key = if scorer == "jev" { secret.as_str() } else { "" };
-                        let request = json!({"model": model, "questions": questions, "state": state});
-                        let (answer, replied) = if scorer == "jev" && secret.is_empty() {
-                            (
-                                Err(io::Error::other(
-                                    "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
-                                )),
-                                String::new(),
-                            )
-                        } else {
-                            post(&url, &request.to_string(), key, begun, limit)
-                        };
-                        let scored = answer.and_then(|reply| {
-                            let nouls = (0..shortlist.len()).map(|rank| {
-                                reply["answers"][rank.to_string()]["noul"]
-                                    .as_f64()
-                                    .ok_or_else(|| {
-                                        io::Error::other(format!("reply: no noul for question {rank}"))
-                                    })
-                            });
-                            Ok((
-                                nouls.collect::<io::Result<Vec<f64>>>()?,
-                                reply["usage"]["input_tokens"].as_u64().unwrap_or(0),
-                            ))
-                        });
-                        scored
-                            .map_err(|error| {
-                                // out of credit or refused: down for 6 h, else for 60 s
-                                let refused = ["billing_error", "error: 401", "error: 402", "error: 403"]
-                                    .iter()
-                                    .any(|marker| replied.contains(marker));
-                                let expiry = setting(
-                                    ["SANDMAN_JEV_DOWN_MS", "SANDMAN_JEV_HELD_MS"][usize::from(refused)],
-                                    [60_000, 21_600_000][usize::from(refused)],
-                                );
-                                let until = json!({"error": one_line(&error.to_string(), 400), "until": now().saturating_add(expiry)});
-                                drop((scorer == "jev").then(|| put(&down, &until.to_string())));
-                                fail(scorer, error);
-                            })
-                            .ok()
-                            .map(|found| (scorer.to_owned(), found))
-                    });
+                let (decided, failures) = decide(&root, &home, &questions, &state, begun, limit);
+                errors.extend(failures);
                 let embedded = fused.is_some();
                 let (lines, max, route, scorer, tokens) = match (decided, fused) {
                     // the decision's order and the first order fused within the 10, a tie
@@ -2729,7 +3845,7 @@ fn main() -> ExitCode {
             let fits = |listed: usize, used: usize| listed < max && used <= budget;
             let failing = errors
                 .iter()
-                .map(|error| error.0)
+                .map(|error| error.0.as_str())
                 .collect::<Vec<_>>()
                 .join(" and ");
             let head = |sent: usize| {
@@ -2816,7 +3932,7 @@ fn main() -> ExitCode {
                     }
                     if let Some(figure) = score {
                         digest.push_str(&row);
-                        sent.push(json!({"file": path(memory), "score": figure.parse::<f64>().unwrap_or_default()}));
+                        sent.push(json!({"file": path(memory), "id": memory["id"], "score": figure.parse::<f64>().unwrap_or_default()}));
                     } else {
                         listed.push_str(&row);
                         carried.push(path(memory));
@@ -2895,9 +4011,10 @@ fn main() -> ExitCode {
                 &title,
                 &mut BTreeSet::new(),
             );
-            let (now, session) = (utc(SystemTime::now()), pull.as_deref());
+            let (now, session, id) = (utc(SystemTime::now()), pull.as_deref(), mint());
             let contents = note(
                 &[
+                    ("id", &id),
                     ("name", one_line(&title, 200).as_str()),
                     ("description", one_line(&line, 400).as_str()),
                     ("type", &kind),
@@ -2908,6 +4025,7 @@ fn main() -> ExitCode {
                     ),
                     ("topic", shelved),
                     ("session", session.unwrap_or_default()),
+                    ("origin", ["hand", ""][usize::from(session.is_some())]),
                     (
                         "source",
                         &format!("remember {now} \u{b7} {}", session.unwrap_or("-")),
@@ -2922,9 +4040,40 @@ fn main() -> ExitCode {
             let path = format!("traces/{bank}/{}", name(&file));
             drop(record(
                 &root,
-                &mut json!({"file": path, "kind": "remember", "session": pull, "type": kind}),
+                &mut json!({"file": path, "id": id, "kind": "remember", "session": pull, "type": kind}),
             ));
             println!("{me} show {path}");
+            ExitCode::SUCCESS
+        }
+        "rethink" => {
+            let wanted = args.get(2).cloned().unwrap_or_default();
+            let given: Vec<&str> = VERDICTS
+                .into_iter()
+                .filter(|verdict| args.contains(&format!("--{verdict}")))
+                .collect();
+            let [verdict] = given[..] else {
+                eprintln!(
+                    "sandman rethink: takes <path> first and one of --irrelevant, --used, --wrong, --stale"
+                );
+                return ExitCode::from(2);
+            };
+            let Some(memory) = every(&root)
+                .into_iter()
+                .find(|note| note["path"] == wanted.as_str())
+            else {
+                eprintln!(
+                    "sandman rethink: no memory {wanted} (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under {})",
+                    root.display()
+                );
+                return ExitCode::FAILURE;
+            };
+            let line =
+                json!({"by": "agent", "session": pull, "verdict": verdict, "why": flag("--why")});
+            if let Err(error) = rethink(&root, &ledger(&root), &memory, line) {
+                eprintln!("sandman rethink: {error}");
+                return ExitCode::FAILURE;
+            }
+            println!("rethink: {verdict} {wanted}");
             ExitCode::SUCCESS
         }
         "serve" => {
@@ -3043,10 +4192,13 @@ fn main() -> ExitCode {
                 settle(line);
             };
             let ticker = thread::spawn(move || {
+                // the UTC day release last said it was held back, so it says so once a day
+                let mut gated = String::new();
                 while STOP.get().is_none() {
                     thread::park_timeout(tick);
                     let lines = ledger(&data);
                     let story = sessions(&lines);
+                    let (_, _, label) = labels(&home, &claude);
                     // this machine's sessions started before the grace with no end since, no job
                     // naming them: without a transcript gone, idle past the window taken; at most
                     // 20 gone and one taken a tick
@@ -3081,7 +4233,6 @@ fn main() -> ExitCode {
                     // then what recall would embed and it lacks, in reader order, at most
                     // `$SANDMAN_EMBED_TICK` a tick
                     {
-                        let (_, _, label) = labels(&home, &claude);
                         let (cache, file) = (vectors(&data), data.join("embeddings.jsonl"));
                         let wanted: Vec<(String, String, String)> = pool(&data)
                             .1
@@ -3170,6 +4321,72 @@ fn main() -> ExitCode {
                             ),
                         );
                     }
+                    // release, after settle, only while check holds but for its own backlog (6): at
+                    // most `$SANDMAN_RELEASE_TICK` transcripts and as many copies, the stop flag
+                    // checked before each; the file goes before its line
+                    let planned = plan(&data, &lines);
+                    let allotted = setting("SANDMAN_RELEASE_TICK", 20usize);
+                    let blocking = audit(&data, &lines, &planned)
+                        .2
+                        .iter()
+                        .filter(|found| found.0 != 6)
+                        .count();
+                    let utc_day = utc(SystemTime::now())
+                        .get(..10)
+                        .unwrap_or_default()
+                        .to_owned();
+                    let stuck = blocking > 0
+                        && gated != utc_day
+                        && !(planned.release.is_empty() && planned.sweep.is_empty());
+                    let _: Option<()> = stuck.then(|| {
+                        let held = io::Error::other(format!(
+                            "check: {blocking} violations, nothing released"
+                        ));
+                        logged("release", "event", "release", Err(held));
+                        gated = utc_day;
+                    });
+                    for (session, files) in planned
+                        .release
+                        .iter()
+                        .take(allotted)
+                        .filter(|_| blocking == 0)
+                        .take_while(|_| STOP.get().is_none())
+                        .map(|pair| (&pair.0, &pair.1))
+                    {
+                        let free = || -> io::Result<Value> {
+                            let from = files
+                                .iter()
+                                .map(|file| {
+                                    let whole = String::from_utf8_lossy(&fs::read(file)?).into_owned();
+                                    let bytes = weight(file).saturating_add(weight(&sidecar(file)));
+                                    Ok(json!({"bytes": bytes, "digest": sha256(&whole), "id": null, "path": shown(&data, file), "sessions": [session]}))
+                                })
+                                .collect::<io::Result<Vec<Value>>>()?;
+                            for file in files {
+                                fs::remove_file(file)?;
+                                drop(fs::remove_dir_all(sidecar(file)));
+                                drop(file.parent().map(fs::remove_dir));
+                            }
+                            drop(fs::remove_file(
+                                data.join(format!("memories/.recent/{session}.json")),
+                            ));
+                            let mut line = json!({"from": from, "kind": "rewrite", "model": null, "op": "release", "reason": null, "to": null});
+                            record(&data, &mut line).map(|()| line)
+                        };
+                        logged("release", "session", session, free());
+                    }
+                    let swept = planned
+                        .sweep
+                        .iter()
+                        .take(allotted)
+                        .filter(|copy| {
+                            blocking == 0 && STOP.get().is_none() && fs::remove_file(copy).is_ok()
+                        })
+                        .map(|copy| drop(copy.parent().map(fs::remove_dir)))
+                        .count();
+                    if swept > 0 {
+                        logged("sweep", "event", "sweep", Ok(json!({"swept": swept})));
+                    }
                     let oldest = story
                         .values()
                         .filter(|marks| {
@@ -3178,31 +4395,51 @@ fn main() -> ExitCode {
                         })
                         .min_by_key(|marks| marks[1]["at"].as_str());
                     let cutoff = ago(calm);
-                    let labile = notes(&data, "traces");
-                    let mut banks: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
+                    let (labile, filed) = (
+                        notes(&data, "traces"),
+                        [notes(&data, "memories"), notes(&data, "knowledge")].concat(),
+                    );
+                    // per bank: when each trace was created and each wrong or stale verdict its
+                    // notes still answer to was given, the verdicts flagged
+                    let mut banks: BTreeMap<&str, Vec<(&str, bool)>> = BTreeMap::new();
                     for trace in &labile {
-                        banks.entry(text(&trace["bank"])).or_default().push(trace);
+                        let bank = banks.entry(text(&trace["bank"])).or_default();
+                        bank.push((text(&trace["created"]), false));
                     }
-                    // quiet: its newest trace older than the window; a failed bank waits for a
-                    // trace newer than its failure
+                    for held in &filed {
+                        for verdict in judged(&lines, held) {
+                            let bank = banks.entry(text(&held["bank"])).or_default();
+                            bank.push((text(&verdict["at"]), true));
+                        }
+                    }
+                    // quiet: nothing newer than the window; then a trace newer than its last
+                    // failure, or a verdict newer than its last consolidate
                     let ripe = banks
                         .into_iter()
                         .filter(|pair| {
-                            let newest = pair.1.iter().map(|trace| text(&trace["created"])).max();
-                            let failed = lines
-                                .iter()
-                                .filter(|line| {
-                                    line["kind"] == "consolidate"
-                                        && line["outcome"] == "failed"
-                                        && line["bank"] == pair.0
-                                })
-                                .filter_map(|line| line["at"].as_str())
-                                .max();
-                            newest <= Some(cutoff.as_str()) && failed < newest
+                            let latest = |verdicts: bool| {
+                                let after = lines
+                                    .iter()
+                                    .filter(|line| {
+                                        line["kind"] == "consolidate"
+                                            && line["bank"] == pair.0
+                                            && (verdicts || line["outcome"] == "failed")
+                                    })
+                                    .filter_map(|line| line["at"].as_str())
+                                    .max();
+                                after
+                                    < pair
+                                        .1
+                                        .iter()
+                                        .filter(|time| time.1 == verdicts)
+                                        .map(|time| time.0)
+                                        .max()
+                            };
+                            pair.1.iter().map(|time| time.0).max() <= Some(cutoff.as_str())
+                                && (latest(false) || latest(true))
                         })
-                        .min_by_key(|pair| {
-                            pair.1.iter().map(|trace| text(&trace["created"])).min()
-                        });
+                        .min_by_key(|pair| pair.1.iter().map(|time| time.0).min())
+                        .map(|pair| pair.0);
                     // the latest reflect line of this machine, and the model runs since
                     let since = lines
                         .iter()
@@ -3276,7 +4513,7 @@ fn main() -> ExitCode {
                             if !archived.is_file() {
                                 return Ok(json!({"outcome": "gone", "traces": 0}));
                             }
-                            let (digest, cwd) = episode(&data, closing, budget);
+                            let (digest, cwd, recalled) = episode(&data, &lines, closing, budget);
                             let reply = run(
                                 &data,
                                 "encode",
@@ -3301,7 +4538,39 @@ fn main() -> ExitCode {
                                     one_line(&bad.to_string(), 200)
                                 )));
                             }
-                            let now = utc(SystemTime::now());
+                            // at most one verdict per note `# recalled` lists, none on another
+                            let (listed, mut judged, none): (BTreeMap<&str, &Value>, _, _) = (
+                                recalled
+                                    .iter()
+                                    .map(|note| (text(&note["path"]), note))
+                                    .collect(),
+                                BTreeSet::new(),
+                                Vec::new(),
+                            );
+                            let verdicts = if reply["verdicts"].is_null() {
+                                Some(&none)
+                            } else {
+                                reply["verdicts"].as_array()
+                            };
+                            if let Some(bad) = verdicts.map_or_else(
+                                || Some(&reply["verdicts"]),
+                                |list| {
+                                    list.iter().find(|verdict| {
+                                        let file = text(&verdict["file"]);
+                                        !(listed.contains_key(file)
+                                            && VERDICTS.contains(&text(&verdict["verdict"]))
+                                            && (verdict["why"].is_null()
+                                                || verdict["why"].is_string())
+                                            && judged.insert(file))
+                                    })
+                                },
+                            ) {
+                                return Err(io::Error::other(format!(
+                                    "output: not a verdict: {}",
+                                    one_line(&bad.to_string(), 200)
+                                )));
+                            }
+                            let (now, mut ids) = (utc(SystemTime::now()), Vec::new());
                             for trace in traces.into_iter().flatten() {
                                 let (kind, name, about) = (
                                     text(&trace["type"]),
@@ -3328,8 +4597,10 @@ fn main() -> ExitCode {
                                     name,
                                     &mut BTreeSet::new(),
                                 );
+                                ids.push(mint());
                                 let contents = note(
                                     &[
+                                        ("id", ids.last().map_or("", String::as_str)),
                                         ("name", one_line(name, 200).as_str()),
                                         (
                                             "description",
@@ -3354,7 +4625,21 @@ fn main() -> ExitCode {
                                 );
                                 put(&file, &contents)?;
                             }
-                            Ok(json!({"outcome": "encoded", "traces": traces.map_or(0, Vec::len)}))
+                            verdicts
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|verdict| {
+                                    Some((*listed.get(text(&verdict["file"]))?, verdict))
+                                })
+                                .try_for_each(|(note, verdict)| {
+                                    rethink(
+                                        &data,
+                                        &lines,
+                                        note,
+                                        json!({"by": "encode", "session": session, "verdict": verdict["verdict"], "why": verdict["why"]}),
+                                    )
+                                })
+                                .map(|()| json!({"ids": ids, "outcome": "encoded", "traces": ids.len()}))
                         };
                         (
                             "encode",
@@ -3363,11 +4648,103 @@ fn main() -> ExitCode {
                             json!({"traces": 0u8}),
                             encode(),
                         )
-                    } else if let Some((bank, inbound)) = ripe {
+                    } else if let Some(bank) = ripe {
                         // a topic's traces fold into its knowledge pages, a bank's into its memories
+                        let inbound: Vec<&Value> = labile
+                            .iter()
+                            .filter(|trace| trace["bank"] == bank)
+                            .collect();
                         let (dir, memories) = shelf(&data, bank);
+                        let (traces, subject) = (
+                            data.join("traces").join(bank),
+                            bank.strip_prefix('@').unwrap_or_default(),
+                        );
                         let consolidate = || -> io::Result<Value> {
-                            let (input, full) = stack(bank, &inbound, &memories, allowance);
+                            let before = measure(&data, Some(bank), &label);
+                            // the wrong and stale verdicts its memories still answer to
+                            let blamed: BTreeMap<&str, Vec<&Value>> = memories
+                                .iter()
+                                .map(|memory| (text(&memory["file"]), judged(&lines, memory)))
+                                .filter(|pair| !pair.1.is_empty())
+                                .collect();
+                            let charges = blamed
+                                .iter()
+                                .flat_map(|(file, verdicts)| {
+                                    verdicts.iter().map(move |verdict| {
+                                        format!(
+                                            "{file} \u{b7} {} \u{b7} {}",
+                                            text(&verdict["verdict"]),
+                                            verdict["why"].as_str().map_or_else(
+                                                || "-".to_owned(),
+                                                |said| one_line(said, 400)
+                                            )
+                                        )
+                                    })
+                                })
+                                .collect();
+                            // the notes of other banks and topics nearest one sent, by the cosine of
+                            // their cached embeddings, at most 5
+                            let cache = vectors(&data);
+                            let vector = |note: &Value| -> Option<Vec<f64>> {
+                                let hashed = hash(&excerpt(note, &label(text(&note["bank"]))));
+                                Some(
+                                    cache.get(&hashed)?["v"]
+                                        .as_array()?
+                                        .iter()
+                                        .filter_map(Value::as_f64)
+                                        .collect(),
+                                )
+                            };
+                            let ours: Vec<Vec<f64>> = inbound
+                                .iter()
+                                .copied()
+                                .chain(&memories)
+                                .filter_map(vector)
+                                .collect();
+                            #[expect(clippy::float_arithmetic, reason = "a cosine is float math")]
+                            let mut near: Vec<(f64, String)> = pool(&data)
+                                .1
+                                .iter()
+                                .filter(|note| note["bank"] != bank)
+                                .filter_map(|note| {
+                                    let theirs = vector(note)?;
+                                    let best = ours
+                                        .iter()
+                                        .map(|one| {
+                                            total(
+                                                one.iter()
+                                                    .zip(&theirs)
+                                                    .map(|(mine, other)| mine * other),
+                                            )
+                                        })
+                                        .fold(f64::MIN, f64::max);
+                                    (best >= setting("SANDMAN_NEAR", 0.8f64)).then(|| {
+                                        (
+                                            best,
+                                            format!(
+                                                "{} \u{b7} {} \u{b7} {}",
+                                                text(&note["path"]),
+                                                text(&note["name"]),
+                                                one_line(text(&note["description"]), 160)
+                                            ),
+                                        )
+                                    })
+                                })
+                                .collect();
+                            near.sort_by(|one, two| two.0.total_cmp(&one.0));
+                            let (input, full) = stack(
+                                bank,
+                                &inbound,
+                                &memories,
+                                allowance,
+                                &[
+                                    ("judged", charges),
+                                    (
+                                        "elsewhere",
+                                        near.into_iter().take(5).map(|pair| pair.1).collect(),
+                                    ),
+                                ],
+                            );
                             let reply = run(
                                 &data,
                                 "consolidate",
@@ -3384,41 +4761,75 @@ fn main() -> ExitCode {
                                     .collect()
                             };
                             let (given, held_memories) = (fed(&inbound), fed(&full));
-                            // every trace named once, a memory at most once, only whole ones
+                            // every trace named once, a memory at most once, only whole ones; a
+                            // revise only on a judged one
                             let ops = reply["ops"].as_array();
                             let mut named = BTreeSet::new();
                             if let Some(bad) = ops.map_or(Some(&reply), |list| {
                                 list.iter().find(|op| {
                                     let (trace, memory) =
                                         (op["trace"].as_str(), op["memory"].as_str());
+                                    let parents =
+                                        op.get("memories").map(|files| -> Option<Vec<&str>> {
+                                            files.as_array()?.iter().map(Value::as_str).collect()
+                                        });
                                     let has = |fields: &[&str]| {
                                         fields.iter().all(|field| op[field].is_string())
                                     };
-                                    !(match text(&op["op"]) {
-                                        "keep" => {
-                                            [KINDS.as_slice(), &KNOWN]
-                                                [usize::from(bank.starts_with('@'))]
-                                            .contains(&text(&op["type"]))
-                                                && has(&["body", "description", "name"])
-                                                && trace.is_some()
-                                                && memory.is_none()
+                                    let typed = [KINDS.as_slice(), &KNOWN]
+                                        [usize::from(!subject.is_empty())]
+                                    .contains(&text(&op["type"]));
+                                    let shape = (
+                                        trace.is_some(),
+                                        memory.is_some(),
+                                        parents.as_ref().map(|files| files.as_ref().map(Vec::len)),
+                                    );
+                                    !(match (text(&op["op"]), shape) {
+                                        ("keep", (true, false, None))
+                                        | ("merge", (false, false, Some(Some(2..)))) => {
+                                            typed && has(&["body", "description", "name"])
                                         }
-                                        "merge" => {
+                                        ("merge", (true, true, None)) => {
                                             has(&["body", "description"])
-                                                && trace.is_some()
-                                                && memory.is_some()
                                         }
-                                        "prune" => {
-                                            has(&["reason"]) && trace.is_some() != memory.is_some()
+                                        ("graduate", (false, false, Some(Some(1..)))) => {
+                                            topic(text(&op["type"]), op["topic"].as_str())
+                                                .is_some_and(|slug| !slug.is_empty())
+                                                && has(&["body", "description", "name", "reason"])
+                                        }
+                                        ("prune", (true, false, None) | (false, true, None)) => {
+                                            has(&["reason"])
+                                        }
+                                        ("rehome", (false, true, None)) => {
+                                            // another bank of its kind, already on disk
+                                            let target = text(&op["bank"]);
+                                            let tier = target.strip_prefix('@').unwrap_or(target);
+                                            target != bank
+                                                && target.starts_with('@') == bank.starts_with('@')
+                                                && !tier.is_empty()
+                                                && !tier.contains('/')
+                                                && !tier.starts_with(['.', '_'])
+                                                && shelf(&data, target).0.is_dir()
+                                        }
+                                        ("retitle", (false, true, None)) => {
+                                            has(&["description", "name"])
+                                        }
+                                        ("revise", (false, true, None)) => {
+                                            has(&["body", "description"])
+                                                && memory
+                                                    .is_some_and(|file| blamed.contains_key(file))
                                         }
                                         _ => false,
                                     } && trace.is_none_or(|file| {
                                         given.contains_key(file)
                                             && named.insert(("trace", file.to_owned()))
-                                    }) && memory.is_none_or(|file| {
-                                        held_memories.contains_key(file)
-                                            && named.insert(("memory", file.to_owned()))
-                                    }))
+                                    }) && memory
+                                        .into_iter()
+                                        .chain(parents.flatten().into_iter().flatten())
+                                        .all(|file| {
+                                            held_memories.contains_key(file)
+                                                && named.insert(("memory", file.to_owned()))
+                                        }))
                                 })
                             }) {
                                 return Err(io::Error::other(format!(
@@ -3449,18 +4860,40 @@ fn main() -> ExitCode {
                                     format!("{reply}\n"),
                                 )],
                             );
+                            let (mut rewrites, mut undo) = (Vec::new(), Vec::new());
                             for op in ops.into_iter().flatten() {
                                 let trace = op["trace"].as_str().and_then(|file| given.get(file));
                                 let memory = op["memory"]
                                     .as_str()
                                     .and_then(|file| held_memories.get(file));
-                                for (tier, file) in [
-                                    (data.join("traces").join(bank), trace),
-                                    (dir.clone(), memory),
-                                ]
-                                .into_iter()
-                                .filter_map(|(tier, found)| Some((tier, text(&found?["file"]))))
-                                {
+                                // a merge's parents, each with an id: one minted for one without
+                                let parents: Vec<Value> = op["memories"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .filter_map(|file| held_memories.get(text(file)))
+                                    .map(|held| {
+                                        let mut parent = held.clone();
+                                        parent["id"] = parent["id"]
+                                            .as_str()
+                                            .map_or_else(mint, str::to_owned)
+                                            .into();
+                                        parent
+                                    })
+                                    .collect();
+                                let inputs: Vec<(&Path, &Value)> = trace
+                                    .map(|found| (traces.as_path(), found))
+                                    .into_iter()
+                                    .chain(
+                                        memory
+                                            .into_iter()
+                                            .chain(&parents)
+                                            .map(|found| (dir.as_path(), found)),
+                                    )
+                                    .collect();
+                                let first = aside.len();
+                                for &(tier, found) in &inputs {
+                                    let file = text(&found["file"]);
                                     aside.push((
                                         tier.join(file),
                                         dated(
@@ -3473,34 +4906,58 @@ fn main() -> ExitCode {
                                 }
                                 let at =
                                     |field: &str| trace.map_or("", |found| text(&found[field]));
+                                let of =
+                                    |field: &str| memory.map_or("", |found| text(&found[field]));
                                 let one = |field: &str, max: usize| one_line(text(&op[field]), max);
                                 let stamp = format!(
                                     "consolidate {now} \u{b7} {} \u{b7} model={}",
-                                    at("session"),
+                                    Some(at("session"))
+                                        .filter(|session| !session.is_empty())
+                                        .unwrap_or("-"),
                                     model(&consolidator)
                                 );
-                                // the result descends from every session its inputs did
+                                // the result continues the note: the trace's id on a keep, the
+                                // memory's otherwise, descended from every session and note its
+                                // inputs were, its origin kept only without either; a merge of
+                                // notes starts a new one, from its parents alone
+                                let fresh = !parents.is_empty();
+                                let values = || inputs.iter().map(|pair| pair.1);
                                 let sessions =
-                                    Vec::from_iter(lineage(trace.into_iter().chain(memory)))
-                                        .join(" ");
-                                match text(&op["op"]) {
-                                    "keep" => {
-                                        let kind = text(&op["type"]);
+                                    Vec::from_iter(lineage(values().filter(|_| !fresh))).join(" ");
+                                let from =
+                                    Vec::from_iter(words(values().map(|part| {
+                                        text(&part[if fresh { "id" } else { "from" }])
+                                    })))
+                                    .join(" ");
+                                let origin = memory
+                                    .into_iter()
+                                    .chain(trace)
+                                    .find_map(|part| part["origin"].as_str())
+                                    .filter(|_| sessions.is_empty() && from.is_empty())
+                                    .unwrap_or_default();
+                                let id = memory
+                                    .or(trace)
+                                    .and_then(|part| part["id"].as_str())
+                                    .map_or_else(mint, str::to_owned);
+                                let (kind, name, description) =
+                                    (text(&op["type"]), one("name", 200), one("description", 400));
+                                match (text(&op["op"]), fresh) {
+                                    ("keep", _) => {
                                         writes.push((
                                             slot(&dir, kind, text(&op["name"]), &mut claimed),
                                             note(
                                                 &[
-                                                    ("name", one("name", 200).as_str()),
-                                                    (
-                                                        "description",
-                                                        one("description", 400).as_str(),
-                                                    ),
+                                                    ("id", id.as_str()),
+                                                    ("name", name.as_str()),
+                                                    ("description", description.as_str()),
                                                     ("type", kind),
                                                     ("created", at("created")),
                                                     ("about", at("about")),
                                                     ("topic", at("topic")),
                                                     ("session", at("session")),
                                                     ("archived", at("archived")),
+                                                    ("from", from.as_str()),
+                                                    ("origin", origin),
                                                     ("sessions", sessions.as_str()),
                                                     ("source", stamp.as_str()),
                                                 ],
@@ -3508,33 +4965,113 @@ fn main() -> ExitCode {
                                             ),
                                         ));
                                     }
-                                    "merge" => {
-                                        let description = one("description", 400);
-                                        let mut fields =
-                                            front(memory.map_or("", |found| text(&found["text"])));
-                                        fields.retain(|field| field.0 != "sessions");
+                                    (made, true) => {
+                                        // a graduation's trace goes to its topic's traces
+                                        let (into, slugged) = if made == "graduate" {
+                                            let slug = text(&op["topic"]);
+                                            (data.join("traces").join(format!("@{slug}")), slug)
+                                        } else {
+                                            (dir.clone(), subject)
+                                        };
+                                        writes.push((
+                                            slot(&into, kind, text(&op["name"]), &mut claimed),
+                                            note(
+                                                &[
+                                                    ("id", id.as_str()),
+                                                    ("name", name.as_str()),
+                                                    ("description", description.as_str()),
+                                                    ("type", kind),
+                                                    ("created", now.as_str()),
+                                                    ("topic", slugged),
+                                                    ("from", from.as_str()),
+                                                    ("source", stamp.as_str()),
+                                                ],
+                                                text(&op["body"]),
+                                            ),
+                                        ));
+                                    }
+                                    ("prune", _) => {}
+                                    (continuing, _) => {
+                                        // merged, revised, retitled or rehomed: the memory continuing,
+                                        // its keys kept in order
+                                        let mut fields = front(of("text"));
+                                        fields.retain(|field| {
+                                            !["from", "id", "origin", "sessions"].contains(&field.0)
+                                        });
                                         let source = fields
                                             .iter()
                                             .position(|field| field.0 == "source")
                                             .unwrap_or(fields.len());
-                                        fields.insert(source, ("sessions", sessions.as_str()));
-                                        amend(
-                                            &mut fields,
-                                            &[
-                                                ("description", description.as_str()),
-                                                ("source", stamp.as_str()),
-                                                ("updated", now.as_str()),
+                                        drop(fields.splice(
+                                            source..source,
+                                            [
+                                                ("from", from.as_str()),
+                                                ("origin", origin),
+                                                ("sessions", sessions.as_str()),
                                             ],
-                                        );
-                                        writes.push((
-                                            dir.join(
-                                                memory.map_or("", |found| text(&found["file"])),
-                                            ),
-                                            note(&fields, text(&op["body"])),
                                         ));
+                                        fields.insert(0, ("id", id.as_str()));
+                                        // a retitle under its new name, a rehome in its new bank,
+                                        // both with the body as it was; else rewritten in place
+                                        let target = text(&op["bank"]);
+                                        let (amended, into, body): (&[(&str, &str)], _, _) =
+                                            match continuing {
+                                                "retitle" => (
+                                                    &[
+                                                        ("description", &description),
+                                                        ("name", &name),
+                                                    ],
+                                                    slot(&dir, of("type"), &name, &mut claimed),
+                                                    of("body"),
+                                                ),
+                                                "rehome" => (
+                                                    &[(
+                                                        "topic",
+                                                        target
+                                                            .strip_prefix('@')
+                                                            .unwrap_or_default(),
+                                                    )],
+                                                    slot(
+                                                        &shelf(&data, target).0,
+                                                        of("type"),
+                                                        of("name"),
+                                                        &mut claimed,
+                                                    ),
+                                                    of("body"),
+                                                ),
+                                                _ => (
+                                                    &[
+                                                        ("description", &description),
+                                                        ("source", &stamp),
+                                                        ("updated", &now),
+                                                    ],
+                                                    dir.join(of("file")),
+                                                    text(&op["body"]),
+                                                ),
+                                            };
+                                        amend(&mut fields, amended);
+                                        writes.push((into, note(&fields, body)));
                                     }
-                                    _ => {}
                                 }
+                                // a line per op, each input as it stood and where it went, if anywhere
+                                let landed = writes.last().filter(|_| op["op"] != "prune").map(|pending| {
+                                    let under = pending.0.strip_prefix(&data).unwrap_or(&pending.0).to_string_lossy();
+                                    json!({"id": id, "path": under.strip_prefix("memories/").unwrap_or(&under)})
+                                });
+                                rewrites.push(json!({
+                                    "from": values().map(entry).collect::<Vec<_>>(),
+                                    "kind": "rewrite", "model": model(&consolidator), "op": op["op"], "reason": op["reason"], "to": landed,
+                                }));
+                                // an order op (a merge of notes, a graduation, a memory pruned), so
+                                // a lowered score can put it back
+                                let ordering = fresh || (op["op"] == "prune" && memory.is_some());
+                                undo.extend(ordering.then(|| {
+                                    let written = writes
+                                        .last()
+                                        .filter(|_| fresh)
+                                        .map(|pending| pending.0.clone());
+                                    (written, aside.get(first..).unwrap_or_default().to_vec())
+                                }));
                             }
                             if let Err(error) = writes.iter().try_for_each(|pending| {
                                 pending.0.parent().map_or(Ok(()), fs::create_dir_all)?;
@@ -3552,14 +5089,25 @@ fn main() -> ExitCode {
                             for pending in &writes {
                                 fs::rename(staged(&pending.0), &pending.0)?;
                             }
-                            let count = |op: &str| {
-                                ops.into_iter()
-                                    .flatten()
-                                    .filter(|done| done["op"] == op)
-                                    .count()
+                            for mut line in rewrites {
+                                drop(record(&data, &mut line));
+                            }
+                            let count = |pick: &dyn Fn(&Value) -> bool| {
+                                ops.into_iter().flatten().filter(|done| pick(done)).count()
                             };
+                            let tally = |op: &str| count(&|done| done["op"] == op);
+                            let measured = measure(&data, Some(bank), &label);
+                            let reverted = !undo.is_empty() && worse(&before, &measured);
+                            let cause = json!(format!(
+                                "order: eval {} \u{2192} {}",
+                                before["eval"], measured["eval"]
+                            ));
+                            let _: Option<()> =
+                                reverted.then(|| unwind(&data, &undo, &cause)).transpose()?;
                             Ok(json!({
-                                "kept": count("keep"), "merged": count("merge"), "outcome": "consolidated", "pruned": count("prune"),
+                                "kept": tally("keep"), "merged": tally("merge"),
+                                "order": {"after": measured, "before": before, "merges": count(&|done| done["op"] == "merge" && done["memories"].is_array())},
+                                "outcome": (["consolidated", "reverted"][usize::from(reverted)]), "pruned": tally("prune"),
                             }))
                         };
                         (
@@ -3570,7 +5118,33 @@ fn main() -> ExitCode {
                             consolidate(),
                         )
                     } else if due {
-                        let reflect = || -> io::Result<Value> {
+                        // decay first, with no model run: each note under the floor but one about
+                        // the person, pinned or muted, or with a verdict consolidate still answers
+                        let decay = || -> io::Result<Vec<(PathBuf, PathBuf)>> {
+                            let (floor, now) = (
+                                setting("SANDMAN_DECAY_FLOOR", 0.1f64),
+                                day(&today()).unwrap_or_default(),
+                            );
+                            let mut moved = Vec::new();
+                            for note in
+                                [notes(&data, "memories"), notes(&data, "knowledge")].concat()
+                            {
+                                let force = strength(&lines, &note, now);
+                                if force < floor
+                                    && note["type"] != "user"
+                                    && !["mute", "pin"].contains(&text(&note["recall"]))
+                                    && judged(&lines, &note).is_empty()
+                                {
+                                    let cause =
+                                        json!(format!("decay: strength {force} under {floor}"));
+                                    let aside =
+                                        retire(&data, &note, "prune", &cause, &Value::Null)?;
+                                    moved.push((located(&data, &note), aside));
+                                }
+                            }
+                            Ok(moved)
+                        };
+                        let review = || -> io::Result<Value> {
                             let mine = |kind: &str| -> Vec<&Value> {
                                 after
                                     .iter()
@@ -3689,10 +5263,99 @@ fn main() -> ExitCode {
                                     format!("{} \u{b7} sent {} times, never shown", pair.0, pair.1)
                                 })
                                 .collect();
+                            // the ladder's evidence, per note with an id that no proposal holds open
+                            // and none was dropped for since its body last changed: used in so many
+                            // sessions and never blamed (rung 2), or relearned by so many sessions'
+                            // traces merged into it since it was written (rung 3)
+                            let held = intentions(&data);
+                            let (mut standing, mut relearned) = (BTreeMap::new(), BTreeMap::new());
+                            for note in [notes(&data, "memories"), notes(&data, "knowledge")]
+                                .concat()
+                                .into_iter()
+                                .filter(|note| {
+                                    note["id"].is_string()
+                                        && !held.iter().any(|one| {
+                                            one["graduate"] == note["id"]
+                                                && (one["state"] != "dropped"
+                                                    || one["closed"].as_str() > when(note))
+                                        })
+                                })
+                            {
+                                let verdicts: Vec<&Value> = lines
+                                    .iter()
+                                    .filter(|line| {
+                                        line["kind"] == "rethink"
+                                            && (line["file"] == note["path"]
+                                                || line["id"] == note["id"])
+                                    })
+                                    .collect();
+                                let used: BTreeSet<&str> = verdicts
+                                    .iter()
+                                    .filter(|line| line["verdict"] == "used")
+                                    .filter_map(|line| line["session"].as_str())
+                                    .collect();
+                                let rejoined: BTreeSet<&str> = lines
+                                    .iter()
+                                    .filter(|line| {
+                                        line["kind"] == "rewrite"
+                                            && line["op"] == "merge"
+                                            && line["to"]["id"] == note["id"]
+                                            && line["at"].as_str() > note["created"].as_str()
+                                    })
+                                    .flat_map(|line| line["from"].as_array().into_iter().flatten())
+                                    .filter(|from| text(&from["path"]).starts_with("traces/"))
+                                    .flat_map(|from| {
+                                        from["sessions"].as_array().into_iter().flatten()
+                                    })
+                                    .filter_map(Value::as_str)
+                                    .collect();
+                                let listing = |count: usize, how: &str| {
+                                    format!(
+                                        "{} \u{b7} {} \u{b7} {} \u{2014} {} \u{b7} {how} in {count} sessions",
+                                        text(&note["id"]),
+                                        text(&note["path"]),
+                                        text(&note["name"]),
+                                        one_line(text(&note["description"]), 160)
+                                    )
+                                };
+                                let id = text(&note["id"]).to_owned();
+                                if used.len() >= setting("SANDMAN_GUIDE_SESSIONS", 5)
+                                    && !verdicts.iter().any(|line| {
+                                        ["stale", "wrong"].contains(&text(&line["verdict"]))
+                                    })
+                                {
+                                    drop(standing.insert(
+                                        id.clone(),
+                                        (listing(used.len(), "used"), note.clone()),
+                                    ));
+                                }
+                                if rejoined.len() >= setting("SANDMAN_MECHANISM_SESSIONS", 3) {
+                                    drop(relearned.insert(
+                                        id,
+                                        (listing(rejoined.len(), "relearned"), note.clone()),
+                                    ));
+                                }
+                            }
+                            // recall's misses since: sends judged not about their cue
+                            let irrelevant: Vec<String> = jsonl(&data.join("eval/recall.jsonl"))
+                                .iter()
+                                .filter(|example| {
+                                    example["label"] == 0u8
+                                        && example["at"].as_str() > last["at"].as_str()
+                                })
+                                .map(|example| {
+                                    format!(
+                                        "{} \u{b7} {}",
+                                        text(&example["path"]),
+                                        one_line(text(&example["cue"]), 160)
+                                    )
+                                })
+                                .collect();
                             let input = format!(
-                                "<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n\n# since\n{}\n\n{}",
+                                "<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n<question>\n{}\n</question>\n\n# since\n{}\n\n{}",
                                 guide(&data, "encode").trim_end(),
                                 guide(&data, "consolidate").trim_end(),
+                                guide(&data, "question").trim(),
                                 last["at"].as_str().unwrap_or("the start"),
                                 cut(
                                     sections(&[
@@ -3713,6 +5376,15 @@ fn main() -> ExitCode {
                                         ("merged again", again.into_iter().collect()),
                                         ("remembered by hand", remembered),
                                         ("sent, never read", unread.into_iter().collect()),
+                                        ("irrelevant", irrelevant),
+                                        (
+                                            "standing",
+                                            standing.values().map(|pair| pair.0.clone()).collect()
+                                        ),
+                                        (
+                                            "relearned",
+                                            relearned.values().map(|pair| pair.0.clone()).collect()
+                                        ),
                                     ]),
                                     evidence
                                 )
@@ -3726,19 +5398,42 @@ fn main() -> ExitCode {
                                 reflect_limit,
                                 &noted,
                             )?;
-                            let jobs = ["consolidate", "encode"];
+                            let (jobs, proposals) = (
+                                ["consolidate", "encode"],
+                                ["consolidate", "encode", "question"],
+                            );
+                            // a proposal per note the evidence lists on its rung, at most once
+                            let (mut proposed, rungs) = (BTreeSet::new(), [&standing, &relearned]);
+                            let fits = |one: &Value| {
+                                let rung = rungs
+                                    .get(usize::from(one["rung"] == 3u8))
+                                    .filter(|_| one["rung"] == 2u8 || one["rung"] == 3u8);
+                                ["artifact", "line", "note", "why"]
+                                    .iter()
+                                    .all(|field| one[field].is_string())
+                                    && (one["replaces"].is_null() || one["replaces"].is_string())
+                                    && rung.is_some_and(|listed| {
+                                        listed.contains_key(text(&one["note"]))
+                                    })
+                                    && proposed.insert(text(&one["note"]).to_owned())
+                            };
                             if !reply["reason"].is_string()
-                                || jobs
+                                || proposals
                                     .iter()
                                     .any(|job| !(reply[job].is_null() || reply[job].is_string()))
+                                || !(reply["propose"].is_null()
+                                    || reply["propose"]
+                                        .as_array()
+                                        .is_some_and(|list| list.iter().all(fits)))
                             {
                                 return Err(io::Error::other(format!(
                                     "output: not a proposal: {}",
                                     one_line(&reply.to_string(), 200)
                                 )));
                             }
-                            if let Some(job) =
-                                jobs.iter().find(|job| text(&reply[**job]).len() > ceiling)
+                            if let Some(job) = proposals
+                                .iter()
+                                .find(|job| text(&reply[**job]).len() > ceiling)
                             {
                                 return Err(io::Error::other(format!(
                                     "output: {job} guidance over {ceiling} bytes"
@@ -3772,7 +5467,9 @@ fn main() -> ExitCode {
                                                     Path::new(text(&marks[1]["archived"])).is_file()
                                                 })
                                                 .take(replays)
-                                                .map(|marks| episode(&data, &marks[1], budget).0)
+                                                .map(|marks| {
+                                                    episode(&data, &lines, &marks[1], budget).0
+                                                })
                                                 .collect(),
                                         )
                                     } else {
@@ -3832,6 +5529,7 @@ fn main() -> ExitCode {
                                                         &consumed.iter().collect::<Vec<_>>(),
                                                         &sorted(stood, "file"),
                                                         allowance,
+                                                        &[],
                                                     )
                                                     .0
                                                 })
@@ -3873,7 +5571,7 @@ fn main() -> ExitCode {
                                     let verdict = judge(&asked)?;
                                     let pick = ["a", "b", "same"]
                                         .iter()
-                                        .position(|label| verdict["better"] == *label)
+                                        .position(|choice| verdict["better"] == *choice)
                                         .ok_or_else(|| {
                                             io::Error::other(format!(
                                                 "output: not a verdict: {}",
@@ -3891,11 +5589,103 @@ fn main() -> ExitCode {
                                     adopted.push((job, new.to_owned()));
                                 }
                             }
+                            // a selection question, scored with the one in force over the recall
+                            // evaluation's examples: adopted when it scores no worse
+                            if let Some(new) = reply["question"].as_str() {
+                                let current = guide(&data, "question");
+                                let old = questioned(&data, &home, &label, current.trim())?;
+                                let fresh = questioned(&data, &home, &label, new)?;
+                                drop(judged.insert(
+                                    "question".to_owned(),
+                                    json!({"new": fresh, "old": old}),
+                                ));
+                                adopted.extend(
+                                    (old.is_some() && fresh >= old)
+                                        .then(|| ("question", new.to_owned())),
+                                );
+                            }
                             let history = adopt(&data, &adopted)?;
+                            // each proposal an intention due today, about the artifact's directory;
+                            // a rung-2 line that replaces none and says nothing of its cost dropped
+                            let (now, deadline) = (utc(SystemTime::now()), today());
+                            let mut written = 0usize;
+                            for (one, subject) in reply["propose"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter(|one| {
+                                    one["rung"] == 3u8
+                                        || one["replaces"].is_string()
+                                        || !text(&one["why"]).trim().is_empty()
+                                })
+                                .filter_map(|one| {
+                                    let rung = rungs[usize::from(one["rung"] == 3u8)];
+                                    Some((one, &rung.get(text(&one["note"]))?.1))
+                                })
+                            {
+                                let (artifact, minted) = (text(&one["artifact"]), random());
+                                let about = Path::new(artifact).parent().map(Path::to_string_lossy);
+                                let tail = |field: &str, lead: &str| {
+                                    Some(text(&one[field]).trim())
+                                        .filter(|said| !said.is_empty())
+                                        .map_or_else(String::new, |said| format!("{lead}{said}"))
+                                };
+                                let what = format!(
+                                    "Graduate {} (rung {}) into {artifact}: {}{}{}",
+                                    text(&subject["name"]),
+                                    one["rung"],
+                                    text(&one["line"]),
+                                    tail("replaces", ", replacing: "),
+                                    tail("why", " \u{2014} ")
+                                );
+                                let id = minted.get(..8).unwrap_or_default();
+                                let proposal = note(
+                                    &[
+                                        ("due", &deadline),
+                                        ("created", &now),
+                                        ("about", &about.unwrap_or_default()),
+                                        ("graduate", text(&subject["id"])),
+                                        ("artifact", artifact),
+                                        ("state", "open"),
+                                    ],
+                                    &what,
+                                );
+                                put(&data.join(format!("intentions/{id}.md")), &proposal)?;
+                                drop(record(
+                                    &data,
+                                    &mut json!({"due": deadline, "graduate": subject["id"], "id": id, "kind": "defer", "session": null}),
+                                ));
+                                written = written.saturating_add(1);
+                            }
                             Ok(json!({
                                 "outcome": (["kept", "adopted"][usize::from(!history.is_empty())]),
-                                "reason": one_line(text(&reply["reason"]), 400), "replay": judged, "history": history,
+                                "proposed": written, "reason": one_line(text(&reply["reason"]), 400), "replay": judged, "history": history,
                             }))
+                        };
+                        // the review's line carries the store's order before decay and after the pass;
+                        // a decay that lowers the recall evaluation's score is put back first
+                        let reflect = || -> io::Result<Value> {
+                            let before = measure(&data, None, &label);
+                            let moved = decay()?;
+                            let decayed = measure(&data, None, &label);
+                            let back = !moved.is_empty() && worse(&before, &decayed);
+                            let cause = json!(format!(
+                                "order: eval {} \u{2192} {}",
+                                before["eval"], decayed["eval"]
+                            ));
+                            let _: Option<()> = back
+                                .then(|| unwind(&data, &[(None, moved.clone())], &cause))
+                                .transpose()?;
+                            let mut line = review().or_else(|error| match STOP.get() {
+                                Some(_) => Err(error),
+                                None => Ok(json!({"error": one_line(&error.to_string(), 400), "history": {}, "outcome": "failed"})),
+                            })?;
+                            (line["order"], line["pruned"]) = (
+                                json!({"after": measure(&data, None, &label), "before": before, "merges": 0u8}),
+                                moved.len().into(),
+                            );
+                            let _: Option<()> = back.then(|| line["reverted"] = true.into());
+                            Ok(line)
                         };
                         (
                             "reflect",
@@ -4135,7 +5925,7 @@ fn main() -> ExitCode {
             );
             drop(record(
                 &root,
-                &mut json!({"file": wanted, "kind": "show", "session": pull}),
+                &mut json!({"file": wanted, "id": memory["id"], "kind": "show", "session": pull}),
             ));
             ExitCode::SUCCESS
         }
@@ -4169,7 +5959,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove] | upgrade [--check | --back | --retry]\n       sandman chart | mcp | serve | status | version"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman rethink <path> --irrelevant|--used|--wrong|--stale [--why \"<text>\"] [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove] | upgrade [--check | --back | --retry]\n       sandman check [--fix] [--release] | chart | mcp | serve | status | version"
             );
             ExitCode::from(2)
         }

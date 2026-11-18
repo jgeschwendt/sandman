@@ -141,6 +141,8 @@ due: 2026-11-03                  or  after: after grove ships
 created: 2026-11-02T09:00:00Z
 about: /work/alpha               the repository, when given
 session: 5a000000-0000-4000-8000-00000000000a
+graduate: 3f9a0c1d2b4e           a graduation's proposal: the note's id
+artifact: /work/alpha/AGENTS.md  and where it would go
 state: open                      open, done or dropped
 closed: …                        once closed
 note: …                          the close's note
@@ -149,7 +151,9 @@ note: …                          the close's note
 sample: rerun the alpha bench on the new box</pre>
   <p>The body is what was deferred, in the person's words. A push rewrites <code class="code">due</code> or
     <code class="code">after</code> in place; a close sets <code class="code">state</code> and
-    <code class="code">closed</code>. Recall never reads <code class="code">intentions/</code>: an intention is
+    <code class="code">closed</code>. The weekly review writes one per graduation it proposes
+    (<a class="link" href="index.html#cycle-graduate">the ladder</a>); <code class="code">done</code> on it ends its note
+    into the artifact. Recall never reads <code class="code">intentions/</code>: an intention is
     surfaced by date, not ranked by relevance. <code class="code">sandman chart</code> lists every one under
     <code class="code">intentions</code> (id, what, due or after, state, created, closed, about, session) for a timeline
     to draw.</p>
