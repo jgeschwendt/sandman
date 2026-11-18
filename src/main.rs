@@ -743,6 +743,21 @@ fn jsonl(path: &Path) -> Vec<Value> {
         .collect()
 }
 
+/// The `wrong` and `stale` verdicts on `note` since its body last changed (docs/index.html#cycle-strength),
+/// by path, else id.
+fn judged<'line>(lines: &'line [Value], note: &Value) -> Vec<&'line Value> {
+    lines
+        .iter()
+        .filter(|line| {
+            line["kind"] == "rethink"
+                && ["stale", "wrong"].contains(&text(&line["verdict"]))
+                && line["at"].as_str() > when(note)
+                && (line["file"] == note["path"]
+                    || (note["id"].is_string() && line["id"] == note["id"]))
+        })
+        .collect()
+}
+
 /// A directory's bank key, the earlier sandman's `Bank::key_for`: every byte not ASCII
 /// alphanumeric turned into `-`, so distinct paths can share a key.
 fn key(path: &Path) -> String {
@@ -900,6 +915,17 @@ fn manifest() -> hotswap::Manifest {
         ],
         ..hotswap::Manifest::default()
     }
+}
+
+/// A bank's order (docs/index.html#cycle-rewrite): its active notes, its traces among them, and
+/// their characters.
+fn measure(root: &Path, bank: &str) -> Value {
+    let held: Vec<Value> = notes(root, "traces")
+        .into_iter()
+        .filter(|trace| trace["bank"] == bank)
+        .chain(shelf(root, bank).1)
+        .collect();
+    json!({"chars": held.iter().map(|note| text(&note["text"]).chars().count()).sum::<usize>(), "notes": held.len()})
 }
 
 /// A new note's id: 12 lowercase hex digits from `/dev/urandom`.
@@ -1537,12 +1563,14 @@ fn sorted(mut rows: Vec<Value>, key: &str) -> Vec<Value> {
 }
 
 /// Consolidate's input for `bank` (AGENTS.md `### consolidate`): the traces whole, the memories
-/// whole while their bytes fit `allowance`, the rest listed; and the whole ones.
+/// whole while their bytes fit `allowance`, the rest listed, then each of `more` that has items;
+/// and the whole ones.
 fn stack<'note>(
     bank: &str,
     traces: &[&Value],
     memories: &'note [Value],
     allowance: usize,
+    more: &[(&str, Vec<String>)],
 ) -> (String, Vec<&'note Value>) {
     let mut used = 0usize;
     let (full, listed): (Vec<&Value>, Vec<&Value>) = memories.iter().partition(|memory| {
@@ -1588,7 +1616,17 @@ fn stack<'note>(
                 })
                 .collect(),
         ),
-    ] {
+    ]
+    .into_iter()
+    .chain(more.iter().map(|list| {
+        (
+            list.0,
+            list.1
+                .iter()
+                .map(|item| ["- ", item, "\n"].concat())
+                .collect(),
+        )
+    })) {
         if !body.is_empty() {
             input.extend(["\n# ", title, "\n", &body]);
         }
@@ -2118,7 +2156,7 @@ fn main() -> ExitCode {
             // counted from the ledger, never stored (docs/index.html#cycle-strength): the note's
             // used verdicts and shows, its wrong and stale verdicts since its body last changed,
             // decayed by the days since the latest of its dates, used verdicts and shows (none: 0)
-            let (now, [used, shown, judged, half]) = (
+            let (now, [used, shown, blame, half]) = (
                 day(&today()).unwrap_or_default(),
                 [
                     ("SANDMAN_USED_WEIGHT", 3.0f64),
@@ -2130,12 +2168,7 @@ fn main() -> ExitCode {
             );
             #[expect(clippy::float_arithmetic, reason = "strength is float math")]
             let strength = |note: &Value| -> f64 {
-                let (body, dates) = (
-                    note["updated"]
-                        .as_str()
-                        .or_else(|| note["created"].as_str()),
-                    [note["created"].as_str(), note["updated"].as_str()],
-                );
+                let dates = [note["created"].as_str(), note["updated"].as_str()];
                 let about: Vec<&Value> = lines
                     .iter()
                     .filter(|line| {
@@ -2143,12 +2176,9 @@ fn main() -> ExitCode {
                             || (note["id"].is_string() && line["id"] == note["id"])
                     })
                     .collect();
-                let verdict = |line: &Value, verdicts: &[&str]| {
-                    line["kind"] == "rethink" && verdicts.contains(&text(&line["verdict"]))
-                };
                 let (read, acted) = (
                     |line: &Value| line["kind"] == "show",
-                    |line: &Value| verdict(line, &["used"]),
+                    |line: &Value| line["kind"] == "rethink" && line["verdict"] == "used",
                 );
                 let tally = |pick: &dyn Fn(&Value) -> bool| {
                     u32::try_from(about.iter().filter(|line| pick(line)).count())
@@ -2166,10 +2196,8 @@ fn main() -> ExitCode {
                     tally(&acted),
                     shown.mul_add(
                         tally(&read),
-                        judged.mul_add(
-                            -tally(&|line| {
-                                verdict(line, &["stale", "wrong"]) && line["at"].as_str() > body
-                            }),
+                        blame.mul_add(
+                            -u32::try_from(judged(&lines, note).len()).map_or(f64::MAX, f64::from),
                             1.0,
                         ),
                     ),
@@ -3704,31 +3732,51 @@ fn main() -> ExitCode {
                         })
                         .min_by_key(|marks| marks[1]["at"].as_str());
                     let cutoff = ago(calm);
-                    let labile = notes(&data, "traces");
-                    let mut banks: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
+                    let (labile, filed) = (
+                        notes(&data, "traces"),
+                        [notes(&data, "memories"), notes(&data, "knowledge")].concat(),
+                    );
+                    // per bank: when each trace was created and each wrong or stale verdict its
+                    // notes still answer to was given, the verdicts flagged
+                    let mut banks: BTreeMap<&str, Vec<(&str, bool)>> = BTreeMap::new();
                     for trace in &labile {
-                        banks.entry(text(&trace["bank"])).or_default().push(trace);
+                        let bank = banks.entry(text(&trace["bank"])).or_default();
+                        bank.push((text(&trace["created"]), false));
                     }
-                    // quiet: its newest trace older than the window; a failed bank waits for a
-                    // trace newer than its failure
+                    for held in &filed {
+                        for verdict in judged(&lines, held) {
+                            let bank = banks.entry(text(&held["bank"])).or_default();
+                            bank.push((text(&verdict["at"]), true));
+                        }
+                    }
+                    // quiet: nothing newer than the window; then a trace newer than its last
+                    // failure, or a verdict newer than its last consolidate
                     let ripe = banks
                         .into_iter()
                         .filter(|pair| {
-                            let newest = pair.1.iter().map(|trace| text(&trace["created"])).max();
-                            let failed = lines
-                                .iter()
-                                .filter(|line| {
-                                    line["kind"] == "consolidate"
-                                        && line["outcome"] == "failed"
-                                        && line["bank"] == pair.0
-                                })
-                                .filter_map(|line| line["at"].as_str())
-                                .max();
-                            newest <= Some(cutoff.as_str()) && failed < newest
+                            let latest = |verdicts: bool| {
+                                let after = lines
+                                    .iter()
+                                    .filter(|line| {
+                                        line["kind"] == "consolidate"
+                                            && line["bank"] == pair.0
+                                            && (verdicts || line["outcome"] == "failed")
+                                    })
+                                    .filter_map(|line| line["at"].as_str())
+                                    .max();
+                                after
+                                    < pair
+                                        .1
+                                        .iter()
+                                        .filter(|time| time.1 == verdicts)
+                                        .map(|time| time.0)
+                                        .max()
+                            };
+                            pair.1.iter().map(|time| time.0).max() <= Some(cutoff.as_str())
+                                && (latest(false) || latest(true))
                         })
-                        .min_by_key(|pair| {
-                            pair.1.iter().map(|trace| text(&trace["created"])).min()
-                        });
+                        .min_by_key(|pair| pair.1.iter().map(|time| time.0).min())
+                        .map(|pair| pair.0);
                     // the latest reflect line of this machine, and the model runs since
                     let since = lines
                         .iter()
@@ -3937,11 +3985,42 @@ fn main() -> ExitCode {
                             json!({"traces": 0u8}),
                             encode(),
                         )
-                    } else if let Some((bank, inbound)) = ripe {
+                    } else if let Some(bank) = ripe {
                         // a topic's traces fold into its knowledge pages, a bank's into its memories
+                        let inbound: Vec<&Value> = labile
+                            .iter()
+                            .filter(|trace| trace["bank"] == bank)
+                            .collect();
                         let (dir, memories) = shelf(&data, bank);
+                        let (traces, topic) = (
+                            data.join("traces").join(bank),
+                            bank.strip_prefix('@').unwrap_or_default(),
+                        );
                         let consolidate = || -> io::Result<Value> {
-                            let (input, full) = stack(bank, &inbound, &memories, allowance);
+                            let before = measure(&data, bank);
+                            // the wrong and stale verdicts its memories still answer to
+                            let blamed: BTreeMap<&str, Vec<&Value>> = memories
+                                .iter()
+                                .map(|memory| (text(&memory["file"]), judged(&lines, memory)))
+                                .filter(|pair| !pair.1.is_empty())
+                                .collect();
+                            let charges = blamed
+                                .iter()
+                                .flat_map(|(file, verdicts)| {
+                                    verdicts.iter().map(move |verdict| {
+                                        format!(
+                                            "{file} \u{b7} {} \u{b7} {}",
+                                            text(&verdict["verdict"]),
+                                            verdict["why"].as_str().map_or_else(
+                                                || "-".to_owned(),
+                                                |said| one_line(said, 400)
+                                            )
+                                        )
+                                    })
+                                })
+                                .collect();
+                            let (input, full) =
+                                stack(bank, &inbound, &memories, allowance, &[("judged", charges)]);
                             let reply = run(
                                 &data,
                                 "consolidate",
@@ -3958,41 +4037,59 @@ fn main() -> ExitCode {
                                     .collect()
                             };
                             let (given, held_memories) = (fed(&inbound), fed(&full));
-                            // every trace named once, a memory at most once, only whole ones
+                            // every trace named once, a memory at most once, only whole ones; a
+                            // revise only on a judged one
                             let ops = reply["ops"].as_array();
                             let mut named = BTreeSet::new();
                             if let Some(bad) = ops.map_or(Some(&reply), |list| {
                                 list.iter().find(|op| {
                                     let (trace, memory) =
                                         (op["trace"].as_str(), op["memory"].as_str());
+                                    let parents =
+                                        op.get("memories").map(|files| -> Option<Vec<&str>> {
+                                            files.as_array()?.iter().map(Value::as_str).collect()
+                                        });
                                     let has = |fields: &[&str]| {
                                         fields.iter().all(|field| op[field].is_string())
                                     };
-                                    !(match text(&op["op"]) {
-                                        "keep" => {
-                                            [KINDS.as_slice(), &KNOWN]
-                                                [usize::from(bank.starts_with('@'))]
-                                            .contains(&text(&op["type"]))
-                                                && has(&["body", "description", "name"])
-                                                && trace.is_some()
-                                                && memory.is_none()
+                                    let typed = [KINDS.as_slice(), &KNOWN]
+                                        [usize::from(!topic.is_empty())]
+                                    .contains(&text(&op["type"]));
+                                    let shape = (
+                                        trace.is_some(),
+                                        memory.is_some(),
+                                        parents.as_ref().map(|files| files.as_ref().map(Vec::len)),
+                                    );
+                                    !(match (text(&op["op"]), shape) {
+                                        ("keep", (true, false, None))
+                                        | ("merge", (false, false, Some(Some(2..)))) => {
+                                            typed && has(&["body", "description", "name"])
                                         }
-                                        "merge" => {
+                                        ("merge", (true, true, None)) => {
                                             has(&["body", "description"])
-                                                && trace.is_some()
-                                                && memory.is_some()
                                         }
-                                        "prune" => {
-                                            has(&["reason"]) && trace.is_some() != memory.is_some()
+                                        ("prune", (true, false, None) | (false, true, None)) => {
+                                            has(&["reason"])
+                                        }
+                                        ("retitle", (false, true, None)) => {
+                                            has(&["description", "name"])
+                                        }
+                                        ("revise", (false, true, None)) => {
+                                            has(&["body", "description"])
+                                                && memory
+                                                    .is_some_and(|file| blamed.contains_key(file))
                                         }
                                         _ => false,
                                     } && trace.is_none_or(|file| {
                                         given.contains_key(file)
                                             && named.insert(("trace", file.to_owned()))
-                                    }) && memory.is_none_or(|file| {
-                                        held_memories.contains_key(file)
-                                            && named.insert(("memory", file.to_owned()))
-                                    }))
+                                    }) && memory
+                                        .into_iter()
+                                        .chain(parents.flatten().into_iter().flatten())
+                                        .all(|file| {
+                                            held_memories.contains_key(file)
+                                                && named.insert(("memory", file.to_owned()))
+                                        }))
                                 })
                             }) {
                                 return Err(io::Error::other(format!(
@@ -4029,13 +4126,33 @@ fn main() -> ExitCode {
                                 let memory = op["memory"]
                                     .as_str()
                                     .and_then(|file| held_memories.get(file));
-                                for (tier, file) in [
-                                    (data.join("traces").join(bank), trace),
-                                    (dir.clone(), memory),
-                                ]
-                                .into_iter()
-                                .filter_map(|(tier, found)| Some((tier, text(&found?["file"]))))
-                                {
+                                // a merge's parents, each with an id: one minted for one without
+                                let parents: Vec<Value> = op["memories"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .filter_map(|file| held_memories.get(text(file)))
+                                    .map(|held| {
+                                        let mut parent = held.clone();
+                                        parent["id"] = parent["id"]
+                                            .as_str()
+                                            .map_or_else(mint, str::to_owned)
+                                            .into();
+                                        parent
+                                    })
+                                    .collect();
+                                let inputs: Vec<(&Path, &Value)> = trace
+                                    .map(|found| (traces.as_path(), found))
+                                    .into_iter()
+                                    .chain(
+                                        memory
+                                            .into_iter()
+                                            .chain(&parents)
+                                            .map(|found| (dir.as_path(), found)),
+                                    )
+                                    .collect();
+                                for &(tier, found) in &inputs {
+                                    let file = text(&found["file"]);
                                     aside.push((
                                         tier.join(file),
                                         dated(
@@ -4048,20 +4165,29 @@ fn main() -> ExitCode {
                                 }
                                 let at =
                                     |field: &str| trace.map_or("", |found| text(&found[field]));
+                                let of =
+                                    |field: &str| memory.map_or("", |found| text(&found[field]));
                                 let one = |field: &str, max: usize| one_line(text(&op[field]), max);
                                 let stamp = format!(
                                     "consolidate {now} \u{b7} {} \u{b7} model={}",
-                                    at("session"),
+                                    Some(at("session"))
+                                        .filter(|session| !session.is_empty())
+                                        .unwrap_or("-"),
                                     model(&consolidator)
                                 );
                                 // the result continues the note: the trace's id on a keep, the
-                                // memory's on a merge, descended from every session and note its
-                                // inputs were, its origin kept only without either
-                                let inputs = || trace.into_iter().chain(memory);
-                                let sessions = Vec::from_iter(lineage(inputs())).join(" ");
+                                // memory's otherwise, descended from every session and note its
+                                // inputs were, its origin kept only without either; a merge of
+                                // notes starts a new one, from its parents alone
+                                let fresh = !parents.is_empty();
+                                let values = || inputs.iter().map(|pair| pair.1);
+                                let sessions =
+                                    Vec::from_iter(lineage(values().filter(|_| !fresh))).join(" ");
                                 let from =
-                                    Vec::from_iter(words(inputs().map(|part| text(&part["from"]))))
-                                        .join(" ");
+                                    Vec::from_iter(words(values().map(|part| {
+                                        text(&part[if fresh { "id" } else { "from" }])
+                                    })))
+                                    .join(" ");
                                 let origin = memory
                                     .into_iter()
                                     .chain(trace)
@@ -4072,19 +4198,17 @@ fn main() -> ExitCode {
                                     .or(trace)
                                     .and_then(|part| part["id"].as_str())
                                     .map_or_else(mint, str::to_owned);
-                                match text(&op["op"]) {
-                                    "keep" => {
-                                        let kind = text(&op["type"]);
+                                let (kind, name, description) =
+                                    (text(&op["type"]), one("name", 200), one("description", 400));
+                                match (text(&op["op"]), fresh) {
+                                    ("keep", _) => {
                                         writes.push((
                                             slot(&dir, kind, text(&op["name"]), &mut claimed),
                                             note(
                                                 &[
                                                     ("id", id.as_str()),
-                                                    ("name", one("name", 200).as_str()),
-                                                    (
-                                                        "description",
-                                                        one("description", 400).as_str(),
-                                                    ),
+                                                    ("name", name.as_str()),
+                                                    ("description", description.as_str()),
                                                     ("type", kind),
                                                     ("created", at("created")),
                                                     ("about", at("about")),
@@ -4100,10 +4224,29 @@ fn main() -> ExitCode {
                                             ),
                                         ));
                                     }
-                                    "merge" => {
-                                        let description = one("description", 400);
-                                        let mut fields =
-                                            front(memory.map_or("", |found| text(&found["text"])));
+                                    (_, true) => {
+                                        writes.push((
+                                            slot(&dir, kind, text(&op["name"]), &mut claimed),
+                                            note(
+                                                &[
+                                                    ("id", id.as_str()),
+                                                    ("name", name.as_str()),
+                                                    ("description", description.as_str()),
+                                                    ("type", kind),
+                                                    ("created", now.as_str()),
+                                                    ("topic", topic),
+                                                    ("from", from.as_str()),
+                                                    ("source", stamp.as_str()),
+                                                ],
+                                                text(&op["body"]),
+                                            ),
+                                        ));
+                                    }
+                                    ("prune", _) => {}
+                                    (continuing, _) => {
+                                        // merged, revised or retitled: the memory continuing,
+                                        // its keys kept in order
+                                        let mut fields = front(of("text"));
                                         fields.retain(|field| {
                                             !["from", "id", "origin", "sessions"].contains(&field.0)
                                         });
@@ -4120,22 +4263,26 @@ fn main() -> ExitCode {
                                             ],
                                         ));
                                         fields.insert(0, ("id", id.as_str()));
-                                        amend(
-                                            &mut fields,
+                                        let retitled = continuing == "retitle";
+                                        let amended: &[(&str, &str)] = if retitled {
+                                            &[("description", &description), ("name", &name)]
+                                        } else {
                                             &[
-                                                ("description", description.as_str()),
-                                                ("source", stamp.as_str()),
-                                                ("updated", now.as_str()),
-                                            ],
-                                        );
-                                        writes.push((
-                                            dir.join(
-                                                memory.map_or("", |found| text(&found["file"])),
-                                            ),
-                                            note(&fields, text(&op["body"])),
-                                        ));
+                                                ("description", &description),
+                                                ("source", &stamp),
+                                                ("updated", &now),
+                                            ]
+                                        };
+                                        amend(&mut fields, amended);
+                                        writes.push(if retitled {
+                                            (
+                                                slot(&dir, of("type"), &name, &mut claimed),
+                                                note(&fields, of("body")),
+                                            )
+                                        } else {
+                                            (dir.join(of("file")), note(&fields, text(&op["body"])))
+                                        });
                                     }
-                                    _ => {}
                                 }
                                 // a line per op, each input as it stood and where it went, if anywhere
                                 let landed = writes.last().filter(|_| op["op"] != "prune").map(|pending| {
@@ -4143,7 +4290,7 @@ fn main() -> ExitCode {
                                     json!({"id": id, "path": under.strip_prefix("memories/").unwrap_or(&under)})
                                 });
                                 rewrites.push(json!({
-                                    "from": inputs().map(|part| json!({"digest": sha256(text(&part["text"])), "id": part["id"], "path": part["path"], "sessions": lineage([part])})).collect::<Vec<_>>(),
+                                    "from": values().map(|part| json!({"digest": sha256(text(&part["text"])), "id": part["id"], "path": part["path"], "sessions": lineage([part])})).collect::<Vec<_>>(),
                                     "kind": "rewrite", "model": model(&consolidator), "op": op["op"], "reason": op["reason"], "to": landed,
                                 }));
                             }
@@ -4166,14 +4313,14 @@ fn main() -> ExitCode {
                             for mut line in rewrites {
                                 drop(record(&data, &mut line));
                             }
-                            let count = |op: &str| {
-                                ops.into_iter()
-                                    .flatten()
-                                    .filter(|done| done["op"] == op)
-                                    .count()
+                            let count = |pick: &dyn Fn(&Value) -> bool| {
+                                ops.into_iter().flatten().filter(|done| pick(done)).count()
                             };
+                            let tally = |op: &str| count(&|done| done["op"] == op);
                             Ok(json!({
-                                "kept": count("keep"), "merged": count("merge"), "outcome": "consolidated", "pruned": count("prune"),
+                                "kept": tally("keep"), "merged": tally("merge"),
+                                "order": {"after": measure(&data, bank), "before": before, "merges": count(&|done| done["op"] == "merge" && done["memories"].is_array())},
+                                "outcome": "consolidated", "pruned": tally("prune"),
                             }))
                         };
                         (
@@ -4448,6 +4595,7 @@ fn main() -> ExitCode {
                                                         &consumed.iter().collect::<Vec<_>>(),
                                                         &sorted(stood, "file"),
                                                         allowance,
+                                                        &[],
                                                     )
                                                     .0
                                                 })

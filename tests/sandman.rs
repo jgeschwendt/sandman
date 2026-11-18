@@ -1906,12 +1906,15 @@ esac
                 Value::Null,
             )
         };
-        let line = |bank: &str, counts: [u8; 3], error: &str| {
+        // a consolidated line's order: its notes and characters before, then after
+        let line = |bank: &str, counts: [u8; 3], error: &str, order: [u16; 4]| {
             let mut entry = json!({
                 "at": 20u8, "bank": bank, "kept": counts[0], "kind": "consolidate", "machine": "studio",
                 "merged": counts[1], "outcome": "consolidated", "pruned": counts[2],
             });
-            if !error.is_empty() {
+            if error.is_empty() {
+                entry["order"] = json!({"after": {"chars": order[3], "notes": order[2]}, "before": {"chars": order[1], "notes": order[0]}, "merges": 0u8});
+            } else {
                 (entry["error"], entry["outcome"]) = (error.into(), "failed".into());
             }
             entry.to_string()
@@ -1942,35 +1945,33 @@ esac
             ),
             cut("traces/alpha/feedback_t_prune.md", "c", "sample: says what project_m_merge.md says"),
             cut("alpha/reference_m_prune.md", "", "sample: superseded"),
-            line("alpha", [1, 1, 2], ""),
-            line("exit", [0; 3], "exit status: 3: sample: broke"),
-            line("junk", [0; 3], "output: EOF while parsing a value at line 1 column 1"),
-            line("shape", [0; 3], &op(r#"{"ops":{}}"#)),
-            line("verb", [0; 3], &op(r#"{"op":"forget","trace":"feedback_t.md"}"#)),
+            line("alpha", [1, 1, 2], "", [6, 1998, 3, 1520]),
+            line("exit", [0; 3], "exit status: 3: sample: broke", [0; 4]),
+            line("junk", [0; 3], "output: EOF while parsing a value at line 1 column 1", [0; 4]),
+            line("shape", [0; 3], &op(r#"{"ops":{}}"#), [0; 4]),
+            line("verb", [0; 3], &op(r#"{"op":"forget","trace":"feedback_t.md"}"#), [0; 4]),
             line(
                 "field",
                 [0; 3],
                 &op(
                     r#"{"body":"x","description":"x","name":"x","op":"keep","trace":"feedback_t.md","type":"opinion"}"#,
-                ),
-            ),
-            line("ghost", [0; 3], &op(r#"{"op":"prune","reason":"x","trace":"feedback_nope.md"}"#)),
-            line("twice", [0; 3], &op(r#"{"op":"prune","reason":"x","trace":"feedback_t.md"}"#)),
+                ), [0; 4]),
+            line("ghost", [0; 3], &op(r#"{"op":"prune","reason":"x","trace":"feedback_nope.md"}"#), [0; 4]),
+            line("twice", [0; 3], &op(r#"{"op":"prune","reason":"x","trace":"feedback_t.md"}"#), [0; 4]),
             line(
                 "listed",
                 [0; 3],
                 &op(
                     r#"{"body":"x","description":"x","memory":"project_m.md","op":"merge","trace":"feedback_t.md"}"#,
-                ),
-            ),
-            line("again", [0; 3], &op(r#"{"memory":"project_m.md","op":"prune","reason":"x"}"#)),
-            line("unnamed", [0; 3], "output: trace not named: feedback_t.md"),
-            line("locked", [0; 3], "Permission denied (os error 13)"),
-            line("rearm", [0; 3], "exit status: 3: sample: broke"),
+                ), [0; 4]),
+            line("again", [0; 3], &op(r#"{"memory":"project_m.md","op":"prune","reason":"x"}"#), [0; 4]),
+            line("unnamed", [0; 3], "output: trace not named: feedback_t.md", [0; 4]),
+            line("locked", [0; 3], "Permission denied (os error 13)", [0; 4]),
+            line("rearm", [0; 3], "exit status: 3: sample: broke", [0; 4]),
             cut("traces/rearm/feedback_t.md", "d", "x"),
             cut("traces/rearm/feedback_t2.md", "f", "x"),
-            line("rearm", [0, 0, 2], ""),
-            line("slow", [0; 3], "timed out after 300 ms"),
+            line("rearm", [0, 0, 2], "", [2, 530, 0, 0]),
+            line("slow", [0; 3], "timed out after 300 ms", [0; 4]),
         ]);
         same(&lines.join("\n"), &want.join("\n"))?;
         // what the stub read, run by run: the first whole, the rest by their bank
@@ -2146,6 +2147,208 @@ esac
         )
     }
 
+    /// Order within a bank (docs/index.html#cycle-rewrite), a bank with no trace consolidated for
+    /// its judged notes: two memories merged into a new note (`from:` its parents, no sessions),
+    /// one retitled and one revised (the same id continuing), one pruned; `# judged` lists the
+    /// verdicts outstanding, by path or id, and the line carries the order measure. A revise of a
+    /// note no verdict names fails its bank; a bank consolidated since its verdict waits; `check`
+    /// holds over what is left.
+    #[test]
+    fn order() -> Outcome {
+        let root = temp("order")?;
+        let stub = format!("{root}/stub.sh");
+        let note = |id: &str, name: &str, kind: &str, rest: &str| {
+            format!(
+                "---\nid: {id}\nname: {name}\ndescription: sample: {name}\ntype: {kind}\ncreated: 2026-11-01T00:00:00Z\n{rest}source: remember 2026-11-01T00:00:00Z \u{b7} -\n---\n\nsample: {name} body\n"
+            )
+        };
+        let alpha = [
+            (
+                "feedback_a.md",
+                note("a1a1a1a1a1a1", "A", "feedback", "sessions: @a\n"),
+            ),
+            (
+                "feedback_b.md",
+                note("b2b2b2b2b2b2", "B", "feedback", "sessions: @b\n"),
+            ),
+            (
+                "project_old_name.md",
+                note("c3c3c3c3c3c3", "Old", "project", "origin: hand\n"),
+            ),
+            (
+                "reference_port.md",
+                note("d4d4d4d4d4d4", "Port", "reference", "sessions: @c\n"),
+            ),
+            (
+                "reference_stale.md",
+                note(
+                    "e5e5e5e5e5e5",
+                    "Stale",
+                    "reference",
+                    "updated: 2026-11-04T00:00:00Z\nsessions: @d\n",
+                ),
+            ),
+        ];
+        let mut files: Vec<(String, String)> = alpha
+            .iter()
+            .map(|file| (format!("memories/alpha/{}", file.0), file.1.clone()))
+            .collect();
+        for (path, id) in [
+            ("beta/reference_x.md", "f6f6f6f6f6f6"),
+            ("unjudged/project_y.md", "0b0b0b0b0b0b"),
+            ("unjudged/reference_x.md", "1c1c1c1c1c1c"),
+        ] {
+            files.push((
+                format!("memories/{path}"),
+                note(id, "X", "reference", "origin: hand\n"),
+            ));
+        }
+        let verdict = |at: &str, file: &str, id: &str, verdict: &str, why: &str| {
+            json!({"at": at, "by": "agent", "file": file, "id": id, "kind": "rethink", "session": null, "verdict": verdict, "why": if why.is_empty() { Value::Null } else { why.into() }}).to_string()
+        };
+        // judged: the port by path, the stale note by id under an older path and since its
+        // update; a used verdict and one before the stale note's update judge nothing
+        files.push((
+            "ledger/2026/11/05.jsonl".to_owned(),
+            [
+                verdict("2026-11-03T00:00:00Z", "alpha/reference_stale.md", "e5e5e5e5e5e5", "wrong", ""),
+                verdict("2026-11-05T00:00:00Z", "alpha/reference_port.md", "d4d4d4d4d4d4", "wrong", "sample: the port is 8080"),
+                verdict("2026-11-05T00:01:00Z", "alpha/reference_old.md", "e5e5e5e5e5e5", "stale", ""),
+                verdict("2026-11-05T00:02:00Z", "alpha/feedback_a.md", "a1a1a1a1a1a1", "used", ""),
+                verdict("2026-11-05T00:03:00Z", "beta/reference_x.md", "f6f6f6f6f6f6", "stale", ""),
+                r#"{"at":"2026-11-05T00:04:00Z","bank":"beta","kind":"consolidate","outcome":"failed"}"#.to_owned(),
+                verdict("2026-11-06T00:00:00Z", "unjudged/reference_x.md", "1c1c1c1c1c1c", "stale", ""),
+            ]
+            .join("\n"),
+        ));
+        let ops = r#"{"op":"merge","memories":["feedback_a.md","feedback_b.md"],"type":"feedback","name":"Sample: merged","description":"sample: merged","body":"sample: merged body"},{"op":"retitle","memory":"project_old_name.md","name":"Sample: new name","description":"sample: retitled"},{"op":"revise","memory":"reference_port.md","description":"sample: revised","body":"sample: the port is 8080"},{"op":"prune","memory":"reference_stale.md","reason":"sample: stale"}"#;
+        files.push((
+            "stub.sh".to_owned(),
+            format!(
+                r#"case $(tee -a "$0.log" | sed -n '/^# bank$/{{n;p;}}' | tail -n 1) in
+  alpha) printf '%s' '{{"ops":[{ops}]}}';;
+  unjudged) printf '{{"ops":[{{"op":"revise","memory":"project_y.md","description":"x","body":"x"}}]}}';;
+esac
+"#
+            ),
+        ));
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|file| (file.0.as_str(), file.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let before: usize = alpha
+            .iter()
+            .map(|file| file.1.replace('@', ID).chars().count())
+            .sum();
+        let consolidator = format!("sh {stub} --model sample-model");
+        let today = format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        let (mut daemon, _) = serve(
+            &root,
+            &[
+                ("SANDMAN_CONSOLIDATE_QUIET_MS", "0"),
+                ("SANDMAN_CONSOLIDATOR", consolidator.as_str()),
+                ("SANDMAN_TICK_MS", "10"),
+            ],
+        )?;
+        until(|| read(&today).contains(r#""bank":"unjudged""#))?;
+        // a TERM, so its coverage counts
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let bank = |file: &str| read(&format!("{root}/memories/alpha/{file}"));
+        let merged = bank("feedback_sample_merged.md");
+        let minted = merged
+            .lines()
+            .find_map(|said| said.strip_prefix("id: "))
+            .unwrap_or_default();
+        let now = merged
+            .lines()
+            .find_map(|said| said.strip_prefix("created: "))
+            .unwrap_or_default();
+        let after: usize = [
+            "feedback_sample_merged.md",
+            "project_sample_new_name.md",
+            "reference_port.md",
+        ]
+        .iter()
+        .map(|file| bank(file).chars().count())
+        .sum();
+        let fed = |id: &str, file: &str, letter: &str| {
+            let sessions: Vec<String> = (!letter.is_empty())
+                .then(|| format!("{ID}{letter}"))
+                .into_iter()
+                .collect();
+            json!({"digest": 64u8, "id": id, "path": format!("alpha/{file}"), "sessions": sessions})
+        };
+        let rewrite = |op: &str, from: Vec<Value>, reason: Value, to: Value| {
+            json!({"at": "A", "from": from, "kind": "rewrite", "machine": "studio", "model": "sample-model", "op": op, "reason": reason, "to": to}).to_string()
+        };
+        let to = |id: &str, file: &str| json!({"id": id, "path": format!("alpha/{file}")});
+        let lines: Vec<String> = read(&today)
+            .lines()
+            .map(|line| {
+                let mut entry: Value = serde_json::from_str(&line.replace(minted, "<id>"))?;
+                entry["at"] = "A".into();
+                for from in entry
+                    .get_mut("from")
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                {
+                    from["digest"] = json!(from["digest"].as_str().map(str::len));
+                }
+                Ok(entry.to_string())
+            })
+            .collect::<Result<_, serde_json::Error>>()?;
+        same(
+            &lines.join("\n"),
+            &[
+                rewrite("merge", vec![fed("a1a1a1a1a1a1", "feedback_a.md", "a"), fed("b2b2b2b2b2b2", "feedback_b.md", "b")], Value::Null, to("<id>", "feedback_sample_merged.md")),
+                rewrite("retitle", vec![fed("c3c3c3c3c3c3", "project_old_name.md", "")], Value::Null, to("c3c3c3c3c3c3", "project_sample_new_name.md")),
+                rewrite("revise", vec![fed("d4d4d4d4d4d4", "reference_port.md", "c")], Value::Null, to("d4d4d4d4d4d4", "reference_port.md")),
+                rewrite("prune", vec![fed("e5e5e5e5e5e5", "reference_stale.md", "d")], "sample: stale".into(), Value::Null),
+                json!({"at": "A", "bank": "alpha", "kept": 0u8, "kind": "consolidate", "machine": "studio", "merged": 1u8, "order": {"after": {"chars": after, "notes": 3u8}, "before": {"chars": before, "notes": 5u8}, "merges": 1u8}, "outcome": "consolidated", "pruned": 1u8}).to_string(),
+                json!({"at": "A", "bank": "unjudged", "error": r#"output: not an op: {"body":"x","description":"x","memory":"project_y.md","op":"revise"}"#, "kept": 0u8, "kind": "consolidate", "machine": "studio", "merged": 0u8, "outcome": "failed", "pruned": 0u8}).to_string(),
+            ]
+            .join("\n"),
+        )?;
+        // alpha's input: no trace, the verdicts it answers to after its memories
+        let seen = read(&format!("{stub}.log"));
+        same(
+            seen.split_once("\n# bank\nalpha\n\n# traces\n\n# memories\n")
+                .and_then(|pair| pair.1.split_once("\n# judged\n"))
+                .map_or("", |pair| pair.1)
+                .split("You consolidate")
+                .next()
+                .unwrap_or_default(),
+            "- reference_port.md \u{b7} wrong \u{b7} sample: the port is 8080\n- reference_stale.md \u{b7} stale \u{b7} -\n",
+        )?;
+        let stamp = format!("source: consolidate {now} \u{b7} - \u{b7} model=sample-model");
+        same(
+            &format!(
+                "{merged}{}{}",
+                bank("project_sample_new_name.md"),
+                bank("reference_port.md")
+            ),
+            &format!(
+                "---\nid: {minted}\nname: Sample: merged\ndescription: sample: merged\ntype: feedback\ncreated: {now}\nfrom: a1a1a1a1a1a1 b2b2b2b2b2b2\n{stamp}\n---\n\nsample: merged body\n---\nid: c3c3c3c3c3c3\nname: Sample: new name\ndescription: sample: retitled\ntype: project\ncreated: 2026-11-01T00:00:00Z\norigin: hand\nsource: remember 2026-11-01T00:00:00Z \u{b7} -\n---\n\nsample: Old body\n---\nid: d4d4d4d4d4d4\nname: Port\ndescription: sample: revised\ntype: reference\ncreated: 2026-11-01T00:00:00Z\nsessions: {ID}c\n{stamp}\nupdated: {now}\n---\n\nsample: the port is 8080\n"
+            ),
+        )?;
+        same(
+            &sandman(&[("SANDMAN_ROOT", &root)], &["check"], "")?,
+            "0\ncheck: 6 notes: clean\n",
+        )
+    }
+
     /// The knowledge store end to end. One episode's three traces split: the memory into the bank
     /// of its cwd, the knowledge and the playbook into the topic's `traces/@launchd/`; a knowledge
     /// type without a topic fails its episode. The topic consolidates as a bank does, into
@@ -2264,13 +2467,21 @@ esac
                 if let Some(ids) = entry["ids"].as_array() {
                     shown["ids"] = ids.len().into();
                 }
+                // the characters ride on the temp root's length: the notes only
+                if entry["order"].is_object() {
+                    shown["order"] = format!(
+                        "{}>{}",
+                        entry["order"]["before"]["notes"], entry["order"]["after"]["notes"]
+                    )
+                    .into();
+                }
                 shown.to_string()
             })
             .collect();
         let bank = work.replace(|letter: char| !letter.is_ascii_alphanumeric(), "-");
-        let line = |key: &str, counts: [u8; 3]| {
+        let line = |key: &str, counts: [u8; 3], order: &str| {
             format!(
-                r#"{{"at":"A","bank":"{key}","kept":{},"kind":"consolidate","machine":"studio","merged":{},"outcome":"consolidated","pruned":{}}}"#,
+                r#"{{"at":"A","bank":"{key}","kept":{},"kind":"consolidate","machine":"studio","merged":{},"order":"{order}","outcome":"consolidated","pruned":{}}}"#,
                 counts[0], counts[1], counts[2]
             )
         };
@@ -2281,10 +2492,10 @@ esac
                 format!(
                     r#"{{"at":"A","error":"output: not a trace: {{\"body\":\"x\",\"description\":\"x\",\"name\":\"x\",\"type\":\"knowledge\"}}","kind":"encode","machine":"studio","outcome":"failed","session":"{ID}c","traces":0}}"#
                 ),
-                line(&bank, [0, 0, 1]),
-                line("@launchd", [2, 0, 0]),
+                line(&bank, [0, 0, 1], "1>0"),
+                line("@launchd", [2, 0, 0], "2>2"),
                 format!(r#"{{"at":"A","ids":1,"kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}b","traces":1}}"#),
-                line("@launchd", [0, 1, 0]),
+                line("@launchd", [0, 1, 0], "3>2"),
             ]
             .join("\n"),
         )?;
