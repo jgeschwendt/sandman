@@ -873,6 +873,28 @@ fn ledger(root: &Path) -> Vec<Value> {
         .collect()
 }
 
+/// The archived sessions `notes` descend from, sorted, once each: the ids on each one's
+/// `sessions:` line, its `session:`, and the one a consolidate's or a dream's `source` stamp names.
+fn lineage<'note, I: IntoIterator<Item = &'note Value>>(notes: I) -> BTreeSet<&'note str> {
+    notes
+        .into_iter()
+        .flat_map(|note| {
+            let source = text(&note["source"]);
+            let stamped = source
+                .split_whitespace()
+                .next()
+                .is_some_and(|word| ["consolidate", "dream"].contains(&word));
+            [
+                text(&note["sessions"]),
+                text(&note["session"]),
+                if stamped { source } else { "" },
+            ]
+        })
+        .flat_map(str::split_whitespace)
+        .filter(|word| uuid(word))
+        .collect()
+}
+
 /// This machine's id: `$SANDMAN_MACHINE`, else `<root>/machine`, created on first use by a hard
 /// link from a temp file, so concurrent first runs agree on one id.
 fn machine(root: &Path) -> String {
@@ -1713,7 +1735,7 @@ fn main() -> ExitCode {
                     let mut row = json!({
                         "created": note["created"], "file": note["file"], "name": note["name"],
                         "session": source.split_whitespace().find(|word| ["consolidate", "dream"].contains(&kind) && uuid(word)),
-                        "source": kind, "type": text(&note["type"]),
+                        "sessions": lineage([note]), "source": kind, "type": text(&note["type"]),
                     });
                     let bank = text(&note["bank"]);
                     match bank.strip_prefix('@') {
@@ -1724,13 +1746,13 @@ fn main() -> ExitCode {
                 })
                 .collect()
             };
-            let memories = shelved("memories");
+            let (knowledge, memories) = (shelved("knowledge"), shelved("memories"));
             let traces: Vec<Value> = notes(&root, "traces")
                 .iter()
                 .map(|note| {
                     json!({
                         "bank": note["bank"], "created": note["created"], "file": note["file"], "name": note["name"],
-                        "session": note["session"], "type": text(&note["type"]),
+                        "session": note["session"], "sessions": lineage([note]), "type": text(&note["type"]),
                     })
                 })
                 .collect();
@@ -1773,7 +1795,7 @@ fn main() -> ExitCode {
                     "bytes": fs::metadata(&path).map_or(0, |meta| meta.len()), "cwd": pointer["cwd"],
                     "dreamed": pointer["dreamed"],
                     "highlights": pointer["highlights"].as_array().map_or(0, Vec::len),
-                    "memories": memories.iter().filter(|memory| memory["session"] == session).count(),
+                    "memories": memories.iter().chain(&knowledge).filter(|row| row["sessions"].as_array().into_iter().flatten().any(|id| *id == session)).count(),
                     "session": session, "state": state,
                     "taken": format!("{yyyy}-{mm}-{dd}T{}Z", clock.join(":")), "title": pointer["title"],
                 })));
@@ -1817,7 +1839,7 @@ fn main() -> ExitCode {
                 json!({
                     "active": sorted(active, "start"), "at": utc(SystemTime::now()), "guards": sorted(guards, "at"),
                     "intentions": sorted(intended, "created"),
-                    "knowledge": shelved("knowledge"),
+                    "knowledge": knowledge,
                     "machine": machine(&root), "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
                 })
             ));
@@ -2117,7 +2139,24 @@ fn main() -> ExitCode {
                 }
                 for path in &scrub {
                     let held = fs::read_to_string(path)?;
-                    let scrubbed = held.replace(&format!("session: {session}\n"), "");
+                    // off a `sessions:` line, the line gone once empty; `-` in a stamp
+                    let scrubbed: String = held
+                        .replace(&format!("session: {session}\n"), "")
+                        .split_inclusive('\n')
+                        .filter_map(|line| {
+                            line.strip_prefix("sessions: ").map_or_else(
+                                || Some(line.to_owned()),
+                                |ids| {
+                                    let kept: Vec<&str> = ids
+                                        .split_whitespace()
+                                        .filter(|id| *id != session)
+                                        .collect();
+                                    (!kept.is_empty())
+                                        .then(|| format!("sessions: {}\n", kept.join(" ")))
+                                },
+                            )
+                        })
+                        .collect();
                     put(path, &scrubbed.replace(session, "-"))?;
                     done[1] = done[1].saturating_add(1);
                 }
@@ -3446,6 +3485,10 @@ fn main() -> ExitCode {
                                     at("session"),
                                     model(&consolidator)
                                 );
+                                // the result descends from every session its inputs did
+                                let sessions =
+                                    Vec::from_iter(lineage(trace.into_iter().chain(memory)))
+                                        .join(" ");
                                 match text(&op["op"]) {
                                     "keep" => {
                                         let kind = text(&op["type"]);
@@ -3464,6 +3507,7 @@ fn main() -> ExitCode {
                                                     ("topic", at("topic")),
                                                     ("session", at("session")),
                                                     ("archived", at("archived")),
+                                                    ("sessions", sessions.as_str()),
                                                     ("source", stamp.as_str()),
                                                 ],
                                                 text(&op["body"]),
@@ -3474,6 +3518,12 @@ fn main() -> ExitCode {
                                         let description = one("description", 400);
                                         let mut fields =
                                             front(memory.map_or("", |found| text(&found["text"])));
+                                        fields.retain(|field| field.0 != "sessions");
+                                        let source = fields
+                                            .iter()
+                                            .position(|field| field.0 == "source")
+                                            .unwrap_or(fields.len());
+                                        fields.insert(source, ("sessions", sessions.as_str()));
                                         amend(
                                             &mut fields,
                                             &[

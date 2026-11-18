@@ -121,7 +121,8 @@
     <li><strong>pages</strong> — the memory file format: flat frontmatter, <code class="code">type</code>
       <code class="code">knowledge</code> or <code class="code">playbook</code>, <code class="code">topic</code>,
       <code class="code">created</code>, <code class="code">updated</code> once merged, <code class="code">source</code> the
-      consolidate stamp; the session and archive of the trace that started it.</li>
+      consolidate stamp; the session and archive of the trace that started it, and
+      <code class="code">sessions</code> every session it descends from, merges included.</li>
     <li><strong>traces</strong> — a topic's wait in <code class="code">traces/@&lt;topic&gt;/</code>. A bank key is letters,
       digits and <code class="code">-</code>, so <code class="code">@</code> never collides with one, and the
       <code class="code">notes</code> reader, which skips only <code class="code">.</code> and <code class="code">_</code>, finds
@@ -209,6 +210,7 @@ description: launchd: swap a running daemon after an install with kickstart -k, 
 type: playbook
 created: 2026-10-02T09:12:00Z
 topic: launchd
+sessions: 5a000000-0000-4000-8000-00000000000a 5a000000-0000-4000-8000-00000000000b
 source: consolidate 2026-11-14T09:30:00Z · 5a000000-0000-4000-8000-00000000000b · model=opus
 updated: 2026-11-14T09:30:00Z
 ---
