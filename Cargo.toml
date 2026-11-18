@@ -12,7 +12,7 @@ version = "0.1.0"
 
 [dependencies]
 # `setup` and `upgrade`: packslip installs, hotswap keeps the versions and swaps (gigantic.dev/hotswap/).
-hotswap = { git = "https://github.com/jgeschwendt/hotswap", rev = "0c8fdd80b4dfd1b8d4db3edb4695eef508ee9851" }
+hotswap = { git = "https://github.com/jgeschwendt/hotswap", rev = "8d3036b2e3a6e732865845e93a23d608520988a6" }
 # float_roundtrip: a cached embedding parses to the exact f64 the reference wrote.
 serde_json = { features = ["float_roundtrip"], version = "1" }
 # SIGTERM, SIGINT, SIGHUP into a thread: std has no signal handling and `unsafe_code` is forbidden.
