@@ -1,8 +1,9 @@
 //! `sandman`, rewritten from scratch: `mark` appends a session's start or end, or a guard, to the
 //! day's ledger file, `take` archives a marked session at its end, `chart` prints what the data
-//! root holds as one JSON object, `recall` scores the memories against an agent's cue and `show`
-//! prints one, over the memories, the knowledge pages and the traces of both, `defer`, `due`,
-//! `done` and `drop` keep work put off for later, `mcp` serves the agent's verbs as MCP tools,
+//! root holds as one JSON object, `check` holds every note to the memory cycle's invariants,
+//! `recall` scores the memories against an agent's cue and `show` prints one, over the memories,
+//! the knowledge pages and the traces of both, `defer`, `due`, `done` and `drop` keep work put off
+//! for later, `mcp` serves the agent's verbs as MCP tools,
 //! `serve` is the daemon (reconcile, settle, encode, consolidate, reflect), `status` asks it for its
 //! health, `setup` installs its launchd agent, `forget` erases one session from every store,
 //! `version` prints the build.
@@ -78,6 +79,10 @@ const KINDS: [&str; 4] = ["feedback", "project", "reference", "user"];
 /// one episode) and a `playbook` (procedural memory, how a recurring task is done).
 const KNOWN: [&str; 2] = ["knowledge", "playbook"];
 
+/// A note's `origin`, its source when it descends from no session and no note: `hand` (remembered
+/// without a session), `import` (brought in from elsewhere), `routine` (a pipeline's).
+const ORIGINS: [&str; 3] = ["hand", "import", "routine"];
+
 /// Each model job's default guidance and its fixed contract, sent before its data; `guide` reads
 /// `<root>/prompts/<job>.md` in place of the guidance.
 const PROMPTS: [(&str, [&str; 2]); 4] = [
@@ -133,6 +138,9 @@ const STEER: &str = "go yes yeah yep ok okay continue next thanks thank done sav
 
 /// The words `toks` drops.
 const STOPWORDS: &str = "a an and are as at be by can do for from has have i if in into is it its me my no not of on or our so that the then this to was we what when where which will with you your about should would could lets let im dont get going want need make use using also just like than them there these they";
+
+/// The three stores of notes, in reader order.
+const STORES: [&str; 3] = ["memories", "knowledge", "traces"];
 
 /// The release (else the crate version) and the build, the commit it was built from (`build.rs`):
 /// what `version` prints, the daemon's health carries and `status` compares.
@@ -331,6 +339,13 @@ fn day(when: &str) -> Option<u64> {
     (date(days) == when).then_some(days)
 }
 
+/// Where `note`, as `notes(root, dir)` reads it, is on disk.
+fn disk(root: &Path, dir: &str, note: &Value) -> PathBuf {
+    let address = Path::new(text(&note["path"]));
+    root.join(dir)
+        .join(address.strip_prefix(dir).unwrap_or(address))
+}
+
 /// Each of `texts` embedded by `$SANDMAN_OLLAMA`'s `/api/embed`, 16 a request, as the reference
 /// sends them (raw, truncated to 1,024 tokens), L2-normalised.
 #[expect(clippy::float_arithmetic, reason = "the norm is float math")]
@@ -481,12 +496,7 @@ fn episode(root: &Path, closing: &Value, budget: usize) -> (String, Option<Strin
 /// Every note recall and `show` read, in reader order: the memories, the knowledge pages, the
 /// traces.
 fn every(root: &Path) -> Vec<Value> {
-    [
-        notes(root, "memories"),
-        notes(root, "knowledge"),
-        notes(root, "traces"),
-    ]
-    .concat()
+    STORES.iter().flat_map(|dir| notes(root, dir)).collect()
 }
 
 /// What is embedded of a candidate: its head and the first 1,500 characters of its body.
@@ -679,6 +689,14 @@ fn head(memory: &Value, label: &str) -> String {
         text(&memory["name"]),
         one_line(text(&memory["description"]), 400)
     )
+}
+
+/// Whether `text` is a note's id: 12 lowercase hex digits.
+fn hexid(text: &str) -> bool {
+    text.len() == 12
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// The quoted bodies after `sandman remember ` and `orrery attend ` in the commands a transcript's
@@ -936,6 +954,11 @@ fn manifest() -> hotswap::Manifest {
         ],
         ..hotswap::Manifest::default()
     }
+}
+
+/// A new note's id: 12 lowercase hex digits from `/dev/urandom`.
+fn mint() -> String {
+    random().get(..12).unwrap_or_default().to_owned()
 }
 
 /// The model a command names: the word after `--model`, else its first word.
@@ -1621,6 +1644,15 @@ fn vectors(root: &Path) -> BTreeMap<String, Value> {
         .collect()
 }
 
+/// The words of `lines` but `-`, sorted, once each: a note's `from` ids, its `sessions:`.
+fn words<'line, I: IntoIterator<Item = &'line str>>(lines: I) -> BTreeSet<&'line str> {
+    lines
+        .into_iter()
+        .flat_map(str::split_whitespace)
+        .filter(|word| *word != "-")
+        .collect()
+}
+
 fn main() -> ExitCode {
     let home = PathBuf::from(env::var_os("HOME").unwrap_or_default());
     let root = env::var_os("SANDMAN_ROOT").map_or_else(|| home.join(".sandman"), PathBuf::from);
@@ -1718,6 +1750,193 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "check" => {
+            // `--fix` first repairs what is mechanical (AGENTS.md `### sandman check`), each note by
+            // temp + rename, then says so in the ledger: an empty or `-` `from:` or `sessions:`
+            // dropped, else its words sorted and once; an `origin:` none of `ORIGINS` dropped; a
+            // minted `id:` first for a note without a valid one of its own (an earlier note's is
+            // taken); a note left without a source given `origin:` by its stamp's first word
+            let mend = |whole: &str, taken: &mut BTreeSet<String>| -> String {
+                let (head, rest) = whole
+                    .strip_prefix("---\n")
+                    .and_then(|rest| rest.split_once("\n---"))
+                    .map_or_else(
+                        || ("", format!("\n\n{whole}")),
+                        |(head, rest)| (head, rest.to_owned()),
+                    );
+                let mut lines: Vec<String> = head
+                    .lines()
+                    .filter_map(|line| {
+                        let (key, value) = line.split_once(':').unwrap_or_default();
+                        match key.trim() {
+                            listed @ ("from" | "sessions") => {
+                                let kept = words([value]);
+                                (!kept.is_empty()).then(|| {
+                                    format!("{listed}: {}", Vec::from_iter(kept).join(" "))
+                                })
+                            }
+                            "origin" => ORIGINS.contains(&value.trim()).then(|| line.to_owned()),
+                            _ => Some(line.to_owned()),
+                        }
+                    })
+                    .collect();
+                let joined = |kept: &[String]| {
+                    format!(
+                        "---\n{}---{rest}",
+                        kept.iter()
+                            .map(|line| [line, "\n"].concat())
+                            .collect::<String>()
+                    )
+                };
+                let note = read(json!({}), joined(&lines));
+                let id = text(&note["id"]).to_owned();
+                if !(hexid(&id) && taken.insert(id)) {
+                    let minted = mint();
+                    lines.retain(|line| {
+                        line.split_once(':')
+                            .is_none_or(|(key, _)| key.trim() != "id")
+                    });
+                    lines.insert(0, format!("id: {minted}"));
+                    let _: bool = taken.insert(minted);
+                }
+                if lineage([&note]).is_empty() && note["from"].is_null() && note["origin"].is_null()
+                {
+                    let origin = match text(&note["source"]).split_whitespace().next() {
+                        Some("remember") => "hand",
+                        Some("consolidate" | "dream" | "reconsolidate" | "reflect") => "routine",
+                        _ => "import",
+                    };
+                    let at = lines
+                        .iter()
+                        .position(|line| {
+                            line.starts_with("sessions:") || line.starts_with("source:")
+                        })
+                        .unwrap_or(lines.len());
+                    lines.insert(at, format!("origin: {origin}"));
+                }
+                joined(&lines)
+            };
+            let fix = || -> io::Result<()> {
+                let (mut taken, mut fixed) = (BTreeSet::new(), 0u32);
+                for dir in STORES {
+                    for note in notes(&root, dir) {
+                        let (whole, mended) =
+                            (text(&note["text"]), mend(text(&note["text"]), &mut taken));
+                        if mended != whole {
+                            put(&disk(&root, dir, &note), &mended)?;
+                            fixed = fixed.saturating_add(1);
+                        }
+                    }
+                }
+                println!("check: fixed {fixed}");
+                record(&root, &mut json!({"fixed": fixed, "kind": "check"}))
+            };
+            // the invariants, read only: per note in reader order, `<path>: <n>: <detail>`
+            let audit = || -> io::Result<(usize, Vec<String>)> {
+                let _: Option<()> = args
+                    .iter()
+                    .any(|arg| arg == "--fix")
+                    .then(fix)
+                    .transpose()?;
+                let (all, mut ids) = (every(&root), BTreeMap::new());
+                let found: Vec<String> = all
+                    .iter()
+                    .flat_map(|note| {
+                        let (path, field) = (text(&note["path"]), |key: &str| {
+                            note.get(key).and_then(Value::as_str)
+                        });
+                        let id = field("id").unwrap_or_default();
+                        let twin = ids.get(id).copied();
+                        if twin.is_none() {
+                            let _: Option<&str> = ids.insert(id, path);
+                        }
+                        let listed = |key: &str| -> Vec<&str> {
+                            field(key).unwrap_or_default().split_whitespace().collect()
+                        };
+                        let unsorted = |key: &str| {
+                            listed(key)
+                                .windows(2)
+                                .any(|pair| matches!(pair, [left, right] if left >= right))
+                                .then(|| format!("{key} is not sorted once"))
+                        };
+                        let origin = field("origin").filter(|value| !["", "-"].contains(value));
+                        [
+                            (1u8, field("id").is_none().then(|| "no id".to_owned())),
+                            (
+                                1,
+                                (field("id").is_some() && !hexid(id))
+                                    .then(|| format!("id {id} is not 12 lowercase hex")),
+                            ),
+                            (
+                                1,
+                                twin.filter(|_| hexid(id))
+                                    .map(|first| format!("id {id} is also {first}'s")),
+                            ),
+                        ]
+                        .into_iter()
+                        .chain(["from", "origin", "sessions"].map(|key| {
+                            let bare = field(key).filter(|value| ["", "-"].contains(value));
+                            (2, bare.map(|value| format!("{key} is {value:?}")))
+                        }))
+                        .chain([
+                            (
+                                2,
+                                origin
+                                    .filter(|value| !ORIGINS.contains(value))
+                                    .map(|value| {
+                                        format!("origin {value} is not hand, import or routine")
+                                    }),
+                            ),
+                            (
+                                2,
+                                (lineage([note]).is_empty()
+                                    && words(field("from")).is_empty()
+                                    && !origin.is_some_and(|value| ORIGINS.contains(&value)))
+                                .then(|| "no source".to_owned()),
+                            ),
+                            (
+                                3,
+                                listed("from")
+                                    .into_iter()
+                                    .find(|word| !hexid(word))
+                                    .map(|word| format!("from: {word} is not an id")),
+                            ),
+                            (3, unsorted("from")),
+                            (
+                                3,
+                                listed("sessions")
+                                    .into_iter()
+                                    .find(|word| !uuid(word))
+                                    .map(|word| format!("sessions: {word} is not a session id")),
+                            ),
+                            (3, unsorted("sessions")),
+                            (
+                                3,
+                                field("strength")
+                                    .map(|_| "strength is counted, never stored".to_owned()),
+                            ),
+                        ])
+                        .filter_map(|(rule, detail)| Some(format!("{path}: {rule}: {}", detail?)))
+                        .collect::<Vec<_>>()
+                    })
+                    .collect();
+                Ok((all.len(), found))
+            };
+            audit().map_or_else(
+                |error| {
+                    eprintln!("sandman check: {error}");
+                    ExitCode::FAILURE
+                },
+                |(count, found)| {
+                    if found.is_empty() {
+                        println!("check: {count} notes: clean");
+                    } else {
+                        println!("{}", found.join("\n"));
+                    }
+                    ExitCode::from(u8::from(!found.is_empty()))
+                },
+            )
+        }
         "chart" => {
             // a memory or a knowledge page, the page's topic in place of a bank
             let shelved = |dir: &str| -> Vec<Value> {
@@ -1731,9 +1950,10 @@ fn main() -> ExitCode {
                         .filter(|word| ["consolidate", "dream", "reflect", "remember"].contains(word))
                         .unwrap_or("other");
                     let mut row = json!({
-                        "created": note["created"], "file": note["file"], "name": note["name"],
+                        "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
+                        "id": note["id"], "name": note["name"], "origin": note["origin"],
                         "session": source.split_whitespace().find(|word| ["consolidate", "dream"].contains(&kind) && uuid(word)),
-                        "sessions": lineage([note]), "source": kind, "type": text(&note["type"]),
+                        "sessions": lineage([note]), "source": kind, "state": "active", "type": text(&note["type"]),
                     });
                     let bank = text(&note["bank"]);
                     match bank.strip_prefix('@') {
@@ -1749,8 +1969,9 @@ fn main() -> ExitCode {
                 .iter()
                 .map(|note| {
                     json!({
-                        "bank": note["bank"], "created": note["created"], "file": note["file"], "name": note["name"],
-                        "session": note["session"], "sessions": lineage([note]), "type": text(&note["type"]),
+                        "bank": note["bank"], "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
+                        "id": note["id"], "name": note["name"], "origin": note["origin"], "session": note["session"],
+                        "sessions": lineage([note]), "state": "active", "type": text(&note["type"]),
                     })
                 })
                 .collect();
@@ -2063,12 +2284,10 @@ fn main() -> ExitCode {
                 // embedding cache; one naming it otherwise (a merge's source, an intention's link) is
                 // rewritten without it
                 let (mut paths, mut scrub) = (BTreeSet::new(), Vec::new());
-                for dir in ["memories", "knowledge", "traces"] {
+                for dir in STORES {
                     for note in notes(&root, dir) {
                         let address = Path::new(text(&note["path"]));
-                        let file = root
-                            .join(dir)
-                            .join(address.strip_prefix(dir).unwrap_or(address));
+                        let file = disk(&root, dir, &note);
                         match (
                             note["session"] == session,
                             text(&note["text"]).contains(session),
@@ -2900,6 +3119,7 @@ fn main() -> ExitCode {
             let (now, session) = (utc(SystemTime::now()), pull.as_deref());
             let contents = note(
                 &[
+                    ("id", &mint()),
                     ("name", one_line(&title, 200).as_str()),
                     ("description", one_line(&line, 400).as_str()),
                     ("type", &kind),
@@ -2910,6 +3130,7 @@ fn main() -> ExitCode {
                     ),
                     ("topic", shelved),
                     ("session", session.unwrap_or_default()),
+                    ("origin", ["hand", ""][usize::from(session.is_some())]),
                     (
                         "source",
                         &format!("remember {now} \u{b7} {}", session.unwrap_or("-")),
@@ -3332,6 +3553,7 @@ fn main() -> ExitCode {
                                 );
                                 let contents = note(
                                     &[
+                                        ("id", &mint()),
                                         ("name", one_line(name, 200).as_str()),
                                         (
                                             "description",
@@ -3481,10 +3703,24 @@ fn main() -> ExitCode {
                                     at("session"),
                                     model(&consolidator)
                                 );
-                                // the result descends from every session its inputs did
-                                let sessions =
-                                    Vec::from_iter(lineage(trace.into_iter().chain(memory)))
+                                // the result continues the note: the trace's id on a keep, the
+                                // memory's on a merge, descended from every session and note its
+                                // inputs were, its origin kept only without either
+                                let inputs = || trace.into_iter().chain(memory);
+                                let sessions = Vec::from_iter(lineage(inputs())).join(" ");
+                                let from =
+                                    Vec::from_iter(words(inputs().map(|part| text(&part["from"]))))
                                         .join(" ");
+                                let origin = memory
+                                    .into_iter()
+                                    .chain(trace)
+                                    .find_map(|part| part["origin"].as_str())
+                                    .filter(|_| sessions.is_empty() && from.is_empty())
+                                    .unwrap_or_default();
+                                let id = memory
+                                    .or(trace)
+                                    .and_then(|part| part["id"].as_str())
+                                    .map_or_else(mint, str::to_owned);
                                 match text(&op["op"]) {
                                     "keep" => {
                                         let kind = text(&op["type"]);
@@ -3492,6 +3728,7 @@ fn main() -> ExitCode {
                                             slot(&dir, kind, text(&op["name"]), &mut claimed),
                                             note(
                                                 &[
+                                                    ("id", id.as_str()),
                                                     ("name", one("name", 200).as_str()),
                                                     (
                                                         "description",
@@ -3503,6 +3740,8 @@ fn main() -> ExitCode {
                                                     ("topic", at("topic")),
                                                     ("session", at("session")),
                                                     ("archived", at("archived")),
+                                                    ("from", from.as_str()),
+                                                    ("origin", origin),
                                                     ("sessions", sessions.as_str()),
                                                     ("source", stamp.as_str()),
                                                 ],
@@ -3514,12 +3753,22 @@ fn main() -> ExitCode {
                                         let description = one("description", 400);
                                         let mut fields =
                                             front(memory.map_or("", |found| text(&found["text"])));
-                                        fields.retain(|field| field.0 != "sessions");
+                                        fields.retain(|field| {
+                                            !["from", "id", "origin", "sessions"].contains(&field.0)
+                                        });
                                         let source = fields
                                             .iter()
                                             .position(|field| field.0 == "source")
                                             .unwrap_or(fields.len());
-                                        fields.insert(source, ("sessions", sessions.as_str()));
+                                        drop(fields.splice(
+                                            source..source,
+                                            [
+                                                ("from", from.as_str()),
+                                                ("origin", origin),
+                                                ("sessions", sessions.as_str()),
+                                            ],
+                                        ));
+                                        fields.insert(0, ("id", id.as_str()));
                                         amend(
                                             &mut fields,
                                             &[
@@ -4171,7 +4420,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove] | upgrade [--check | --back | --retry]\n       sandman chart | mcp | serve | status | version"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove] | upgrade [--check | --back | --retry]\n       sandman check [--fix] | chart | mcp | serve | status | version"
             );
             ExitCode::from(2)
         }

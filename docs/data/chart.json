@@ -17,16 +17,16 @@
     {"about": null, "after": "after the beta ships", "closed": null, "created": "2026-11-09T12:30:00Z", "due": null, "id": "9c8b7a6d", "session": "5a000000-0000-4000-8000-00000000000b", "state": "open", "what": "sample: cut the release"}
   ],
   "knowledge": [
-    {"created": "2026-11-10T05:00:00Z", "file": "knowledge_labels.md", "name": "Labels name the project", "session": null, "sessions": ["5a000000-0000-4000-8000-00000000000b", "5a000000-0000-4000-8000-00000000000c", "5a000000-0000-4000-8000-00000000000e"], "source": "consolidate", "topic": "launchd", "type": "knowledge"},
-    {"created": "2026-11-09T09:45:00Z", "file": "playbook_swap_a_daemon.md", "name": "Swap a launchd daemon", "session": "5a000000-0000-4000-8000-00000000000a", "sessions": ["5a000000-0000-4000-8000-00000000000a"], "source": "consolidate", "topic": "launchd", "type": "playbook"}
+    {"created": "2026-11-10T05:00:00Z", "file": "knowledge_labels.md", "from": ["0a1b2c3d4e5f", "9e8d7c6b5a4f"], "id": "3f9a0c1d2b4e", "name": "Labels name the project", "origin": null, "session": null, "sessions": ["5a000000-0000-4000-8000-00000000000b", "5a000000-0000-4000-8000-00000000000c", "5a000000-0000-4000-8000-00000000000e"], "source": "consolidate", "state": "active", "topic": "launchd", "type": "knowledge"},
+    {"created": "2026-11-09T09:45:00Z", "file": "playbook_swap_a_daemon.md", "from": [], "id": null, "name": "Swap a launchd daemon", "origin": null, "session": "5a000000-0000-4000-8000-00000000000a", "sessions": ["5a000000-0000-4000-8000-00000000000a"], "source": "consolidate", "state": "active", "topic": "launchd", "type": "playbook"}
   ],
   "machine": "studio",
   "memories": [
-    {"bank": "-work-alpha", "created": "2026-11-09T22:00:00Z", "file": "feedback_parser_spans.md", "name": "Parser errors carry spans", "session": "5a000000-0000-4000-8000-00000000000a", "sessions": ["5a000000-0000-4000-8000-00000000000a"], "source": "dream", "type": "feedback"},
-    {"bank": "-work-alpha", "created": "2026-11-09T08:40:00Z", "file": "reference_grammar.md", "name": "The grammar lives in one file", "session": null, "sessions": [], "source": "remember", "type": "reference"},
-    {"bank": "-work-beta", "created": null, "file": "loose.md", "name": "loose", "session": null, "sessions": [], "source": "other", "type": ""},
-    {"bank": "-work-beta", "created": "2026-11-10T03:00:00Z", "file": "project_release.md", "name": "Release notes are cut weekly", "session": null, "sessions": [], "source": "reflect", "type": "project"},
-    {"bank": "-work-gamma", "created": "2026-11-10T09:00:00Z", "file": "feedback_clean_tree.md", "name": "The gamma suite needs a clean tree", "session": "5a000000-0000-4000-8000-00000000000e", "sessions": ["5a000000-0000-4000-8000-00000000000e"], "source": "dream", "type": "feedback"}
+    {"bank": "-work-alpha", "created": "2026-11-09T22:00:00Z", "file": "feedback_parser_spans.md", "from": [], "id": null, "name": "Parser errors carry spans", "origin": null, "session": "5a000000-0000-4000-8000-00000000000a", "sessions": ["5a000000-0000-4000-8000-00000000000a"], "source": "dream", "state": "active", "type": "feedback"},
+    {"bank": "-work-alpha", "created": "2026-11-09T08:40:00Z", "file": "reference_grammar.md", "from": [], "id": null, "name": "The grammar lives in one file", "origin": "hand", "session": null, "sessions": [], "source": "remember", "state": "active", "type": "reference"},
+    {"bank": "-work-beta", "created": null, "file": "loose.md", "from": [], "id": null, "name": "loose", "origin": null, "session": null, "sessions": [], "source": "other", "state": "active", "type": ""},
+    {"bank": "-work-beta", "created": "2026-11-10T03:00:00Z", "file": "project_release.md", "from": [], "id": null, "name": "Release notes are cut weekly", "origin": null, "session": null, "sessions": [], "source": "reflect", "state": "active", "type": "project"},
+    {"bank": "-work-gamma", "created": "2026-11-10T09:00:00Z", "file": "feedback_clean_tree.md", "from": [], "id": null, "name": "The gamma suite needs a clean tree", "origin": null, "session": "5a000000-0000-4000-8000-00000000000e", "sessions": ["5a000000-0000-4000-8000-00000000000e"], "source": "dream", "state": "active", "type": "feedback"}
   ],
   "taken": [
     {"bytes": 4800, "cwd": "/work/alpha", "dreamed": "2026-11-09T22:00:00Z", "highlights": 3, "memories": 2, "session": "5a000000-0000-4000-8000-00000000000a", "state": "dreamed", "taken": "2026-11-09T09:30:05Z", "title": "sample: tighten the parser"},
@@ -35,6 +35,6 @@
     {"bytes": 700, "cwd": "/work/gamma", "dreamed": "2026-11-10T09:00:00Z", "highlights": 0, "memories": 2, "session": "5a000000-0000-4000-8000-00000000000e", "state": "dreamed", "taken": "2026-11-10T06:00:01Z", "title": "sample: green the gamma suite"}
   ],
   "traces": [
-    {"bank": "-work-alpha", "created": "2026-11-09T09:40:00Z", "file": "feedback_sample_spans.md", "name": "Sample: spans", "session": "5a000000-0000-4000-8000-00000000000a", "sessions": ["5a000000-0000-4000-8000-00000000000a"], "type": "feedback"}
+    {"bank": "-work-alpha", "created": "2026-11-09T09:40:00Z", "file": "feedback_sample_spans.md", "from": [], "id": "6c5d4e3f2a1b", "name": "Sample: spans", "origin": null, "session": "5a000000-0000-4000-8000-00000000000a", "sessions": ["5a000000-0000-4000-8000-00000000000a"], "state": "active", "type": "feedback"}
   ]
 }

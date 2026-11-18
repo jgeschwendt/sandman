@@ -193,6 +193,25 @@ mod tests {
         Ok(lines.join("\n"))
     }
 
+    /// `text` with each `id: <12 lowercase hex>` line's id as `<id>`: a minted id, checked for its
+    /// shape; any other stays, to fail the comparison.
+    fn masked(text: &str) -> String {
+        text.split_inclusive('\n')
+            .map(|line| {
+                let id = line.strip_prefix("id: ").map_or("", str::trim_end);
+                if id.len() == 12
+                    && id
+                        .bytes()
+                        .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+                {
+                    "id: <id>\n"
+                } else {
+                    line
+                }
+            })
+            .collect()
+    }
+
     /// `Err` showing both sides unless `got == want`.
     fn same(got: &str, want: &str) -> Outcome {
         if got == want {
@@ -467,12 +486,14 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             ("memories/-work-alpha/notes.txt", String::new()),
             (
                 "memories/-work-alpha/reference_grammar.md",
+                // remembered without a session: its origin its source
                 memory(
                     "The grammar lives in one file",
                     "reference",
                     "2026-11-09T08:40:00Z",
                     "remember 2026-11-09T08:40:00Z",
-                ),
+                )
+                .replacen("source:", "origin: hand\nsource:", 1),
             ),
             (
                 "memories/-work-beta/loose.md",
@@ -511,14 +532,14 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             (
                 "knowledge/launchd/knowledge_labels.md",
                 format!(
-                    "---\nname: Labels name the project\ntype: knowledge\ncreated: 2026-11-10T05:00:00Z\nsession: {ID}e\nsessions: {ID}c {ID}b sample {ID}c\nsource: consolidate 2026-11-10T05:00:00Z \u{b7}  \u{b7} model=opus\n---\n\nsample body\n"
+                    "---\nid: 3f9a0c1d2b4e\nname: Labels name the project\ntype: knowledge\ncreated: 2026-11-10T05:00:00Z\nsession: {ID}e\nfrom: 9e8d7c6b5a4f 0a1b2c3d4e5f\nsessions: {ID}c {ID}b sample {ID}c\nsource: consolidate 2026-11-10T05:00:00Z \u{b7}  \u{b7} model=opus\n---\n\nsample body\n"
                 ),
             ),
             ("knowledge/launchd/MEMORY.md", String::new()),
             (
                 "traces/-work-alpha/feedback_sample_spans.md",
                 format!(
-                    "---\nname: Sample: spans\ntype: feedback\ncreated: 2026-11-09T09:40:00Z\nsession: {ID}a\nsource: encode 2026-11-09T09:40:00Z \u{b7} {ID}a \u{b7} model=opus\n---\n\nsample body\n"
+                    "---\nid: 6c5d4e3f2a1b\nname: Sample: spans\ntype: feedback\ncreated: 2026-11-09T09:40:00Z\nsession: {ID}a\nsource: encode 2026-11-09T09:40:00Z \u{b7} {ID}a \u{b7} model=opus\n---\n\nsample body\n"
                 ),
             ),
             (
@@ -563,6 +584,152 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             serde_json::from_str(out.strip_prefix("0\n").ok_or_else(|| out.clone())?)?;
         got["at"] = want["at"].clone();
         same(&got.to_string(), &want.to_string())
+    }
+
+    /// `check` reports each note's violations of invariants 1–3 in reader order and writes
+    /// nothing, not even a machine id; `--fix` mints ids (missing, malformed or taken), drops empty
+    /// and `-` source keys and an unknown origin, sorts and dedupes `from:` and `sessions:`, gives a
+    /// sourceless note its origin by stamp (frontmatter for a file without it), writes a `check`
+    /// line and reports what is left; a clean store says so, exit 0; a failed write is exit 1.
+    #[test]
+    fn check() -> Outcome {
+        let root = temp("check")?;
+        let notes = [
+            (
+                "memories/alpha/first.md",
+                "---\nid: 0a0a0a0a0a0a\nname: First\norigin: routine\nsource: encode\n---\n\nbody\n",
+            ),
+            (
+                "memories/alpha/noid.md",
+                "---\nname: No id\nsource: remember 2026-11-01T00:00:00Z \u{b7} -\n---\n\nbody\n",
+            ),
+            (
+                "memories/alpha/second.md",
+                "---\nid: 0a0a0a0a0a0a\nname: Second\nsession: @b\n---\n\nbody\n",
+            ),
+            ("memories/alpha/MEMORY.md", "never read\n"),
+            ("memories/beta/loose.md", "no frontmatter\n"),
+            (
+                "knowledge/topic/bad.md",
+                "---\nid: XYZ\nname: Bad\norigin: manual\nfrom: 1b1b1b1b1b1b nope 0a0a0a0a0a0a 0a0a0a0a0a0a\nsource: consolidate\n---\n\nbody\n",
+            ),
+            (
+                "traces/b/empty.md",
+                "---\nid: 2b2b2b2b2b2b\nfrom:\norigin: -\nsessions:\nstrength: 3\nsource: dream 2026-01-01\n---\n\nbody\n",
+            ),
+            (
+                "traces/b/odd.md",
+                "---\nid: 3c3c3c3c3c3c\nsessions: @c @b notuuid @b\nsource: encode\n---\n\nbody\n",
+            ),
+        ];
+        plant(&root, &notes)?;
+        let envs = [("SANDMAN_ROOT", root.as_str())];
+        let read = |path: &str| fs::read_to_string(format!("{root}/{path}")).unwrap_or_default();
+        let all = || notes.map(|note| masked(&read(note.0))).concat();
+        let before = all();
+        let left = [
+            "knowledge/topic/bad.md: 3: from: nope is not an id",
+            "traces/b/empty.md: 3: strength is counted, never stored",
+            "traces/b/odd.md: 3: sessions: notuuid is not a session id",
+        ];
+        let bad = [
+            "alpha/noid.md: 1: no id",
+            "alpha/noid.md: 2: no source",
+            "alpha/second.md: 1: id 0a0a0a0a0a0a is also alpha/first.md's",
+            "beta/loose.md: 1: no id",
+            "beta/loose.md: 2: no source",
+            "knowledge/topic/bad.md: 1: id XYZ is not 12 lowercase hex",
+            "knowledge/topic/bad.md: 2: origin manual is not hand, import or routine",
+            left[0],
+            "knowledge/topic/bad.md: 3: from is not sorted once",
+            "traces/b/empty.md: 2: from is \"\"",
+            "traces/b/empty.md: 2: origin is \"-\"",
+            "traces/b/empty.md: 2: sessions is \"\"",
+            "traces/b/empty.md: 2: no source",
+            left[1],
+            left[2],
+            "traces/b/odd.md: 3: sessions is not sorted once",
+        ];
+        same(
+            &format!(
+                "{}{}{}",
+                sandman(&envs, &["check"], "")?,
+                fs::exists(format!("{root}/machine"))?,
+                all() == before
+            ),
+            &format!("1\n{}\nfalsetrue", bad.join("\n")),
+        )?;
+        let fixed = sandman(
+            &[&envs[..], &[("SANDMAN_MACHINE", "studio")]].concat(),
+            &["check", "--fix"],
+            "",
+        )?;
+        same(
+            &format!("{fixed}{}\n{}", all().replace('@', ID), ledger(&root)?),
+            &format!(
+                "1\ncheck: fixed 6\n{}\n{}\n{}",
+                left.join("\n"),
+                [
+                    "---\nid: <id>\nname: First\norigin: routine\nsource: encode\n---\n\nbody\n",
+                    "---\nid: <id>\nname: No id\norigin: hand\nsource: remember 2026-11-01T00:00:00Z \u{b7} -\n---\n\nbody\n",
+                    "---\nid: <id>\nname: Second\nsession: @b\n---\n\nbody\n",
+                    "never read\n",
+                    "---\nid: <id>\norigin: import\n---\n\nno frontmatter\n",
+                    "---\nid: <id>\nname: Bad\nfrom: 0a0a0a0a0a0a 1b1b1b1b1b1b nope\nsource: consolidate\n---\n\nbody\n",
+                    "---\nid: <id>\nstrength: 3\norigin: routine\nsource: dream 2026-01-01\n---\n\nbody\n",
+                    "---\nid: <id>\nsessions: @b @c notuuid\nsource: encode\n---\n\nbody\n",
+                ]
+                .concat()
+                .replace('@', ID),
+                r#"{"at":"A","fixed":6,"kind":"check","machine":"studio"}"#
+            ),
+        )?;
+        // a valid id kept, each minted one new
+        let ids: BTreeSet<String> = notes
+            .iter()
+            .filter(|note| !note.0.ends_with("MEMORY.md"))
+            .map(|note| read(note.0).lines().nth(1).unwrap_or_default().to_owned())
+            .collect();
+        same(
+            &format!(
+                "{} {}",
+                ids.len(),
+                ["0a0a0a0a0a0a", "2b2b2b2b2b2b", "3c3c3c3c3c3c"]
+                    .iter()
+                    .all(|id| ids.contains(&format!("id: {id}")))
+            ),
+            "7 true",
+        )?;
+        for path in [
+            "knowledge/topic/bad.md",
+            "traces/b/empty.md",
+            "traces/b/odd.md",
+        ] {
+            fs::remove_file(format!("{root}/{path}"))?;
+        }
+        same(
+            &sandman(&envs, &["check"], "")?,
+            "0\ncheck: 4 notes: clean\n",
+        )?;
+        let blocked = format!("{root}/blocked");
+        plant(&blocked, &[("memories/locked/x.md", "no id\n")])?;
+        fs::set_permissions(
+            format!("{blocked}/memories/locked"),
+            Permissions::from_mode(0o555),
+        )?;
+        let failed = sandman(
+            &[("SANDMAN_ROOT", blocked.as_str())],
+            &["check", "--fix"],
+            "",
+        );
+        fs::set_permissions(
+            format!("{blocked}/memories/locked"),
+            Permissions::from_mode(0o755),
+        )?;
+        same(
+            &failed?,
+            "1\nsandman check: Permission denied (os error 13)\n",
+        )
     }
 
     /// Prospective memory against a fixed local today, Saturday 2026-11-14: `defer` resolves each
@@ -1101,7 +1268,7 @@ esac
         ));
         let now = first
             .lines()
-            .nth(4)
+            .nth(5)
             .and_then(|said| said.strip_prefix("created: "))
             .unwrap_or_default();
         let mut want = [
@@ -1139,14 +1306,17 @@ esac
                 key(&format!("{work}/{dir}"))
             ))
             .lines()
-            .nth(5)
+            .nth(6)
             .unwrap_or_default()
             .to_owned()
         });
         same(
-            &format!("{}{written:?}\n{abouts:?}", first.replace(now, "<now>")),
             &format!(
-                "---\nname: Sample: pass the clock in!\ndescription: sample: one line\ntype: feedback\ncreated: <now>\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsource: encode <now> \u{b7} {ID}a \u{b7} model=sample-model\n---\n\nsample: the body\n\nWhy: sample.\n{want:?}\n{:?}",
+                "{}{written:?}\n{abouts:?}",
+                masked(&first.replace(now, "<now>"))
+            ),
+            &format!(
+                "---\nid: <id>\nname: Sample: pass the clock in!\ndescription: sample: one line\ntype: feedback\ncreated: <now>\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsource: encode <now> \u{b7} {ID}a \u{b7} model=sample-model\n---\n\nsample: the body\n\nWhy: sample.\n{want:?}\n{:?}",
                 [
                     format!("about: {work}/elsewhere"),
                     format!("about: {work}/missing")
@@ -1297,12 +1467,13 @@ printf '{{"traces":[]}}\n'
         let alpha = [
             (
                 "traces/alpha/feedback_t_keep.md",
-                // remembered on the fly: kept like any trace, its session and about carried
+                // remembered on the fly: kept like any trace, its id, from, session and about
+                // carried
                 note(
                     "T keep",
                     "feedback",
                     "2026-11-01T01:00:00Z",
-                    "about: /work/alpha\nsession: @a\nsource: remember 2026-11-01T01:00:00Z \u{b7} @a\n",
+                    "about: /work/alpha\nsession: @a\nid: 0a0a0a0a0a0a\nfrom: 1b1b1b1b1b1b\nsource: remember 2026-11-01T01:00:00Z \u{b7} @a\n",
                     "sample: trace body",
                 ),
             ),
@@ -1320,8 +1491,9 @@ printf '{{"traces":[]}}\n'
                     "M merge",
                     "project",
                     "2026-10-01T00:00:00Z",
-                    // provenance off its first stamp, moved to before the new one
-                    "sessions: @c\nrecall: pin\nsource: remember 2026-10-01T00:00:00Z\n",
+                    // provenance off its first stamp, moved to before the new one; its id first,
+                    // its origin gone once it has sessions
+                    "origin: import\nsessions: @c\nrecall: pin\nid: 2c2c2c2c2c2c\nsource: remember 2026-10-01T00:00:00Z\n",
                     "sample: before",
                 ),
             ),
@@ -1638,7 +1810,7 @@ esac
                 aside("alpha-ops.json")?
             ),
             &format!(
-                "---\nname: Sample: kept\ndescription: sample: kept\ntype: project\ncreated: 2026-11-01T01:00:00Z\nabout: /work/alpha\nsession: {ID}a\nsessions: {ID}a\n{}\n---\n\nsample: kept body\n---\nname: M merge\ndescription: sample: merged\ntype: project\ncreated: 2026-10-01T00:00:00Z\nrecall: pin\nsessions: {ID}b {ID}c\n{}\nupdated: <now>\n---\n\nsample: merged body\n{}{}{}\n",
+                "---\nid: 0a0a0a0a0a0a\nname: Sample: kept\ndescription: sample: kept\ntype: project\ncreated: 2026-11-01T01:00:00Z\nabout: /work/alpha\nsession: {ID}a\nfrom: 1b1b1b1b1b1b\nsessions: {ID}a\n{}\n---\n\nsample: kept body\n---\nid: 2c2c2c2c2c2c\nname: M merge\ndescription: sample: merged\ntype: project\ncreated: 2026-10-01T00:00:00Z\nrecall: pin\nsessions: {ID}b {ID}c\n{}\nupdated: <now>\n---\n\nsample: merged body\n{}{}{}\n",
                 source("a"),
                 source("b"),
                 alpha[3].1.replace('@', ID),
@@ -1866,11 +2038,13 @@ esac
         };
         let (created, updated) = (stamp("created: "), stamp("updated: "));
         same(
-            &playbook
-                .replace(&format!("created: {created}"), "created: <created>")
-                .replace(&updated, "<updated>"),
+            &masked(
+                &playbook
+                    .replace(&format!("created: {created}"), "created: <created>")
+                    .replace(&updated, "<updated>"),
+            ),
             &format!(
-                "---\nname: Swap a launchd daemon\ndescription: launchd: swap a running daemon with kickstart -k\ntype: playbook\ncreated: <created>\ntopic: launchd\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsessions: {ID}a {ID}b\nsource: consolidate <updated> \u{b7} {ID}b \u{b7} model=sh\nupdated: <updated>\n---\n\nWhen: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10).\n"
+                "---\nid: <id>\nname: Swap a launchd daemon\ndescription: launchd: swap a running daemon with kickstart -k\ntype: playbook\ncreated: <created>\ntopic: launchd\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsessions: {ID}a {ID}b\nsource: consolidate <updated> \u{b7} {ID}b \u{b7} model=sh\nupdated: <updated>\n---\n\nWhen: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10).\n"
             ),
         )?;
         let envs = [
@@ -1918,8 +2092,8 @@ esac
             .find_map(|said| said.strip_prefix("created: "))
             .unwrap_or_default();
         same(
-            &remembered.replace(now, "<now>"),
-            "---\nname: Drain a daemon\ndescription: sample: drain on SIGTERM\ntype: playbook\ncreated: <now>\ntopic: launchd\nsource: remember <now> \u{b7} -\n---\n\nsample: drain on SIGTERM\n",
+            &masked(&remembered.replace(now, "<now>")),
+            "---\nid: <id>\nname: Drain a daemon\ndescription: sample: drain on SIGTERM\ntype: playbook\ncreated: <now>\ntopic: launchd\norigin: hand\nsource: remember <now> \u{b7} -\n---\n\nsample: drain on SIGTERM\n",
         )?;
         // recall: the pages and their traces under the topic's label, no repository's bonus
         let path = stub(&root)?;
@@ -3836,13 +4010,17 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 .lines()
                 .find_map(|line| line.strip_prefix("created: "))
                 .unwrap_or_default();
-            written.push_str(&held.replace(now, "<now>"));
+            written.push_str(&masked(&held.replace(now, "<now>")));
         }
-        // name, description and type; what follows `created`; the source's session; the body
+        // name, description and type; what follows `created`; the source's session (none: the
+        // origin is `hand`); the body
         let note = |head: [&str; 3], rest: &str, id: &str, body: &str| {
             format!(
-                "---\nname: {}\ndescription: {}\ntype: {}\ncreated: <now>\n{rest}source: remember <now> \u{b7} {id}\n---\n\n{body}\n",
-                head[0], head[1], head[2]
+                "---\nid: <id>\nname: {}\ndescription: {}\ntype: {}\ncreated: <now>\n{rest}{}source: remember <now> \u{b7} {id}\n---\n\n{body}\n",
+                head[0],
+                head[1],
+                head[2],
+                if id == "-" { "origin: hand\n" } else { "" }
             )
         };
         let (elsewhere, homeless) = ("sample: elsewhere", "sample: homeless");

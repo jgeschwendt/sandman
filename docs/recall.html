@@ -468,7 +468,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       <code class="code">traces/&lt;bank&gt;/&lt;file&gt;</code>, anything else refused.</li>
     <li><strong><code class="code">sandman remember "&lt;body&gt;" [--type &lt;type&gt;] [--topic &lt;topic&gt;] [--name …] [--description …] [--about &lt;path&gt;] [--session &lt;uuid&gt;]</code></strong>
       <span class="badge badge-ok">built</span> — encodes on purpose: one trace written at once to
-      <code class="code">traces/&lt;bank&gt;/</code>, source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>,
+      <code class="code">traces/&lt;bank&gt;/</code>, a new <code class="code">id</code>, source <code class="code">remember &lt;ISO&gt; · &lt;session&gt;</code>
+      (<code class="code">origin: hand</code> without one),
       a <code class="code">knowledge</code> or <code class="code">playbook</code> by its <code class="code">--topic</code>
       (<a class="link" href="knowledge.html#write">the knowledge store</a>), else homed by <code class="code">--about</code> as an encoded trace is, else by the cwd (from the root: about the person,
       or true everywhere); defaults feedback, the body's first eight words, its first line. It prints the
