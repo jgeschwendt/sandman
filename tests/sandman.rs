@@ -2743,6 +2743,43 @@ printf '{"ops":[],"under":"%s"}\n' $u
         )
     }
 
+    /// A `mark` waiting on the lock of a ledger file that is replaced meanwhile (as `forget`
+    /// replaces it) opens the replacement and writes there, every time: the race `forget_race`
+    /// only makes likely, forced. An attempt whose `mark` opened the file after the swap (it then
+    /// writes at once, unlocked) proves nothing and is run again.
+    #[test]
+    fn forget_reopen() -> Outcome {
+        let root = temp("forget-reopen")?;
+        let today = format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        fs::create_dir_all(PathBuf::from(&today).parent().ok_or("parent")?)?;
+        let reopened = (0u8..5).try_fold(false, |done, _| -> Result<bool, Box<dyn Error>> {
+            if done {
+                return Ok(true);
+            }
+            let held = File::create(&today)?;
+            held.lock()?;
+            let mut mark = command(
+                &[("SANDMAN_MACHINE", "studio"), ("SANDMAN_ROOT", &root)],
+                &["mark"],
+            )
+            .stdin(Stdio::piped())
+            .spawn()?;
+            mark.stdin
+                .take()
+                .ok_or("stdin")?
+                .write_all(format!(r#"{{"kind":"start","session":"{ID}a"}}"#).as_bytes())?;
+            thread::sleep(Duration::from_millis(300));
+            fs::write(format!("{today}.new"), "")?;
+            fs::rename(format!("{today}.new"), &today)?;
+            thread::sleep(Duration::from_millis(100));
+            let waited = fs::read_to_string(&today)?.is_empty();
+            drop(held);
+            same(&format!("{:?}", mark.wait()?.code()), "Some(0)")?;
+            Ok(waited && fs::read_to_string(&today)?.contains(&format!("{ID}a")))
+        })?;
+        same(&reopened.to_string(), "true")
+    }
+
     /// `mark` refuses bad stdin with exit 2 and no write (a guard without a rationale too), appends
     /// a good mark to today's file, a guard's rationale one-lined to 1,000 characters, and exits 1
     /// when the root cannot hold one.
