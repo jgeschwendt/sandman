@@ -507,6 +507,13 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
                     &format!("consolidate 2026-11-10T04:00:00Z \u{b7} {ID}a \u{b7} model=opus"),
                 ),
             ),
+            // provenance past the first stamp: a topic stamp with no session, a backfilled line
+            (
+                "knowledge/launchd/knowledge_labels.md",
+                format!(
+                    "---\nname: Labels name the project\ntype: knowledge\ncreated: 2026-11-10T05:00:00Z\nsession: {ID}e\nsessions: {ID}c {ID}b sample {ID}c\nsource: consolidate 2026-11-10T05:00:00Z \u{b7}  \u{b7} model=opus\n---\n\nsample body\n"
+                ),
+            ),
             ("knowledge/launchd/MEMORY.md", String::new()),
             (
                 "traces/-work-alpha/feedback_sample_spans.md",
@@ -1313,7 +1320,8 @@ printf '{{"traces":[]}}\n'
                     "M merge",
                     "project",
                     "2026-10-01T00:00:00Z",
-                    "recall: pin\nsource: remember 2026-10-01T00:00:00Z\n",
+                    // provenance off its first stamp, moved to before the new one
+                    "sessions: @c\nrecall: pin\nsource: remember 2026-10-01T00:00:00Z\n",
                     "sample: before",
                 ),
             ),
@@ -1630,10 +1638,10 @@ esac
                 aside("alpha-ops.json")?
             ),
             &format!(
-                "---\nname: Sample: kept\ndescription: sample: kept\ntype: project\ncreated: 2026-11-01T01:00:00Z\nabout: /work/alpha\nsession: {ID}a\n{}\n---\n\nsample: kept body\n---\nname: M merge\ndescription: sample: merged\ntype: project\ncreated: 2026-10-01T00:00:00Z\nrecall: pin\n{}\nupdated: <now>\n---\n\nsample: merged body\n{}{}{}\n",
+                "---\nname: Sample: kept\ndescription: sample: kept\ntype: project\ncreated: 2026-11-01T01:00:00Z\nabout: /work/alpha\nsession: {ID}a\nsessions: {ID}a\n{}\n---\n\nsample: kept body\n---\nname: M merge\ndescription: sample: merged\ntype: project\ncreated: 2026-10-01T00:00:00Z\nrecall: pin\nsessions: {ID}b {ID}c\n{}\nupdated: <now>\n---\n\nsample: merged body\n{}{}{}\n",
                 source("a"),
                 source("b"),
-                alpha[3].1,
+                alpha[3].1.replace('@', ID),
                 alpha[0].1.replace('@', ID),
                 serde_json::from_str::<Value>(&format!("{{\"ops\":[{keep},{merge},{prunes}]}}"))?
             ),
@@ -1654,8 +1662,8 @@ esac
             .filter(|memory| memory["bank"] == "alpha")
             .map(|memory| {
                 format!(
-                    "{} {} {}",
-                    memory["file"], memory["source"], memory["session"]
+                    "{} {} {} {}",
+                    memory["file"], memory["source"], memory["session"], memory["sessions"]
                 )
             })
             .collect();
@@ -1664,9 +1672,9 @@ esac
             &format!(
                 "{:?}",
                 [
-                    format!(r#""project_m_merge.md" "consolidate" "{ID}b""#),
-                    format!(r#""project_sample_kept.md" "consolidate" "{ID}a""#),
-                    r#""user_m_listed.md" "other" null"#.to_owned(),
+                    format!(r#""project_m_merge.md" "consolidate" "{ID}b" ["{ID}b","{ID}c"]"#),
+                    format!(r#""project_sample_kept.md" "consolidate" "{ID}a" ["{ID}a"]"#),
+                    r#""user_m_listed.md" "other" null []"#.to_owned(),
                 ]
             ),
         )
@@ -1862,7 +1870,7 @@ esac
                 .replace(&format!("created: {created}"), "created: <created>")
                 .replace(&updated, "<updated>"),
             &format!(
-                "---\nname: Swap a launchd daemon\ndescription: launchd: swap a running daemon with kickstart -k\ntype: playbook\ncreated: <created>\ntopic: launchd\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsource: consolidate <updated> \u{b7} {ID}b \u{b7} model=sh\nupdated: <updated>\n---\n\nWhen: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10).\n"
+                "---\nname: Swap a launchd daemon\ndescription: launchd: swap a running daemon with kickstart -k\ntype: playbook\ncreated: <created>\ntopic: launchd\nsession: {ID}a\narchived: {root}/archive/a.jsonl\nsessions: {ID}a {ID}b\nsource: consolidate <updated> \u{b7} {ID}b \u{b7} model=sh\nupdated: <updated>\n---\n\nWhen: sample.\n\nSteps:\n1. sample: kickstart -k\n\nWatch for: sample: bootout raced KeepAlive (2026-11-10).\n"
             ),
         )?;
         let envs = [
@@ -2519,10 +2527,13 @@ printf '{"ops":[],"under":"%s"}\n' $u
             note("@a", "remember 2026-11-09T09:00:00Z \u{b7} @a"),
             note("@b", "encode \u{b7} @b"),
         );
+        // the id comes off a `sessions:` line, the line with it when it was the only one
         let merged = note(
             "@b",
             "consolidate 2026-11-10T04:00:00Z \u{b7} @a \u{b7} model=opus",
-        );
+        )
+        .replace("source:", "sessions: @a @c\nsource:");
+        let backfilled = other.replace("source:", "sessions: @a\nsource:");
         let ledger = [
             r#"{"at":"2026-11-09T08:00:00Z","kind":"start","session":"@a"}"#,
             r#"{"at":"2026-11-09T08:01:00Z","kind":"start","session":"@b"}"#,
@@ -2585,7 +2596,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 ("memories/.recent/@b.json", "{}\n"),
                 ("memories/-work-alpha/feedback_kept.md", &mine),
                 ("memories/-work-alpha/feedback_merged.md", &merged),
-                ("memories/-work-alpha/project_other.md", &other),
+                ("memories/-work-alpha/project_other.md", &backfilled),
                 ("run/consolidate.in", "session: @a\n"),
                 ("run/consolidate.out", "{}\n"),
                 ("run/encode.err", ""),
@@ -2607,7 +2618,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             ],
         )?;
         let forget = |letter: &str| sandman(&envs, &["forget", &format!("{ID}{letter}")], "");
-        same(&forget("a")?, "0\nforgot: 15 removed, 7 rewritten\n")?;
+        same(&forget("a")?, "0\nforgot: 15 removed, 8 rewritten\n")?;
         // what is left, each file under the root by path, and the rewritten ones' text
         let mut left = Vec::new();
         let mut dirs = vec![PathBuf::from(&root)];
@@ -2632,18 +2643,19 @@ printf '{"ops":[],"under":"%s"}\n' $u
         };
         same(
             &format!(
-                "{}\n{}{}{}{}{}{}{}",
+                "{}\n{}{}{}{}{}{}{}{}",
                 left.join("\n"),
                 read("ledger/2026/11/09.jsonl")?,
                 read(".pruned/2026/11/10/040000--work-alpha-ops.json")?,
                 read(".pruned/2026/11/10/040001--work-alpha-feedback_merged.md")?,
                 read("memories/-work-alpha/feedback_merged.md")?,
+                read("memories/-work-alpha/project_other.md")?,
                 read("intentions/1f2e3d4c.md")?,
                 read("embeddings.jsonl")?,
                 read("run/serve.log")?,
             ),
             &format!(
-                "{}\n{}\n{}{}{}{}{}{}",
+                "{}\n{}\n{}{}{}{}{}{}{}",
                 [
                     ".archive/claude/2026/11/09/120000-projects--work-alpha-@b.jsonl",
                     ".pruned/2026/11/10/040000--work-alpha-feedback_b.md",
@@ -2673,7 +2685,9 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     "@b",
                     "consolidate 2026-11-10T04:00:00Z \u{b7} - \u{b7} model=opus"
                 )
+                .replace("source:", "sessions: @c\nsource:")
                 .repeat(2),
+                other,
                 "---\ndue: 2026-11-12\nstate: open\n---\n\nsample\n",
                 "{\"h\":\"2\",\"path\":\"traces/-work-alpha/feedback_b.md\"}\nnot json\n",
                 "{\"event\":\"take\",\"session\":\"@b\"}\n",

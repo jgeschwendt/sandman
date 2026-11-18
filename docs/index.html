@@ -197,11 +197,11 @@
  "at":"&lt;now, RFC 3339 UTC&gt;",
  "guards":[{"at":str,"rationale":str,"session":str,"tool":str|null}],
  "intentions":[{"about":str|null,"after":str|null,"closed":str|null,"created":str|null,"due":str|null,"id":str,"session":str|null,"state":str|null,"what":str}],
- "knowledge":[{"created":str|null,"file":str,"name":str,"session":str|null,"source":…,"topic":str,"type":str}],
+ "knowledge":[{"created":str|null,"file":str,"name":str,"session":str|null,"sessions":[str],"source":…,"topic":str,"type":str}],
  "machine":"&lt;this machine's id&gt;",
- "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"source":"consolidate"|"dream"|"reflect"|"remember"|"other","type":str}],
+ "memories":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"sessions":[str],"source":"consolidate"|"dream"|"reflect"|"remember"|"other","type":str}],
  "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}],
- "traces":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"type":str}]}</pre>
+ "traces":[{"bank":str,"created":str|null,"file":str,"name":str,"session":str|null,"sessions":[str],"type":str}]}</pre>
   <ul class="stack claims" role="list">
     <li><strong>active</strong> — one per session in the ledger files: <code class="code">start</code>
       the <code class="code">at</code> of its earliest start mark (a reload re-fires it),
@@ -221,7 +221,7 @@
       <code class="code">dreamed</code> come from the pointer. <code class="code">state</code>:
       <code class="code">waiting</code>, a pointer without <code class="code">dreamed</code>;
       <code class="code">dreamed</code>, with it; <code class="code">archived</code>, no pointer.
-      <code class="code">memories</code> counts the memory files naming the session. By
+      <code class="code">memories</code> counts the memories and knowledge pages whose <code class="code">sessions</code> holds the session. By
       <code class="code">taken</code>, then session.</li>
     <li><strong>memories</strong> — every <code class="code">.md</code> directly in a bank dir but
       <code class="code">MEMORY.md</code>, banks and files starting with <code class="code">.</code> or
@@ -229,15 +229,17 @@
       <code class="code">type</code> to <code class="code">""</code>; <code class="code">source</code> is
       the first word of the frontmatter's when it is consolidate, dream, reflect or remember, else
       <code class="code">other</code>; a consolidate's or a dream's <code class="code">session</code> is
-      the uuid in its source line (<code class="code">dream &lt;ISO&gt; · &lt;uuid&gt; · minds=…</code>). By bank, then
-      file.</li>
+      the uuid in its source line (<code class="code">dream &lt;ISO&gt; · &lt;uuid&gt; · minds=…</code>); <code class="code">sessions</code> is the
+      note's provenance, every archived session it descends from, sorted, once each: the uuids on its
+      <code class="code">sessions:</code> line (space-separated, directly before <code class="code">source:</code>), its <code class="code">session:</code> and that
+      <code class="code">session</code>. By bank, then file.</li>
     <li><strong>intentions</strong> — every <code class="code">intentions/&lt;id&gt;.md</code>, open and closed, its
       frontmatter as it stands and <code class="code">what</code> its body (<a class="link" href="intentions.html#store">the store</a>). By
       <code class="code">created</code>, then id.</li>
     <li><strong>knowledge</strong> — every page under <code class="code">knowledge/&lt;topic&gt;/</code>, read as
       memories are, <code class="code">topic</code> in place of <code class="code">bank</code>. By topic, then file.</li>
     <li><strong>traces</strong> — every trace file, read and skipped as memories are, a topic's bank
-      <code class="code">@&lt;topic&gt;</code>; <code class="code">session</code> from its frontmatter. By bank, then file.</li>
+      <code class="code">@&lt;topic&gt;</code>; <code class="code">session</code> from its frontmatter, <code class="code">sessions</code> as a memory's. By bank, then file.</li>
   </ul>
   <figure class="figure">
     <div class="chart" id="timeline"><noscript><p class="docs-note">The timeline needs JavaScript; its data is <a class="link" href="data/chart.json">docs/data/chart.json</a>.</p></noscript></div>
@@ -283,7 +285,7 @@
       <tr><td><code class="code">&lt;claude&gt;/projects/*/&lt;session&gt;.jsonl</code> and <code class="code">&lt;session&gt;/</code></td><td>removed, in every project</td></tr>
       <tr><td><code class="code">.archive/claude/**</code></td><td>every copy and <code class="code">-dir</code> named for it removed</td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>removed</td></tr>
-      <tr><td>traces, memories, knowledge pages</td><td>those whose <code class="code">session</code> is it removed (an encoded or remembered trace, a consolidate's keep), their lines in <code class="code">embeddings.jsonl</code> too; any other holding the id rewritten without it (a merge's <code class="code">source</code>)</td></tr>
+      <tr><td>traces, memories, knowledge pages</td><td>those whose <code class="code">session</code> is it removed (an encoded or remembered trace, a consolidate's keep), their lines in <code class="code">embeddings.jsonl</code> too; any other holding the id rewritten without it: off a <code class="code">sessions:</code> line, the line gone once empty, else <code class="code">-</code> (a merge's <code class="code">source</code>)</td></tr>
       <tr><td><code class="code">.pruned/**</code></td><td>a copy whose <code class="code">session</code> is it removed, a reply's ops on that trace dropped, any other holding the id rewritten</td></tr>
       <tr><td><code class="code">intentions/&lt;id&gt;.md</code></td><td>kept, its <code class="code">session</code> link dropped: deferred work is the person's, not the session's</td></tr>
       <tr><td><code class="code">run/</code></td><td>a model run's <code class="code">.in</code>, <code class="code">.out</code>, <code class="code">.err</code> holding the id removed, and encode's when the last or next episode encoded was this one; <code class="code">serve.log</code> and <code class="code">serve.log.1</code> without its lines</td></tr>
@@ -568,7 +570,9 @@ Why: "mocks hid a real ordering bug last year".</pre>
     <li><strong>stamped</strong> — a kept or merged memory's <code class="code">source</code> is
       <code class="code">consolidate &lt;now&gt; · &lt;the trace's session&gt; · model=&lt;model&gt;</code>; a merge replaces the
       earlier one, as the bank format's own rewrites do, and the replaced version keeps it under
-      <code class="code">.pruned/</code>. <code class="code">MEMORY.md</code> is left alone: the earlier recall reads memory
+      <code class="code">.pruned/</code>. Its <code class="code">sessions:</code> line, directly before <code class="code">source:</code>, is the union of the
+      trace's and the merged memory's provenance, so the sessions a merge descends from outlive the stamp it
+      replaces. <code class="code">MEMORY.md</code> is left alone: the earlier recall reads memory
       files, never the index, and the earlier commit path regenerates it whole.</li>
     <li><strong>stop</strong> — as encode's: no line, the bank runs again after the next start.</li>
   </ul>
