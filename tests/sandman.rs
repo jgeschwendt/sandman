@@ -3621,18 +3621,18 @@ printf '{"ops":[],"under":"%s"}\n' $u
             })
             .collect::<io::Result<_>>()?;
         held.sort();
-        let open = |id: &str, artifact: &str, what: &str| {
+        let open = |id: &str, artifact: &str, line: &str, what: &str| {
             format!(
-                "---\ndue: 2026-11-18\ncreated: <now>\nabout: {root}/repo\ngraduate: {id}\nartifact: {root}/repo/{artifact}\nstate: open\n---\n\n{what}\n"
+                "---\ndue: 2026-11-18\ncreated: <now>\nabout: {root}/repo\ngraduate: {id}\nartifact: {root}/repo/{artifact}\nline: {line}\nstate: open\n---\n\nDone once {root}/repo/{artifact} holds the line: {line}{what}\n"
             )
         };
         same(
             &held.iter().map(|pair| pair.0.as_str()).collect::<String>(),
             &[
                 "---\ndue: 2026-11-12\ncreated: 2026-11-12T00:00:00Z\ngraduate: a00000000003\nstate: dropped\nclosed: 2026-11-15T00:00:00Z\n---\n\nSample: declined\n".to_owned(),
-                open("a00000000001", "AGENTS.md", &format!("Graduate Sample a00000000001 (rung 2) into {root}/repo/AGENTS.md: Sample: a, always. \u{2014} sample: saves a recall a session")),
-                open("a00000000002", "hk.pkl", &format!("Graduate Sample a00000000002 (rung 3) into {root}/repo/hk.pkl: Sample: a gate for b. \u{2014} sample: relearned")),
-                open("a00000000004", "AGENTS.md", &format!("Graduate Sample a00000000004 (rung 2) into {root}/repo/AGENTS.md: Sample: d., replacing: Sample: the old d.")),
+                open("a00000000001", "AGENTS.md", "Sample: a, always.", " \u{2014} graduates Sample a00000000001 (rung 2): sample: saves a recall a session"),
+                open("a00000000002", "hk.pkl", "Sample: a gate for b.", " \u{2014} graduates Sample a00000000002 (rung 3): sample: relearned"),
+                open("a00000000004", "AGENTS.md", "Sample: d.", ", replacing: Sample: the old d. \u{2014} graduates Sample a00000000004 (rung 2)"),
             ]
             .concat(),
         )?;
@@ -3644,12 +3644,47 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 .join("\n"),
             "\"2026-11-18\" \"a00000000001\" null\n\"2026-11-18\" \"a00000000004\" null\n\"2026-11-18\" \"a00000000002\" null",
         )?;
-        // done ends the note into the artifact; a failed move leaves the proposal open
+        // done holds the artifact to the line first: missing, or without it (whitespace aside),
+        // the proposal stays open and the note active
         let verbs = [
             ("SANDMAN_MACHINE", "studio"),
             ("SANDMAN_ROOT", root.as_str()),
             ("SANDMAN_TODAY", "2026-11-18"),
         ];
+        let agents = format!("{root}/repo/AGENTS.md");
+        let unmoved = || {
+            format!(
+                "{} {}",
+                read(&format!("intentions/{}.md", held[1].1)).contains("state: open"),
+                !read("memories/-w/feedback_a.md").is_empty()
+            )
+        };
+        let missing = sandman(&verbs, &["done", &held[1].1], "")?;
+        fs::create_dir_all(format!("{root}/repo"))?;
+        fs::write(&agents, "# repo\n\n- Sample:   d.\n")?;
+        same(
+            &format!(
+                "{missing}{}{}",
+                sandman(&verbs, &["done", &held[1].1], "")?,
+                unmoved()
+            ),
+            &format!(
+                "1\nsandman done: {agents}: No such file or directory (os error 2)\n1\nsandman done: {agents} does not hold the line \"Sample: a, always.\"\ntrue true"
+            ),
+        )?;
+        fs::write(
+            &agents,
+            "# repo\n\n- Sample:   d.\n- Sample: a,\n  always.\n",
+        )?;
+        // a failed move, or a line that cannot be written (the note moved back), leaves it open
+        let ledger_day = format!("{root}/{today}");
+        fs::set_permissions(&ledger_day, Permissions::from_mode(0o444))?;
+        let unwritten = sandman(&verbs, &["done", &held[1].1], "")?;
+        fs::set_permissions(&ledger_day, Permissions::from_mode(0o644))?;
+        same(
+            &format!("{unwritten}{}", unmoved()),
+            "1\nsandman done: Permission denied (os error 13)\ntrue true",
+        )?;
         let day = format!("{root}/.pruned/{stamp}");
         fs::set_permissions(&day, Permissions::from_mode(0o555))?;
         let refused = sandman(&verbs, &["done", &held[3].1], "")?;
@@ -3787,6 +3822,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             rewrite("2026-10-01T00:00:00Z", "a00000000005", "", "merge", r#"{"id":"a00000000003","path":"-w/feedback_p1.md"}"#),
             rewrite("2026-11-01T00:00:00Z", "a00000000003", "", "merge", into_n),
             rewrite("2026-11-01T00:00:00Z", "a00000000006", "", "prune", "null"),
+            rewrite("2026-11-01T00:00:00Z", "a00000000008", "", "prune", "null"),
             rewrite(&now, "a00000000007", r#""@a""#, "prune", "null"),
             r#"{"at":"2099-01-01T00:00:00Z","history":{},"kind":"reflect","machine":"laptop","outcome":"kept"}"#.to_owned(),
         ]
@@ -4068,6 +4104,270 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 archive("080800", '9').replace('@', ID),
                 released_at.trim_matches('"')
             ),
+        )
+    }
+
+    /// Release frees only what is provably done with: a session whose encode failed stays held; an
+    /// id'd `.pruned/` copy no rewrite line ends and no note holds (a move whose line never landed)
+    /// is never swept and holds the job back, named, until a person restores it; a tree made by
+    /// hand under `.pruned/` and a symlinked day dir under either store are never walked.
+    #[test]
+    fn release_guards() -> Outcome {
+        let root = temp("release-guards")?;
+        let archived = |clock: &str, letter: char| {
+            format!(".archive/claude/2026/11/01/{clock}-projects--w-@{letter}.jsonl")
+        };
+        let story = |letter: char, clock: &str, outcome: &str| {
+            [
+                format!(
+                    r#"{{"at":"2026-11-01T07:00:00Z","interactive":true,"kind":"start","machine":"laptop","session":"@{letter}"}}"#
+                ),
+                format!(
+                    r#"{{"archived":"{root}/{}","at":"2026-11-01T08:00:00Z","kind":"end","machine":"laptop","outcome":"taken","session":"@{letter}"}}"#,
+                    archived(clock, letter)
+                ),
+                format!(
+                    r#"{{"at":"2026-11-01T08:05:00Z","kind":"encode","machine":"laptop","outcome":"{outcome}","session":"@{letter}","traces":0}}"#
+                ),
+            ]
+            .join("\n")
+        };
+        let pruned = |id: &str| {
+            format!(
+                r#"{{"at":"2026-10-01T00:00:00Z","from":[{{"digest":"x","id":"{id}","path":"-w/x.md","sessions":[]}}],"kind":"rewrite","machine":"laptop","model":"opus","op":"prune","reason":null,"to":null}}"#
+            )
+        };
+        let lines = [
+            story('1', "080000", "failed"),
+            story('2', "080100", "encoded"),
+            pruned("a00000000002"),
+            pruned("a00000000003"),
+            pruned("a00000000004"),
+            r#"{"at":"2099-01-01T00:00:00Z","history":{},"kind":"reflect","machine":"laptop","outcome":"kept"}"#.to_owned(),
+        ]
+        .join("\n");
+        let copy =
+            |id: &str| format!("---\nid: {id}\nname: Sample\norigin: import\n---\n\nsample\n");
+        let orphan = ".pruned/2026/10/01/120000--w-feedback_o.md";
+        let files = [
+            ("ledger/2026/11/01.jsonl".to_owned(), lines),
+            (archived("080000", '1'), "x".repeat(10)),
+            (archived("080100", '2'), "x".repeat(20)),
+            (
+                "outside/day/080000-projects--w-@3.jsonl".to_owned(),
+                "x".to_owned(),
+            ),
+            (orphan.to_owned(), copy("a00000000001")),
+            (
+                ".pruned/2026/10/01/120000--w-feedback_p.md".to_owned(),
+                copy("a00000000002"),
+            ),
+            (
+                ".pruned/reconsolidate-2026-11-14/memories/-w/feedback_h.md".to_owned(),
+                copy("a00000000003"),
+            ),
+            (
+                "outside/pruned/120000--w-feedback_s.md".to_owned(),
+                copy("a00000000004"),
+            ),
+        ];
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|pair| (pair.0.as_str(), pair.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        symlink(
+            format!("{root}/outside/day"),
+            format!("{root}/.archive/claude/2026/11/02"),
+        )?;
+        symlink(
+            format!("{root}/outside/pruned"),
+            format!("{root}/.pruned/2026/10/02"),
+        )?;
+        let verbs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        let swept = ".pruned/2026/10/01/120000--w-feedback_p.md";
+        let named = format!(
+            "{orphan}: 4: id a00000000001 is neither active nor ended: restore it or end it\n"
+        );
+        same(
+            &format!(
+                "{}{}",
+                sandman(&verbs, &["check"], "")?,
+                sandman(&verbs, &["check", "--release"], "")?
+            ),
+            &format!(
+                "1\n{named}{swept}: 6: past depth 1 and its grace\n1\n{named}{}: release \u{b7} {ID}2 \u{b7} 20 bytes\n{swept}: sweep \u{b7} {} bytes\nrelease: 1 transcripts, 1 copies, {} bytes; held back: 1 violations\n",
+                archived("080100", '2').replace('@', ID),
+                copy("a00000000002").len(),
+                20 + copy("a00000000002").len()
+            ),
+        )?;
+        // restored by hand, the job runs: the failed encode's transcript stays, and so does every
+        // file it was never to walk
+        let at = |path: &str| PathBuf::from(&root).join(path.replace('@', ID));
+        fs::create_dir_all(at("memories/-w"))?;
+        fs::rename(at(orphan), at("memories/-w/feedback_o.md"))?;
+        let (mut daemon, _) = serve(&root, &[("SANDMAN_TICK_MS", "10")])?;
+        until(|| !at(&archived("080100", '2')).exists() && !at(swept).exists())?;
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        same(
+            &[
+                archived("080000", '1').as_str(),
+                "outside/day/080000-projects--w-@3.jsonl",
+                ".pruned/reconsolidate-2026-11-14/memories/-w/feedback_h.md",
+                "outside/pruned/120000--w-feedback_s.md",
+            ]
+            .map(|path| at(path).exists().to_string())
+            .join(" "),
+            "true true true true",
+        )?;
+        same(
+            &sandman(&verbs, &["check"], "")?,
+            "0\ncheck: 1 notes, 1 held, 1 released: clean\n",
+        )
+    }
+
+    /// A consolidate whose rewrite lines cannot be written puts its moves back and fails: the
+    /// trace it pruned is where it was, no copy is left in `.pruned/`, and `check` stays clean.
+    #[test]
+    fn consolidate_unwritten() -> Outcome {
+        let root = temp("consolidate-unwritten")?;
+        let trace = "---\nid: a00000000001\nname: T\ndescription: t\ntype: feedback\ncreated: 2026-11-01T00:00:00Z\norigin: import\n---\n\nsample\n";
+        let script = "f=\"$SANDMAN_ROOT/ledger/$(date -u +%Y/%m/%d).jsonl\"\nmkdir -p \"$(dirname \"$f\")\"\ntouch \"$f\"\nchmod 444 \"$f\"\necho '{\"ops\":[{\"op\":\"prune\",\"trace\":\"feedback_t.md\",\"reason\":\"r\"}]}'\n";
+        plant(
+            &root,
+            &[
+                ("traces/-w/feedback_t.md", trace),
+                ("consolidator.sh", script),
+            ],
+        )?;
+        let consolidator = format!("sh {root}/consolidator.sh");
+        let (mut daemon, _) = serve(
+            &root,
+            &[
+                ("SANDMAN_CONSOLIDATOR", consolidator.as_str()),
+                ("SANDMAN_TICK_MS", "10"),
+            ],
+        )?;
+        let log = || fs::read_to_string(format!("{root}/run/serve.log")).unwrap_or_default();
+        until(|| log().contains(r#""event":"consolidate""#))?;
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let today = format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        fs::set_permissions(&today, Permissions::from_mode(0o644))?;
+        let copies = fs::read_dir(format!("{root}/.pruned/{}", date(&["+%Y/%m/%d"])?))
+            .map_or(0, Iterator::count);
+        same(
+            &format!(
+                "{} {copies} {}",
+                fs::read_to_string(format!("{root}/traces/-w/feedback_t.md"))? == trace,
+                fs::read_to_string(&today)?.is_empty()
+            ),
+            "true 0 true",
+        )?;
+        same(
+            &sandman(
+                &[
+                    ("SANDMAN_MACHINE", "studio"),
+                    ("SANDMAN_ROOT", root.as_str()),
+                ],
+                &["check"],
+                "",
+            )?,
+            "0\ncheck: 1 notes, 0 held, 0 released: clean\n",
+        )
+    }
+
+    /// An intention's id is its file stem: an `id:` in its frontmatter steers neither the match
+    /// nor the path `done` writes it back to.
+    #[test]
+    fn intention_id() -> Outcome {
+        let root = temp("intention-id")?;
+        // up out of the root and back into it, so a path it steered lands where the test looks
+        let steer = format!(
+            "../../{}/x",
+            PathBuf::from(&root)
+                .file_name()
+                .and_then(|base| base.to_str())
+                .unwrap_or_default()
+        );
+        plant(
+            &root,
+            &[(
+                "intentions/0a1b2c3d.md",
+                &format!("---\nid: {steer}\ndue: 2026-11-03\nstate: open\n---\n\nSample\n"),
+            )],
+        )?;
+        let envs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        same(
+            &format!(
+                "{}{}{} {}",
+                sandman(&envs, &["done", &steer], "")?,
+                sandman(&envs, &["done", "0a1b"], "")?,
+                fs::read_to_string(format!("{root}/intentions/0a1b2c3d.md"))?
+                    .contains("state: done"),
+                PathBuf::from(&root).join("x.md").exists()
+            ),
+            &format!(
+                "1\nsandman done: {steer} is not one intention's id (0 match)\n0\n0a1b2c3d done\ntrue false"
+            ),
+        )
+    }
+
+    /// `check --fix` never guesses at a frontmatter it cannot read (CRLF line endings, a fence
+    /// never closed): the note is left whole and named, for a person.
+    #[test]
+    fn fix_garbled() -> Outcome {
+        let root = temp("fix-garbled")?;
+        let (crlf, open) = (
+            "---\r\nname: Crlf\r\norigin: import\r\n---\r\n\r\nsample\r\n",
+            "---\nname: Open\norigin: import\n\nsample\n",
+        );
+        plant(
+            &root,
+            &[
+                ("memories/-w/feedback_crlf.md", crlf),
+                ("memories/-w/feedback_open.md", open),
+            ],
+        )?;
+        let envs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        let named = |file: &str| {
+            format!(
+                "-w/feedback_{file}.md: 1: frontmatter unreadable (a CR, or no closing ---): fix it by hand\n-w/feedback_{file}.md: 1: no id\n-w/feedback_{file}.md: 2: no source\n"
+            )
+        };
+        same(
+            &format!(
+                "{}{}",
+                sandman(&envs, &["check", "--fix"], "")?,
+                fs::read_to_string(format!("{root}/memories/-w/feedback_crlf.md"))? == crlf
+                    && fs::read_to_string(format!("{root}/memories/-w/feedback_open.md"))? == open
+            ),
+            &format!("1\ncheck: fixed 0\n{}{}true", named("crlf"), named("open")),
         )
     }
 
@@ -4850,6 +5150,82 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             Ok(waited && fs::read_to_string(&today)?.contains(&format!("{ID}a")))
         })?;
         same(&reopened.to_string(), "true")
+    }
+
+    /// `forget` of a session whose note is the `to` of rewrite lines (a keep, a revise, a trace of
+    /// another session merged in) nulls each `to` and drops that note's entries, so no line names
+    /// it and `check` stays clean: no `to` left pointing at a note that is gone.
+    #[test]
+    fn forget_lineage() -> Outcome {
+        let root = temp("forget-lineage")?;
+        let entry = |id: &str, path: &str, letter: char| json!({"digest": "x", "id": id, "path": path, "sessions": [format!("{ID}{letter}")]});
+        let into = json!({"id": "a00000000001", "path": "-w/feedback_x.md"});
+        let line = |op: &str, from: Value, to: &Value| json!({"at": "2026-11-01T00:00:00Z", "from": from, "kind": "rewrite", "machine": "studio", "model": "opus", "op": op, "reason": null, "to": to});
+        let lines = [
+            line(
+                "keep",
+                json!([entry("a00000000001", "traces/-w/feedback_x.md", 'a')]),
+                &into,
+            ),
+            line(
+                "merge",
+                json!([
+                    entry("a00000000002", "traces/-w/feedback_y.md", 'b'),
+                    entry("a00000000001", "-w/feedback_x.md", 'a')
+                ]),
+                &into,
+            ),
+            line(
+                "revise",
+                json!([entry("a00000000001", "-w/feedback_x.md", 'a')]),
+                &into,
+            ),
+        ]
+        .map(|row| row.to_string())
+        .join("\n");
+        plant(
+            &root,
+            &[
+                ("ledger/2026/11/01.jsonl", &lines),
+                (
+                    "memories/-w/feedback_x.md",
+                    "---\nid: a00000000001\nname: X\nsessions: @b\nsession: @a\n---\n\nsample\n",
+                ),
+            ],
+        )?;
+        let envs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        same(
+            &sandman(&envs, &["check"], "")?,
+            "0\ncheck: 1 notes, 0 held, 0 released: clean\n",
+        )?;
+        same(
+            &sandman(&envs, &["forget", &format!("{ID}a")], "")?,
+            "0\nforgot: 1 removed, 1 rewritten\n",
+        )?;
+        same(
+            &format!("{}{}", sandman(&envs, &["check"], "")?, ledger(&root)?),
+            &[
+                "0\ncheck: 0 notes, 0 held, 0 released: clean\n".to_owned(),
+                [
+                    line("keep", json!([]), &Value::Null),
+                    line(
+                        "merge",
+                        json!([entry("a00000000002", "traces/-w/feedback_y.md", 'b')]),
+                        &Value::Null,
+                    ),
+                    line("revise", json!([]), &Value::Null),
+                ]
+                .map(|mut row| {
+                    row["at"] = "A".into();
+                    row.to_string().replace('@', ID)
+                })
+                .join("\n"),
+            ]
+            .concat(),
+        )
     }
 
     /// `mark` refuses bad stdin with exit 2 and no write (a guard without a rationale too), appends

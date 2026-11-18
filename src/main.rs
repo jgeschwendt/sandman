@@ -26,6 +26,7 @@ use std::os::unix::process::CommandExt as _;
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, ExitStatus, Stdio, id};
+use std::slice;
 use std::str::FromStr;
 use std::sync::OnceLock;
 use std::thread;
@@ -171,6 +172,8 @@ type Undo = (Option<PathBuf>, Vec<(PathBuf, PathBuf)>);
 struct Plan {
     /// The sessions with a transcript on disk that are held.
     held: BTreeSet<String>,
+    /// The `.pruned/` copies, and their ids, that no rewrite line ends and no active note holds.
+    orphans: Vec<(PathBuf, String)>,
     /// Per unheld session past the grace, oldest first: its archived transcripts.
     release: Vec<(String, Vec<PathBuf>)>,
     /// The `.pruned/` copies past depth 1 and its grace.
@@ -275,11 +278,11 @@ fn append(path: &Path, text: &str) -> io::Result<()> {
     }
 }
 
-/// Every archived transcript, `(session, path, taken)`, by path: a file `stamped` reads.
+/// Every archived transcript, `(session, path, taken)`, by path: a file `stamped` reads, no
+/// symlink on its way (`daily`).
 fn archived(root: &Path) -> Vec<(String, PathBuf, String)> {
-    tree(&root.join(".archive/claude"), 4)
+    daily(&root.join(".archive/claude"))
         .into_iter()
-        .filter(|path| path.is_file())
         .filter_map(|path| {
             let (session, at) = stamped(&path)?;
             Some((session, path, at))
@@ -332,7 +335,14 @@ fn audit(root: &Path, lines: &[Value], plan: &Plan) -> (usize, usize, Vec<(u8, S
             };
             let origin = field("origin").filter(|value| !["", "-"].contains(value));
             [
-                (1u8, field("id").is_none().then(|| "no id".to_owned())),
+                (
+                    1u8,
+                    garbled(text(&note["text"])).then(|| {
+                        "frontmatter unreadable (a CR, or no closing ---): fix it by hand"
+                            .to_owned()
+                    }),
+                ),
+                (1, field("id").is_none().then(|| "no id".to_owned())),
                 (
                     1,
                     (field("id").is_some() && !hexid(id))
@@ -459,7 +469,17 @@ fn audit(root: &Path, lines: &[Value], plan: &Plan) -> (usize, usize, Vec<(u8, S
             .map(|detail| (5, format!("ledger {}: 5: {detail}", text(&line["at"])))),
         );
     }
-    // release's: no copy past depth 1 and its grace, no released transcript on disk
+    // release's: no orphaned copy, none past depth 1 and its grace, no released transcript on disk
+    found.extend(plan.orphans.iter().map(|orphan| {
+        (
+            4,
+            format!(
+                "{}: 4: id {} is neither active nor ended: restore it or end it",
+                shown(root, &orphan.0),
+                orphan.1
+            ),
+        )
+    }));
     found.extend(plan.sweep.iter().map(|copy| {
         (
             6,
@@ -646,6 +666,31 @@ fn day(when: &str) -> Option<u64> {
         .checked_add(doy)?
         .checked_sub(719_468)?;
     (date(days) == when).then_some(days)
+}
+
+/// Every file at `<yyyy>/<mm>/<dd>/<file>` under `path`, the dirs digits (as `stamped` reads
+/// them), by path: what release may delete, so a symlink at any level is skipped, never followed.
+fn daily(path: &Path) -> Vec<PathBuf> {
+    let real = |kid: &PathBuf, dir: bool| {
+        fs::symlink_metadata(kid)
+            .is_ok_and(|meta| [meta.is_file(), meta.is_dir()][usize::from(dir)])
+    };
+    [4, 2, 2]
+        .iter()
+        .fold(vec![path.to_owned()], |dirs, &width| {
+            dirs.iter()
+                .flat_map(|dir| tree(dir, 1))
+                .filter(|kid| {
+                    name(kid).len() == width
+                        && name(kid).bytes().all(|byte| byte.is_ascii_digit())
+                        && real(kid, true)
+                })
+                .collect()
+        })
+        .iter()
+        .flat_map(|dir| tree(dir, 1))
+        .filter(|file| real(file, false))
+        .collect()
 }
 
 /// Each of `texts` embedded by `$SANDMAN_OLLAMA`'s `/api/embed`, 16 a request, as the reference
@@ -926,10 +971,20 @@ fn free<I: IntoIterator<Item = String>>(
     path
 }
 
+/// A note's frontmatter and what follows its closing fence: `---\n<head>\n---<rest>`.
+fn fence(text: &str) -> Option<(&str, &str)> {
+    text.strip_prefix("---\n")?.split_once("\n---")
+}
+
+/// Whether a note opens a frontmatter that `fence` cannot read, or one holding a CR: `check
+/// --fix` never guesses at it.
+fn garbled(text: &str) -> bool {
+    text.starts_with("---") && fence(text).is_none_or(|(head, _)| head.contains('\r'))
+}
+
 /// A note's frontmatter: its `key: value` lines between `---` fences, in order, trimmed.
 fn front(text: &str) -> Vec<(&str, &str)> {
-    text.strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---"))
+    fence(text)
         .map_or("", |(head, _)| head)
         .lines()
         .filter_map(|line| line.split_once(':'))
@@ -1035,16 +1090,16 @@ fn highlights(lines: &[Value]) -> Vec<String> {
     highlights.split_off(highlights.len().saturating_sub(20))
 }
 
-/// Every intention, `<root>/intentions/<id>.md`, as `read` gives it with its `id`, by id.
+/// Every intention, `<root>/intentions/<id>.md`, as `read` gives it, by id: its `id` the stem,
+/// always, so no frontmatter `id:` steers the path it is written back to.
 fn intentions(root: &Path) -> Vec<Value> {
     tree(&root.join("intentions"), 1)
         .iter()
         .filter(|path| path.extension() == Some("md".as_ref()))
         .map(|path| {
-            read(
-                json!({"id": path.file_stem().and_then(OsStr::to_str)}),
-                fs::read_to_string(path).unwrap_or_default(),
-            )
+            let mut held = read(json!({}), fs::read_to_string(path).unwrap_or_default());
+            held["id"] = path.file_stem().and_then(OsStr::to_str).into();
+            held
         })
         .collect()
 }
@@ -1575,12 +1630,14 @@ fn place<'line>(lines: &'line [Value], fallback: &'line Value) -> Option<&'line 
 }
 
 /// Release's plan over the ledger's `lines` (docs/index.html#cycle-release). A transcript is held
-/// while its session runs, is held by a job, waits for encode (or, with no ledger story, for the
-/// earlier sandman's dream), or a note names it (a note without an id: anywhere in its text);
-/// unheld, since the latest of its takes, its encode line and the rewrite line that last named it,
-/// it goes past `$SANDMAN_RELEASE_DAYS` (7). `.pruned/` keeps, past the latest reflect line's
-/// files and those the next review replays, the newest copy of each active note, of each active
-/// note's parent and of a note pruned or graduated within the grace; a copy without an id stays.
+/// while its session runs, is held by a job, waits for an encode that did not fail (or, with no
+/// ledger story, for the earlier sandman's dream), or a note names it (a note without an id:
+/// anywhere in its text); unheld, since the latest of its takes, its encode line and the rewrite
+/// line that last named it, it goes past `$SANDMAN_RELEASE_DAYS` (7). `.pruned/` (its dated day
+/// dirs only) keeps, past the latest reflect line's files and those the next review replays, the
+/// newest copy of each active note, of each active note's parent and of a note pruned or graduated
+/// within the grace; a copy without an id stays, and so does an orphan, one whose id is neither
+/// active nor ended (a person restores or ends it: `check` names it).
 fn plan(root: &Path, lines: &[Value]) -> Plan {
     let days = setting("SANDMAN_RELEASE_DAYS", 7u64).saturating_mul(86_400);
     let cutoff = utc(SystemTime::now()
@@ -1627,11 +1684,15 @@ fn plan(root: &Path, lines: &[Value]) -> Plan {
                     .and_then(|pointer| serde_json::from_str::<Value>(&pointer).ok())
                     .is_some_and(|pointer| pointer.is_object() && pointer["dreamed"].is_null())
             },
+            // taken, it waits until an encode line since says encoded, skipped or gone: a failed
+            // one is no encode
             |marks| {
                 marks[3]["at"].as_str() > marks[1]["at"].as_str()
                     || marks[1]["outcome"] == "held"
                     || (marks[1]["outcome"] == "taken"
-                        && marks[2]["at"].as_str() < marks[1]["at"].as_str())
+                        && (marks[2]["at"].as_str() < marks[1]["at"].as_str()
+                            || !["encoded", "skipped", "gone"]
+                                .contains(&text(&marks[2]["outcome"]))))
             },
         );
         let since = files
@@ -1670,10 +1731,7 @@ fn plan(root: &Path, lines: &[Value]) -> Plan {
         .rev()
         .find(|line| line["kind"] == "reflect")
         .and_then(|line| line["at"].as_str());
-    let copies: Vec<PathBuf> = tree(&root.join(".pruned"), 4)
-        .into_iter()
-        .filter(|path| path.is_file())
-        .collect();
+    let copies = daily(&root.join(".pruned"));
     let replies: Vec<&PathBuf> = copies
         .iter()
         .filter(|path| name(path).ends_with("-ops.json"))
@@ -1709,6 +1767,17 @@ fn plan(root: &Path, lines: &[Value]) -> Plan {
         .iter()
         .map(|body| (text(&body.1["id"]), body.0))
         .collect();
+    // an id'd copy no rewrite line ends and no active note holds: a move whose line never landed
+    let over: BTreeSet<&str> = ended(lines)
+        .iter()
+        .filter_map(|end| end.2["id"].as_str())
+        .collect();
+    let orphans: Vec<(PathBuf, String)> = bodies
+        .iter()
+        .map(|body| (body.0, text(&body.1["id"])))
+        .filter(|&(_, id)| hexid(id) && !ids.contains(id) && !over.contains(id))
+        .map(|(path, id)| (path.clone(), id.to_owned()))
+        .collect();
     let sweep = copies
         .iter()
         .filter(|path| {
@@ -1723,6 +1792,7 @@ fn plan(root: &Path, lines: &[Value]) -> Plan {
                 && (name(path).ends_with("-ops.json")
                     || body.is_some_and(|id| {
                         hexid(id)
+                            && (ids.contains(id) || over.contains(id))
                             && !(newest.get(id) == Some(path)
                                 && (ids.contains(id)
                                     || parents.contains(id)
@@ -1733,6 +1803,7 @@ fn plan(root: &Path, lines: &[Value]) -> Plan {
         .collect();
     Plan {
         held,
+        orphans,
         release: release.into_iter().map(|row| (row.1, row.2)).collect(),
         sweep,
     }
@@ -1865,9 +1936,7 @@ fn read(mut note: Value, whole: String) -> Value {
     for (key, value) in front(&whole) {
         note[key] = value.into();
     }
-    note["body"] = whole
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---"))
+    note["body"] = fence(&whole)
         .map_or(whole.as_str(), |(_, body)| body)
         .trim()
         .into();
@@ -1875,17 +1944,26 @@ fn read(mut note: Value, whole: String) -> Value {
     note
 }
 
-/// Appends `line`, stamped with `at` and `machine`, to today's ledger file (`append`).
+/// Appends `line`, stamped with `at` and `machine`, to today's ledger file (`records`).
 fn record(root: &Path, line: &mut Value) -> io::Result<()> {
+    records(root, slice::from_mut(line))
+}
+
+/// Appends `lines`, each stamped with `at` and `machine`, to today's ledger file in one write
+/// (`append`): all of them land, or none.
+fn records(root: &Path, lines: &mut [Value]) -> io::Result<()> {
     let at = utc(SystemTime::now());
     let day = root.join(format!(
         "ledger/{}.jsonl",
         at.get(..10).unwrap_or_default().replace('-', "/")
     ));
-    line["at"] = at.into();
-    line["machine"] = machine(root).into();
+    let mine = machine(root);
+    for line in &mut *lines {
+        (line["at"], line["machine"]) = (at.as_str().into(), mine.as_str().into());
+    }
+    let whole: Vec<String> = lines.iter().map(Value::to_string).collect();
     day.parent().map_or(Ok(()), fs::create_dir_all)?;
-    append(&day, &format!("{line}\n"))
+    append(&day, &[whole.join("\n"), String::new()].join("\n"))
 }
 
 /// Waits on `child`, spawned in its own process group, for its status; `limit` past `begun` or on
@@ -1954,21 +2032,25 @@ fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
 }
 
 /// Ends `note` outside consolidate (decay, a graduation approved): its file moved aside to
-/// `<root>/.pruned/<yyyy>/<mm>/<dd>/<HHMMSS>-<bank>-<file>`, then one `rewrite` line of `op`; the
-/// copy's path.
+/// `<root>/.pruned/<yyyy>/<mm>/<dd>/<HHMMSS>-<bank>-<file>`, then one `rewrite` line of `op`, the
+/// file moved back when the line cannot be written; the copy's path.
 fn retire(root: &Path, note: &Value, op: &str, reason: &Value, to: &Value) -> io::Result<PathBuf> {
-    let aside = dated(
-        root,
-        ".pruned",
-        &format!("{}-{}", text(&note["bank"]), text(&note["file"])),
-        &mut BTreeSet::new(),
+    let (aside, from) = (
+        dated(
+            root,
+            ".pruned",
+            &format!("{}-{}", text(&note["bank"]), text(&note["file"])),
+            &mut BTreeSet::new(),
+        ),
+        located(root, note),
     );
     aside.parent().map_or(Ok(()), fs::create_dir_all)?;
-    fs::rename(located(root, note), &aside)?;
+    fs::rename(&from, &aside)?;
     record(
         root,
         &mut json!({"from": [entry(note)], "kind": "rewrite", "model": null, "op": op, "reason": reason, "to": to}),
     )
+    .or_else(|error| fs::rename(&aside, &from).and(Err(error)))
     .map(|()| aside)
 }
 
@@ -2768,13 +2850,10 @@ fn main() -> ExitCode {
             // minted `id:` first for a note without a valid one of its own (an earlier note's is
             // taken); a note left without a source given `origin:` by its stamp's first word
             let mend = |whole: &str, taken: &mut BTreeSet<String>| -> String {
-                let (head, rest) = whole
-                    .strip_prefix("---\n")
-                    .and_then(|rest| rest.split_once("\n---"))
-                    .map_or_else(
-                        || ("", format!("\n\n{whole}")),
-                        |(head, rest)| (head, rest.to_owned()),
-                    );
+                let (head, rest) = fence(whole).map_or_else(
+                    || ("", format!("\n\n{whole}")),
+                    |(head, rest)| (head, rest.to_owned()),
+                );
                 let mut lines: Vec<String> = head
                     .lines()
                     .filter_map(|line| {
@@ -2829,11 +2908,15 @@ fn main() -> ExitCode {
             };
             let fix = || -> io::Result<()> {
                 let (mut taken, mut fixed) = (BTreeSet::new(), 0u32);
-                for note in every(&root) {
+                // a garbled frontmatter is left whole, for a person (`check` names it)
+                for note in every(&root)
+                    .iter()
+                    .filter(|note| !garbled(text(&note["text"])))
+                {
                     let (whole, mended) =
                         (text(&note["text"]), mend(text(&note["text"]), &mut taken));
                     if mended != whole {
-                        put(&located(&root, &note), &mended)?;
+                        put(&located(&root, note), &mended)?;
                         fixed = fixed.saturating_add(1);
                     }
                 }
@@ -3149,7 +3232,7 @@ fn main() -> ExitCode {
                 let mut fields = Vec::from(
                     [
                         "due", "after", "created", "about", "session", "graduate", "artifact",
-                        "state", "closed", "note",
+                        "line", "state", "closed", "note",
                     ]
                     .map(|key| (key, text(&held[key]))),
                 );
@@ -3171,9 +3254,22 @@ fn main() -> ExitCode {
                         .unwrap_or_default(),
                 );
                 let failed = |error: io::Error| (1, format!("sandman {verb}: {error}"));
-                // done on a graduation's proposal first ends its note, into the artifact
-                let graduated = found
-                    .filter(|_| verb == "done")
+                // done on a graduation's proposal holds the artifact to its line (whitespace
+                // collapsed), then ends its note, into the artifact
+                let proposal = found.filter(|hit| verb == "done" && hit["graduate"].is_string());
+                if let Some(hit) = proposal {
+                    let (artifact, line) = (text(&hit["artifact"]), text(&hit["line"]));
+                    let wanted = one_line(line, usize::MAX);
+                    let holds = fs::read_to_string(artifact)
+                        .map_err(|error| (1, format!("sandman done: {artifact}: {error}")))?;
+                    if wanted.is_empty() || !one_line(&holds, usize::MAX).contains(&wanted) {
+                        return Err((
+                            1,
+                            format!("sandman done: {artifact} does not hold the line {line:?}"),
+                        ));
+                    }
+                }
+                let graduated = proposal
                     .and_then(|hit| {
                         let wanted = hit["graduate"].as_str()?;
                         let ending = every(&root).into_iter().find(|one| one["id"] == wanted)?;
@@ -3257,26 +3353,54 @@ fn main() -> ExitCode {
                         }
                         Ok(usize::from(changed))
                     };
-                let lines = ledger(&root);
+                let (lines, all) = (ledger(&root), every(&root));
                 let unnamed = |line: &str| (!line.contains(session)).then(|| line.to_owned());
+                // the ids of the notes that go, which no note left holds
+                let erased: BTreeSet<&str> = all
+                    .iter()
+                    .filter(|note| note["session"] == session)
+                    .filter_map(|note| note["id"].as_str())
+                    .filter(|id| {
+                        !all.iter()
+                            .any(|note| note["session"] != session && note["id"] == *id)
+                    })
+                    .collect();
                 // a rewrite line stays, the session off its `from[].sessions`, so the notes it ended
-                // still hold invariants 4–5; any other line naming it goes, and so does one still
-                // naming it once rewritten
+                // still hold invariants 4–5; one into an erased note keeps none of it (`to` null,
+                // that id's entries dropped), so no line names a note that is gone; any other line
+                // naming the session goes, and so does one still naming it once rewritten
                 let ledgered = |line: &str| {
-                    unnamed(line).or_else(|| {
-                        let mut row = serde_json::from_str::<Value>(line)
-                            .ok()
-                            .filter(|row| row["kind"] == "rewrite")?;
-                        for held in row["from"]
-                            .as_array_mut()
+                    let parsed = serde_json::from_str::<Value>(line)
+                        .ok()
+                        .filter(|row| row["kind"] == "rewrite");
+                    let into = parsed
+                        .as_ref()
+                        .and_then(|row| row["to"]["id"].as_str())
+                        .filter(|id| erased.contains(id))
+                        .map(str::to_owned);
+                    if into.is_none() && !line.contains(session) {
+                        return Some(line.to_owned());
+                    }
+                    let mut row = parsed?;
+                    if let Some(id) = into {
+                        let kept: Vec<Value> = row["from"]
+                            .as_array()
                             .into_iter()
                             .flatten()
-                            .filter_map(|entry| entry["sessions"].as_array_mut())
-                        {
-                            held.retain(|id| id != session);
-                        }
-                        unnamed(&format!("{row}\n"))
-                    })
+                            .filter(|entry| entry["id"] != id.as_str())
+                            .cloned()
+                            .collect();
+                        (row["from"], row["to"]) = (kept.into(), Value::Null);
+                    }
+                    for held in row["from"]
+                        .as_array_mut()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|entry| entry["sessions"].as_array_mut())
+                    {
+                        held.retain(|id| id != session);
+                    }
+                    unnamed(&format!("{row}\n"))
                 };
                 // first, so a take, a reconcile or an encode racing this finds no start mark to act on
                 for day in tree(&root.join("ledger"), 3) {
@@ -3314,8 +3438,8 @@ fn main() -> ExitCode {
                 // embedding cache; one naming it otherwise (a merge's source, an intention's link) is
                 // rewritten without it
                 let (mut paths, mut scrub) = (BTreeSet::new(), Vec::new());
-                for note in every(&root) {
-                    let file = located(&root, &note);
+                for note in &all {
+                    let file = located(&root, note);
                     match (
                         note["session"] == session,
                         text(&note["text"]).contains(session),
@@ -5082,15 +5206,23 @@ fn main() -> ExitCode {
                                 }
                                 return Err(error);
                             }
-                            for (from, to) in aside {
-                                to.parent().map_or(Ok(()), fs::create_dir_all)?;
-                                fs::rename(from, to)?;
+                            for pair in &aside {
+                                pair.1.parent().map_or(Ok(()), fs::create_dir_all)?;
+                                fs::rename(&pair.0, &pair.1)?;
                             }
                             for pending in &writes {
                                 fs::rename(staged(&pending.0), &pending.0)?;
                             }
-                            for mut line in rewrites {
-                                drop(record(&data, &mut line));
+                            // the lines in one write; none landed, the pass is put back and fails
+                            // (a copy a failed put-back leaves is `check`'s to name)
+                            if let Err(error) = records(&data, &mut rewrites) {
+                                for pending in &writes {
+                                    drop(fs::remove_file(&pending.0));
+                                }
+                                for pair in aside.iter().rev() {
+                                    drop(fs::rename(&pair.1, &pair.0));
+                                }
+                                return Err(error);
                             }
                             let count = |pick: &dyn Fn(&Value) -> bool| {
                                 ops.into_iter().flatten().filter(|done| pick(done)).count()
@@ -5623,20 +5755,24 @@ fn main() -> ExitCode {
                                     Some((one, &rung.get(text(&one["note"]))?.1))
                                 })
                             {
-                                let (artifact, minted) = (text(&one["artifact"]), random());
+                                let (artifact, minted, line) = (
+                                    text(&one["artifact"]),
+                                    random(),
+                                    one_line(text(&one["line"]), usize::MAX),
+                                );
                                 let about = Path::new(artifact).parent().map(Path::to_string_lossy);
                                 let tail = |field: &str, lead: &str| {
                                     Some(text(&one[field]).trim())
                                         .filter(|said| !said.is_empty())
                                         .map_or_else(String::new, |said| format!("{lead}{said}"))
                                 };
+                                // what `done` checks first, so the due block's cut keeps it
                                 let what = format!(
-                                    "Graduate {} (rung {}) into {artifact}: {}{}{}",
+                                    "Done once {artifact} holds the line: {line}{} \u{2014} graduates {} (rung {}){}",
+                                    tail("replaces", ", replacing: "),
                                     text(&subject["name"]),
                                     one["rung"],
-                                    text(&one["line"]),
-                                    tail("replaces", ", replacing: "),
-                                    tail("why", " \u{2014} ")
+                                    tail("why", ": ")
                                 );
                                 let id = minted.get(..8).unwrap_or_default();
                                 let proposal = note(
@@ -5646,6 +5782,7 @@ fn main() -> ExitCode {
                                         ("about", &about.unwrap_or_default()),
                                         ("graduate", text(&subject["id"])),
                                         ("artifact", artifact),
+                                        ("line", &line),
                                         ("state", "open"),
                                     ],
                                     &what,
