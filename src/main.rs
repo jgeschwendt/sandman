@@ -116,12 +116,12 @@ const PROMPTS: [(&str, [&str; 2]); 4] = [
 const QUESTION: &str = "Does the agent need this memory to carry out the request correctly?";
 
 /// The old sandman's launchd agents, retired with the cutover (2026-11-14): `setup` boots each out
-/// and removes its plist, and never writes one.
-const RETIRED: [&str; 4] = [
+/// and removes its plist, and never writes one. Its `.upgrade` is not among them: hotswap's
+/// `ensure` owns that label (2026-11-17).
+const RETIRED: [&str; 3] = [
     "dev.gigantic.sandman.breathe",
     "dev.gigantic.sandman.reflect",
     "dev.gigantic.sandman.report",
-    "dev.gigantic.sandman.upgrade",
 ];
 
 /// The seed's instructions, first in a session's context; `<id>` is the session's id, `<me>` the
@@ -134,9 +134,9 @@ const STEER: &str = "go yes yeah yep ok okay continue next thanks thank done sav
 /// The words `toks` drops.
 const STOPWORDS: &str = "a an and are as at be by can do for from has have i if in into is it its me my no not of on or our so that the then this to was we what when where which will with you your about should would could lets let im dont get going want need make use using also just like than them there these they";
 
-/// The crate version and the build, the commit it was built from (`build.rs`): what `version`
-/// prints, the daemon's health carries and `status` compares.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("SANDMAN_BUILD"));
+/// The release (else the crate version) and the build, the commit it was built from (`build.rs`):
+/// what `version` prints, the daemon's health carries and `status` compares.
+const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"));
 
 /// Held by the tick for each take; the drain takes it after setting `STOP`, so the take in hand
 /// finishes and no other starts.
@@ -891,6 +891,31 @@ fn machine(root: &Path) -> String {
             read().unwrap_or(hex)
         })
     })
+}
+
+/// sandman's hotswap manifest (gigantic.dev/hotswap/): releases from jgeschwendt/sandman under its
+/// packslip signer, `sandman setup` after each swap and the daemon the one agent kickstarted. No
+/// drain step: the kickstart's SIGTERM is the daemon's own drain, inside its 2 s `ExitTimeOut`,
+/// and a separate stop would race `KeepAlive`'s respawn. The smoke is the new binary's `version`,
+/// then `status` until the restarted daemon answers with that same version, 30 s at most.
+fn manifest() -> hotswap::Manifest {
+    let owned = |words: &[&str]| words.iter().map(|&word| word.to_owned()).collect();
+    hotswap::Manifest {
+        agents: owned(&["dev.gigantic.sandman"]),
+        bin: "sandman".into(),
+        repo: "jgeschwendt/sandman".into(),
+        setup: owned(&["sandman", "setup"]),
+        signer: "ps1_nensfiggtc7n6uctbniwf7q4am".into(),
+        smoke: vec![
+            owned(&["sandman", "version"]),
+            owned(&[
+                "/bin/sh",
+                "-c",
+                r#"for _ in $(seq 30); do sandman status | grep -qF "\"version\":\"$(sandman version)\"" && exit 0; sleep 1; done; exit 1"#,
+            ]),
+        ],
+        ..hotswap::Manifest::default()
+    }
 }
 
 /// The model a command names: the word after `--model`, else its first word.
@@ -3903,7 +3928,9 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "setup" => {
-            let exe = env::current_exe().unwrap_or_default();
+            // hotswap's link through its `current`, never this executable: a checkout's setup
+            // wires the installed release
+            let exe = home.join(".local/bin/sandman");
             let plist = format!(
                 r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -3993,11 +4020,25 @@ fn main() -> ExitCode {
                     Ok(())
                 };
                 if args.iter().any(|arg| arg == "--remove") {
-                    return remove(label);
+                    // first: it refuses while a swap runs, before anything is booted out
+                    hotswap::forget("sandman").map_err(io::Error::other)?;
+                    remove(label)?;
+                    if fs::remove_file(&exe).is_ok() {
+                        println!("removed {}", exe.display());
+                    }
+                    return Ok(());
                 }
                 for job in RETIRED {
                     remove(job)?;
                 }
+                // the release into hotswap's layout, the link onto its `current`, and the upgrade
+                // agent, hotswap's alone
+                let linked = hotswap::ensure("sandman", &manifest()).map_err(io::Error::other)?;
+                println!(
+                    "linked {} \u{2192} {}",
+                    linked.display(),
+                    fs::canonicalize(&linked)?.display()
+                );
                 let path = agents.join(format!("{label}.plist"));
                 let same = fs::read_to_string(&path).is_ok_and(|held| held == plist);
                 put(&path, &plist)?;
@@ -4017,6 +4058,12 @@ fn main() -> ExitCode {
                 |()| ExitCode::SUCCESS,
             )
         }
+        "upgrade" => u8::try_from(hotswap::upgrade(
+            "sandman",
+            &manifest(),
+            args.get(2..).unwrap_or_default(),
+        ))
+        .map_or(ExitCode::FAILURE, ExitCode::from),
         "show" => {
             let wanted = args.get(2).cloned().unwrap_or_default();
             let Some(memory) = every(&root)
@@ -4077,7 +4124,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove]\n       sandman chart | mcp | serve | status | version"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove] | upgrade [--check | --back | --retry]\n       sandman chart | mcp | serve | status | version"
             );
             ExitCode::from(2)
         }

@@ -13,6 +13,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hotswap"
+version = "0.1.0"
+source = "git+https://github.com/jgeschwendt/hotswap?rev=0c8fdd80b4dfd1b8d4db3edb4695eef508ee9851#0c8fdd80b4dfd1b8d4db3edb4695eef508ee9851"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -52,6 +61,7 @@ dependencies = [
 name = "sandman"
 version = "0.1.0"
 dependencies = [
+ "hotswap",
  "serde_json",
  "signal-hook",
 ]
@@ -63,6 +73,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

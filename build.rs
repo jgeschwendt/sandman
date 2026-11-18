@@ -1,7 +1,8 @@
-//! The build identity `sandman version` prints and the daemon's health carries: the short commit,
-//! `-dirty` over uncommitted work, `unknown` outside a git checkout; it never fails the build.
+//! The build identity `sandman version` prints and the daemon's health carries: the release (else
+//! the crate version), then the short commit, `-dirty` over uncommitted work, `unknown` outside a
+//! git checkout; it never fails the build.
 
-use std::process::Command;
+use std::{env, process::Command};
 
 fn main() {
     let git = |args: &[&str]| {
@@ -32,4 +33,10 @@ fn main() {
         },
     );
     println!("cargo::rustc-env=SANDMAN_BUILD={build}");
+    // the release's `YYYY.M.N`, which the release workflow stamps; a checkout's build the crate's
+    println!("cargo::rerun-if-env-changed=SANDMAN_VERSION");
+    println!(
+        "cargo::rustc-env=SANDMAN_RELEASE={}",
+        env::var("SANDMAN_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned())
+    );
 }
