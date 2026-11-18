@@ -26,7 +26,7 @@ use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, ExitStatus, Stdio, id};
 use std::str::FromStr;
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -137,10 +137,6 @@ const STOPWORDS: &str = "a an and are as at be by can do for from has have i if 
 /// The release (else the crate version) and the build, the commit it was built from (`build.rs`):
 /// what `version` prints, the daemon's health carries and `status` compares.
 const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"));
-
-/// Held by the tick for each take; the drain takes it after setting `STOP`, so the take in hand
-/// finishes and no other starts.
-static BUSY: Mutex<()> = Mutex::new(());
 
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
@@ -3046,9 +3042,9 @@ fn main() -> ExitCode {
                 (line["event"], line[key]) = (event.into(), value.into());
                 settle(line);
             };
-            drop(thread::spawn(move || {
+            let ticker = thread::spawn(move || {
                 while STOP.get().is_none() {
-                    thread::sleep(tick);
+                    thread::park_timeout(tick);
                     let lines = ledger(&data);
                     let story = sessions(&lines);
                     // this machine's sessions started before the grace with no end since, no job
@@ -3065,7 +3061,6 @@ fn main() -> ExitCode {
                         }
                         let live = touched(&claude, session);
                         let which = usize::from(live.is_some());
-                        let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
                         if left[which] == 0
                             || live.is_some_and(|time| spent(time) <= idle)
                             || job(&claude, session).is_some()
@@ -3086,7 +3081,6 @@ fn main() -> ExitCode {
                     // then what recall would embed and it lacks, in reader order, at most
                     // `$SANDMAN_EMBED_TICK` a tick
                     {
-                        let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
                         let (_, _, label) = labels(&home, &claude);
                         let (cache, file) = (vectors(&data), data.join("embeddings.jsonl"));
                         let wanted: Vec<(String, String, String)> = pool(&data)
@@ -3109,12 +3103,14 @@ fn main() -> ExitCode {
                             .filter_map(|hashed| cache.get(hashed))
                             .flat_map(|line| [line.to_string(), "\n".to_owned()])
                             .collect();
-                        if fs::metadata(&file).is_ok_and(|meta| {
-                            meta.len()
-                                > u64::try_from(live.len())
-                                    .unwrap_or(u64::MAX)
-                                    .saturating_mul(2)
-                        }) {
+                        if STOP.get().is_none()
+                            && fs::metadata(&file).is_ok_and(|meta| {
+                                meta.len()
+                                    > u64::try_from(live.len())
+                                        .unwrap_or(u64::MAX)
+                                        .saturating_mul(2)
+                            })
+                        {
                             drop(put(&file, &live));
                         }
                         let missing: Vec<&(String, String, String)> = wanted
@@ -3152,10 +3148,7 @@ fn main() -> ExitCode {
                     // a held end whose job is gone and whose transcript has been quiet for the
                     // window is taken
                     for (session, marks) in &story {
-                        let (_busy, held) = (
-                            BUSY.lock().unwrap_or_else(PoisonError::into_inner),
-                            &marks[1],
-                        );
+                        let held = &marks[1];
                         if !ended(marks, "held")
                             || job(&claude, session).is_some()
                             || touched(&claude, session).is_some_and(|time| spent(time) < quiet)
@@ -3248,10 +3241,11 @@ fn main() -> ExitCode {
                         .as_str()
                         .is_none_or(|at| at <= ago(cadence).as_str())
                         && after.iter().filter(ran).count() >= minimum;
-                    let (_busy, noted) = (
-                        BUSY.lock().unwrap_or_else(PoisonError::into_inner),
-                        Cell::new(None),
-                    );
+                    let noted = Cell::new(None);
+                    // a stop that woke the tick, or landed since its last job: none starts
+                    if STOP.get().is_some() {
+                        continue;
+                    }
                     // one job a tick: a rollback; else the oldest of this machine's episodes taken
                     // and not encoded since; else the quiet bank whose oldest trace is oldest; else,
                     // when due, the weekly review of the guidance
@@ -3929,7 +3923,7 @@ fn main() -> ExitCode {
                     }
                     logged(kind, key, &value, record(&data, &mut line).map(|()| line));
                 }
-            }));
+            });
             let health = json!({
                 "machine": machine(&root), "ok": true, "pid": id(), "since": utc(SystemTime::now()), "state": "ready", "version": VERSION,
             });
@@ -3966,9 +3960,10 @@ fn main() -> ExitCode {
                 };
                 drop(writeln!(conn, "{reply}"));
             };
-            // the take in hand finishes; the tick starts no other
+            // the tick finishes the job in hand and leaves its loop, starting no other
             STOP.set("").unwrap_or_default();
-            let _busy = BUSY.lock().unwrap_or_else(PoisonError::into_inner);
+            ticker.thread().unpark();
+            drop(ticker.join());
             let pid = rundir.join("serve.pid");
             if fs::read_to_string(&pid).is_ok_and(|text| text == id().to_string()) {
                 drop(fs::remove_file(&pid));
