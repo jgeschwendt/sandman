@@ -3150,6 +3150,10 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 .map(|line| {
                     let mut entry: Value = serde_json::from_str(line)?;
                     entry["at"] = json!(entry["at"].as_str().map(str::len));
+                    // the store's order and the ladder's counts are `weekly`'s
+                    for key in ["order", "proposed", "pruned"] {
+                        drop(entry.as_object_mut().and_then(|fields| fields.remove(key)));
+                    }
                     for path in entry["history"]
                         .as_object_mut()
                         .into_iter()
@@ -3347,6 +3351,353 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 read("prompts/encode.md")
             ),
             "1 {\"at\":20,\"history\":{\"encode\":\"-encode.md\"},\"kind\":\"reflect\",\"machine\":\"studio\",\"outcome\":\"reverted\",\"reason\":\"its next two runs failed\"} sample: adopted\nsample: earlier\n",
+        )
+    }
+
+    /// The weekly review's decay and ladder: each note under the floor pruned with no model run
+    /// (one about the person, a pinned one, a judged one and a trace kept), even when the model
+    /// then fails; `# standing` and `# relearned` list what may graduate, each valid proposal an
+    /// intention due today (a rung-2 line that neither replaces one nor says why dropped); `done`
+    /// on one ends its note into the artifact, `drop` keeps it off the list until its body changes.
+    #[test]
+    fn weekly() -> Outcome {
+        let root = temp("weekly")?;
+        let note = |id: &str, kind: &str, extra: &str| {
+            format!(
+                "---\nid: {id}\nname: Sample {id}\ndescription: sample: {id}\ntype: {kind}\n{extra}origin: import\n---\n\nsample: {id}\n"
+            )
+        };
+        let (old, fresh) = (
+            "created: 2026-06-01T00:00:00Z\n",
+            "created: 2026-11-01T00:00:00Z\n",
+        );
+        let verdict = |id: &str, file: &str, letter: char, said: &str| json!({"at": "2026-11-10T00:00:00Z", "by": "agent", "cue": null, "file": file, "id": id, "kind": "rethink", "machine": "studio", "session": format!("@{letter}"), "verdict": said, "why": null});
+        let merged = |trace: &str, letter: char| json!({"at": "2026-11-10T00:00:00Z", "from": [{"digest": "x", "id": trace, "path": format!("traces/-w/feedback_{trace}.md"), "sessions": [format!("@{letter}")]}, {"digest": "x", "id": "a00000000002", "path": "-w/feedback_b.md", "sessions": []}], "kind": "rewrite", "machine": "studio", "model": "opus", "op": "merge", "reason": null, "to": {"id": "a00000000002", "path": "-w/feedback_b.md"}});
+        let mut lines: Vec<Value> = Vec::new();
+        for (id, file) in [
+            ("a00000000001", "-w/feedback_a.md"),
+            ("a00000000003", "-w/feedback_c.md"),
+            ("a00000000004", "-w/feedback_d.md"),
+            ("a00000000005", "-w/feedback_e.md"),
+        ] {
+            lines.extend(
+                "abcde"
+                    .chars()
+                    .map(|letter| verdict(id, file, letter, "used")),
+            );
+        }
+        lines.extend([
+            verdict("a00000000009", "-w/feedback_blamed.md", 'a', "wrong"),
+            merged("b00000000001", 'f'),
+            merged("b00000000002", 'g'),
+            merged("b00000000003", 'h'),
+        ]);
+        let notes = [
+            (
+                "memories/-w/feedback_a.md",
+                note("a00000000001", "feedback", fresh),
+            ),
+            (
+                "memories/-w/feedback_b.md",
+                note("a00000000002", "feedback", fresh),
+            ),
+            (
+                "memories/-w/feedback_c.md",
+                note("a00000000003", "feedback", fresh),
+            ),
+            (
+                "memories/-w/feedback_d.md",
+                note("a00000000004", "feedback", fresh),
+            ),
+            (
+                "memories/-w/feedback_e.md",
+                note("a00000000005", "feedback", fresh),
+            ),
+            (
+                "memories/-w/feedback_old.md",
+                note("a00000000006", "feedback", old),
+            ),
+            ("memories/-w/user_old.md", note("a00000000007", "user", old)),
+            (
+                "memories/-w/feedback_pinned.md",
+                note("a00000000008", "feedback", &format!("{old}recall: pin\n")),
+            ),
+            (
+                "memories/-w/feedback_blamed.md",
+                note("a00000000009", "feedback", old),
+            ),
+            (
+                "knowledge/k/knowledge_old.md",
+                note("a0000000000a", "knowledge", old),
+            ),
+            (
+                "traces/-w/feedback_trace.md",
+                note("a0000000000b", "feedback", old),
+            ),
+        ];
+        let reply = |propose: &Value| {
+            json!({"consolidate": null, "encode": null, "propose": propose, "reason": "sample: ladder"}).to_string()
+        };
+        let bad = json!([{"artifact": "a", "line": "l", "note": "a00000000003", "replaces": null, "rung": 2u8, "why": "w"}]);
+        let good = json!([
+            {"artifact": format!("{root}/repo/AGENTS.md"), "line": "Sample: a, always.", "note": "a00000000001", "replaces": null, "rung": 2u8, "why": "sample: saves a recall a session"},
+            {"artifact": format!("{root}/repo/AGENTS.md"), "line": "Sample: d.", "note": "a00000000004", "replaces": "Sample: the old d.", "rung": 2u8, "why": ""},
+            {"artifact": format!("{root}/repo/AGENTS.md"), "line": "Sample: e.", "note": "a00000000005", "replaces": null, "rung": 2u8, "why": " "},
+            {"artifact": format!("{root}/repo/hk.pkl"), "line": "Sample: a gate for b.", "note": "a00000000002", "replaces": null, "rung": 3u8, "why": "sample: relearned"},
+        ]);
+        let script = format!(
+            "c=$(head -n 1 \"$0.cases\"); tail -n +2 \"$0.cases\" > \"$0.rest\"; mv \"$0.rest\" \"$0.cases\"\ncat > \"$0.${{c:-none}}\"\ncase $c in\n  bad) echo '{}';;\n  good) echo '{}';;\n  *) echo '{{\"encode\":null,\"consolidate\":null,\"reason\":\"sample: none\"}}';;\nesac\n",
+            reply(&bad),
+            reply(&good)
+        );
+        let ledger_text = lines
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut files: Vec<(&str, &str)> =
+            notes.iter().map(|pair| (pair.0, pair.1.as_str())).collect();
+        files.extend([
+            ("intentions/0c000003.md", "---\ndue: 2026-11-12\ncreated: 2026-11-12T00:00:00Z\ngraduate: a00000000003\nstate: dropped\nclosed: 2026-11-15T00:00:00Z\n---\n\nSample: declined\n"),
+            ("ledger/2026/11/10.jsonl", ledger_text.as_str()),
+            ("reflector.sh", script.as_str()),
+            ("reflector.sh.cases", "bad\ngood\n"),
+        ]);
+        plant(&root, &files)?;
+        let reflector = format!("sh {root}/reflector.sh");
+        let envs = [
+            ("SANDMAN_REFLECT_MIN", "0"),
+            ("SANDMAN_REFLECT_MS", "0"),
+            ("SANDMAN_REFLECTOR", reflector.as_str()),
+            ("SANDMAN_TICK_MS", "10"),
+            ("SANDMAN_TODAY", "2026-11-18"),
+        ];
+        let read = |path: &str| fs::read_to_string(format!("{root}/{path}")).unwrap_or_default();
+        let today = format!("ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        let kinds = |kind: &str| -> Vec<Value> {
+            read(&today)
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|line| line["kind"] == kind)
+                .collect()
+        };
+        // a run of the daemon until `count` reviews are written, then its drain
+        let review = |count: usize| -> Outcome {
+            let (mut daemon, _) = serve(&root, &envs)?;
+            until(|| kinds("reflect").len() >= count)?;
+            same(
+                &format!(
+                    "{} {:?}",
+                    kill("-TERM", &daemon.0.id().to_string())?,
+                    daemon.0.wait()?.code()
+                ),
+                "true Some(0)",
+            )
+        };
+        review(3)?;
+        let chars = |picked: &[usize]| -> usize {
+            picked
+                .iter()
+                .map(|&at| notes[at].1.replace('@', ID).chars().count())
+                .sum()
+        };
+        let all: Vec<usize> = (0..notes.len()).collect();
+        let kept: Vec<usize> = all
+            .iter()
+            .copied()
+            .filter(|at| ![5, 9].contains(at))
+            .collect();
+        let order = |before: &[usize], after: &[usize]| json!({"after": {"chars": chars(after), "notes": after.len()}, "before": {"chars": chars(before), "notes": before.len()}, "merges": 0u8});
+        let mut reviews = kinds("reflect");
+        reviews.truncate(3);
+        for line in &mut reviews {
+            drop(line.as_object_mut().map(|fields| fields.remove("at")));
+        }
+        let error = format!(
+            "output: not a proposal: {}",
+            serde_json::from_str::<Value>(&reply(&bad))?
+                .to_string()
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
+        same(
+            &serde_json::to_string_pretty(&reviews)?,
+            &serde_json::to_string_pretty(&json!([
+                {"error": error, "history": {}, "kind": "reflect", "machine": "studio", "order": order(&all, &kept), "outcome": "failed", "pruned": 2u8},
+                {"history": {}, "kind": "reflect", "machine": "studio", "order": order(&kept, &kept), "outcome": "kept", "proposed": 3u8, "pruned": 0u8, "reason": "sample: ladder", "replay": {}},
+                {"history": {}, "kind": "reflect", "machine": "studio", "order": order(&kept, &kept), "outcome": "kept", "proposed": 0u8, "pruned": 0u8, "reason": "sample: none", "replay": {}},
+            ]))?,
+        )?;
+        // decay's lines, and its copies under .pruned/
+        let pruned: Vec<String> = kinds("rewrite")
+            .iter()
+            .map(|line| {
+                format!(
+                    "{} {} {} {}",
+                    line["op"], line["from"][0]["path"], line["reason"], line["to"]
+                )
+            })
+            .collect();
+        same(
+            &pruned.join("\n"),
+            "\"prune\" \"-w/feedback_old.md\" \"decay: strength 0.02 under 0.1\" null\n\"prune\" \"knowledge/k/knowledge_old.md\" \"decay: strength 0.02 under 0.1\" null",
+        )?;
+        let stamp = date(&["+%Y/%m/%d"])?;
+        let mut aside: Vec<String> = fs::read_dir(format!("{root}/.pruned/{stamp}"))?
+            .map(|entry| {
+                Ok(entry?
+                    .file_name()
+                    .to_string_lossy()
+                    .get(7..)
+                    .unwrap_or_default()
+                    .to_owned())
+            })
+            .collect::<io::Result<_>>()?;
+        aside.sort();
+        same(&aside.join(" "), "-w-feedback_old.md @k-knowledge_old.md")?;
+        // what the reviews read: the ladder last, the dropped one and the ones held open absent
+        let listed = |id: &str, file: &str, how: &str, count: u8| {
+            format!(
+                "- {id} \u{b7} {file} \u{b7} Sample {id} \u{2014} sample: {id} \u{b7} {how} in {count} sessions\n"
+            )
+        };
+        let standing = |ids: &[(&str, &str)]| -> String {
+            ids.iter()
+                .map(|pair| listed(pair.0, pair.1, "used", 5))
+                .collect()
+        };
+        let relearned = listed("a00000000002", "-w/feedback_b.md", "relearned", 3);
+        same(
+            &read("reflector.sh.good"),
+            &format!(
+                "{}# standing\n{}\n# relearned\n{relearned}\n",
+                read("reflector.sh.good")
+                    .split("# standing\n")
+                    .next()
+                    .unwrap_or_default(),
+                standing(&[
+                    ("a00000000001", "-w/feedback_a.md"),
+                    ("a00000000004", "-w/feedback_d.md"),
+                    ("a00000000005", "-w/feedback_e.md")
+                ])
+            ),
+        )?;
+        // the proposals: three intentions due today, about the artifact's directory
+        let mut held: Vec<(String, String)> = fs::read_dir(format!("{root}/intentions"))?
+            .map(|entry| {
+                let path = entry?.path();
+                let body = fs::read_to_string(&path)?;
+                let id = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let masked: String = body
+                    .lines()
+                    .map(|line| {
+                        if line.starts_with("created: 2026-11-12") || !line.starts_with("created: ")
+                        {
+                            line
+                        } else {
+                            "created: <now>"
+                        }
+                    })
+                    .map(|line| [line, "\n"].concat())
+                    .collect();
+                Ok((masked, id))
+            })
+            .collect::<io::Result<_>>()?;
+        held.sort();
+        let open = |id: &str, artifact: &str, what: &str| {
+            format!(
+                "---\ndue: 2026-11-18\ncreated: <now>\nabout: {root}/repo\ngraduate: {id}\nartifact: {root}/repo/{artifact}\nstate: open\n---\n\n{what}\n"
+            )
+        };
+        same(
+            &held.iter().map(|pair| pair.0.as_str()).collect::<String>(),
+            &[
+                "---\ndue: 2026-11-12\ncreated: 2026-11-12T00:00:00Z\ngraduate: a00000000003\nstate: dropped\nclosed: 2026-11-15T00:00:00Z\n---\n\nSample: declined\n".to_owned(),
+                open("a00000000001", "AGENTS.md", &format!("Graduate Sample a00000000001 (rung 2) into {root}/repo/AGENTS.md: Sample: a, always. \u{2014} sample: saves a recall a session")),
+                open("a00000000002", "hk.pkl", &format!("Graduate Sample a00000000002 (rung 3) into {root}/repo/hk.pkl: Sample: a gate for b. \u{2014} sample: relearned")),
+                open("a00000000004", "AGENTS.md", &format!("Graduate Sample a00000000004 (rung 2) into {root}/repo/AGENTS.md: Sample: d., replacing: Sample: the old d.")),
+            ]
+            .concat(),
+        )?;
+        same(
+            &kinds("defer")
+                .iter()
+                .map(|line| format!("{} {} {}", line["due"], line["graduate"], line["session"]))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "\"2026-11-18\" \"a00000000001\" null\n\"2026-11-18\" \"a00000000004\" null\n\"2026-11-18\" \"a00000000002\" null",
+        )?;
+        // done ends the note into the artifact; a failed move leaves the proposal open
+        let verbs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+            ("SANDMAN_TODAY", "2026-11-18"),
+        ];
+        let day = format!("{root}/.pruned/{stamp}");
+        fs::set_permissions(&day, Permissions::from_mode(0o555))?;
+        let refused = sandman(&verbs, &["done", &held[3].1], "")?;
+        fs::set_permissions(&day, Permissions::from_mode(0o755))?;
+        same(
+            &format!(
+                "{refused}{}",
+                read(&format!("intentions/{}.md", held[3].1)).contains("state: open")
+            ),
+            "1\nsandman done: Permission denied (os error 13)\ntrue",
+        )?;
+        same(
+            &format!(
+                "{}{}{}",
+                sandman(&verbs, &["done", &held[1].1], "")?,
+                sandman(&verbs, &["drop", &held[2].1], "")?,
+                read("memories/-w/feedback_a.md").is_empty()
+            ),
+            &format!(
+                "0\n{} done\ngraduated: -w/feedback_a.md \u{2192} {root}/repo/AGENTS.md\n0\n{} dropped\ntrue",
+                held[1].1, held[2].1
+            ),
+        )?;
+        let graduated = kinds("rewrite").pop().unwrap_or_default();
+        same(
+            &format!(
+                "{} {} {}",
+                graduated["op"], graduated["from"][0]["id"], graduated["to"]
+            ),
+            &format!(
+                "\"graduate\" \"a00000000001\" {}",
+                json!({"artifact": format!("{root}/repo/AGENTS.md")})
+            ),
+        )?;
+        same(
+            &sandman(&verbs, &["check"], "")?,
+            "0\ncheck: 8 notes: clean\n",
+        )?;
+        // dropped: off the list while its body stands; changed, listed again
+        review(4)?;
+        let last = read("reflector.sh.none");
+        same(
+            last.get(last.find("# standing\n").unwrap_or_default()..)
+                .unwrap_or_default(),
+            &format!(
+                "# standing\n{}\n",
+                standing(&[("a00000000005", "-w/feedback_e.md")])
+            ),
+        )?;
+        let file = format!("{root}/memories/-w/feedback_b.md");
+        fs::write(
+            &file,
+            fs::read_to_string(&file)?
+                .replace(fresh, &format!("{fresh}updated: 2099-01-01T00:00:00Z\n")),
+        )?;
+        review(kinds("reflect").len() + 1)?;
+        same(
+            &read("reflector.sh.none")
+                .ends_with(&format!("# relearned\n{relearned}\n"))
+                .to_string(),
+            "true",
         )
     }
 

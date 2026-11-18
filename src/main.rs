@@ -348,13 +348,6 @@ fn day(when: &str) -> Option<u64> {
     (date(days) == when).then_some(days)
 }
 
-/// Where `note`, as `notes(root, dir)` reads it, is on disk.
-fn disk(root: &Path, dir: &str, note: &Value) -> PathBuf {
-    let address = Path::new(text(&note["path"]));
-    root.join(dir)
-        .join(address.strip_prefix(dir).unwrap_or(address))
-}
-
 /// Each of `texts` embedded by `$SANDMAN_OLLAMA`'s `/api/embed`, 16 a request, as the reference
 /// sends them (raw, truncated to 1,024 tokens), L2-normalised.
 #[expect(clippy::float_arithmetic, reason = "the norm is float math")]
@@ -564,6 +557,12 @@ fn episode(
             .collect::<String>()
     );
     (cut(digest, budget), cwd.map(str::to_owned), recalled)
+}
+
+/// A rewrite line's `from` entry for `note` as it stands: its file's digest, its id, its path and
+/// the sessions it descends from.
+fn entry(note: &Value) -> Value {
+    json!({"digest": sha256(text(&note["text"])), "id": note["id"], "path": note["path"], "sessions": lineage([note])})
 }
 
 /// Every note recall and `show` read, in reader order: the memories, the knowledge pages, the
@@ -872,6 +871,16 @@ fn lineage<'note, I: IntoIterator<Item = &'note Value>>(notes: I) -> BTreeSet<&'
         .collect()
 }
 
+/// Where `note` is on disk: its path under the root, a memory's under `memories/`.
+fn located(root: &Path, note: &Value) -> PathBuf {
+    let path = text(&note["path"]);
+    if path.starts_with("knowledge/") || path.starts_with("traces/") {
+        root.join(path)
+    } else {
+        root.join("memories").join(path)
+    }
+}
+
 /// This machine's id: `$SANDMAN_MACHINE`, else `<root>/machine`, created on first use by a hard
 /// link from a temp file, so concurrent first runs agree on one id.
 fn machine(root: &Path) -> String {
@@ -917,13 +926,12 @@ fn manifest() -> hotswap::Manifest {
     }
 }
 
-/// A bank's order (docs/index.html#cycle-rewrite): its active notes, its traces among them, and
-/// their characters.
-fn measure(root: &Path, bank: &str) -> Value {
-    let held: Vec<Value> = notes(root, "traces")
+/// A bank's order, else the store's (docs/index.html#cycle-rewrite): its active notes, its traces
+/// among them, and their characters.
+fn measure(root: &Path, bank: Option<&str>) -> Value {
+    let held: Vec<Value> = every(root)
         .into_iter()
-        .filter(|trace| trace["bank"] == bank)
-        .chain(shelf(root, bank).1)
+        .filter(|note| bank.is_none_or(|one| note["bank"] == one))
         .collect();
     json!({"chars": held.iter().map(|note| text(&note["text"]).chars().count()).sum::<usize>(), "notes": held.len()})
 }
@@ -1235,6 +1243,23 @@ fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
             .unwrap_or_default(),
     )
     .map_err(|error| io::Error::other(format!("output: {error}")))
+}
+
+/// Ends `note` outside consolidate (decay, a graduation approved): its file moved aside to
+/// `<root>/.pruned/<yyyy>/<mm>/<dd>/<HHMMSS>-<bank>-<file>`, then one `rewrite` line of `op`.
+fn retire(root: &Path, note: &Value, op: &str, reason: &Value, to: &Value) -> io::Result<()> {
+    let aside = dated(
+        root,
+        ".pruned",
+        &format!("{}-{}", text(&note["bank"]), text(&note["file"])),
+        &mut BTreeSet::new(),
+    );
+    aside.parent().map_or(Ok(()), fs::create_dir_all)?;
+    fs::rename(located(root, note), aside)?;
+    record(
+        root,
+        &mut json!({"from": [entry(note)], "kind": "rewrite", "model": null, "op": op, "reason": reason, "to": to}),
+    )
 }
 
 /// One verdict on `note` (docs/index.html#cycle-rethink): `line`, holding `by`, `session`,
@@ -1639,6 +1664,54 @@ fn staged(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{}.{}", name(path), id()))
 }
 
+/// A note's strength on day `now`, counted from the ledger's `lines`, never stored
+/// (docs/index.html#cycle-strength): its used verdicts and shows, its wrong and stale verdicts since
+/// its body last changed, decayed by the days since the latest of its dates, used verdicts and
+/// shows (none: 0), to 3 places.
+#[expect(clippy::float_arithmetic, reason = "strength is float math")]
+fn strength(lines: &[Value], note: &Value, now: u64) -> f64 {
+    let [used, shown, blame, half] = [
+        ("SANDMAN_USED_WEIGHT", 3.0f64),
+        ("SANDMAN_SHOWN_WEIGHT", 1.0f64),
+        ("SANDMAN_JUDGED_WEIGHT", 4.0f64),
+        ("SANDMAN_HALF_LIFE_DAYS", 30.0f64),
+    ]
+    .map(|(key, default)| setting(key, default));
+    let about: Vec<&Value> = lines
+        .iter()
+        .filter(|line| {
+            line["file"] == note["path"] || (note["id"].is_string() && line["id"] == note["id"])
+        })
+        .collect();
+    let (read, acted) = (
+        |line: &Value| line["kind"] == "show",
+        |line: &Value| line["kind"] == "rethink" && line["verdict"] == "used",
+    );
+    let count = |items: usize| u32::try_from(items).map_or(f64::MAX, f64::from);
+    let tally =
+        |pick: &dyn Fn(&Value) -> bool| count(about.iter().filter(|line| pick(line)).count());
+    let idle = about
+        .iter()
+        .filter(|line| read(line) || acted(line))
+        .filter_map(|line| line["at"].as_str())
+        .chain(
+            [note["created"].as_str(), note["updated"].as_str()]
+                .into_iter()
+                .flatten(),
+        )
+        .max()
+        .and_then(|at| day(at.get(..10)?))
+        .map_or(0, |then| now.saturating_sub(then));
+    let score = used.mul_add(
+        tally(&acted),
+        shown.mul_add(
+            tally(&read),
+            blame.mul_add(-count(judged(lines, note).len()), 1.0),
+        ),
+    ) * (-u32::try_from(idle).map_or(f64::MAX, f64::from) / half).exp2();
+    (score * 1000.0f64).round() / 1000.0f64
+}
+
 /// The string `value` holds, else "".
 fn text(value: &Value) -> &str {
     value.as_str().unwrap_or_default()
@@ -1964,14 +2037,12 @@ fn main() -> ExitCode {
             };
             let fix = || -> io::Result<()> {
                 let (mut taken, mut fixed) = (BTreeSet::new(), 0u32);
-                for dir in STORES {
-                    for note in notes(&root, dir) {
-                        let (whole, mended) =
-                            (text(&note["text"]), mend(text(&note["text"]), &mut taken));
-                        if mended != whole {
-                            put(&disk(&root, dir, &note), &mended)?;
-                            fixed = fixed.saturating_add(1);
-                        }
+                for note in every(&root) {
+                    let (whole, mended) =
+                        (text(&note["text"]), mend(text(&note["text"]), &mut taken));
+                    if mended != whole {
+                        put(&located(&root, &note), &mended)?;
+                        fixed = fixed.saturating_add(1);
                     }
                 }
                 println!("check: fixed {fixed}");
@@ -2152,58 +2223,7 @@ fn main() -> ExitCode {
             )
         }
         "chart" => {
-            let lines = ledger(&root);
-            // counted from the ledger, never stored (docs/index.html#cycle-strength): the note's
-            // used verdicts and shows, its wrong and stale verdicts since its body last changed,
-            // decayed by the days since the latest of its dates, used verdicts and shows (none: 0)
-            let (now, [used, shown, blame, half]) = (
-                day(&today()).unwrap_or_default(),
-                [
-                    ("SANDMAN_USED_WEIGHT", 3.0f64),
-                    ("SANDMAN_SHOWN_WEIGHT", 1.0),
-                    ("SANDMAN_JUDGED_WEIGHT", 4.0),
-                    ("SANDMAN_HALF_LIFE_DAYS", 30.0),
-                ]
-                .map(|(key, default)| setting(key, default)),
-            );
-            #[expect(clippy::float_arithmetic, reason = "strength is float math")]
-            let strength = |note: &Value| -> f64 {
-                let dates = [note["created"].as_str(), note["updated"].as_str()];
-                let about: Vec<&Value> = lines
-                    .iter()
-                    .filter(|line| {
-                        line["file"] == note["path"]
-                            || (note["id"].is_string() && line["id"] == note["id"])
-                    })
-                    .collect();
-                let (read, acted) = (
-                    |line: &Value| line["kind"] == "show",
-                    |line: &Value| line["kind"] == "rethink" && line["verdict"] == "used",
-                );
-                let tally = |pick: &dyn Fn(&Value) -> bool| {
-                    u32::try_from(about.iter().filter(|line| pick(line)).count())
-                        .map_or(f64::MAX, f64::from)
-                };
-                let idle = about
-                    .iter()
-                    .filter(|line| read(line) || acted(line))
-                    .filter_map(|line| line["at"].as_str())
-                    .chain(dates.into_iter().flatten())
-                    .max()
-                    .and_then(|at| day(at.get(..10)?))
-                    .map_or(0, |then| now.saturating_sub(then));
-                let score = used.mul_add(
-                    tally(&acted),
-                    shown.mul_add(
-                        tally(&read),
-                        blame.mul_add(
-                            -u32::try_from(judged(&lines, note).len()).map_or(f64::MAX, f64::from),
-                            1.0,
-                        ),
-                    ),
-                ) * (-u32::try_from(idle).map_or(f64::MAX, f64::from) / half).exp2();
-                (score * 1000.0f64).round() / 1000.0f64
-            };
+            let (lines, now) = (ledger(&root), day(&today()).unwrap_or_default());
             // a memory or a knowledge page, the page's topic in place of a bank
             let shelved = |dir: &str| -> Vec<Value> {
                 notes(&root, dir)
@@ -2219,7 +2239,7 @@ fn main() -> ExitCode {
                         "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
                         "id": note["id"], "name": note["name"], "origin": note["origin"],
                         "session": source.split_whitespace().find(|word| ["consolidate", "dream"].contains(&kind) && uuid(word)),
-                        "sessions": lineage([note]), "source": kind, "state": "active", "strength": strength(note), "type": text(&note["type"]),
+                        "sessions": lineage([note]), "source": kind, "state": "active", "strength": strength(&lines, note, now), "type": text(&note["type"]),
                     });
                     let bank = text(&note["bank"]);
                     match bank.strip_prefix('@') {
@@ -2237,7 +2257,7 @@ fn main() -> ExitCode {
                     json!({
                         "bank": note["bank"], "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
                         "id": note["id"], "name": note["name"], "origin": note["origin"], "session": note["session"],
-                        "sessions": lineage([note]), "state": "active", "strength": strength(note), "type": text(&note["type"]),
+                        "sessions": lineage([note]), "state": "active", "strength": strength(&lines, note, now), "type": text(&note["type"]),
                     })
                 })
                 .collect();
@@ -2434,7 +2454,8 @@ fn main() -> ExitCode {
                 );
                 let mut fields = Vec::from(
                     [
-                        "due", "after", "created", "about", "session", "state", "closed", "note",
+                        "due", "after", "created", "about", "session", "graduate", "artifact",
+                        "state", "closed", "note",
                     ]
                     .map(|key| (key, text(&held[key]))),
                 );
@@ -2455,11 +2476,32 @@ fn main() -> ExitCode {
                         .get([0, 2][usize::from(!deferring)]..)
                         .unwrap_or_default(),
                 );
+                let failed = |error: io::Error| (1, format!("sandman {verb}: {error}"));
+                // done on a graduation's proposal first ends its note, into the artifact
+                let graduated = found
+                    .filter(|_| verb == "done")
+                    .and_then(|hit| {
+                        let wanted = hit["graduate"].as_str()?;
+                        let ending = every(&root).into_iter().find(|one| one["id"] == wanted)?;
+                        let artifact = text(&hit["artifact"]);
+                        let to = json!({"artifact": artifact});
+                        Some(
+                            retire(&root, &ending, "graduate", &Value::Null, &to).map(|()| {
+                                format!(
+                                    "\ngraduated: {} \u{2192} {artifact}",
+                                    text(&ending["path"])
+                                )
+                            }),
+                        )
+                    })
+                    .transpose()
+                    .map_err(failed)?
+                    .unwrap_or_default();
                 put(
                     &root.join(format!("intentions/{id}.md")),
                     &note(&fields, found.map_or(what, |hit| text(&hit["body"]))),
                 )
-                .map_err(|error| (1, format!("sandman {verb}: {error}")))?;
+                .map_err(failed)?;
                 let kind = ["push", verb][usize::from(!deferring || found.is_none())];
                 let mut line = json!({"id": id, "kind": kind, "session": pull});
                 for (key, said) in [(field, &value), ("note", &noted)] {
@@ -2469,7 +2511,7 @@ fn main() -> ExitCode {
                 }
                 drop(record(&root, &mut line));
                 Ok(match (deferring, field) {
-                    (false, _) => format!("{id} {state}"),
+                    (false, _) => format!("{id} {state}{graduated}"),
                     (true, "due") => format!("{id} {value}"),
                     _ => format!("{id} waiting: {value}"),
                 })
@@ -2578,21 +2620,18 @@ fn main() -> ExitCode {
                 // embedding cache; one naming it otherwise (a merge's source, an intention's link) is
                 // rewritten without it
                 let (mut paths, mut scrub) = (BTreeSet::new(), Vec::new());
-                for dir in STORES {
-                    for note in notes(&root, dir) {
-                        let address = Path::new(text(&note["path"]));
-                        let file = disk(&root, dir, &note);
-                        match (
-                            note["session"] == session,
-                            text(&note["text"]).contains(session),
-                        ) {
-                            (true, _) => {
-                                let _: bool = paths.insert(address.to_string_lossy().into_owned());
-                                gone.push(file);
-                            }
-                            (false, true) => scrub.push(file),
-                            (false, false) => {}
+                for note in every(&root) {
+                    let file = located(&root, &note);
+                    match (
+                        note["session"] == session,
+                        text(&note["text"]).contains(session),
+                    ) {
+                        (true, _) => {
+                            let _: bool = paths.insert(text(&note["path"]).to_owned());
+                            gone.push(file);
                         }
+                        (false, true) => scrub.push(file),
+                        (false, false) => {}
                     }
                 }
                 let pruned = tree(&root.join(".pruned"), 4);
@@ -3997,7 +4036,7 @@ fn main() -> ExitCode {
                             bank.strip_prefix('@').unwrap_or_default(),
                         );
                         let consolidate = || -> io::Result<Value> {
-                            let before = measure(&data, bank);
+                            let before = measure(&data, Some(bank));
                             // the wrong and stale verdicts its memories still answer to
                             let blamed: BTreeMap<&str, Vec<&Value>> = memories
                                 .iter()
@@ -4396,7 +4435,7 @@ fn main() -> ExitCode {
                                     json!({"id": id, "path": under.strip_prefix("memories/").unwrap_or(&under)})
                                 });
                                 rewrites.push(json!({
-                                    "from": values().map(|part| json!({"digest": sha256(text(&part["text"])), "id": part["id"], "path": part["path"], "sessions": lineage([part])})).collect::<Vec<_>>(),
+                                    "from": values().map(entry).collect::<Vec<_>>(),
                                     "kind": "rewrite", "model": model(&consolidator), "op": op["op"], "reason": op["reason"], "to": landed,
                                 }));
                             }
@@ -4425,7 +4464,7 @@ fn main() -> ExitCode {
                             let tally = |op: &str| count(&|done| done["op"] == op);
                             Ok(json!({
                                 "kept": tally("keep"), "merged": tally("merge"),
-                                "order": {"after": measure(&data, bank), "before": before, "merges": count(&|done| done["op"] == "merge" && done["memories"].is_array())},
+                                "order": {"after": measure(&data, Some(bank)), "before": before, "merges": count(&|done| done["op"] == "merge" && done["memories"].is_array())},
                                 "outcome": "consolidated", "pruned": tally("prune"),
                             }))
                         };
@@ -4437,7 +4476,32 @@ fn main() -> ExitCode {
                             consolidate(),
                         )
                     } else if due {
-                        let reflect = || -> io::Result<Value> {
+                        // decay first, with no model run: each note under the floor but one about
+                        // the person, pinned or muted, or with a verdict consolidate still answers
+                        let decay = || -> io::Result<usize> {
+                            let (floor, now) = (
+                                setting("SANDMAN_DECAY_FLOOR", 0.1f64),
+                                day(&today()).unwrap_or_default(),
+                            );
+                            let mut pruned = 0usize;
+                            for note in
+                                [notes(&data, "memories"), notes(&data, "knowledge")].concat()
+                            {
+                                let force = strength(&lines, &note, now);
+                                if force < floor
+                                    && note["type"] != "user"
+                                    && !["mute", "pin"].contains(&text(&note["recall"]))
+                                    && judged(&lines, &note).is_empty()
+                                {
+                                    let cause =
+                                        json!(format!("decay: strength {force} under {floor}"));
+                                    retire(&data, &note, "prune", &cause, &Value::Null)?;
+                                    pruned = pruned.saturating_add(1);
+                                }
+                            }
+                            Ok(pruned)
+                        };
+                        let review = || -> io::Result<Value> {
                             let mine = |kind: &str| -> Vec<&Value> {
                                 after
                                     .iter()
@@ -4556,6 +4620,79 @@ fn main() -> ExitCode {
                                     format!("{} \u{b7} sent {} times, never shown", pair.0, pair.1)
                                 })
                                 .collect();
+                            // the ladder's evidence, per note with an id that no proposal holds open
+                            // and none was dropped for since its body last changed: used in so many
+                            // sessions and never blamed (rung 2), or relearned by so many sessions'
+                            // traces merged into it since it was written (rung 3)
+                            let held = intentions(&data);
+                            let (mut standing, mut relearned) = (BTreeMap::new(), BTreeMap::new());
+                            for note in [notes(&data, "memories"), notes(&data, "knowledge")]
+                                .concat()
+                                .into_iter()
+                                .filter(|note| {
+                                    note["id"].is_string()
+                                        && !held.iter().any(|one| {
+                                            one["graduate"] == note["id"]
+                                                && (one["state"] != "dropped"
+                                                    || one["closed"].as_str() > when(note))
+                                        })
+                                })
+                            {
+                                let verdicts: Vec<&Value> = lines
+                                    .iter()
+                                    .filter(|line| {
+                                        line["kind"] == "rethink"
+                                            && (line["file"] == note["path"]
+                                                || line["id"] == note["id"])
+                                    })
+                                    .collect();
+                                let used: BTreeSet<&str> = verdicts
+                                    .iter()
+                                    .filter(|line| line["verdict"] == "used")
+                                    .filter_map(|line| line["session"].as_str())
+                                    .collect();
+                                let rejoined: BTreeSet<&str> = lines
+                                    .iter()
+                                    .filter(|line| {
+                                        line["kind"] == "rewrite"
+                                            && line["op"] == "merge"
+                                            && line["to"]["id"] == note["id"]
+                                            && line["at"].as_str() > note["created"].as_str()
+                                    })
+                                    .flat_map(|line| line["from"].as_array().into_iter().flatten())
+                                    .filter(|from| text(&from["path"]).starts_with("traces/"))
+                                    .flat_map(|from| {
+                                        from["sessions"].as_array().into_iter().flatten()
+                                    })
+                                    .filter_map(Value::as_str)
+                                    .collect();
+                                let listing = |count: usize, how: &str| {
+                                    format!(
+                                        "{} \u{b7} {} \u{b7} {} \u{2014} {} \u{b7} {how} in {count} sessions",
+                                        text(&note["id"]),
+                                        text(&note["path"]),
+                                        text(&note["name"]),
+                                        one_line(text(&note["description"]), 160)
+                                    )
+                                };
+                                let id = text(&note["id"]).to_owned();
+                                if used.len() >= setting("SANDMAN_GUIDE_SESSIONS", 5)
+                                    && !verdicts.iter().any(|line| {
+                                        ["stale", "wrong"].contains(&text(&line["verdict"]))
+                                    })
+                                {
+                                    drop(standing.insert(
+                                        id.clone(),
+                                        (listing(used.len(), "used"), note.clone()),
+                                    ));
+                                }
+                                if rejoined.len() >= setting("SANDMAN_MECHANISM_SESSIONS", 3) {
+                                    drop(relearned.insert(
+                                        id,
+                                        (listing(rejoined.len(), "relearned"), note.clone()),
+                                    ));
+                                }
+                            }
                             let input = format!(
                                 "<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n\n# since\n{}\n\n{}",
                                 guide(&data, "encode").trim_end(),
@@ -4580,6 +4717,14 @@ fn main() -> ExitCode {
                                         ("merged again", again.into_iter().collect()),
                                         ("remembered by hand", remembered),
                                         ("sent, never read", unread.into_iter().collect()),
+                                        (
+                                            "standing",
+                                            standing.values().map(|pair| pair.0.clone()).collect()
+                                        ),
+                                        (
+                                            "relearned",
+                                            relearned.values().map(|pair| pair.0.clone()).collect()
+                                        ),
                                     ]),
                                     evidence
                                 )
@@ -4594,10 +4739,29 @@ fn main() -> ExitCode {
                                 &noted,
                             )?;
                             let jobs = ["consolidate", "encode"];
+                            // a proposal per note the evidence lists on its rung, at most once
+                            let (mut proposed, rungs) = (BTreeSet::new(), [&standing, &relearned]);
+                            let fits = |one: &Value| {
+                                let rung = rungs
+                                    .get(usize::from(one["rung"] == 3u8))
+                                    .filter(|_| one["rung"] == 2u8 || one["rung"] == 3u8);
+                                ["artifact", "line", "note", "why"]
+                                    .iter()
+                                    .all(|field| one[field].is_string())
+                                    && (one["replaces"].is_null() || one["replaces"].is_string())
+                                    && rung.is_some_and(|listed| {
+                                        listed.contains_key(text(&one["note"]))
+                                    })
+                                    && proposed.insert(text(&one["note"]).to_owned())
+                            };
                             if !reply["reason"].is_string()
                                 || jobs
                                     .iter()
                                     .any(|job| !(reply[job].is_null() || reply[job].is_string()))
+                                || !(reply["propose"].is_null()
+                                    || reply["propose"]
+                                        .as_array()
+                                        .is_some_and(|list| list.iter().all(fits)))
                             {
                                 return Err(io::Error::other(format!(
                                     "output: not a proposal: {}",
@@ -4762,10 +4926,76 @@ fn main() -> ExitCode {
                                 }
                             }
                             let history = adopt(&data, &adopted)?;
+                            // each proposal an intention due today, about the artifact's directory;
+                            // a rung-2 line that replaces none and says nothing of its cost dropped
+                            let (now, deadline) = (utc(SystemTime::now()), today());
+                            let mut written = 0usize;
+                            for (one, subject) in reply["propose"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter(|one| {
+                                    one["rung"] == 3u8
+                                        || one["replaces"].is_string()
+                                        || !text(&one["why"]).trim().is_empty()
+                                })
+                                .filter_map(|one| {
+                                    let rung = rungs[usize::from(one["rung"] == 3u8)];
+                                    Some((one, &rung.get(text(&one["note"]))?.1))
+                                })
+                            {
+                                let (artifact, minted) = (text(&one["artifact"]), random());
+                                let about = Path::new(artifact).parent().map(Path::to_string_lossy);
+                                let tail = |field: &str, lead: &str| {
+                                    Some(text(&one[field]).trim())
+                                        .filter(|said| !said.is_empty())
+                                        .map_or_else(String::new, |said| format!("{lead}{said}"))
+                                };
+                                let what = format!(
+                                    "Graduate {} (rung {}) into {artifact}: {}{}{}",
+                                    text(&subject["name"]),
+                                    one["rung"],
+                                    text(&one["line"]),
+                                    tail("replaces", ", replacing: "),
+                                    tail("why", " \u{2014} ")
+                                );
+                                let id = minted.get(..8).unwrap_or_default();
+                                let proposal = note(
+                                    &[
+                                        ("due", &deadline),
+                                        ("created", &now),
+                                        ("about", &about.unwrap_or_default()),
+                                        ("graduate", text(&subject["id"])),
+                                        ("artifact", artifact),
+                                        ("state", "open"),
+                                    ],
+                                    &what,
+                                );
+                                put(&data.join(format!("intentions/{id}.md")), &proposal)?;
+                                drop(record(
+                                    &data,
+                                    &mut json!({"due": deadline, "graduate": subject["id"], "id": id, "kind": "defer", "session": null}),
+                                ));
+                                written = written.saturating_add(1);
+                            }
                             Ok(json!({
                                 "outcome": (["kept", "adopted"][usize::from(!history.is_empty())]),
-                                "reason": one_line(text(&reply["reason"]), 400), "replay": judged, "history": history,
+                                "proposed": written, "reason": one_line(text(&reply["reason"]), 400), "replay": judged, "history": history,
                             }))
+                        };
+                        // the review's line carries the store's order before decay and after the pass
+                        let reflect = || -> io::Result<Value> {
+                            let before = measure(&data, None);
+                            let pruned = decay()?;
+                            let mut line = review().or_else(|error| match STOP.get() {
+                                Some(_) => Err(error),
+                                None => Ok(json!({"error": one_line(&error.to_string(), 400), "history": {}, "outcome": "failed"})),
+                            })?;
+                            (line["order"], line["pruned"]) = (
+                                json!({"after": measure(&data, None), "before": before, "merges": 0u8}),
+                                pruned.into(),
+                            );
+                            Ok(line)
                         };
                         (
                             "reflect",

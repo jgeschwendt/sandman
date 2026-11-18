@@ -623,7 +623,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
     <h2 class="h2">reflect</h2>
     <p class="docs-note">A job of <a class="link" href="#serve">serve</a>'s tick, the weekly review: the pipeline rewrites
       the guidance <a class="link" href="#encode">encode</a> and <a class="link" href="#consolidate">consolidate</a> run on
-      from evidence of what they did, and adopts a rewrite only when a replay judges it no worse. No step waits for a
+      from evidence of what they did, and adopts a rewrite only when a replay judges it no worse; it also decays the
+      store and proposes graduations (<a class="link" href="#cycle-strength">decay</a>, <a class="link" href="#cycle-graduate">the ladder</a>). No step waits for a
       person; the contracts stay fixed in the binary.</p>
   </header>
   <p>It runs only in a tick with no rollback due, no episode waiting and no quiet bank; at most once per
@@ -657,18 +658,27 @@ Why: "mocks hid a real ordering bug last year".</pre>
 - No closing summary of changes — Every reply, in any repository: no closing summary (traces/-work/feedback_no_closing_summary.md)
 
 # sent, never read
-- -work-ledger-api/reference_redis_queue_host.md · sent 4 times, never shown</pre>
+- -work-ledger-api/reference_redis_queue_host.md · sent 4 times, never shown
+
+# standing
+- 3f9a0c1d2b4e · -work-ledger-api/feedback_pass_a_clock_in.md · Pass a clock in — ledger-api tests take time from an injected clock · used in 6 sessions
+
+# relearned
+- 0a1b2c3d4e5f · -work/feedback_no_closing_summary.md · No closing summary — every reply: no closing summary · relearned in 3 sessions</pre>
   <ul class="stack claims" role="list">
     <li><strong>evidence</strong> — since the latest reflect line, a section each, absent when empty: every model run's
       ledger line; each op of the <code class="code">.pruned/…-ops.json</code> written since, its body cut; memories merged
       more than once; each <code class="code">remember</code> line with its trace's name and description, live or moved
       aside; and <a class="link" href="recall.html#record">recall's</a> sends per memory against
-      <code class="code">show</code> lines of the same session, listing those sent three times or more and never read. Cut
-      like encode's digest past <code class="code">$SANDMAN_REFLECT_BYTES</code> (300 000); the guidance goes whole.</li>
+      <code class="code">show</code> lines of the same session, listing those sent three times or more and never read; the
+      ladder's <code class="code"># standing</code> and <code class="code"># relearned</code>. Cut
+      like encode's digest past <code class="code">$SANDMAN_REFLECT_BYTES</code> (300 000); the guidance goes whole.
+      Decay runs first, with no model run, so a decayed note is in no section.</li>
     <li><strong>propose</strong> — <code class="code">null</code> leaves a job alone; another shape, or a guidance
       over <code class="code">$SANDMAN_GUIDANCE_BYTES</code> (8 000), fails the review whole, so guidance cannot grow
-      without bound. reflect never rewrites its own guidance or a contract.
-      <pre class="snippet">{"encode":str|null,"consolidate":str|null,"reason":str}</pre></li>
+      without bound, and so does a <code class="code">propose</code> entry off its shape (<a class="link" href="#cycle-graduate">the ladder</a>).
+      reflect never rewrites its own guidance or a contract.
+      <pre class="snippet">{"encode":str|null,"consolidate":str|null,"reason":str,"propose"?:[…]}</pre></li>
     <li><strong>replay</strong> — per proposal, the latest <code class="code">$SANDMAN_REFLECT_REPLAY</code> (3) inputs
       run through the job's own model command under the guidance in force and under the new one, writing nothing; then
       one judge run per input (<code class="code">$SANDMAN_REFLECTOR</code>,
@@ -690,8 +700,11 @@ Why: "mocks hid a real ordering bug last year".</pre>
     <li><strong>stop</strong> — as encode's: the group killed, no line, the review again after the next start. Every
       other outcome, <code class="code">failed</code> too, waits out the week.</li>
   </ul>
-  <pre class="snippet">{"at":…,"error":"&lt;one line&gt;"?,"history":{"&lt;job&gt;":"prompts/.history/…"},"kind":"reflect","machine":…,"outcome":"adopted"|"kept"|"failed"|"reverted","reason":"&lt;one line&gt;"?,"replay":{"&lt;job&gt;":{"new":n,"old":n,"same":n}}?,"token":…?}</pre>
-  <p><code class="code">kept</code> means nothing was proposed, the old won a replay, or there was nothing to replay
+  <pre class="snippet">{"at":…,"error":"&lt;one line&gt;"?,"history":{"&lt;job&gt;":"prompts/.history/…"},"kind":"reflect","machine":…,"order"?:{…},"outcome":"adopted"|"kept"|"failed"|"reverted",
+ "proposed"?:n,"pruned"?:n,"reason":"&lt;one line&gt;"?,"replay":{"&lt;job&gt;":{"new":n,"old":n,"same":n}}?,"token":…?}</pre>
+  <p><code class="code">order</code> is the store's before decay and after the pass, <code class="code">pruned</code>
+    decay's count, both on a failed review too; <code class="code">proposed</code> the intentions written.
+    <code class="code">kept</code> means no guidance was proposed, the old won a replay, or there was nothing to replay
     (all three counts 0). One review costs one model run plus three per input replayed: at most 19 with the defaults.</p>
 </section>
 
@@ -711,7 +724,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
     4–5 (stage 2); <code class="code">rethink</code> in session, its MCP tool and <code class="code">eval/recall.jsonl</code> (stage 3);
     encode's <code class="code"># recalled</code> and <code class="code">verdicts</code> (stage 4); strength, on chart's rows (stage 5);
     consolidate's merge of notes, <code class="code"># judged</code> with revise, retitle and the order measure (stage 6); rehome,
-    rung-1 graduation and <code class="code"># elsewhere</code> (stage 7). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
+    rung-1 graduation and <code class="code"># elsewhere</code> (stage 7); decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
+    rungs 2–3 as intentions and <code class="code">done</code> and <code class="code">drop</code> on them (stage 8). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -726,7 +740,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <g transform="translate(392,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑥ rethink</text><text class="life-note" x="14" y="44">one verdict a send,</text><text class="life-note" x="14" y="60">in session or at encode</text></g>
         <g transform="translate(196,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑦ strength</text><text class="life-note" x="14" y="44">counted from lines,</text><text class="life-note" x="14" y="60">never stored</text></g>
         <g transform="translate(0,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑨ release</text><text class="life-note" x="14" y="44">unheld for 7 days:</text><text class="life-note" x="14" y="60">the transcript goes</text></g>
-        <g transform="translate(196,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ decay</text><text class="life-note" x="14" y="44">under the floor:</text><text class="life-note" x="14" y="60">pruned, an end</text></g>
+        <g transform="translate(196,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ decay</text><text class="life-note" x="14" y="44">under the floor:</text><text class="life-note" x="14" y="60">pruned, an end</text></g>
         <g transform="translate(392,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ reconsolidate</text><text class="life-note" x="14" y="44">a trace, a verdict:</text><text class="life-note" x="14" y="60">revise or merge</text></g>
         <g transform="translate(588,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ graduate</text><text class="life-note" x="14" y="44">a page, a guidance</text><text class="life-note" x="14" y="60">line, a mechanism</text></g>
         <g aria-hidden="true">
@@ -747,8 +761,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <text class="life-note" x="632" y="402" text-anchor="middle">back into the store: the same id, or a new one</text>
       </svg>
     </div>
-    <figcaption>The cycle, ①–⑨. Dashed boxes are not built yet; graduate is built for a page, not yet for a guidance
-      line or a mechanism. A merge that writes a new note ends its parents, which, like decay, can leave a session
+    <figcaption>The cycle, ①–⑨. Dashed boxes are not built yet; a guidance line or a mechanism graduates once the owner
+      approves its proposal. A merge that writes a new note ends its parents, which, like decay, can leave a session
       unnamed.</figcaption>
   </figure>
 
@@ -795,10 +809,10 @@ updated: &lt;now&gt;                   as today
   <table data-table>
     <thead><tr><th>op</th><th>from → to</th><th>written by</th></tr></thead>
     <tbody>
-      <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate <span class="badge badge-ok">built</span>; <code class="code">done</code> on the owner's approval</td></tr>
+      <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate; <code class="code">done</code> on the owner's approval <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">keep</code></td><td>a trace → the same id under <code class="code">memories/</code> or <code class="code">knowledge/</code></td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">merge</code></td><td>a trace and a note → the note; two or more notes → a new id</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate <span class="badge badge-ok">built</span>; the weekly review (decay)</td></tr>
+      <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate; the weekly review (decay) <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">rehome</code></td><td>a note → the same id in another bank or topic</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">release</code></td><td><code class="code">[{"path":&lt;archived&gt;,"session"}]</code> → null</td><td>the tick's release job</td></tr>
       <tr><td><code class="code">retitle</code></td><td>a note → the same id under another name and file</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
@@ -843,7 +857,7 @@ updated: &lt;now&gt;                   as today
       stays <code class="code">$SANDMAN_RELEASE_DAYS</code>. A file the next weekly review reads (written after the latest
       reflect line, or among the latest <code class="code">$SANDMAN_REFLECT_REPLAY</code> replies and the copies they name)
       stays until it is not. Older generations are rewrite lines only.</li>
-    <li><strong>order</strong> <span class="badge badge-ok">built</span> for consolidate — each consolidated and weekly
+    <li><strong>order</strong> <span class="badge badge-ok">built</span> — each consolidated and weekly
       review line carries <code class="code">"order":{"after":{"chars","eval"?,"notes"},"before":{…},"merges":n}</code>
       over the bank's or the topic's active notes, its traces among them, or the store's: their count, their files'
       characters, and the pass's merges of notes. A pass with an order op (a merge of notes, a graduation, a note pruned)
@@ -920,11 +934,13 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
       <code class="code">$SANDMAN_HALF_LIFE_DAYS</code> (30). <code class="code">idle</code> counts whole days to the local
       today (<code class="code">$SANDMAN_TODAY</code>, as <a class="link" href="intentions.html">intentions</a> date), 0 for a note
       with none of those dates; chart rounds to 3 places, and a judged note can go below 0.</li>
-    <li><strong>floor</strong> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 100
+    <li><strong>floor</strong> <span class="badge badge-ok">built</span> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 100
       days idle (30 · log₂ 10), shown once 130, used once 160, used five times 220.</li>
-    <li><strong>decay</strong> — the weekly review prunes, with no model run, each active note under the floor but a
+    <li><strong>decay</strong> <span class="badge badge-ok">built</span> — the weekly review first prunes, with no model run, each active note under the floor but a
       <code class="code">type: user</code> note, a <code class="code">recall: pin</code> or <code class="code">mute</code> one,
-      one with a judged verdict outstanding (consolidate's to revise or prune), and a trace (consolidate's).</li>
+      one with a judged verdict outstanding (consolidate's to revise or prune), and a trace (consolidate's): moved to
+      <code class="code">.pruned/</code> as consolidate's prune, its rewrite line <code class="code">model</code> null and
+      <code class="code">reason</code> <code class="code">decay: strength &lt;s&gt; under &lt;floor&gt;</code>.</li>
   </ul>
 
   <h3 class="h3" id="cycle-graduate">Graduation</h3>
@@ -935,8 +951,8 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
           <marker id="ladder-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
         </defs>
         <g transform="translate(0,176)"><rect class="life-box" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">① page or playbook</text><text class="life-note" x="14" y="46">memories converge on a subject</text><text class="life-note" x="14" y="64">automatic, in consolidate</text><text class="life-note" x="14" y="82">cost: reread at every merge</text></g>
-        <g transform="translate(252,96)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">② standing guidance</text><text class="life-note" x="14" y="46">used in 5 sessions, never wrong</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: context in every session</text></g>
-        <g transform="translate(504,16)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">③ mechanism</text><text class="life-note" x="14" y="46">relearned in 3 sessions</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: code, tests and a gate</text></g>
+        <g transform="translate(252,96)"><rect class="life-box" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">② standing guidance</text><text class="life-note" x="14" y="46">used in 5 sessions, never wrong</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: context in every session</text></g>
+        <g transform="translate(504,16)"><rect class="life-box" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">③ mechanism</text><text class="life-note" x="14" y="46">relearned in 3 sessions</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: code, tests and a gate</text></g>
         <g aria-hidden="true">
           <path class="life-path" marker-end="url(#ladder-head)" d="M116,176V148H252" />
           <path class="life-path" marker-end="url(#ladder-head)" d="M368,96V68H504" />
@@ -944,7 +960,7 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
         <text class="life-note" x="368" y="306" text-anchor="middle">a rung-2 line replaces a line or justifies the characters it adds; pinning is no rung</text>
       </svg>
     </div>
-    <figcaption>The ladder, 1 → 2 → 3, built for rung 1. Each rung costs more to keep true and less to apply: a page is
+    <figcaption>The ladder, 1 → 2 → 3. Each rung costs more to keep true and less to apply: a page is
       reread by a model, a line is read by every session in its scope, a mechanism runs without being read.</figcaption>
   </figure>
   <ul class="stack claims" role="list">
@@ -953,20 +969,25 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
       which end; the topic's consolidate keeps it as a page or merges it into one, the page continuing with its
       <code class="code">from:</code> extended. <code class="code"># elsewhere</code> (<a class="link" href="#consolidate">consolidate</a>)
       shows a subject converging across banks.</li>
-    <li><strong>rung 2</strong> — the weekly review's evidence gains <code class="code"># standing</code>: a note with
+    <li><strong>rung 2</strong> <span class="badge badge-ok">built</span> — the weekly review's evidence gains <code class="code"># standing</code>: a note with an id,
       <code class="code">used</code> verdicts in <code class="code">$SANDMAN_GUIDE_SESSIONS</code> (5) distinct sessions and no
       <code class="code">wrong</code> or <code class="code">stale</code> ever. Its reply gains <code class="code">propose</code>
       (below), the artifact the most
       specific one (a repository's <code class="code">AGENTS.md</code>, a rules file, a skill, <code class="code">CLAUDE.md</code>); a
       rung-2 proposal with no <code class="code">replaces</code> justifies its characters in <code class="code">why</code> or is
       dropped.</li>
-    <li><strong>rung 3</strong> — <code class="code"># relearned</code>: a note, or the line it graduated into, that traces of
-      <code class="code">$SANDMAN_MECHANISM_SESSIONS</code> (3) distinct sessions merged into since it was written: the same failure
-      needed the lesson again. Proposed as a hook, lint, test, gate or tool default.</li>
-    <li><strong>approval</strong> — each proposal becomes an <a class="link" href="intentions.html">intention</a>, due today,
-      <code class="code">about</code> the artifact's repository, <code class="code">graduate: &lt;note id&gt;</code>, which the seed
-      surfaces. The owner has it applied; <code class="code">done</code> on it ends the note (<code class="code">graduate</code>,
-      to the artifact); <code class="code">drop</code> declines, and the note is not proposed again until its body changes.</li>
+    <li><strong>rung 3</strong> <span class="badge badge-ok">built</span> — <code class="code"># relearned</code>: an active note that traces of
+      <code class="code">$SANDMAN_MECHANISM_SESSIONS</code> (3) distinct sessions merged into since its <code class="code">created</code>
+      (the merge rewrite lines' trace entries): the same failure needed the lesson again. Proposed as a hook, lint, test,
+      gate or tool default. A graduated line is outside the store, so nothing counts its relearning.</li>
+    <li><strong>approval</strong> <span class="badge badge-ok">built</span> — each proposal becomes an <a class="link" href="intentions.html">intention</a>, due today,
+      <code class="code">about</code> the artifact's directory, <code class="code">graduate: &lt;note id&gt;</code> and
+      <code class="code">artifact: &lt;path&gt;</code>, its text <code class="code">Graduate &lt;name&gt; (rung &lt;n&gt;) into &lt;artifact&gt;: &lt;line&gt;[, replacing: …][ — &lt;why&gt;]</code>,
+      which the seed's due block surfaces. The owner has it applied; <code class="code">done</code> on it first ends the note
+      (moved to <code class="code">.pruned/</code>, a <code class="code">graduate</code> line to <code class="code">{"artifact"}</code>,
+      stdout's second line <code class="code">graduated: &lt;path&gt; → &lt;artifact&gt;</code>); <code class="code">drop</code>
+      declines, and the note is not listed again until its body changes (its <code class="code">updated</code> after the
+      drop's <code class="code">closed</code>). A note with an open proposal is not listed either.</li>
   </ul>
   <pre class="snippet">{"op":"graduate","memories":[&lt;file&gt;,…],"topic","type":"knowledge"|"playbook","name","description","body","reason"}   consolidate's
 "propose":[{"artifact","line","note","replaces":str|null,"rung":2|3,"why"}]                                    the weekly review's</pre>
@@ -1049,7 +1070,7 @@ sandman check --release  # what the release job would delete now, with its bytes
     <li><strong>order in a bank</strong> <span class="badge badge-ok">built</span> — consolidate's merge of notes, <code class="code"># judged</code> (revise, prune),
       retitle; the order measure.</li>
     <li><strong>across banks</strong> <span class="badge badge-ok">built</span> — rehome, rung-1 graduation, <code class="code"># elsewhere</code>.</li>
-    <li><strong>the weekly review</strong> — decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
+    <li><strong>the weekly review</strong> <span class="badge badge-ok">built</span> — decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
       proposals as intentions, <code class="code">done</code> and <code class="code">drop</code> on them.</li>
     <li><strong>release</strong> — the job, the depth-1 sweep, chart's <code class="code">held</code> and <code class="code">released</code>,
       invariants 6–7, <code class="code">check --release</code>. The owner reads <code class="code">check --release</code> on the root
