@@ -38,10 +38,12 @@
     {"bank": "-work-gamma", "created": "2026-11-10T09:00:00Z", "file": "feedback_clean_tree.md", "from": [], "id": null, "name": "The gamma suite needs a clean tree", "origin": null, "session": "5a000000-0000-4000-8000-00000000000e", "sessions": ["5a000000-0000-4000-8000-00000000000e"], "source": "dream", "state": "active", "strength": 0.912, "type": "feedback"}
   ],
   "taken": [
-    {"bytes": 4800, "cwd": "/work/alpha", "dreamed": "2026-11-09T22:00:00Z", "highlights": 3, "memories": 2, "session": "5a000000-0000-4000-8000-00000000000a", "state": "dreamed", "taken": "2026-11-09T09:30:05Z", "title": "sample: tighten the parser"},
-    {"bytes": 2600, "cwd": "/work/beta", "dreamed": null, "highlights": 1, "memories": 1, "session": "5a000000-0000-4000-8000-00000000000b", "state": "waiting", "taken": "2026-11-09T12:40:02Z", "title": "sample: draft the release notes"},
-    {"bytes": 1500, "cwd": null, "dreamed": null, "highlights": 0, "memories": 1, "session": "5a000000-0000-4000-8000-00000000000c", "state": "archived", "taken": "2026-11-09T15:10:04Z", "title": null},
-    {"bytes": 700, "cwd": "/work/gamma", "dreamed": "2026-11-10T09:00:00Z", "highlights": 0, "memories": 2, "session": "5a000000-0000-4000-8000-00000000000e", "state": "dreamed", "taken": "2026-11-10T06:00:01Z", "title": "sample: green the gamma suite"}
+    {"bytes": 1234, "cwd": null, "dreamed": null, "held": false, "highlights": 0, "memories": 0, "released": "2026-11-10T08:00:00Z", "session": "5a000000-0000-4000-8000-000000000002", "state": "released", "taken": "2026-11-01T08:00:00Z", "title": null},
+    {"bytes": 4800, "cwd": "/work/alpha", "dreamed": "2026-11-09T22:00:00Z", "held": true, "highlights": 3, "memories": 2, "released": null, "session": "5a000000-0000-4000-8000-00000000000a", "state": "dreamed", "taken": "2026-11-09T09:30:05Z", "title": "sample: tighten the parser"},
+    {"bytes": 2600, "cwd": "/work/beta", "dreamed": null, "held": true, "highlights": 1, "memories": 1, "released": null, "session": "5a000000-0000-4000-8000-00000000000b", "state": "waiting", "taken": "2026-11-09T12:40:02Z", "title": "sample: draft the release notes"},
+    {"bytes": 1500, "cwd": null, "dreamed": null, "held": true, "highlights": 0, "memories": 1, "released": null, "session": "5a000000-0000-4000-8000-00000000000c", "state": "archived", "taken": "2026-11-09T15:10:04Z", "title": null},
+    {"bytes": 700, "cwd": "/work/gamma", "dreamed": "2026-11-10T09:00:00Z", "held": true, "highlights": 0, "memories": 2, "released": null, "session": "5a000000-0000-4000-8000-00000000000e", "state": "dreamed", "taken": "2026-11-10T06:00:01Z", "title": "sample: green the gamma suite"},
+    {"bytes": 300, "cwd": null, "dreamed": null, "held": false, "highlights": 0, "memories": 0, "released": null, "session": "5a000000-0000-4000-8000-000000000001", "state": "archived", "taken": "2026-11-10T07:00:00Z", "title": null}
   ],
   "traces": [
     {"bank": "-work-alpha", "created": "2026-11-09T09:40:00Z", "file": "feedback_sample_spans.md", "from": [], "id": "6c5d4e3f2a1b", "name": "Sample: spans", "origin": null, "session": "5a000000-0000-4000-8000-00000000000a", "sessions": ["5a000000-0000-4000-8000-00000000000a"], "state": "active", "strength": 0.891, "type": "feedback"}

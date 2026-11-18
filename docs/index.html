@@ -62,7 +62,7 @@
     carries <code class="code">mark</code>, <code class="code">take</code>, <code class="code">chart</code>,
     <a class="link" href="#forget"><code class="code">forget</code></a>, the agent's <a class="link" href="recall.html"><code class="code">recall</code>, <code class="code">show</code> and <code class="code">remember</code></a>,
     its <a class="link" href="intentions.html"><code class="code">defer</code>, <code class="code">due</code>, <code class="code">done</code> and <code class="code">drop</code></a>,
-    and the daemon, <code class="code">serve</code>, whose tick ends sessions that never ended, settles held takes,
+    and the daemon, <code class="code">serve</code>, whose tick ends sessions that never ended, settles held takes, releases unheld transcripts,
     <a class="link" href="#encode">encodes</a> episodes, <a class="link" href="#consolidate">consolidates</a> banks and
     <a class="link" href="knowledge.html">topics</a> and <a class="link" href="#reflect">reviews</a> its own guidance weekly;
     <code class="code">status</code>, <code class="code">setup</code>, <code class="code">upgrade</code> and <code class="code">version</code> run it.
@@ -316,8 +316,8 @@
   <header>
     <h2 class="h2">serve</h2>
     <p class="docs-note">The daemon, a foreground process launchd keeps alive as
-      <code class="code">dev.gigantic.sandman</code>. Its tick runs six jobs, in order: it reconciles sessions
-      that never ended, fills recall's embedding cache, settles held takes, then one of: a <a class="link" href="#reflect">rollback</a> due,
+      <code class="code">dev.gigantic.sandman</code>. Its tick runs seven jobs, in order: it reconciles sessions
+      that never ended, fills recall's embedding cache, settles held takes, <a class="link" href="#cycle-release">releases</a> transcripts no note holds, then one of: a <a class="link" href="#reflect">rollback</a> due,
       <a class="link" href="#encode">encode</a> one episode, <a class="link" href="#consolidate">consolidate</a> one bank, or, with
       neither waiting, once a week, <a class="link" href="#reflect">reflect</a> on the guidance.</p>
   </header>
@@ -377,6 +377,8 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       (<code class="code">$SANDMAN_QUIET_MS</code>), is taken as <a class="link" href="#take">take</a> does:
       <code class="code">taken</code> or <code class="code">gone</code>, reason
       <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.</li>
+    <li><strong>release</strong> — after settle, while <a class="link" href="#cycle-check">check</a> holds: the
+      <a class="link" href="#cycle-release">release</a> of unheld transcripts and the sweep of <code class="code">.pruned/</code>.</li>
     <li><strong>signals</strong> — SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is
       ignored. The drain budget is 2 s, launchd's <code class="code">ExitTimeOut</code>: the one
       connection in hand, at most its 1 s read, and the tick's job in hand (a running model command
@@ -725,7 +727,9 @@ Why: "mocks hid a real ordering bug last year".</pre>
     encode's <code class="code"># recalled</code> and <code class="code">verdicts</code> (stage 4); strength, on chart's rows (stage 5);
     consolidate's merge of notes, <code class="code"># judged</code> with revise, retitle and the order measure (stage 6); rehome,
     rung-1 graduation and <code class="code"># elsewhere</code> (stage 7); decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
-    rungs 2–3 as intentions and <code class="code">done</code> and <code class="code">drop</code> on them (stage 8). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
+    rungs 2–3 as intentions and <code class="code">done</code> and <code class="code">drop</code> on them (stage 8); release, the
+    depth-1 sweep, invariants 6–7, <code class="code">check --release</code> and chart's <code class="code">held</code> and
+    <code class="code">released</code> (stage 9). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -739,7 +743,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <g transform="translate(588,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑤ recall</text><text class="life-note" x="14" y="44">a pointer sent,</text><text class="life-note" x="14" y="60">one ledger line</text></g>
         <g transform="translate(392,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑥ rethink</text><text class="life-note" x="14" y="44">one verdict a send,</text><text class="life-note" x="14" y="60">in session or at encode</text></g>
         <g transform="translate(196,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑦ strength</text><text class="life-note" x="14" y="44">counted from lines,</text><text class="life-note" x="14" y="60">never stored</text></g>
-        <g transform="translate(0,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑨ release</text><text class="life-note" x="14" y="44">unheld for 7 days:</text><text class="life-note" x="14" y="60">the transcript goes</text></g>
+        <g transform="translate(0,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑨ release</text><text class="life-note" x="14" y="44">unheld for 7 days:</text><text class="life-note" x="14" y="60">the transcript goes</text></g>
         <g transform="translate(196,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ decay</text><text class="life-note" x="14" y="44">under the floor:</text><text class="life-note" x="14" y="60">pruned, an end</text></g>
         <g transform="translate(392,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ reconsolidate</text><text class="life-note" x="14" y="44">a trace, a verdict:</text><text class="life-note" x="14" y="60">revise or merge</text></g>
         <g transform="translate(588,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ graduate</text><text class="life-note" x="14" y="44">a page, a guidance</text><text class="life-note" x="14" y="60">line, a mechanism</text></g>
@@ -761,8 +765,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <text class="life-note" x="632" y="402" text-anchor="middle">back into the store: the same id, or a new one</text>
       </svg>
     </div>
-    <figcaption>The cycle, ①–⑨. Dashed boxes are not built yet; a guidance line or a mechanism graduates once the owner
-      approves its proposal. A merge that writes a new note ends its parents, which, like decay, can leave a session
+    <figcaption>The cycle, ①–⑨. A guidance line or a mechanism graduates once the owner approves its proposal. A merge that writes a new note ends its parents, which, like decay, can leave a session
       unnamed.</figcaption>
   </figure>
 
@@ -814,7 +817,7 @@ updated: &lt;now&gt;                   as today
       <tr><td><code class="code">merge</code></td><td>a trace and a note → the note; two or more notes → a new id</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate; the weekly review (decay) <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">rehome</code></td><td>a note → the same id in another bank or topic</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">release</code></td><td><code class="code">[{"path":&lt;archived&gt;,"session"}]</code> → null</td><td>the tick's release job</td></tr>
+      <tr><td><code class="code">release</code></td><td>per archived file <code class="code">{"bytes","digest","id":null,"path","sessions":[&lt;session&gt;]}</code> → null</td><td>the tick's release job <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">retitle</code></td><td>a note → the same id under another name and file</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">revert</code></td><td>a pass's outputs → the notes it replaced</td><td>a pass that fails its measure</td></tr>
       <tr><td><code class="code">revise</code></td><td>a note → the same id, body rewritten after a <code class="code">wrong</code> or <code class="code">stale</code> verdict</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
@@ -830,8 +833,8 @@ updated: &lt;now&gt;                   as today
         <text class="life-head" x="88" y="14" text-anchor="middle">two back: lines only</text>
         <text class="life-head" x="368" y="14" text-anchor="middle">parents: bodies kept</text>
         <text class="life-head" x="648" y="14" text-anchor="middle">active</text>
-        <g transform="translate(0,28)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">a1 · ended</text><text class="life-note" x="14" y="44">sessions: s1, on the line</text><text class="life-note" x="14" y="60">body deleted</text></g>
-        <g transform="translate(0,124)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">a2 · ended</text><text class="life-note" x="14" y="44">sessions: s2, on the line</text><text class="life-note" x="14" y="60">body deleted</text></g>
+        <g transform="translate(0,28)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">a1 · ended</text><text class="life-note" x="14" y="44">sessions: s1, on the line</text><text class="life-note" x="14" y="60">body deleted</text></g>
+        <g transform="translate(0,124)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">a2 · ended</text><text class="life-note" x="14" y="44">sessions: s2, on the line</text><text class="life-note" x="14" y="60">body deleted</text></g>
         <g transform="translate(280,28)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">p1 · ended</text><text class="life-note" x="14" y="44">from: a1 a2</text><text class="life-note" x="14" y="60">body in .pruned/</text></g>
         <g transform="translate(280,124)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">p2 · ended</text><text class="life-note" x="14" y="44">sessions: s3 s4</text><text class="life-note" x="14" y="60">body in .pruned/</text></g>
         <g transform="translate(560,76)"><rect class="life-box is-accent" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">n · active</text><text class="life-note" x="14" y="44">from: p1 p2</text><text class="life-note" x="14" y="60">sessions: none</text></g>
@@ -848,15 +851,14 @@ updated: &lt;now&gt;                   as today
     </div>
     <figcaption>Lineage at depth 1. The sessions live on the generation that read them; a note born of a merge names its
       parents instead, and the ledger keeps every generation's ids, digests and sessions: the rewrite lines, chart's
-      <code class="code">lineage</code> and the merge of notes are built, the dashed generation's deleted bodies (the
-      depth-1 sweep) are not.</figcaption>
+      <code class="code">lineage</code>; the oldest generation's bodies are deleted by release's depth-1 sweep.</figcaption>
   </figure>
   <ul class="stack claims" role="list">
-    <li><strong>depth 1</strong> — <code class="code">.pruned/</code> keeps each active note's direct parents and its own
-      previous version, what a rollback needs; when a note ends, its parents' bodies are deleted. A pruned note's body
-      stays <code class="code">$SANDMAN_RELEASE_DAYS</code>. A file the next weekly review reads (written after the latest
+    <li><strong>depth 1</strong> <span class="badge badge-ok">built</span> — <code class="code">.pruned/</code> keeps the newest copy of each active note's direct parents and of its own
+      previous version, what a rollback needs; when a note ends, its parents' bodies are deleted. A pruned or graduated
+      note's body stays <code class="code">$SANDMAN_RELEASE_DAYS</code> after its line. A file the next weekly review reads (written after the latest
       reflect line, or among the latest <code class="code">$SANDMAN_REFLECT_REPLAY</code> replies and the copies they name)
-      stays until it is not. Older generations are rewrite lines only.</li>
+      stays until it is not. A copy without an id is outside the lineage and stays. Older generations are rewrite lines only.</li>
     <li><strong>order</strong> <span class="badge badge-ok">built</span> — each consolidated and weekly
       review line carries <code class="code">"order":{"after":{"chars","eval"?,"notes"},"before":{…},"merges":n}</code>
       over the bank's or the topic's active notes, its traces among them, or the store's: their count, their files'
@@ -992,25 +994,30 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
   <pre class="snippet">{"op":"graduate","memories":[&lt;file&gt;,…],"topic","type":"knowledge"|"playbook","name","description","body","reason"}   consolidate's
 "propose":[{"artifact","line","note","replaces":str|null,"rung":2|3,"why"}]                                    the weekly review's</pre>
 
-  <h3 class="h3" id="cycle-release">Release</h3>
+  <h3 class="h3" id="cycle-release">Release <span class="badge badge-ok">built</span></h3>
   <ul class="stack claims" role="list">
-    <li><strong>held</strong> — a transcript while its session waits for encode, or an active note or a trace names it
-      (chart's <code class="code">sessions</code>). Unheld since the latest of its take, its encode line and the rewrite line that
-      ended the last note naming it.</li>
-    <li><strong>released</strong> — a tick job after settle, at most <code class="code">$SANDMAN_RELEASE_TICK</code> (20) a tick:
-      unheld for <code class="code">$SANDMAN_RELEASE_DAYS</code> (7), its archived file, <code class="code">-dir</code> and
-      <code class="code">.recent</code> pointer are deleted and a <code class="code">release</code> line written; the id stays in
-      the ledger and on ended notes' lines. The same job sweeps <code class="code">.pruned/</code> to depth 1. It runs only
-      while <code class="code">sandman check</code> passes, so a broken link never frees a transcript.</li>
+    <li><strong>transcript</strong> — a file <code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;uuid&gt;.jsonl</code>;
+      anything else under <code class="code">.archive/</code> (a tree made by hand) is neither released nor checked.</li>
+    <li><strong>held</strong> — a transcript while its session runs (a start later than its end), is held by a job, or
+      waits for encode (taken, no encode line since); with no ledger story, while the earlier sandman's
+      <code class="code">.recent</code> pointer has no <code class="code">dreamed</code>; or while an active note or a trace
+      names it (chart's <code class="code">sessions</code>), a note without an id anywhere in its text. Unheld since the
+      latest of its takes, its encode line and the rewrite line that last named it.</li>
+    <li><strong>released</strong> — a tick job after settle, at most <code class="code">$SANDMAN_RELEASE_TICK</code> (20) a tick,
+      oldest first, the stop flag checked before each: unheld for <code class="code">$SANDMAN_RELEASE_DAYS</code> (7), its archived files, <code class="code">-dir</code> and
+      <code class="code">.recent</code> pointer are deleted, then one <code class="code">release</code> line written; the id stays in
+      the ledger and on ended notes' lines. The same job sweeps <code class="code">.pruned/</code> to depth 1, as many
+      copies a tick. It runs only while <code class="code">sandman check</code> passes, so a broken link never frees a
+      transcript; invariant 6, the sweep's own backlog, is the one it does not wait on (it would wait forever). Held back,
+      it says so in <code class="code">serve.log</code> once a UTC day.</li>
   </ul>
 
   <h3 class="h3" id="cycle-check">check</h3>
-  <p class="notice notice-warn"><span>Built: <code class="code">check</code> and <code class="code">--fix</code> over
-    invariants 1–5. Not built: 6–7, <code class="code">--release</code>, and the clean line's held and released counts,
-    which come with release.</span></p>
-  <pre class="snippet">sandman check            # every violation, or check: &lt;n&gt; notes: clean; writes nothing
+  <pre class="snippet">sandman check            # every violation, or check: &lt;n&gt; notes, &lt;h&gt; held, &lt;r&gt; released: clean; writes nothing
 sandman check --fix      # what can be repaired mechanically, then check
-sandman check --release  # what the release job would delete now, with its bytes; writes nothing</pre>
+sandman check --release  # what the release job would delete now, with its bytes; writes nothing
+                         #   &lt;path&gt;: release · &lt;session&gt; · &lt;n&gt; bytes | &lt;path&gt;: sweep · &lt;n&gt; bytes, then
+                         #   release: &lt;t&gt; transcripts, &lt;c&gt; copies, &lt;n&gt; bytes[; held back: &lt;v&gt; violations]</pre>
   <ol class="stack" role="list">
     <li>every note has <code class="code">id:</code>, 12 lowercase hex, unique across memories, knowledge and traces;</li>
     <li>every note has a source (<code class="code">sessions</code>, <code class="code">from:</code> or <code class="code">origin: import|routine|hand</code>), and none of those keys is <code class="code">-</code> or empty;</li>
@@ -1018,7 +1025,7 @@ sandman check --release  # what the release job would delete now, with its bytes
     <li>every <code class="code">from:</code> id was ended by a rewrite line, and no active note's id was;</li>
     <li>every rewrite line has the shape above, an id ends at most once, and every <code class="code">to</code> id is active or ended by a later line;</li>
     <li><code class="code">.pruned/</code> holds no body past depth 1 and its grace;</li>
-    <li>no released transcript is on disk, and none an active note names is released.</li>
+    <li>no released transcript is on disk, and none an active note names is released (since its latest take).</li>
   </ol>
   <p>A violation is one stdout line, <code class="code">&lt;path&gt;: &lt;invariant n&gt;: &lt;detail&gt;</code>, the path as
     <code class="code">show</code> takes it, in reader order, and exit 1; the first note in reader order keeps a shared id.
@@ -1031,13 +1038,17 @@ sandman check --release  # what the release job would delete now, with its bytes
     <code class="code">{"at","fixed":n,"kind":"check","machine"}</code>, then checks. A bad word on a list, a
     <code class="code">strength:</code> and the ledger are left for a person. A rewrite line's violation reads
     <code class="code">ledger &lt;its at&gt;: 5: …</code>, after every note's. <code class="code">forget</code> keeps a rewrite
-    line, its session taken off the entries, so 4–5 hold through it.</p>
+    line, its session taken off the entries, so 4–5 hold through it. A 6 or a 7 reads
+    <code class="code">&lt;its .pruned/ or .archive/ path&gt;: 6: past depth 1 and its grace</code>,
+    <code class="code">… 7: released &lt;at&gt;, still on disk</code>, after the ledger's; a note's 7 is
+    <code class="code">names released &lt;session&gt;</code>. <code class="code">--release</code> prints every violation but 6s
+    first, exit 1 while any holds the job back.</p>
 
   <h3 class="h3" id="cycle-chart">chart</h3>
   <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]   built
 "ended":   [{"at","id","into":str|null,"op","path","sessions":[str],"state":"ended"}]   built
 "lineage": [{"at","from":&lt;id&gt;,"op","to":&lt;id&gt;}]                                     built
-"taken":   [{…,"held":bool,"released":str|null}]          a released one from its release line, state "released"</pre>
+"taken":   [{…,"held":bool,"released":str|null}]          built; a released one from its release line, state "released"</pre>
 </section>
 
 <section class="docs-section" id="next" data-component="next">
@@ -1072,7 +1083,7 @@ sandman check --release  # what the release job would delete now, with its bytes
     <li><strong>across banks</strong> <span class="badge badge-ok">built</span> — rehome, rung-1 graduation, <code class="code"># elsewhere</code>.</li>
     <li><strong>the weekly review</strong> <span class="badge badge-ok">built</span> — decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
       proposals as intentions, <code class="code">done</code> and <code class="code">drop</code> on them.</li>
-    <li><strong>release</strong> — the job, the depth-1 sweep, chart's <code class="code">held</code> and <code class="code">released</code>,
+    <li><strong>release</strong> <span class="badge badge-ok">built</span> — the job, the depth-1 sweep, chart's <code class="code">held</code> and <code class="code">released</code>,
       invariants 6–7, <code class="code">check --release</code>. The owner reads <code class="code">check --release</code> on the root
       before installing it: its first run releases every transcript no note names.</li>
     <li><strong>the recall evaluation</strong> — a score over <code class="code">eval/recall.jsonl</code>, the order measure's

@@ -158,6 +158,16 @@ const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
 
+/// What the release job would do now (docs/index.html#cycle-release).
+struct Plan {
+    /// The sessions with a transcript on disk that are held.
+    held: BTreeSet<String>,
+    /// Per unheld session past the grace, oldest first: its archived transcripts.
+    release: Vec<(String, Vec<PathBuf>)>,
+    /// The `.pruned/` copies past depth 1 and its grace.
+    sweep: Vec<PathBuf>,
+}
+
 /// Puts each `(job, guidance)` in force: the guidance in force first copied to
 /// `<root>/prompts/.history/<yyyy>/<mm>/<dd>/<HHMMSS>-<job>.md` (UTC, `dated`), then the new one
 /// written to `<root>/prompts/<job>.md` by temp + rename; the copies' paths under the root, by job.
@@ -254,6 +264,210 @@ fn append(path: &Path, text: &str) -> io::Result<()> {
             return (&file).write_all(text.as_bytes());
         }
     }
+}
+
+/// Every archived transcript, `(session, path, taken)`, by path: a file `stamped` reads.
+fn archived(root: &Path) -> Vec<(String, PathBuf, String)> {
+    tree(&root.join(".archive/claude"), 4)
+        .into_iter()
+        .filter(|path| path.is_file())
+        .filter_map(|path| {
+            let (session, at) = stamped(&path)?;
+            Some((session, path, at))
+        })
+        .collect()
+}
+
+/// The memory cycle's invariants over the root (docs/index.html#cycle-check), read only: per
+/// violation `(its invariant, "<path>: <n>: <detail>")`, the notes' in reader order, then each
+/// rewrite line's, then `.pruned/`'s and the archive's; and the counts of notes and of sessions
+/// released.
+fn audit(root: &Path, lines: &[Value], plan: &Plan) -> (usize, usize, Vec<(u8, String)>) {
+    let (all, mut ids, gone, takes) = (
+        every(root),
+        BTreeMap::new(),
+        released(lines),
+        archived(root),
+    );
+    // a session released since its latest take
+    let freed: BTreeSet<&str> = gone
+        .iter()
+        .filter(|pair| {
+            !takes
+                .iter()
+                .any(|take| take.0 == *pair.0 && take.2 > pair.1.0)
+        })
+        .map(|pair| pair.0.as_str())
+        .collect();
+    let ends = ended(lines);
+    let over: BTreeSet<&str> = ends.iter().filter_map(|end| end.2["id"].as_str()).collect();
+    let mut found: Vec<(u8, String)> = all
+        .iter()
+        .flat_map(|note| {
+            let (path, field) = (text(&note["path"]), |key: &str| {
+                note.get(key).and_then(Value::as_str)
+            });
+            let id = field("id").unwrap_or_default();
+            let twin = ids.get(id).copied();
+            if twin.is_none() {
+                let _: Option<&str> = ids.insert(id, path);
+            }
+            let listed = |key: &str| -> Vec<&str> {
+                field(key).unwrap_or_default().split_whitespace().collect()
+            };
+            let unsorted = |key: &str| {
+                listed(key)
+                    .windows(2)
+                    .any(|pair| matches!(pair, [left, right] if left >= right))
+                    .then(|| format!("{key} is not sorted once"))
+            };
+            let origin = field("origin").filter(|value| !["", "-"].contains(value));
+            [
+                (1u8, field("id").is_none().then(|| "no id".to_owned())),
+                (
+                    1,
+                    (field("id").is_some() && !hexid(id))
+                        .then(|| format!("id {id} is not 12 lowercase hex")),
+                ),
+                (
+                    1,
+                    twin.filter(|_| hexid(id))
+                        .map(|first| format!("id {id} is also {first}'s")),
+                ),
+            ]
+            .into_iter()
+            .chain(["from", "origin", "sessions"].map(|key| {
+                let bare = field(key).filter(|value| ["", "-"].contains(value));
+                (2, bare.map(|value| format!("{key} is {value:?}")))
+            }))
+            .chain([
+                (
+                    2,
+                    origin
+                        .filter(|value| !ORIGINS.contains(value))
+                        .map(|value| format!("origin {value} is not hand, import or routine")),
+                ),
+                (
+                    2,
+                    (lineage([note]).is_empty()
+                        && words(field("from")).is_empty()
+                        && !origin.is_some_and(|value| ORIGINS.contains(&value)))
+                    .then(|| "no source".to_owned()),
+                ),
+                (
+                    3,
+                    listed("from")
+                        .into_iter()
+                        .find(|word| !hexid(word))
+                        .map(|word| format!("from: {word} is not an id")),
+                ),
+                (3, unsorted("from")),
+                (
+                    3,
+                    listed("sessions")
+                        .into_iter()
+                        .find(|word| !uuid(word))
+                        .map(|word| format!("sessions: {word} is not a session id")),
+                ),
+                (3, unsorted("sessions")),
+                (
+                    3,
+                    field("strength").map(|_| "strength is counted, never stored".to_owned()),
+                ),
+                (
+                    4,
+                    words(field("from"))
+                        .into_iter()
+                        .find(|parent| !over.contains(parent))
+                        .map(|parent| format!("from {parent} was never ended")),
+                ),
+                (4, over.contains(id).then(|| format!("id {id} was ended"))),
+                (
+                    7,
+                    lineage([note])
+                        .into_iter()
+                        .find(|session| freed.contains(session))
+                        .map(|session| format!("names released {session}")),
+                ),
+            ])
+            .filter_map(|(rule, detail)| Some((rule, format!("{path}: {rule}: {}", detail?))))
+            .collect::<Vec<_>>()
+        })
+        .collect();
+    // then each rewrite line: its shape, an id ended once, its `to` still or later accounted for
+    let active: BTreeSet<&str> = all.iter().filter_map(|note| note["id"].as_str()).collect();
+    let mut counted = BTreeSet::new();
+    let twice: Vec<(usize, &str)> = ends
+        .iter()
+        .filter_map(|&(at, _, entry)| {
+            let id = text(&entry["id"]);
+            (!counted.insert(id)).then_some((at, id))
+        })
+        .collect();
+    for (at, line) in lines
+        .iter()
+        .enumerate()
+        .filter(|pair| pair.1["kind"] == "rewrite")
+    {
+        let (maybe, to) = (
+            |value: &Value| value.is_null() || value.is_string(),
+            &line["to"],
+        );
+        let shaped = line["from"].as_array().is_some_and(|entries| {
+            entries.iter().all(|entry| {
+                entry["digest"].is_string()
+                    && maybe(&entry["id"])
+                    && entry["path"].is_string()
+                    && entry["sessions"]
+                        .as_array()
+                        .is_some_and(|held| held.iter().all(Value::is_string))
+            })
+        }) && OPS.contains(&text(&line["op"]))
+            && maybe(&line["model"])
+            && maybe(&line["reason"])
+            && (to.is_null()
+                || (to["id"].is_string() && to["path"].is_string())
+                || to["artifact"].is_string());
+        let lost = to["id"].as_str().filter(|into| {
+            !active.contains(into)
+                && !ends
+                    .iter()
+                    .any(|&(later, _, entry)| later > at && entry["id"] == *into)
+        });
+        found.extend(
+            [
+                (!shaped).then(|| "not a rewrite line".to_owned()),
+                lost.map(|into| format!("to {into} is neither active nor ended later")),
+            ]
+            .into_iter()
+            .chain(
+                twice
+                    .iter()
+                    .filter(|pair| pair.0 == at)
+                    .map(|pair| Some(format!("id {} ended again", pair.1))),
+            )
+            .flatten()
+            .map(|detail| (5, format!("ledger {}: 5: {detail}", text(&line["at"])))),
+        );
+    }
+    // release's: no copy past depth 1 and its grace, no released transcript on disk
+    found.extend(plan.sweep.iter().map(|copy| {
+        (
+            6,
+            format!("{}: 6: past depth 1 and its grace", shown(root, copy)),
+        )
+    }));
+    found.extend(takes.iter().filter_map(|take| {
+        let when = &gone.get(&take.0).filter(|release| release.0 >= take.2)?.0;
+        Some((
+            7,
+            format!(
+                "{}: 7: released {when}, still on disk",
+                shown(root, &take.1)
+            ),
+        ))
+    }));
+    (all.len(), freed.len(), found)
 }
 
 /// The common git dir of the linked worktree at `dir`: its `.git` a file naming
@@ -424,13 +638,9 @@ fn end(
             let ended = utc(fs::metadata(&path)?.modified()?);
             archived.parent().map_or(Ok(()), fs::create_dir_all)?;
             fs::rename(&path, &archived)?;
-            let sidecar = path.with_extension("");
-            if sidecar.is_dir() {
-                let beside = format!(
-                    "{}-dir",
-                    archived.to_string_lossy().trim_end_matches(".jsonl")
-                );
-                fs::rename(sidecar, beside)?;
+            let session_dir = path.with_extension("");
+            if session_dir.is_dir() {
+                fs::rename(session_dir, sidecar(&archived))?;
             }
             let lines = jsonl(&archived);
             let title = lines
@@ -839,6 +1049,15 @@ fn labels(home: &Path, claude: &Path) -> (PathBuf, Vec<(String, String)>, impl F
     (grove, repos, label)
 }
 
+/// A file's bytes, a directory's files' summed; 0 for what is not there.
+fn weight(path: &Path) -> u64 {
+    if path.is_dir() {
+        tree(path, 1).iter().map(|kid| weight(kid)).sum()
+    } else {
+        fs::metadata(path).map_or(0, |meta| meta.len())
+    }
+}
+
 /// Every line of `<root>/ledger/*/*/*.jsonl` that parses, oldest file first; a staged `.` file
 /// skipped.
 fn ledger(root: &Path) -> Vec<Value> {
@@ -1055,6 +1274,170 @@ fn place<'line>(lines: &'line [Value], fallback: &'line Value) -> Option<&'line 
         .find(|dir| !dir.is_empty() && !dir.contains(char::is_control))
 }
 
+/// Release's plan over the ledger's `lines` (docs/index.html#cycle-release). A transcript is held
+/// while its session runs, is held by a job, waits for encode (or, with no ledger story, for the
+/// earlier sandman's dream), or a note names it (a note without an id: anywhere in its text);
+/// unheld, since the latest of its takes, its encode line and the rewrite line that last named it,
+/// it goes past `$SANDMAN_RELEASE_DAYS` (7). `.pruned/` keeps, past the latest reflect line's
+/// files and those the next review replays, the newest copy of each active note, of each active
+/// note's parent and of a note pruned or graduated within the grace; a copy without an id stays.
+fn plan(root: &Path, lines: &[Value]) -> Plan {
+    let days = setting("SANDMAN_RELEASE_DAYS", 7u64).saturating_mul(86_400);
+    let cutoff = utc(SystemTime::now()
+        .checked_sub(Duration::from_secs(days))
+        .unwrap_or(UNIX_EPOCH));
+    let (story, all) = (sessions(lines), every(root));
+    let named = lineage(&all);
+    let unplaced: Vec<&str> = all
+        .iter()
+        .filter(|note| !hexid(text(&note["id"])))
+        .map(|note| text(&note["text"]))
+        .collect();
+    // the latest line each session or id was last ended on, a release's aside
+    let (mut last, mut ends): (BTreeMap<&str, &str>, BTreeMap<&str, &str>) = Default::default();
+    for line in lines
+        .iter()
+        .filter(|line| line["kind"] == "rewrite" && line["op"] != "release")
+    {
+        let at = text(&line["at"]);
+        for entry in line["from"].as_array().into_iter().flatten() {
+            for session in entry["sessions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                let _: Option<&str> = last.insert(session, at);
+            }
+            if !line["to"]["id"].is_string() {
+                let _: Option<&str> = ends.insert(text(&entry["id"]), at);
+            }
+        }
+    }
+    let mut takes: BTreeMap<String, Vec<(PathBuf, String)>> = BTreeMap::new();
+    for (session, path, at) in archived(root) {
+        takes.entry(session).or_default().push((path, at));
+    }
+    let (mut held, mut release) = (BTreeSet::new(), Vec::new());
+    for (session, files) in takes {
+        let waiting = story.get(&session).map_or_else(
+            || {
+                fs::read_to_string(root.join(format!("memories/.recent/{session}.json")))
+                    .ok()
+                    .and_then(|pointer| serde_json::from_str::<Value>(&pointer).ok())
+                    .is_some_and(|pointer| pointer.is_object() && pointer["dreamed"].is_null())
+            },
+            |marks| {
+                marks[3]["at"].as_str() > marks[1]["at"].as_str()
+                    || marks[1]["outcome"] == "held"
+                    || (marks[1]["outcome"] == "taken"
+                        && marks[2]["at"].as_str() < marks[1]["at"].as_str())
+            },
+        );
+        let since = files
+            .iter()
+            .map(|file| file.1.as_str())
+            .chain(
+                story
+                    .get(&session)
+                    .and_then(|marks| marks[2]["at"].as_str()),
+            )
+            .chain(last.get(session.as_str()).copied())
+            .max()
+            .unwrap_or_default()
+            .to_owned();
+        if waiting
+            || named.contains(session.as_str())
+            || unplaced
+                .iter()
+                .any(|whole| whole.contains(session.as_str()))
+        {
+            let _: bool = held.insert(session);
+            continue;
+        }
+        if since <= cutoff {
+            release.push((
+                since,
+                session,
+                files.into_iter().map(|file| file.0).collect(),
+            ));
+        }
+    }
+    release.sort();
+    // the sweep: the next review's files stay, then the newest copy of each note in lineage
+    let review = lines
+        .iter()
+        .rev()
+        .find(|line| line["kind"] == "reflect")
+        .and_then(|line| line["at"].as_str());
+    let copies: Vec<PathBuf> = tree(&root.join(".pruned"), 4)
+        .into_iter()
+        .filter(|path| path.is_file())
+        .collect();
+    let replies: Vec<&PathBuf> = copies
+        .iter()
+        .filter(|path| name(path).ends_with("-ops.json"))
+        .collect();
+    let mut next: BTreeSet<PathBuf> = BTreeSet::new();
+    for reply in replies
+        .iter()
+        .rev()
+        .take(setting("SANDMAN_REFLECT_REPLAY", 3))
+    {
+        let stem = name(reply).strip_suffix("ops.json").unwrap_or_default();
+        let ops: Value = serde_json::from_str(&fs::read_to_string(reply).unwrap_or_default())
+            .unwrap_or_default();
+        next.extend(ops["ops"].as_array().into_iter().flatten().flat_map(|op| {
+            ["trace", "memory"]
+                .map(|field| reply.with_file_name(format!("{stem}{}", text(&op[field]))))
+        }));
+        let _: bool = next.insert((*reply).clone());
+    }
+    let ids: BTreeSet<&str> = all.iter().filter_map(|note| note["id"].as_str()).collect();
+    let parents = words(all.iter().map(|note| text(&note["from"])));
+    let bodies: Vec<(&PathBuf, Value)> = copies
+        .iter()
+        .filter(|path| path.extension() == Some("md".as_ref()))
+        .map(|path| {
+            (
+                path,
+                read(json!({}), fs::read_to_string(path).unwrap_or_default()),
+            )
+        })
+        .collect();
+    let newest: BTreeMap<&str, &PathBuf> = bodies
+        .iter()
+        .map(|body| (text(&body.1["id"]), body.0))
+        .collect();
+    let sweep = copies
+        .iter()
+        .filter(|path| {
+            let fresh = fs::metadata(path)
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|time| Some(utc(time).as_str()) > review);
+            let body = bodies
+                .iter()
+                .find(|body| body.0 == *path)
+                .map(|body| text(&body.1["id"]));
+            !(fresh || next.contains(*path))
+                && (name(path).ends_with("-ops.json")
+                    || body.is_some_and(|id| {
+                        hexid(id)
+                            && !(newest.get(id) == Some(path)
+                                && (ids.contains(id)
+                                    || parents.contains(id)
+                                    || ends.get(id).is_some_and(|at| *at > cutoff.as_str())))
+                    }))
+        })
+        .cloned()
+        .collect();
+    Plan {
+        held,
+        release: release.into_iter().map(|row| (row.1, row.2)).collect(),
+        sweep,
+    }
+}
+
 /// Every note recall reads, muted ones dropped: the always-set (a memory's or a memory trace's
 /// `user` or pinned, never knowledge), then the candidates, each in reader order.
 fn pool(root: &Path) -> (Vec<Value>, Vec<Value>) {
@@ -1227,6 +1610,31 @@ fn reap(child: &mut Child, begun: Instant, limit: Duration) -> io::Result<ExitSt
         }
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Each released session's latest `release` line: its `at` and that line's entries for it.
+fn released(lines: &[Value]) -> BTreeMap<String, (String, Vec<Value>)> {
+    let mut gone = BTreeMap::new();
+    for line in lines
+        .iter()
+        .filter(|line| line["kind"] == "rewrite" && line["op"] == "release")
+    {
+        for entry in line["from"].as_array().into_iter().flatten() {
+            for session in entry["sessions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                let held: &mut (String, Vec<Value>) = gone.entry(session.to_owned()).or_default();
+                if held.0 != text(&line["at"]) {
+                    *held = (text(&line["at"]).to_owned(), Vec::new());
+                }
+                held.1.push(entry.clone());
+            }
+        }
+    }
+    gone
 }
 
 /// A command's reply: `<status>: <stderr>` unless it exited 0, else the object from its stdout's
@@ -1561,6 +1969,22 @@ fn shelf(root: &Path, bank: &str) -> (PathBuf, Vec<Value>) {
     (root.join(tier).join(at), held)
 }
 
+/// `path` under the root, as `show` and `check` print it.
+fn shown(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// An archived transcript's sidecar, the session's directory moved beside it: its stem + `-dir`.
+fn sidecar(archived: &Path) -> PathBuf {
+    PathBuf::from(format!(
+        "{}-dir",
+        archived.to_string_lossy().trim_end_matches(".jsonl")
+    ))
+}
+
 /// A free `<dir>/<type>_<slug>.md` for a note named `name`, claimed: the bank format's slug
 /// (lowercase, non-alphanumeric runs `_`, trimmed, 60 characters), `_2`, `_3`… on a clash.
 fn slot(dir: &Path, kind: &str, name: &str, claimed: &mut BTreeSet<PathBuf>) -> PathBuf {
@@ -1662,6 +2086,31 @@ fn stack<'note>(
 /// `.<file>.<pid>` beside `path`: a temp name every reader skips.
 fn staged(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{}.{}", name(path), id()))
+}
+
+/// An archived transcript's session and UTC take time from its path,
+/// `<yyyy>/<mm>/<dd>/<HHMMSS>-…-<uuid>.jsonl` (under `.archive/claude/`, where `archived` looks);
+/// none for any other shape.
+fn stamped(path: &Path) -> Option<(String, String)> {
+    let stem = name(path).strip_suffix(".jsonl")?;
+    let (head, session) = stem.split_at_checked(stem.len().checked_sub(36)?)?;
+    let digits = |part: &str, count: usize| {
+        part.len() == count && part.bytes().all(|byte| byte.is_ascii_digit())
+    };
+    let [dd, mm, yyyy] = [1, 2, 3].map(|up| path.ancestors().nth(up).map_or("", name));
+    (head.len() > 7
+        && head.ends_with('-')
+        && head.get(6..7) == Some("-")
+        && [(head.get(..6)?, 6), (dd, 2), (mm, 2), (yyyy, 4)]
+            .iter()
+            .all(|part| digits(part.0, part.1))
+        && uuid(session))
+    .then_some(())?;
+    let clock = [head.get(..2), head.get(2..4), head.get(4..6)].map(Option::unwrap_or_default);
+    Some((
+        session.to_owned(),
+        format!("{yyyy}-{mm}-{dd}T{}Z", clock.join(":")),
+    ))
 }
 
 /// A note's strength on day `now`, counted from the ledger's `lines`, never stored
@@ -2049,176 +2498,76 @@ fn main() -> ExitCode {
                 record(&root, &mut json!({"fixed": fixed, "kind": "check"}))
             };
             // the invariants, read only: per note in reader order, `<path>: <n>: <detail>`
-            let audit = || -> io::Result<(usize, Vec<String>)> {
+            let checked = || -> io::Result<_> {
                 let _: Option<()> = args
                     .iter()
                     .any(|arg| arg == "--fix")
                     .then(fix)
                     .transpose()?;
-                let (all, mut ids, lines) = (every(&root), BTreeMap::new(), ledger(&root));
-                let ends = ended(&lines);
-                let over: BTreeSet<&str> =
-                    ends.iter().filter_map(|end| end.2["id"].as_str()).collect();
-                let mut found: Vec<String> = all
-                    .iter()
-                    .flat_map(|note| {
-                        let (path, field) = (text(&note["path"]), |key: &str| {
-                            note.get(key).and_then(Value::as_str)
-                        });
-                        let id = field("id").unwrap_or_default();
-                        let twin = ids.get(id).copied();
-                        if twin.is_none() {
-                            let _: Option<&str> = ids.insert(id, path);
-                        }
-                        let listed = |key: &str| -> Vec<&str> {
-                            field(key).unwrap_or_default().split_whitespace().collect()
-                        };
-                        let unsorted = |key: &str| {
-                            listed(key)
-                                .windows(2)
-                                .any(|pair| matches!(pair, [left, right] if left >= right))
-                                .then(|| format!("{key} is not sorted once"))
-                        };
-                        let origin = field("origin").filter(|value| !["", "-"].contains(value));
-                        [
-                            (1u8, field("id").is_none().then(|| "no id".to_owned())),
-                            (
-                                1,
-                                (field("id").is_some() && !hexid(id))
-                                    .then(|| format!("id {id} is not 12 lowercase hex")),
-                            ),
-                            (
-                                1,
-                                twin.filter(|_| hexid(id))
-                                    .map(|first| format!("id {id} is also {first}'s")),
-                            ),
-                        ]
-                        .into_iter()
-                        .chain(["from", "origin", "sessions"].map(|key| {
-                            let bare = field(key).filter(|value| ["", "-"].contains(value));
-                            (2, bare.map(|value| format!("{key} is {value:?}")))
-                        }))
-                        .chain([
-                            (
-                                2,
-                                origin
-                                    .filter(|value| !ORIGINS.contains(value))
-                                    .map(|value| {
-                                        format!("origin {value} is not hand, import or routine")
-                                    }),
-                            ),
-                            (
-                                2,
-                                (lineage([note]).is_empty()
-                                    && words(field("from")).is_empty()
-                                    && !origin.is_some_and(|value| ORIGINS.contains(&value)))
-                                .then(|| "no source".to_owned()),
-                            ),
-                            (
-                                3,
-                                listed("from")
-                                    .into_iter()
-                                    .find(|word| !hexid(word))
-                                    .map(|word| format!("from: {word} is not an id")),
-                            ),
-                            (3, unsorted("from")),
-                            (
-                                3,
-                                listed("sessions")
-                                    .into_iter()
-                                    .find(|word| !uuid(word))
-                                    .map(|word| format!("sessions: {word} is not a session id")),
-                            ),
-                            (3, unsorted("sessions")),
-                            (
-                                3,
-                                field("strength")
-                                    .map(|_| "strength is counted, never stored".to_owned()),
-                            ),
-                            (
-                                4,
-                                words(field("from"))
-                                    .into_iter()
-                                    .find(|parent| !over.contains(parent))
-                                    .map(|parent| format!("from {parent} was never ended")),
-                            ),
-                            (4, over.contains(id).then(|| format!("id {id} was ended"))),
-                        ])
-                        .filter_map(|(rule, detail)| Some(format!("{path}: {rule}: {}", detail?)))
-                        .collect::<Vec<_>>()
-                    })
-                    .collect();
-                // then each rewrite line: its shape, an id ended once, its `to` still or later accounted for
-                let active: BTreeSet<&str> =
-                    all.iter().filter_map(|note| note["id"].as_str()).collect();
-                let mut counted = BTreeSet::new();
-                let twice: Vec<(usize, &str)> = ends
-                    .iter()
-                    .filter_map(|&(at, _, entry)| {
-                        let id = text(&entry["id"]);
-                        (!counted.insert(id)).then_some((at, id))
-                    })
-                    .collect();
-                for (at, line) in lines
-                    .iter()
-                    .enumerate()
-                    .filter(|pair| pair.1["kind"] == "rewrite")
-                {
-                    let (maybe, to) = (
-                        |value: &Value| value.is_null() || value.is_string(),
-                        &line["to"],
-                    );
-                    let shaped = line["from"].as_array().is_some_and(|entries| {
-                        entries.iter().all(|entry| {
-                            entry["digest"].is_string()
-                                && maybe(&entry["id"])
-                                && entry["path"].is_string()
-                                && entry["sessions"]
-                                    .as_array()
-                                    .is_some_and(|held| held.iter().all(Value::is_string))
-                        })
-                    }) && OPS.contains(&text(&line["op"]))
-                        && maybe(&line["model"])
-                        && maybe(&line["reason"])
-                        && (to.is_null()
-                            || (to["id"].is_string() && to["path"].is_string())
-                            || to["artifact"].is_string());
-                    let lost = to["id"].as_str().filter(|into| {
-                        !active.contains(into)
-                            && !ends
-                                .iter()
-                                .any(|&(later, _, entry)| later > at && entry["id"] == *into)
-                    });
-                    found.extend(
-                        [
-                            (!shaped).then(|| "not a rewrite line".to_owned()),
-                            lost.map(|into| format!("to {into} is neither active nor ended later")),
-                        ]
-                        .into_iter()
-                        .chain(
-                            twice
-                                .iter()
-                                .filter(|pair| pair.0 == at)
-                                .map(|pair| Some(format!("id {} ended again", pair.1))),
-                        )
-                        .flatten()
-                        .map(|detail| format!("ledger {}: 5: {detail}", text(&line["at"]))),
-                    );
-                }
-                Ok((all.len(), found))
+                let lines = ledger(&root);
+                let planned = plan(&root, &lines);
+                Ok((audit(&root, &lines, &planned), planned))
             };
-            audit().map_or_else(
+            // `--release`: what the job would delete now, every violation but its own backlog's (6)
+            // holding it back; else every violation, or the clean line
+            let releasing = args.iter().any(|arg| arg == "--release");
+            checked().map_or_else(
                 |error| {
                     eprintln!("sandman check: {error}");
                     ExitCode::FAILURE
                 },
-                |(count, found)| {
-                    if found.is_empty() {
-                        println!("check: {count} notes: clean");
-                    } else {
-                        println!("{}", found.join("\n"));
-                    }
-                    ExitCode::from(u8::from(!found.is_empty()))
+                |((count, freed, found), planned)| {
+                    let holding: Vec<String> = found
+                        .into_iter()
+                        .filter(|violation| !releasing || violation.0 != 6)
+                        .map(|violation| violation.1)
+                        .collect();
+                    let rows: Vec<(String, u64)> = planned
+                        .release
+                        .iter()
+                        .flat_map(|pair| {
+                            pair.1.iter().map(|file| {
+                                (
+                                    format!("{}: release \u{b7} {}", shown(&root, file), pair.0),
+                                    weight(file).saturating_add(weight(&sidecar(file))),
+                                )
+                            })
+                        })
+                        .chain(
+                            planned.sweep.iter().map(|copy| {
+                                (format!("{}: sweep", shown(&root, copy)), weight(copy))
+                            }),
+                        )
+                        .filter(|_| releasing)
+                        .collect();
+                    let back = format!("; held back: {} violations", holding.len());
+                    let summary = releasing.then(|| {
+                        format!(
+                            "release: {} transcripts, {} copies, {} bytes{}",
+                            rows.len().saturating_sub(planned.sweep.len()),
+                            planned.sweep.len(),
+                            rows.iter().map(|row| row.1).sum::<u64>(),
+                            ["", back.as_str()][usize::from(!holding.is_empty())]
+                        )
+                    });
+                    let clean = (!releasing && holding.is_empty()).then(|| {
+                        format!(
+                            "check: {count} notes, {} held, {freed} released: clean",
+                            planned.held.len()
+                        )
+                    });
+                    let out: Vec<String> = holding
+                        .iter()
+                        .cloned()
+                        .chain(
+                            rows.iter()
+                                .map(|row| format!("{} \u{b7} {} bytes", row.0, row.1)),
+                        )
+                        .chain(summary)
+                        .chain(clean)
+                        .collect();
+                    println!("{}", out.join("\n"));
+                    ExitCode::from(u8::from(!holding.is_empty()))
                 },
             )
         }
@@ -2261,26 +2610,10 @@ fn main() -> ExitCode {
                     })
                 })
                 .collect();
+            // the archive's, the latest per session, held or not; then each session released since
+            let holds = plan(&root, &lines).held;
             let mut taken: BTreeMap<String, Value> = BTreeMap::new();
-            for path in tree(&root.join(".archive/claude"), 4) {
-                let Some((head, session)) = name(&path)
-                    .strip_suffix(".jsonl")
-                    .and_then(|stem| stem.split_at_checked(stem.len().checked_sub(36)?))
-                else {
-                    continue;
-                };
-                let day: Vec<&str> = path.ancestors().skip(1).take(3).map(name).collect();
-                let (&[dd, mm, yyyy], true) = (
-                    day.as_slice(),
-                    head.len() > 7
-                        && head.ends_with('-')
-                        && head.get(6..7) == Some("-")
-                        && head.bytes().take(6).all(|byte| byte.is_ascii_digit())
-                        && uuid(session)
-                        && path.is_file(),
-                ) else {
-                    continue;
-                };
+            for (session, path, at) in archived(&root) {
                 let pointer =
                     fs::read_to_string(root.join(format!("memories/.recent/{session}.json")))
                         .ok()
@@ -2294,17 +2627,35 @@ fn main() -> ExitCode {
                 } else {
                     "waiting"
                 };
-                let clock =
-                    [head.get(..2), head.get(2..4), head.get(4..6)].map(Option::unwrap_or_default);
-                drop(taken.insert(session.to_owned(), json!({
+                let named = memories.iter().chain(&knowledge).filter(|row| {
+                    row["sessions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|id| *id == session.as_str())
+                });
+                drop(taken.insert(session.clone(), json!({
                     "bytes": fs::metadata(&path).map_or(0, |meta| meta.len()), "cwd": pointer["cwd"],
-                    "dreamed": pointer["dreamed"],
+                    "dreamed": pointer["dreamed"], "held": holds.contains(&session),
                     "highlights": pointer["highlights"].as_array().map_or(0, Vec::len),
-                    "memories": memories.iter().chain(&knowledge).filter(|row| row["sessions"].as_array().into_iter().flatten().any(|id| *id == session)).count(),
-                    "session": session, "state": state,
-                    "taken": format!("{yyyy}-{mm}-{dd}T{}Z", clock.join(":")), "title": pointer["title"],
+                    "memories": named.count(), "released": null, "session": session, "state": state, "taken": at, "title": pointer["title"],
                 })));
             }
+            let freed: Vec<(String, Value)> = released(&lines)
+                .into_iter()
+                .filter(|pair| !taken.contains_key(&pair.0))
+                .filter_map(|(session, (at, entries))| {
+                    let first = entries.first().map_or("", |entry| text(&entry["path"]));
+                    let took = stamped(Path::new(first))?.1;
+                    let bytes: u64 = entries.iter().filter_map(|entry| entry["bytes"].as_u64()).sum();
+                    let row = json!({
+                        "bytes": bytes, "cwd": null, "dreamed": null, "held": false, "highlights": 0u8, "memories": 0u8,
+                        "released": at, "session": session, "state": "released", "taken": took, "title": null,
+                    });
+                    Some((session, row))
+                })
+                .collect();
+            taken.extend(freed);
             // the notes rewrite lines ended, and each edge from a parent to the note it went into
             let ends = ended(&lines);
             let gone: Vec<Value> = ends
@@ -3636,6 +3987,8 @@ fn main() -> ExitCode {
                 settle(line);
             };
             let ticker = thread::spawn(move || {
+                // the UTC day release last said it was held back, so it says so once a day
+                let mut gated = String::new();
                 while STOP.get().is_none() {
                     thread::park_timeout(tick);
                     let lines = ledger(&data);
@@ -3762,6 +4115,72 @@ fn main() -> ExitCode {
                                 None,
                             ),
                         );
+                    }
+                    // release, after settle, only while check holds but for its own backlog (6): at
+                    // most `$SANDMAN_RELEASE_TICK` transcripts and as many copies, the stop flag
+                    // checked before each; the file goes before its line
+                    let planned = plan(&data, &lines);
+                    let allotted = setting("SANDMAN_RELEASE_TICK", 20usize);
+                    let blocking = audit(&data, &lines, &planned)
+                        .2
+                        .iter()
+                        .filter(|found| found.0 != 6)
+                        .count();
+                    let utc_day = utc(SystemTime::now())
+                        .get(..10)
+                        .unwrap_or_default()
+                        .to_owned();
+                    let stuck = blocking > 0
+                        && gated != utc_day
+                        && !(planned.release.is_empty() && planned.sweep.is_empty());
+                    let _: Option<()> = stuck.then(|| {
+                        let held = io::Error::other(format!(
+                            "check: {blocking} violations, nothing released"
+                        ));
+                        logged("release", "event", "release", Err(held));
+                        gated = utc_day;
+                    });
+                    for (session, files) in planned
+                        .release
+                        .iter()
+                        .take(allotted)
+                        .filter(|_| blocking == 0)
+                        .take_while(|_| STOP.get().is_none())
+                        .map(|pair| (&pair.0, &pair.1))
+                    {
+                        let free = || -> io::Result<Value> {
+                            let from = files
+                                .iter()
+                                .map(|file| {
+                                    let whole = String::from_utf8_lossy(&fs::read(file)?).into_owned();
+                                    let bytes = weight(file).saturating_add(weight(&sidecar(file)));
+                                    Ok(json!({"bytes": bytes, "digest": sha256(&whole), "id": null, "path": shown(&data, file), "sessions": [session]}))
+                                })
+                                .collect::<io::Result<Vec<Value>>>()?;
+                            for file in files {
+                                fs::remove_file(file)?;
+                                drop(fs::remove_dir_all(sidecar(file)));
+                                drop(file.parent().map(fs::remove_dir));
+                            }
+                            drop(fs::remove_file(
+                                data.join(format!("memories/.recent/{session}.json")),
+                            ));
+                            let mut line = json!({"from": from, "kind": "rewrite", "model": null, "op": "release", "reason": null, "to": null});
+                            record(&data, &mut line).map(|()| line)
+                        };
+                        logged("release", "session", session, free());
+                    }
+                    let swept = planned
+                        .sweep
+                        .iter()
+                        .take(allotted)
+                        .filter(|copy| {
+                            blocking == 0 && STOP.get().is_none() && fs::remove_file(copy).is_ok()
+                        })
+                        .map(|copy| drop(copy.parent().map(fs::remove_dir)))
+                        .count();
+                    if swept > 0 {
+                        logged("sweep", "event", "sweep", Ok(json!({"swept": swept})));
                     }
                     let oldest = story
                         .values()

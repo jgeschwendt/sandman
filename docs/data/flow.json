@@ -1,12 +1,16 @@
 {
   "edges": [
     {"from": "after", "label": "sandman serve encodes it, one episode at a time", "to": "encode"},
+    {"from": "after", "label": "sandman serve releases a transcript no note holds once it has been unheld for a week, while check passes", "to": "release"},
     {"from": "archive", "label": "taken", "to": "chart"},
+    {"from": "archive", "label": "release's plan: what is held, what goes (check --release)", "to": "check"},
     {"from": "archive", "label": "③ reads the transcript", "to": "encode"},
     {"from": "archive", "label": "⑤ recent episodes, replayed", "to": "reflect"},
     {"from": "banks", "label": "memories", "to": "chart"},
     {"from": "banks", "label": "④ the bank's memories, whole within the budget, the rest listed", "to": "consolidate"},
     {"from": "chart", "label": "one JSON object on stdout", "to": "bifrost"},
+    {"from": "check", "label": "--fix: ids and sources mended, each note by temp + rename", "to": "banks"},
+    {"from": "check", "label": "--fix: one check line", "to": "ledger"},
     {"from": "consolidate", "label": "④ keeps a trace as a memory, merges one into a memory", "to": "banks"},
     {"from": "consolidate", "label": "④ folds a topic's traces into its knowledge pages and playbooks", "to": "knowledge"},
     {"from": "consolidate", "label": "④ the consolidate, with its outcome and counts", "to": "ledger"},
@@ -14,6 +18,7 @@
     {"from": "defer", "label": "one intention, written, pushed or closed", "to": "intentions"},
     {"from": "defer", "label": "the defer, push, done or drop", "to": "ledger"},
     {"from": "defer", "label": "done on a graduation's proposal: the note moved aside, a graduate line", "to": "pruned"},
+    {"from": "during", "label": "the owner runs sandman check (--fix, --release)", "to": "check"},
     {"from": "during", "label": "the agent runs sandman defer when the person puts work off", "to": "defer"},
     {"from": "during", "label": "the /delete skill or bridge's forget button runs sandman forget, in-session and again once the CLI exits", "to": "forget"},
     {"from": "during", "label": "the subether mod runs sandman mark: a guard per denied tool call", "to": "mark"},
@@ -37,6 +42,7 @@
     {"from": "knowledge", "label": "④ the topic's pages, whole within the budget, the rest listed", "to": "consolidate"},
     {"from": "later", "label": "sandman serve consolidates a quiet bank's traces when no episode waits", "to": "consolidate"},
     {"from": "ledger", "label": "active, guards", "to": "chart"},
+    {"from": "ledger", "label": "rewrite lines held to invariants 4–5, releases to 7", "to": "check"},
     {"from": "ledger", "label": "⑤ the runs since the last review, remembers, recall's sends and reads", "to": "reflect"},
     {"from": "machine", "label": "the machine id", "to": "chart"},
     {"from": "mark", "label": "a call or a prompt: one line", "to": "ledger"},
@@ -50,6 +56,9 @@
     {"from": "reflect", "label": "⑤ the review, with its outcome and replay counts", "to": "ledger"},
     {"from": "reflect", "label": "⑤ a guidance judged no worse; the one it replaces under .history/", "to": "prompts"},
     {"from": "reflect", "label": "⑤ decay: a note under the strength floor moved aside, a prune line", "to": "pruned"},
+    {"from": "release", "label": "deletes the transcript, its sidecar and its pointer", "to": "archive"},
+    {"from": "release", "label": "a release line per session", "to": "ledger"},
+    {"from": "release", "label": "sweeps to depth 1: a copy no rollback or review needs", "to": "pruned"},
     {"from": "remember", "label": "the remember, with its trace's path", "to": "ledger"},
     {"from": "remember", "label": "one trace at once, source remember, homed by --topic for knowledge, else --about, else the cwd", "to": "traces"},
     {"from": "rethink", "label": "a judged send: one labelled (cue, note) example", "to": "eval"},
@@ -89,6 +98,8 @@
     {"col": 2, "doc": "this machine's id, minted once from /dev/urandom; $SANDMAN_MACHINE overrides it", "id": "machine", "kind": "file", "label": "machine", "row": 7},
     {"col": 2, "doc": "prospective memory: work the person deferred, one file each, due a date from the local today or after an event; open until done or dropped, never closed on its own", "id": "intentions", "kind": "file", "label": "intentions/<id>.md", "row": 8},
     {"col": 3, "doc": "reads the root, never writes it (bar the machine id)", "id": "chart", "kind": "verb", "label": "sandman chart", "row": 2},
-    {"col": 4, "doc": "draws active, taken and memories as a timeline", "id": "bifrost", "kind": "sink", "label": "bifrost · pipeline", "row": 2}
+    {"col": 4, "doc": "draws active, taken and memories as a timeline", "id": "bifrost", "kind": "sink", "label": "bifrost · pipeline", "row": 2},
+    {"col": 1, "doc": "holds every note, rewrite line, .pruned/ copy and archived transcript to the memory cycle's seven invariants; --fix mends what is mechanical, --release prints what release would delete", "id": "check", "kind": "verb", "label": "sandman check", "row": 10},
+    {"col": 1, "doc": "a tick job after settle, only while check passes: deletes transcripts no note holds after a week unheld, a release line each, and sweeps .pruned/ to depth 1", "id": "release", "kind": "verb", "label": "release", "row": 11}
   ]
 }
