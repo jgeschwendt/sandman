@@ -3073,7 +3073,7 @@ fn main() -> ExitCode {
                             .map(|found| {
                                 found.as_ref().map_or(0.0f64, |memory| {
                                     total(
-                                        vector.iter().zip(memory).map(|(left, right)| left * right),
+                                        vector.iter().zip(memory).map(|(mine, other)| mine * other),
                                     )
                                 })
                             })
@@ -3992,7 +3992,7 @@ fn main() -> ExitCode {
                             .filter(|trace| trace["bank"] == bank)
                             .collect();
                         let (dir, memories) = shelf(&data, bank);
-                        let (traces, topic) = (
+                        let (traces, subject) = (
                             data.join("traces").join(bank),
                             bank.strip_prefix('@').unwrap_or_default(),
                         );
@@ -4019,8 +4019,70 @@ fn main() -> ExitCode {
                                     })
                                 })
                                 .collect();
-                            let (input, full) =
-                                stack(bank, &inbound, &memories, allowance, &[("judged", charges)]);
+                            // the notes of other banks and topics nearest one sent, by the cosine of
+                            // their cached embeddings, at most 5
+                            let (_, _, label) = labels(&home, &claude);
+                            let cache = vectors(&data);
+                            let vector = |note: &Value| -> Option<Vec<f64>> {
+                                let hashed = hash(&excerpt(note, &label(text(&note["bank"]))));
+                                Some(
+                                    cache.get(&hashed)?["v"]
+                                        .as_array()?
+                                        .iter()
+                                        .filter_map(Value::as_f64)
+                                        .collect(),
+                                )
+                            };
+                            let ours: Vec<Vec<f64>> = inbound
+                                .iter()
+                                .copied()
+                                .chain(&memories)
+                                .filter_map(vector)
+                                .collect();
+                            #[expect(clippy::float_arithmetic, reason = "a cosine is float math")]
+                            let mut near: Vec<(f64, String)> = pool(&data)
+                                .1
+                                .iter()
+                                .filter(|note| note["bank"] != bank)
+                                .filter_map(|note| {
+                                    let theirs = vector(note)?;
+                                    let best = ours
+                                        .iter()
+                                        .map(|one| {
+                                            total(
+                                                one.iter()
+                                                    .zip(&theirs)
+                                                    .map(|(mine, other)| mine * other),
+                                            )
+                                        })
+                                        .fold(f64::MIN, f64::max);
+                                    (best >= setting("SANDMAN_NEAR", 0.8f64)).then(|| {
+                                        (
+                                            best,
+                                            format!(
+                                                "{} \u{b7} {} \u{b7} {}",
+                                                text(&note["path"]),
+                                                text(&note["name"]),
+                                                one_line(text(&note["description"]), 160)
+                                            ),
+                                        )
+                                    })
+                                })
+                                .collect();
+                            near.sort_by(|one, two| two.0.total_cmp(&one.0));
+                            let (input, full) = stack(
+                                bank,
+                                &inbound,
+                                &memories,
+                                allowance,
+                                &[
+                                    ("judged", charges),
+                                    (
+                                        "elsewhere",
+                                        near.into_iter().take(5).map(|pair| pair.1).collect(),
+                                    ),
+                                ],
+                            );
                             let reply = run(
                                 &data,
                                 "consolidate",
@@ -4053,7 +4115,7 @@ fn main() -> ExitCode {
                                         fields.iter().all(|field| op[field].is_string())
                                     };
                                     let typed = [KINDS.as_slice(), &KNOWN]
-                                        [usize::from(!topic.is_empty())]
+                                        [usize::from(!subject.is_empty())]
                                     .contains(&text(&op["type"]));
                                     let shape = (
                                         trace.is_some(),
@@ -4068,8 +4130,24 @@ fn main() -> ExitCode {
                                         ("merge", (true, true, None)) => {
                                             has(&["body", "description"])
                                         }
+                                        ("graduate", (false, false, Some(Some(1..)))) => {
+                                            topic(text(&op["type"]), op["topic"].as_str())
+                                                .is_some_and(|slug| !slug.is_empty())
+                                                && has(&["body", "description", "name", "reason"])
+                                        }
                                         ("prune", (true, false, None) | (false, true, None)) => {
                                             has(&["reason"])
+                                        }
+                                        ("rehome", (false, true, None)) => {
+                                            // another bank of its kind, already on disk
+                                            let target = text(&op["bank"]);
+                                            let tier = target.strip_prefix('@').unwrap_or(target);
+                                            target != bank
+                                                && target.starts_with('@') == bank.starts_with('@')
+                                                && !tier.is_empty()
+                                                && !tier.contains('/')
+                                                && !tier.starts_with(['.', '_'])
+                                                && shelf(&data, target).0.is_dir()
                                         }
                                         ("retitle", (false, true, None)) => {
                                             has(&["description", "name"])
@@ -4224,9 +4302,16 @@ fn main() -> ExitCode {
                                             ),
                                         ));
                                     }
-                                    (_, true) => {
+                                    (made, true) => {
+                                        // a graduation's trace goes to its topic's traces
+                                        let (into, slugged) = if made == "graduate" {
+                                            let slug = text(&op["topic"]);
+                                            (data.join("traces").join(format!("@{slug}")), slug)
+                                        } else {
+                                            (dir.clone(), subject)
+                                        };
                                         writes.push((
-                                            slot(&dir, kind, text(&op["name"]), &mut claimed),
+                                            slot(&into, kind, text(&op["name"]), &mut claimed),
                                             note(
                                                 &[
                                                     ("id", id.as_str()),
@@ -4234,7 +4319,7 @@ fn main() -> ExitCode {
                                                     ("description", description.as_str()),
                                                     ("type", kind),
                                                     ("created", now.as_str()),
-                                                    ("topic", topic),
+                                                    ("topic", slugged),
                                                     ("from", from.as_str()),
                                                     ("source", stamp.as_str()),
                                                 ],
@@ -4244,7 +4329,7 @@ fn main() -> ExitCode {
                                     }
                                     ("prune", _) => {}
                                     (continuing, _) => {
-                                        // merged, revised or retitled: the memory continuing,
+                                        // merged, revised, retitled or rehomed: the memory continuing,
                                         // its keys kept in order
                                         let mut fields = front(of("text"));
                                         fields.retain(|field| {
@@ -4263,25 +4348,46 @@ fn main() -> ExitCode {
                                             ],
                                         ));
                                         fields.insert(0, ("id", id.as_str()));
-                                        let retitled = continuing == "retitle";
-                                        let amended: &[(&str, &str)] = if retitled {
-                                            &[("description", &description), ("name", &name)]
-                                        } else {
-                                            &[
-                                                ("description", &description),
-                                                ("source", &stamp),
-                                                ("updated", &now),
-                                            ]
-                                        };
+                                        // a retitle under its new name, a rehome in its new bank,
+                                        // both with the body as it was; else rewritten in place
+                                        let target = text(&op["bank"]);
+                                        let (amended, into, body): (&[(&str, &str)], _, _) =
+                                            match continuing {
+                                                "retitle" => (
+                                                    &[
+                                                        ("description", &description),
+                                                        ("name", &name),
+                                                    ],
+                                                    slot(&dir, of("type"), &name, &mut claimed),
+                                                    of("body"),
+                                                ),
+                                                "rehome" => (
+                                                    &[(
+                                                        "topic",
+                                                        target
+                                                            .strip_prefix('@')
+                                                            .unwrap_or_default(),
+                                                    )],
+                                                    slot(
+                                                        &shelf(&data, target).0,
+                                                        of("type"),
+                                                        of("name"),
+                                                        &mut claimed,
+                                                    ),
+                                                    of("body"),
+                                                ),
+                                                _ => (
+                                                    &[
+                                                        ("description", &description),
+                                                        ("source", &stamp),
+                                                        ("updated", &now),
+                                                    ],
+                                                    dir.join(of("file")),
+                                                    text(&op["body"]),
+                                                ),
+                                            };
                                         amend(&mut fields, amended);
-                                        writes.push(if retitled {
-                                            (
-                                                slot(&dir, of("type"), &name, &mut claimed),
-                                                note(&fields, of("body")),
-                                            )
-                                        } else {
-                                            (dir.join(of("file")), note(&fields, text(&op["body"])))
-                                        });
+                                        writes.push((into, note(&fields, body)));
                                     }
                                 }
                                 // a line per op, each input as it stood and where it went, if anywhere

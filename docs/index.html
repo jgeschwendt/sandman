@@ -531,7 +531,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
     <p class="docs-note">A job of <a class="link" href="#serve">serve</a>'s tick: it stabilises a bank's traces and
       integrates them with what the bank holds. A trace or a verdict that revises a memory updates it
       (reconsolidation); a merge folds memories that hold one fact into a new one; pruning drops a trace that does not
-      hold or a memory gone stale. Nothing waits for a person.</p>
+      hold or a memory gone stale; a memory moves to the bank it belongs to, or graduates into a topic's page. Nothing
+      waits for a person.</p>
   </header>
   <p>It runs only in a tick with no episode to encode, one bank at a time, derived from disk each tick: of the
     banks holding a trace or a note judged (a <code class="code">wrong</code> or <code class="code">stale</code> verdict since its
@@ -563,10 +564,16 @@ Why: "mocks hid a real ordering bug last year".</pre>
 - reference_metrics_dashboard.md · ledger-api latency dashboard · Where ledger-api's latency dashboard lives
 
 # judged
-- reference_redis_queue_host.md · stale · the queue moved to postgres</pre>
+- reference_redis_queue_host.md · stale · the queue moved to postgres
+
+# elsewhere
+- knowledge/postgres/knowledge_job_queues.md · Postgres job queues · Queueing jobs in Postgres: SKIP LOCKED, one table</pre>
   <p>Memories go whole while their bytes fit <code class="code">$SANDMAN_CONSOLIDATE_BYTES</code> (300 000); the rest
     are listed, and the contract says a listed memory may not be changed; <code class="code"># judged</code>, absent when
-    empty, lists each verdict a memory answers to, <code class="code">-</code> for no reason. The reply is
+    empty, lists each verdict a memory answers to, <code class="code">-</code> for no reason; <code class="code"># elsewhere</code>,
+    absent when empty, at most 5 notes of other banks and topics, recall's candidates, whose cached embedding has cosine
+    at least <code class="code">$SANDMAN_NEAR</code> (0.8) with a trace's or memory's, nearest first, a tie in reader
+    order, never written. The reply is
     <code class="code">{"ops":[…]}</code>:</p>
   <div class="table-wrap">
   <table data-table>
@@ -579,6 +586,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
       <tr><td><code class="code">{"op":"merge","memories":[…],"type","name","description","body"}</code></td><td>two or more memories hold one fact</td><td>a new note, keep's slug: a new <code class="code">id</code>, <code class="code">created</code> now, <code class="code">topic</code> a topic's, <code class="code">from:</code> its parents' ids (one minted for a parent without), no <code class="code">sessions</code>; the parents leave the bank</td></tr>
       <tr><td><code class="code">{"op":"revise","memory","description","body"}</code></td><td>a judged memory corrected</td><td>as a merge's write, without a trace; only a memory <code class="code"># judged</code> lists</td></tr>
       <tr><td><code class="code">{"op":"retitle","memory","name","description"}</code></td><td>a better name</td><td>its keys and body kept, <code class="code">name</code> and <code class="code">description</code> replaced, under keep's slug for the new name</td></tr>
+      <tr><td><code class="code">{"op":"rehome","memory","bank"}</code></td><td>it belongs to another bank</td><td>unchanged but its <code class="code">topic</code>, under keep's slug in that bank: one of the same kind (a bank's, or a topic's <code class="code">@&lt;topic&gt;</code>) already on disk</td></tr>
+      <tr><td><code class="code">{"op":"graduate","memories":[…],"topic","type","name","description","body","reason"}</code></td><td>one or more memories are a topic's knowledge (rung 1)</td><td>a new trace under <code class="code">traces/@&lt;topic&gt;/</code>, as a merge of memories writes, <code class="code">type</code> <code class="code">knowledge</code> or <code class="code">playbook</code>; the memories leave the bank</td></tr>
       <tr><td><code class="code">{"op":"prune","trace","reason"}</code></td><td>the trace does not hold</td><td>nothing enters the bank</td></tr>
       <tr><td><code class="code">{"op":"prune","memory","reason"}</code></td><td>a trace shows the memory stale</td><td>the memory leaves the bank</td></tr>
     </tbody>
@@ -701,7 +710,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
     show, remember and encode lines, chart's <code class="code">ended</code> and <code class="code">lineage</code>, invariants
     4–5 (stage 2); <code class="code">rethink</code> in session, its MCP tool and <code class="code">eval/recall.jsonl</code> (stage 3);
     encode's <code class="code"># recalled</code> and <code class="code">verdicts</code> (stage 4); strength, on chart's rows (stage 5);
-    consolidate's merge of notes, <code class="code"># judged</code> with revise, retitle and the order measure (stage 6). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
+    consolidate's merge of notes, <code class="code"># judged</code> with revise, retitle and the order measure (stage 6); rehome,
+    rung-1 graduation and <code class="code"># elsewhere</code> (stage 7). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -718,7 +728,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <g transform="translate(0,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑨ release</text><text class="life-note" x="14" y="44">unheld for 7 days:</text><text class="life-note" x="14" y="60">the transcript goes</text></g>
         <g transform="translate(196,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ decay</text><text class="life-note" x="14" y="44">under the floor:</text><text class="life-note" x="14" y="60">pruned, an end</text></g>
         <g transform="translate(392,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ reconsolidate</text><text class="life-note" x="14" y="44">a trace, a verdict:</text><text class="life-note" x="14" y="60">revise or merge</text></g>
-        <g transform="translate(588,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ graduate</text><text class="life-note" x="14" y="44">a page, a guidance</text><text class="life-note" x="14" y="60">line, a mechanism</text></g>
+        <g transform="translate(588,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ graduate</text><text class="life-note" x="14" y="44">a page, a guidance</text><text class="life-note" x="14" y="60">line, a mechanism</text></g>
         <g aria-hidden="true">
           <path class="life-path" marker-end="url(#cycle-head)" d="M176,52H196" />
           <path class="life-path" marker-end="url(#cycle-head)" d="M372,52H392" />
@@ -737,8 +747,9 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <text class="life-note" x="632" y="402" text-anchor="middle">back into the store: the same id, or a new one</text>
       </svg>
     </div>
-    <figcaption>The cycle, ①–⑨. Dashed boxes are not built yet. A merge that writes a new note ends its parents,
-      which, like decay, can leave a session unnamed.</figcaption>
+    <figcaption>The cycle, ①–⑨. Dashed boxes are not built yet; graduate is built for a page, not yet for a guidance
+      line or a mechanism. A merge that writes a new note ends its parents, which, like decay, can leave a session
+      unnamed.</figcaption>
   </figure>
 
   <h3 class="h3" id="cycle-note">The note</h3>
@@ -775,8 +786,8 @@ updated: &lt;now&gt;                   as today
     <code class="code">sent</code> entries and the <code class="code">show</code> and <code class="code">remember</code> lines
     carry the note's <code class="code">id</code>, an encoded line its traces' <code class="code">ids</code>, and a path in an
     older line resolves through these lines' paths. Built for consolidate's <code class="code">keep</code>,
-    <code class="code">merge</code>, <code class="code">prune</code>, <code class="code">retitle</code> and
-    <code class="code">revise</code>, written once the ops have landed, before its line:</p>
+    <code class="code">merge</code>, <code class="code">prune</code>, <code class="code">retitle</code>,
+    <code class="code">revise</code>, <code class="code">rehome</code> and rung 1's <code class="code">graduate</code>, written once the ops have landed, before its line:</p>
   <pre class="snippet">{"at","from":[{"digest":"&lt;SHA-256 of the file as it stood&gt;","id","path","sessions":[…]}],"kind":"rewrite","machine",
  "model":"&lt;model&gt;"|null,"op":"keep"|"merge"|"revise"|"retitle"|"rehome"|"graduate"|"prune"|"release"|"revert",
  "reason":str|null,"to":{"id","path"}|{"artifact":"&lt;path&gt;"}|null}</pre>
@@ -784,11 +795,11 @@ updated: &lt;now&gt;                   as today
   <table data-table>
     <thead><tr><th>op</th><th>from → to</th><th>written by</th></tr></thead>
     <tbody>
-      <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate; <code class="code">done</code> on the owner's approval</td></tr>
+      <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate <span class="badge badge-ok">built</span>; <code class="code">done</code> on the owner's approval</td></tr>
       <tr><td><code class="code">keep</code></td><td>a trace → the same id under <code class="code">memories/</code> or <code class="code">knowledge/</code></td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">merge</code></td><td>a trace and a note → the note; two or more notes → a new id</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate <span class="badge badge-ok">built</span>; the weekly review (decay)</td></tr>
-      <tr><td><code class="code">rehome</code></td><td>a note → the same id in another bank or topic</td><td>consolidate</td></tr>
+      <tr><td><code class="code">rehome</code></td><td>a note → the same id in another bank or topic</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">release</code></td><td><code class="code">[{"path":&lt;archived&gt;,"session"}]</code> → null</td><td>the tick's release job</td></tr>
       <tr><td><code class="code">retitle</code></td><td>a note → the same id under another name and file</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
       <tr><td><code class="code">revert</code></td><td>a pass's outputs → the notes it replaced</td><td>a pass that fails its measure</td></tr>
@@ -923,7 +934,7 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
         <defs>
           <marker id="ladder-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
         </defs>
-        <g transform="translate(0,176)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">① page or playbook</text><text class="life-note" x="14" y="46">memories converge on a subject</text><text class="life-note" x="14" y="64">automatic, in consolidate</text><text class="life-note" x="14" y="82">cost: reread at every merge</text></g>
+        <g transform="translate(0,176)"><rect class="life-box" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">① page or playbook</text><text class="life-note" x="14" y="46">memories converge on a subject</text><text class="life-note" x="14" y="64">automatic, in consolidate</text><text class="life-note" x="14" y="82">cost: reread at every merge</text></g>
         <g transform="translate(252,96)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">② standing guidance</text><text class="life-note" x="14" y="46">used in 5 sessions, never wrong</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: context in every session</text></g>
         <g transform="translate(504,16)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">③ mechanism</text><text class="life-note" x="14" y="46">relearned in 3 sessions</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: code, tests and a gate</text></g>
         <g aria-hidden="true">
@@ -933,16 +944,15 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
         <text class="life-note" x="368" y="306" text-anchor="middle">a rung-2 line replaces a line or justifies the characters it adds; pinning is no rung</text>
       </svg>
     </div>
-    <figcaption>The ladder, 1 → 2 → 3, not built yet. Each rung costs more to keep true and less to apply: a page is
+    <figcaption>The ladder, 1 → 2 → 3, built for rung 1. Each rung costs more to keep true and less to apply: a page is
       reread by a model, a line is read by every session in its scope, a mechanism runs without being read.</figcaption>
   </figure>
   <ul class="stack claims" role="list">
-    <li><strong>rung 1</strong> — consolidate's reply op <code class="code">graduate</code> (below)
+    <li><strong>rung 1</strong> <span class="badge badge-ok">built</span> — consolidate's reply op <code class="code">graduate</code> (below)
       writes a trace under <code class="code">traces/@&lt;topic&gt;/</code>, a new id, <code class="code">from:</code> the memories,
       which end; the topic's consolidate keeps it as a page or merges it into one, the page continuing with its
-      <code class="code">from:</code> extended. A bank's input gains <code class="code"># elsewhere</code>: at most 5 notes of other
-      banks and topics whose cached embedding has cosine at least <code class="code">$SANDMAN_NEAR</code> (0.8) with a trace or memory
-      sent, listed and never written, so a subject converging across banks shows.</li>
+      <code class="code">from:</code> extended. <code class="code"># elsewhere</code> (<a class="link" href="#consolidate">consolidate</a>)
+      shows a subject converging across banks.</li>
     <li><strong>rung 2</strong> — the weekly review's evidence gains <code class="code"># standing</code>: a note with
       <code class="code">used</code> verdicts in <code class="code">$SANDMAN_GUIDE_SESSIONS</code> (5) distinct sessions and no
       <code class="code">wrong</code> or <code class="code">stale</code> ever. Its reply gains <code class="code">propose</code>
@@ -1038,7 +1048,7 @@ sandman check --release  # what the release job would delete now, with its bytes
     <li><strong>strength</strong> <span class="badge badge-ok">built</span> — the count, chart's <code class="code">strength</code>, the knobs.</li>
     <li><strong>order in a bank</strong> <span class="badge badge-ok">built</span> — consolidate's merge of notes, <code class="code"># judged</code> (revise, prune),
       retitle; the order measure.</li>
-    <li><strong>across banks</strong> — rehome, rung-1 graduation, <code class="code"># elsewhere</code>.</li>
+    <li><strong>across banks</strong> <span class="badge badge-ok">built</span> — rehome, rung-1 graduation, <code class="code"># elsewhere</code>.</li>
     <li><strong>the weekly review</strong> — decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
       proposals as intentions, <code class="code">done</code> and <code class="code">drop</code> on them.</li>
     <li><strong>release</strong> — the job, the depth-1 sweep, chart's <code class="code">held</code> and <code class="code">released</code>,

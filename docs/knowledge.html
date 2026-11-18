@@ -57,8 +57,8 @@
     done, filed by topic rather than by repository. The same unattended pipeline feeds it: encode homes a trace by its
     type, consolidate folds a topic's traces into its pages, recall ranks the pages beside the memories.</p>
   <p class="notice notice-warn"><span>Built: the store, encode's and consolidate's split, <code class="code">remember --topic</code>,
-    recall, <code class="code">show</code> and <code class="code">chart</code> over it. Not built: rehoming the existing
-    memories, graduation into and out of the store (<a class="link" href="#next">next</a>).</span></p>
+    recall, <code class="code">show</code> and <code class="code">chart</code> over it, consolidate's graduation into it
+    (rung 1). Not built: rehoming the existing memories, graduation out of it (<a class="link" href="#next">next</a>).</span></p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#problem">problem</a>
     <a class="pill" href="#systems">systems</a>
@@ -122,9 +122,9 @@
       <code class="code">knowledge</code> or <code class="code">playbook</code>, <code class="code">topic</code>,
       <code class="code">created</code>, <code class="code">updated</code> once merged, <code class="code">source</code> the
       consolidate stamp; the session and archive of the trace that started it, and
-      <code class="code">sessions</code> every session it descends from, merges included. The cycle adds
-      <code class="code">id</code>, <code class="code">from</code> and <code class="code">origin</code>
-      (<a class="link" href="index.html#cycle-note">the note</a>, not built): a page born of a rung-1 graduation names its
+      <code class="code">sessions</code> every session it descends from, merges included; <code class="code">id</code>,
+      <code class="code">from</code> and <code class="code">origin</code> as every note's
+      (<a class="link" href="index.html#cycle-note">the note</a>): a page born of a rung-1 graduation names its
       memories on <code class="code">from:</code> and starts with no sessions.</li>
     <li><strong>traces</strong> — a topic's wait in <code class="code">traces/@&lt;topic&gt;/</code>. A bank key is letters,
       digits and <code class="code">-</code>, so <code class="code">@</code> never collides with one, and the
@@ -255,7 +255,7 @@ kickstart -k is one atomic restart.</pre>
       owner reviews it; the apply step writes each moved one as a trace under <code class="code">traces/@&lt;topic&gt;/</code>
       (its <code class="code">created</code>, <code class="code">session</code> and quotes kept) and moves the original to
       <code class="code">.pruned/</code>, so consolidate builds the pages and every step is recoverable.</li>
-    <li><strong>promotion</strong> — memories graduate into pages automatically (rung 1); a page or playbook used across
+    <li><strong>promotion</strong> — memories graduate into pages automatically (rung 1, built); a page or playbook used across
       sessions is proposed as a skill or a guidance line (rung 2), a lesson relearned as a mechanism (rung 3), the owner
       approving both (<a class="link" href="index.html#cycle-graduate">graduation</a>).</li>
   </ul>

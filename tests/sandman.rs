@@ -2349,6 +2349,280 @@ esac
         )
     }
 
+    /// Across banks: a bank keeps its trace, rehomes a memory to another bank (the same id
+    /// continuing) and graduates two into a trace under `traces/@clocks/` (a new id, `from:` the
+    /// two, which end); the topic's consolidate merges that trace into its page, `from:` carried.
+    /// Each input lists `# elsewhere`, the notes of other banks whose cached embedding is near one
+    /// sent, nearest first; a rehome to a bank not on disk fails its bank; `check` holds over what
+    /// is left.
+    #[test]
+    fn across() -> Outcome {
+        let root = temp("across")?;
+        let model = format!("{root}/stub.sh");
+        let note = |id: &str, name: &str, kind: &str, rest: &str, body: &str| {
+            format!(
+                "---\nid: {id}\nname: {name}\ndescription: sample: {name}\ntype: {kind}\ncreated: 2026-11-01T00:00:00Z\n{rest}source: remember 2026-11-01T00:00:00Z \u{b7} -\n---\n\nsample: {body}\n"
+            )
+        };
+        let hand = "origin: hand\n";
+        let zone = note(
+            "2b2b2b2b2b2b",
+            "Clock zone",
+            "feedback",
+            hand,
+            "the clock zone",
+        );
+        let page = note(
+            "8b8b8b8b8b8b",
+            "Clock page",
+            "knowledge",
+            "topic: clocks\norigin: hand\n",
+            "clock page",
+        );
+        let mut files: Vec<(String, String)> = vec![
+            (
+                "traces/alpha/feedback_clock.md".to_owned(),
+                note(
+                    "1a1a1a1a1a1a",
+                    "Clock trace",
+                    "feedback",
+                    "session: @a\n",
+                    "a clock trace",
+                )
+                .replace(
+                    "created: 2026-11-01T00:00:00Z",
+                    "created: 2026-11-01T01:00:00Z",
+                ),
+            ),
+            ("memories/alpha/feedback_tz.md".to_owned(), zone.clone()),
+            (
+                "memories/alpha/reference_clock_a.md".to_owned(),
+                note(
+                    "3c3c3c3c3c3c",
+                    "Clock A",
+                    "reference",
+                    "sessions: @b\n",
+                    "clock a",
+                ),
+            ),
+            (
+                "memories/alpha/reference_clock_b.md".to_owned(),
+                note(
+                    "4d4d4d4d4d4d",
+                    "Clock B",
+                    "reference",
+                    "sessions: @c\n",
+                    "clock b",
+                ),
+            ),
+            ("knowledge/clocks/knowledge_clock.md".to_owned(), page),
+            (
+                "traces/astray/feedback_t.md".to_owned(),
+                note("9c9c9c9c9c9c", "Astray", "feedback", hand, "deploy astray").replace(
+                    "created: 2026-11-01T00:00:00Z",
+                    "created: 2026-11-01T02:00:00Z",
+                ),
+            ),
+        ];
+        // near alpha's: one (cosine 1) and first's (0.82); delta's and astray's are far
+        for (path, id, name, body) in [
+            ("astray/project_x.md", "0d0d0d0d0d0d", "X", "deploy x"),
+            (
+                "delta/project_deploy.md",
+                "7a7a7a7a7a7a",
+                "Deploy",
+                "deploy",
+            ),
+            (
+                "first/project_clock_beta.md",
+                "6f6f6f6f6f6f",
+                "Clock pair",
+                "clock beta",
+            ),
+            (
+                "omega/project_clock_one.md",
+                "5e5e5e5e5e5e",
+                "Clock one",
+                "clock one",
+            ),
+        ] {
+            files.push((
+                format!("memories/{path}"),
+                note(id, name, "project", hand, body),
+            ));
+        }
+        let alpha = r#"{"op":"keep","trace":"feedback_clock.md","type":"feedback","name":"Sample: clock kept","description":"sample: clock kept","body":"sample: kept clock"},{"op":"rehome","memory":"feedback_tz.md","bank":"omega"},{"op":"graduate","memories":["reference_clock_a.md","reference_clock_b.md"],"topic":"clocks","type":"knowledge","name":"Sample: clocks","description":"sample: clocks","body":"sample: clock knowledge","reason":"sample: one subject"}"#;
+        // `?clocks`: `plant` reads an `@` as the session prefix
+        files.push((
+            "stub.sh".to_owned(),
+            format!(
+                r#"case $(tee -a "$0.log" | sed -n '/^# bank$/{{n;p;}}' | tail -n 1) in
+  alpha) printf '%s' '{{"ops":[{alpha}]}}';;
+  astray) printf '%s' '{{"ops":[{{"op":"prune","trace":"feedback_t.md","reason":"x"}},{{"op":"rehome","memory":"project_x.md","bank":"nowhere"}}]}}';;
+  ?clocks) printf '%s' '{{"ops":[{{"op":"merge","trace":"knowledge_sample_clocks.md","memory":"knowledge_clock.md","description":"sample: clock page merged","body":"sample: clock page body"}}]}}';;
+esac
+"#
+            ),
+        ));
+        plant(
+            &root,
+            &files
+                .iter()
+                .map(|file| (file.0.as_str(), file.1.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        let consolidator = format!("sh {model} --model sample-model");
+        let curl = stub(&root)?;
+        let today = format!("{root}/ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        let read = |path: &str| fs::read_to_string(path).unwrap_or_default();
+        let (mut daemon, _) = serve(
+            &root,
+            &[
+                ("PATH", curl.as_str()),
+                ("SANDMAN_CONSOLIDATE_QUIET_MS", "0"),
+                ("SANDMAN_CONSOLIDATOR", consolidator.as_str()),
+                ("SANDMAN_TICK_MS", "10"),
+            ],
+        )?;
+        until(|| read(&today).contains(r#""bank":"@clocks""#))?;
+        same(
+            &format!(
+                "{} {:?}",
+                kill("-TERM", &daemon.0.id().to_string())?,
+                daemon.0.wait()?.code()
+            ),
+            "true Some(0)",
+        )?;
+        let parsed: Vec<Value> = read(&today)
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()?;
+        let graduated = parsed
+            .iter()
+            .find(|line| line["op"] == "graduate")
+            .and_then(|line| line["to"]["id"].as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let lines: Vec<String> = parsed
+            .iter()
+            .map(|line| {
+                let mut shown = line.clone();
+                shown["at"] = "A".into();
+                for from in shown
+                    .get_mut("from")
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                {
+                    from["digest"] = json!(from["digest"].as_str().map(str::len));
+                }
+                if line["order"].is_object() {
+                    shown["order"] = format!(
+                        "{}>{}",
+                        line["order"]["before"]["notes"], line["order"]["after"]["notes"]
+                    )
+                    .into();
+                }
+                shown.to_string().replace(&graduated, "<id>")
+            })
+            .collect();
+        let fed = |id: &str, path: &str, letter: &str| {
+            let sessions: Vec<String> = (!letter.is_empty())
+                .then(|| format!("{ID}{letter}"))
+                .into_iter()
+                .collect();
+            json!({"digest": 64u8, "id": id, "path": path, "sessions": sessions})
+        };
+        let rewrite = |op: &str, from: Vec<Value>, reason: Value, to: [&str; 2]| {
+            json!({"at": "A", "from": from, "kind": "rewrite", "machine": "studio", "model": "sample-model", "op": op, "reason": reason, "to": {"id": to[0], "path": to[1]}}).to_string()
+        };
+        let line = |bank: &str, counts: [u8; 3], order: &str| {
+            json!({"at": "A", "bank": bank, "kept": counts[0], "kind": "consolidate", "machine": "studio", "merged": counts[1], "order": order, "outcome": "consolidated", "pruned": counts[2]}).to_string()
+        };
+        same(
+            &lines.join("\n"),
+            &[
+                rewrite("keep", vec![fed("1a1a1a1a1a1a", "traces/alpha/feedback_clock.md", "a")], Value::Null, ["1a1a1a1a1a1a", "alpha/feedback_sample_clock_kept.md"]),
+                rewrite("rehome", vec![fed("2b2b2b2b2b2b", "alpha/feedback_tz.md", "")], Value::Null, ["2b2b2b2b2b2b", "omega/feedback_clock_zone.md"]),
+                rewrite(
+                    "graduate",
+                    vec![fed("3c3c3c3c3c3c", "alpha/reference_clock_a.md", "b"), fed("4d4d4d4d4d4d", "alpha/reference_clock_b.md", "c")],
+                    "sample: one subject".into(),
+                    ["<id>", "traces/@clocks/knowledge_sample_clocks.md"],
+                ),
+                line("alpha", [1, 0, 0], "4>1"),
+                json!({"at": "A", "bank": "astray", "error": r#"output: not an op: {"bank":"nowhere","memory":"project_x.md","op":"rehome"}"#, "kept": 0u8, "kind": "consolidate", "machine": "studio", "merged": 0u8, "outcome": "failed", "pruned": 0u8}).to_string(),
+                rewrite(
+                    "merge",
+                    vec![fed("<id>", "traces/@clocks/knowledge_sample_clocks.md", ""), fed("8b8b8b8b8b8b", "knowledge/clocks/knowledge_clock.md", "")],
+                    Value::Null,
+                    ["8b8b8b8b8b8b", "knowledge/clocks/knowledge_clock.md"],
+                ),
+                line("@clocks", [0, 1, 0], "2>1"),
+            ]
+            .join("\n"),
+        )?;
+        // each input's `# elsewhere`, by run: alpha's, astray's, the topic's
+        let seen = read(&format!("{model}.log"));
+        let near: Vec<&str> = seen
+            .split("\n# elsewhere\n")
+            .skip(1)
+            .map(|rest| rest.split("You consolidate").next().unwrap_or_default())
+            .collect();
+        let item =
+            |path: &str, name: &str| format!("- {path} \u{b7} {name} \u{b7} sample: {name}\n");
+        same(
+            &format!("{near:?}"),
+            &format!(
+                "{:?}",
+                [
+                    [item("omega/project_clock_one.md", "Clock one"), item("knowledge/clocks/knowledge_clock.md", "Clock page"), item("first/project_clock_beta.md", "Clock pair")].concat(),
+                    item("delta/project_deploy.md", "Deploy"),
+                    [
+                        "- alpha/feedback_sample_clock_kept.md \u{b7} Sample: clock kept \u{b7} sample: clock kept\n".to_owned(),
+                        item("omega/feedback_clock_zone.md", "Clock zone"),
+                        item("omega/project_clock_one.md", "Clock one"),
+                        item("first/project_clock_beta.md", "Clock pair"),
+                    ]
+                    .concat(),
+                ]
+            ),
+        )?;
+        // the rehome as it was, in its new bank; the graduation's trace as the topic took it; the
+        // page continuing, its `from:` the graduation's
+        let aside = fs::read_dir(format!("{root}/.pruned/{}", date(&["+%Y/%m/%d"])?))?
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.to_string_lossy()
+                    .ends_with("@clocks-knowledge_sample_clocks.md")
+            })
+            .ok_or("no copy")?;
+        let trace = fs::read_to_string(aside)?;
+        let stamp = |text: &str| {
+            text.lines()
+                .find_map(|said| said.strip_prefix("source: consolidate "))
+                .and_then(|rest| rest.split(' ').next())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let merged = read(&format!("{root}/knowledge/clocks/knowledge_clock.md"));
+        let (made, then) = (stamp(&trace), stamp(&merged));
+        same(
+            &format!(
+                "{}{trace}{merged}",
+                read(&format!("{root}/memories/omega/feedback_clock_zone.md"))
+            ),
+            &format!(
+                "{zone}---\nid: {graduated}\nname: Sample: clocks\ndescription: sample: clocks\ntype: knowledge\ncreated: {made}\ntopic: clocks\nfrom: 3c3c3c3c3c3c 4d4d4d4d4d4d\nsource: consolidate {made} \u{b7} - \u{b7} model=sample-model\n---\n\nsample: clock knowledge\n---\nid: 8b8b8b8b8b8b\nname: Clock page\ndescription: sample: clock page merged\ntype: knowledge\ncreated: 2026-11-01T00:00:00Z\ntopic: clocks\nfrom: 3c3c3c3c3c3c 4d4d4d4d4d4d\nsource: consolidate {then} \u{b7} - \u{b7} model=sample-model\nupdated: {then}\n---\n\nsample: clock page body\n"
+            ),
+        )?;
+        same(
+            &sandman(&[("SANDMAN_ROOT", &root)], &["check"], "")?,
+            "0\ncheck: 8 notes: clean\n",
+        )
+    }
+
     /// The knowledge store end to end. One episode's three traces split: the memory into the bank
     /// of its cwd, the knowledge and the playbook into the topic's `traces/@launchd/`; a knowledge
     /// type without a topic fails its episode. The topic consolidates as a bank does, into

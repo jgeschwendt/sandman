@@ -31,6 +31,8 @@ A memory under `# judged` was recalled into a session and found wrong or stale t
 
 - `merge` two or more memories into one new memory when they hold one fact, worded differently or split across files: one memory per fact. Every quote and date of each survives in the new body.
 - `retitle` a memory whose name or description breaks the rules below and that no other op touches.
+- `rehome` a memory that holds for another repository's bank, its body or `about` naming that repository, when the bank is listed under `# elsewhere`.
+- `graduate` memories that hold beyond any one repository (how a tool behaves, a playbook for a task) into one topic's trace, written as the start of a page; prefer a topic a path under `# elsewhere` already shows.
 - Tidying is optional: when in doubt, leave the memories as they are.
 
 ## Write each kept, merged or revised memory
