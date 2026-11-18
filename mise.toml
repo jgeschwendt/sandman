@@ -14,8 +14,8 @@ run = [
 ]
 
 [tasks.cover]
-description = "the end-to-end suite under llvm-cov; anything under 100 % of lines fails"
-run = "cargo llvm-cov --fail-under-lines 100"
+description = "the end-to-end suite under llvm-cov; anything under 100 % of lines fails, naming the lines"
+run = "cargo llvm-cov --fail-under-lines 100 --show-missing-lines"
 
 [tasks.install]
 description = "release build to ~/.local/bin/sandman-next, beside the live sandman"
