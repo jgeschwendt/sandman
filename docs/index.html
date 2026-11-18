@@ -689,7 +689,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
     <code class="code">check</code>'s invariants 1–3 (stage 1); consolidate's ops as rewrite lines, the ids on recall,
     show, remember and encode lines, chart's <code class="code">ended</code> and <code class="code">lineage</code>, invariants
     4–5 (stage 2); <code class="code">rethink</code> in session, its MCP tool and <code class="code">eval/recall.jsonl</code> (stage 3);
-    encode's <code class="code"># recalled</code> and <code class="code">verdicts</code> (stage 4). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
+    encode's <code class="code"># recalled</code> and <code class="code">verdicts</code> (stage 4); strength, on chart's rows (stage 5). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -702,7 +702,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
         <g transform="translate(588,16)"><rect class="life-box is-accent" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">④ memory|knowledge</text><text class="life-note" x="14" y="44">id, sessions, from:</text><text class="life-note" x="14" y="60">the active store</text></g>
         <g transform="translate(588,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑤ recall</text><text class="life-note" x="14" y="44">a pointer sent,</text><text class="life-note" x="14" y="60">one ledger line</text></g>
         <g transform="translate(392,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑥ rethink</text><text class="life-note" x="14" y="44">one verdict a send,</text><text class="life-note" x="14" y="60">in session or at encode</text></g>
-        <g transform="translate(196,152)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑦ strength</text><text class="life-note" x="14" y="44">counted from lines,</text><text class="life-note" x="14" y="60">never stored</text></g>
+        <g transform="translate(196,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑦ strength</text><text class="life-note" x="14" y="44">counted from lines,</text><text class="life-note" x="14" y="60">never stored</text></g>
         <g transform="translate(0,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑨ release</text><text class="life-note" x="14" y="44">unheld for 7 days:</text><text class="life-note" x="14" y="60">the transcript goes</text></g>
         <g transform="translate(196,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ decay</text><text class="life-note" x="14" y="44">under the floor:</text><text class="life-note" x="14" y="60">pruned, an end</text></g>
         <g transform="translate(392,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ reconsolidate</text><text class="life-note" x="14" y="44">a trace, a verdict:</text><text class="life-note" x="14" y="60">revise or merge</text></g>
@@ -876,20 +876,22 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
         <text class="life-note" x="368" y="336" text-anchor="middle">a send nobody judged counts for nothing</text>
       </svg>
     </div>
-    <figcaption>Two blames, not built yet: relevance is the classifier's, truth the note's. An irrelevant send never weakens
-      the note it sent.</figcaption>
+    <figcaption>Two blames: relevance is the classifier's, truth the note's. An irrelevant send never weakens the note it
+      sent.</figcaption>
   </figure>
 
   <h3 class="h3" id="cycle-strength">Strength and decay</h3>
   <pre class="snippet">strength = (1 + 3·used + 1·shown − 4·judged) × 2^(−idle ÷ 30)</pre>
   <ul class="stack claims" role="list">
-    <li><strong>terms</strong> — over the note's id: <code class="code">used</code> its <code class="code">used</code> verdicts,
+    <li><strong>terms</strong> <span class="badge badge-ok">built</span> — over the ledger's lines naming the note (by path, else id): <code class="code">used</code> its <code class="code">used</code> verdicts,
       <code class="code">shown</code> its show lines, <code class="code">judged</code> its <code class="code">wrong</code> and
       <code class="code">stale</code> verdicts since its body last changed (a revise or a merge clears them),
       <code class="code">idle</code> the days since the latest of its <code class="code">created</code>,
       <code class="code">updated</code>, used verdicts and shows. <code class="code">$SANDMAN_USED_WEIGHT</code> (3),
       <code class="code">$SANDMAN_SHOWN_WEIGHT</code> (1), <code class="code">$SANDMAN_JUDGED_WEIGHT</code> (4),
-      <code class="code">$SANDMAN_HALF_LIFE_DAYS</code> (30).</li>
+      <code class="code">$SANDMAN_HALF_LIFE_DAYS</code> (30). <code class="code">idle</code> counts whole days to the local
+      today (<code class="code">$SANDMAN_TODAY</code>, as <a class="link" href="intentions.html">intentions</a> date), 0 for a note
+      with none of those dates; chart rounds to 3 places, and a judged note can go below 0.</li>
     <li><strong>floor</strong> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 100
       days idle (30 · log₂ 10), shown once 130, used once 160, used five times 220.</li>
     <li><strong>decay</strong> — the weekly review prunes, with no model run, each active note under the floor but a
@@ -984,7 +986,7 @@ sandman check --release  # what the release job would delete now, with its bytes
     line, its session taken off the entries, so 4–5 hold through it.</p>
 
   <h3 class="h3" id="cycle-chart">chart</h3>
-  <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]   built, strength aside
+  <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]   built
 "ended":   [{"at","id","into":str|null,"op","path","sessions":[str],"state":"ended"}]   built
 "lineage": [{"at","from":&lt;id&gt;,"op","to":&lt;id&gt;}]                                     built
 "taken":   [{…,"held":bool,"released":str|null}]          a released one from its release line, state "released"</pre>
@@ -1016,7 +1018,7 @@ sandman check --release  # what the release job would delete now, with its bytes
     <li><strong>rethink in session</strong> <span class="badge badge-ok">built</span> — the verb, the MCP tool, the seed's sentence, <code class="code">eval/recall.jsonl</code>,
       <code class="code">forget</code> over it.</li>
     <li><strong>rethink at encode</strong> <span class="badge badge-ok">built</span> — <code class="code"># recalled</code>, encode's contract and <code class="code">verdicts</code>.</li>
-    <li><strong>strength</strong> — the count, chart's <code class="code">strength</code>, the knobs.</li>
+    <li><strong>strength</strong> <span class="badge badge-ok">built</span> — the count, chart's <code class="code">strength</code>, the knobs.</li>
     <li><strong>order in a bank</strong> — consolidate's merge of notes, <code class="code"># judged</code> (revise, prune),
       retitle; the order measure and its revert.</li>
     <li><strong>across banks</strong> — rehome, rung-1 graduation, <code class="code"># elsewhere</code>.</li>

@@ -416,6 +416,20 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
                     format!(
                         r#"{{"at":"2026-11-10T07:50:00Z","kind":"guard","machine":"studio","rationale":"sample: ask before deleting","session":"{ID}g","tool":null}}"#
                     ),
+                    // strength's evidence: a show; a used verdict by id under an older path; a
+                    // wrong verdict before the body it judged, a stale one after
+                    format!(
+                        r#"{{"at":"2026-11-11T10:00:00Z","file":"-work-alpha/feedback_parser_spans.md","id":null,"kind":"show","machine":"studio","session":"{ID}a"}}"#
+                    ),
+                    format!(
+                        r#"{{"at":"2026-11-12T10:00:00Z","by":"agent","cue":null,"file":"knowledge/launchd/knowledge_old.md","id":"3f9a0c1d2b4e","kind":"rethink","machine":"studio","session":"{ID}d","verdict":"used","why":null}}"#
+                    ),
+                    format!(
+                        r#"{{"at":"2026-11-09T12:00:00Z","by":"agent","cue":null,"file":"-work-beta/project_release.md","id":null,"kind":"rethink","machine":"studio","session":"{ID}b","verdict":"wrong","why":null}}"#
+                    ),
+                    format!(
+                        r#"{{"at":"2026-11-11T12:00:00Z","by":"encode","cue":null,"file":"-work-beta/project_release.md","id":null,"kind":"rethink","machine":"studio","session":"{ID}b","verdict":"stale","why":null}}"#
+                    ),
                     // a stale memory pruned, then two pages merged into the labels page
                     r#"{"at":"2026-11-10T04:00:00Z","from":[{"digest":"sample","id":"7a7a7a7a7a7a","path":"-work-beta/project_stale.md","sessions":[]}],"kind":"rewrite","machine":"studio","model":"opus","op":"prune","reason":"sample: superseded","to":null}"#.to_owned(),
                     format!(
@@ -576,19 +590,31 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
         File::open(format!("{root}/claude/projects/-work-beta/{ID}d.jsonl"))?
             .set_modified(UNIX_EPOCH + Duration::from_secs(1_794_299_400))?;
         let want: Value = serde_json::from_str(include_str!("../docs/data/chart.json"))?;
-        let out = sandman(
-            &[
-                ("CLAUDE_CONFIG_DIR", &format!("{root}/claude")),
-                ("SANDMAN_MACHINE", "studio"),
-                ("SANDMAN_ROOT", &root),
-            ],
-            &["chart"],
-            "",
-        )?;
-        let mut got: Value =
-            serde_json::from_str(out.strip_prefix("0\n").ok_or_else(|| out.clone())?)?;
+        let claude = format!("{root}/claude");
+        let chart = |knob: (&str, &str)| -> Result<Value, Box<dyn Error>> {
+            let out = sandman(
+                &[
+                    ("CLAUDE_CONFIG_DIR", &claude),
+                    ("SANDMAN_MACHINE", "studio"),
+                    ("SANDMAN_ROOT", &root),
+                    ("SANDMAN_TODAY", "2026-11-14"),
+                    knob,
+                ],
+                &["chart"],
+                "",
+            )?;
+            Ok(serde_json::from_str(
+                out.strip_prefix("0\n").ok_or_else(|| out.clone())?,
+            )?)
+        };
+        let mut got = chart(("SANDMAN_ROOT", &root))?;
         got["at"] = want["at"].clone();
-        same(&got.to_string(), &want.to_string())
+        same(&got.to_string(), &want.to_string())?;
+        // a knob moves it: the labels page's used verdict weighs nothing
+        same(
+            &chart(("SANDMAN_USED_WEIGHT", "0"))?["knowledge"][0]["strength"].to_string(),
+            "0.955",
+        )
     }
 
     /// `check` reports each note's violations of invariants 1–3 in reader order and writes

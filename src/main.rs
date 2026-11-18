@@ -2114,6 +2114,68 @@ fn main() -> ExitCode {
             )
         }
         "chart" => {
+            let lines = ledger(&root);
+            // counted from the ledger, never stored (docs/index.html#cycle-strength): the note's
+            // used verdicts and shows, its wrong and stale verdicts since its body last changed,
+            // decayed by the days since the latest of its dates, used verdicts and shows (none: 0)
+            let (now, [used, shown, judged, half]) = (
+                day(&today()).unwrap_or_default(),
+                [
+                    ("SANDMAN_USED_WEIGHT", 3.0f64),
+                    ("SANDMAN_SHOWN_WEIGHT", 1.0),
+                    ("SANDMAN_JUDGED_WEIGHT", 4.0),
+                    ("SANDMAN_HALF_LIFE_DAYS", 30.0),
+                ]
+                .map(|(key, default)| setting(key, default)),
+            );
+            #[expect(clippy::float_arithmetic, reason = "strength is float math")]
+            let strength = |note: &Value| -> f64 {
+                let (body, dates) = (
+                    note["updated"]
+                        .as_str()
+                        .or_else(|| note["created"].as_str()),
+                    [note["created"].as_str(), note["updated"].as_str()],
+                );
+                let about: Vec<&Value> = lines
+                    .iter()
+                    .filter(|line| {
+                        line["file"] == note["path"]
+                            || (note["id"].is_string() && line["id"] == note["id"])
+                    })
+                    .collect();
+                let verdict = |line: &Value, verdicts: &[&str]| {
+                    line["kind"] == "rethink" && verdicts.contains(&text(&line["verdict"]))
+                };
+                let (read, acted) = (
+                    |line: &Value| line["kind"] == "show",
+                    |line: &Value| verdict(line, &["used"]),
+                );
+                let tally = |pick: &dyn Fn(&Value) -> bool| {
+                    u32::try_from(about.iter().filter(|line| pick(line)).count())
+                        .map_or(f64::MAX, f64::from)
+                };
+                let idle = about
+                    .iter()
+                    .filter(|line| read(line) || acted(line))
+                    .filter_map(|line| line["at"].as_str())
+                    .chain(dates.into_iter().flatten())
+                    .max()
+                    .and_then(|at| day(at.get(..10)?))
+                    .map_or(0, |then| now.saturating_sub(then));
+                let score = used.mul_add(
+                    tally(&acted),
+                    shown.mul_add(
+                        tally(&read),
+                        judged.mul_add(
+                            -tally(&|line| {
+                                verdict(line, &["stale", "wrong"]) && line["at"].as_str() > body
+                            }),
+                            1.0,
+                        ),
+                    ),
+                ) * (-u32::try_from(idle).map_or(f64::MAX, f64::from) / half).exp2();
+                (score * 1000.0f64).round() / 1000.0f64
+            };
             // a memory or a knowledge page, the page's topic in place of a bank
             let shelved = |dir: &str| -> Vec<Value> {
                 notes(&root, dir)
@@ -2129,7 +2191,7 @@ fn main() -> ExitCode {
                         "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
                         "id": note["id"], "name": note["name"], "origin": note["origin"],
                         "session": source.split_whitespace().find(|word| ["consolidate", "dream"].contains(&kind) && uuid(word)),
-                        "sessions": lineage([note]), "source": kind, "state": "active", "type": text(&note["type"]),
+                        "sessions": lineage([note]), "source": kind, "state": "active", "strength": strength(note), "type": text(&note["type"]),
                     });
                     let bank = text(&note["bank"]);
                     match bank.strip_prefix('@') {
@@ -2147,7 +2209,7 @@ fn main() -> ExitCode {
                     json!({
                         "bank": note["bank"], "created": note["created"], "file": note["file"], "from": words([text(&note["from"])]),
                         "id": note["id"], "name": note["name"], "origin": note["origin"], "session": note["session"],
-                        "sessions": lineage([note]), "state": "active", "type": text(&note["type"]),
+                        "sessions": lineage([note]), "state": "active", "strength": strength(note), "type": text(&note["type"]),
                     })
                 })
                 .collect();
@@ -2195,7 +2257,6 @@ fn main() -> ExitCode {
                     "taken": format!("{yyyy}-{mm}-{dd}T{}Z", clock.join(":")), "title": pointer["title"],
                 })));
             }
-            let lines = ledger(&root);
             // the notes rewrite lines ended, and each edge from a parent to the note it went into
             let ends = ended(&lines);
             let gone: Vec<Value> = ends
