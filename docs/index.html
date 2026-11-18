@@ -22,6 +22,9 @@
 .life .life-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
 .life .life-path.is-back { stroke-dasharray: 4 3; }
 .life marker path { fill: var(--ui-fg-muted); }
+/* the cycle's figures: a dashed box is not built yet */
+.life .life-box.is-next { fill: var(--ui-surface); stroke-dasharray: 4 3; }
+.life .life-head { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); font-weight: 600; }
 </style>
 </head>
 <body data-page="sandman">
@@ -55,17 +58,18 @@
 
 <header class="stack">
   <p class="eyebrow">memory for agentic sessions</p>
-  <p class="lead docs-lead"><code class="code">sandman</code> is being rewritten from scratch, one part
-    at a time; this build carries <code class="code">mark</code>, <code class="code">take</code>,
-    <code class="code">chart</code>, <a class="link" href="#forget"><code class="code">forget</code></a>, the agent's <a class="link" href="recall.html"><code class="code">recall</code>, <code class="code">show</code> and <code class="code">remember</code></a>,
-    its <a class="link" href="intentions.html"><code class="code">defer</code>, <code class="code">due</code>, <code class="code">done</code> and <code class="code">drop</code></a>
-    for work put off until later, and the daemon, <code class="code">serve</code>, which ends sessions that never ended, settles held takes,
-    <a class="link" href="#encode">encodes</a> episodes, <a class="link" href="#consolidate">consolidates</a>
-    banks and <a class="link" href="knowledge.html">topics</a> and <a class="link" href="#reflect">reviews</a> its own guidance weekly, with its <code class="code">status</code>, <code class="code">setup</code>, <code class="code">upgrade</code> and <code class="code">version</code>. Its memory follows
-    complementary learning systems: a fast, temporary store captures each session as an episode, and a slow
-    store absorbs episodes through replay. The pipeline runs unattended: it may edit the memories and its own
-    guidance, and every change is recorded in the ledger and recoverable from <code class="code">.pruned/</code>
-    or the prompt history; only <code class="code">forget</code> deletes for good.</p>
+  <p class="lead docs-lead"><code class="code">sandman</code> is rewritten from scratch, one part at a time. This build
+    carries <code class="code">mark</code>, <code class="code">take</code>, <code class="code">chart</code>,
+    <a class="link" href="#forget"><code class="code">forget</code></a>, the agent's <a class="link" href="recall.html"><code class="code">recall</code>, <code class="code">show</code> and <code class="code">remember</code></a>,
+    its <a class="link" href="intentions.html"><code class="code">defer</code>, <code class="code">due</code>, <code class="code">done</code> and <code class="code">drop</code></a>,
+    and the daemon, <code class="code">serve</code>, whose tick ends sessions that never ended, settles held takes,
+    <a class="link" href="#encode">encodes</a> episodes, <a class="link" href="#consolidate">consolidates</a> banks and
+    <a class="link" href="knowledge.html">topics</a> and <a class="link" href="#reflect">reviews</a> its own guidance weekly;
+    <code class="code">status</code>, <code class="code">setup</code>, <code class="code">upgrade</code> and <code class="code">version</code> run it.
+    A fast store captures each session as an episode, a slow one absorbs episodes through replay, and the
+    <a class="link" href="#cycle">memory cycle</a> decides what holds, what ends and when a transcript goes. It runs
+    unattended: every change is a ledger line, recoverable from <code class="code">.pruned/</code> or the prompt history;
+    today only <code class="code">forget</code> deletes for good.</p>
   <nav class="row docs-toc" aria-label="sections">
     <a class="pill" href="#root">root</a>
     <a class="pill" href="#mark">mark</a>
@@ -76,6 +80,7 @@
     <a class="pill" href="#encode">encode</a>
     <a class="pill" href="#consolidate">consolidate</a>
     <a class="pill" href="#reflect">reflect</a>
+    <a class="pill" href="#cycle">cycle</a>
     <a class="pill" href="#next">next</a>
     <a class="pill" href="recall.html">recall ↗</a>
     <a class="pill" href="knowledge.html">knowledge ↗</a>
@@ -100,11 +105,12 @@
     </thead>
     <tbody>
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
-      <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a> moved aside, deleted only by <a class="link" href="#forget">forget</a>: consumed traces, merged and pruned memories as they stood, each reply</td></tr>
+      <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a> moved aside: consumed traces, merged and pruned memories as they stood, each reply; deleted only by <a class="link" href="#forget">forget</a>, until the cycle's depth-1 sweep (<a class="link" href="#cycle-rewrite">not built</a>)</td></tr>
       <tr><td><code class="code">embeddings.jsonl</code></td><td><a class="link" href="recall.html#candidates">recall</a>'s embedding cache: <code class="code">{"h","path","v"}</code> a line, <code class="code">h</code> the SHA-256 of the model, 1024 and the text, the last line per hash winning; appended by recall and the tick, rewritten by the tick past twice its live size; about 14 MB for 635 memories, derived, so a synced root ignores it</td></tr>
+      <tr><td><code class="code">eval/recall.jsonl</code></td><td>not built: <a class="link" href="#cycle-rethink">rethink</a>'s labelled (cue, note) examples, the recall evaluation's growing set</td></tr>
       <tr><td><code class="code">intentions/&lt;id&gt;.md</code></td><td><a class="link" href="intentions.html">intentions</a>, work the person deferred: <code class="code">due</code> a date or <code class="code">after</code> an event, <code class="code">state</code> <code class="code">open</code>, <code class="code">done</code> or <code class="code">dropped</code>, the body what; written by <code class="code">defer</code>, <code class="code">done</code> and <code class="code">drop</code>, never by the daemon</td></tr>
       <tr><td><code class="code">knowledge/&lt;topic&gt;/&lt;file&gt;.md</code></td><td>the <a class="link" href="knowledge.html">knowledge store</a>: knowledge pages and playbooks filed by topic, each revised in place; a memory file's format, <code class="code">type</code> <code class="code">knowledge</code> or <code class="code">playbook</code></td></tr>
-      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>, <code class="code">guard</code> (a denied tool call); <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code> and <code class="code">drop</code>; and the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code></td></tr>
+      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>, <code class="code">guard</code> (a denied tool call); <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code> and <code class="code">drop</code>; and the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code>; not built, the <a class="link" href="#cycle">cycle</a>'s <code class="code">rethink</code>, <code class="code">rewrite</code> and <code class="code">check</code></td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>the banks, the long-term store's memories, filed by repository: memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
       <tr><td><code class="code">prompts/&lt;job&gt;.md</code></td><td>a model job's guidance (<code class="code">encode</code>, <code class="code">consolidate</code>, <code class="code">reflect</code>, <code class="code">judge</code>), read when present; written only by <a class="link" href="#reflect">reflect</a>, every version it replaced under <code class="code">.history/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;job&gt;.md</code></td></tr>
@@ -512,10 +518,10 @@ Why: "mocks hid a real ordering bug last year".</pre>
 <section class="docs-section" id="consolidate" data-component="consolidate">
   <header>
     <h2 class="h2">consolidate</h2>
-    <p class="docs-note">A job of <a class="link" href="#serve">serve</a>'s tick, in place of the dream pass: it
-      stabilises a bank's traces and integrates them with what the bank holds. A trace that revises a memory
-      updates it (reconsolidation); pruning drops a trace that does not hold or a memory gone stale. Nothing
-      waits for a person.</p>
+    <p class="docs-note">A job of <a class="link" href="#serve">serve</a>'s tick: it stabilises a bank's traces and
+      integrates them with what the bank holds. A trace that revises a memory updates it (reconsolidation); pruning
+      drops a trace that does not hold or a memory gone stale. Nothing waits for a person. The cycle adds
+      memory-to-memory ops (<a class="link" href="#cycle-rewrite">not built</a>).</p>
   </header>
   <p>It runs only in a tick with no episode to encode, one bank at a time, derived from disk each tick: of the
     banks under <code class="code">traces/</code>, a topic's <code class="code">@&lt;topic&gt;</code> among them, whose newest trace's <code class="code">created</code> is older than
@@ -569,10 +575,10 @@ Why: "mocks hid a real ordering bug last year".</pre>
       <code class="code">…-&lt;bank&gt;-ops.json</code>, reasons included; then the writes renamed in. Nothing is deleted.</li>
     <li><strong>stamped</strong> — a kept or merged memory's <code class="code">source</code> is
       <code class="code">consolidate &lt;now&gt; · &lt;the trace's session&gt; · model=&lt;model&gt;</code>; a merge replaces the
-      earlier one, as the bank format's own rewrites do, and the replaced version keeps it under
-      <code class="code">.pruned/</code>. Its <code class="code">sessions:</code> line, directly before <code class="code">source:</code>, is the union of the
-      trace's and the merged memory's provenance, so the sessions a merge descends from outlive the stamp it
-      replaces. <code class="code">MEMORY.md</code> is left alone: the earlier recall reads memory
+      earlier one, which <code class="code">.pruned/</code> keeps. A keep or a merge is the note continuing
+      (<a class="link" href="#cycle-note">the note</a>): its <code class="code">sessions:</code> line, directly before
+      <code class="code">source:</code>, is the union of the trace's and the memory's, so the sessions it descends from
+      outlive the stamp it replaces. <code class="code">MEMORY.md</code> is left alone: the earlier recall reads memory
       files, never the index, and the earlier commit path regenerates it whole.</li>
     <li><strong>stop</strong> — as encode's: no line, the bank runs again after the next start.</li>
   </ul>
@@ -656,10 +662,306 @@ Why: "mocks hid a real ordering bug last year".</pre>
     (all three counts 0). One review costs one model run plus three per input replayed: at most 19 with the defaults.</p>
 </section>
 
+<section class="docs-section" id="cycle" data-component="cycle">
+  <header>
+    <h2 class="h2">The memory cycle</h2>
+    <p class="docs-note">A session's transcript is encoded into traces, consolidated into memories and knowledge pages,
+      sent by recall, judged, counted, then revised, merged, graduated or decayed; once no active note names the session,
+      its transcript goes. Text and Rust, no database: every fact here is a file or a ledger line, and any index is a
+      cache rebuilt from them.</p>
+  </header>
+  <p class="notice notice-warn"><span>Built: the trail inward (session → archive → trace → note, each note naming its
+    sessions on <code class="code">sessions:</code>), recall's and show's ledger lines, consolidate's trace ops. Not built:
+    the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
+  <figure class="figure">
+    <div class="chart-frame life" id="cycle-loop">
+      <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
+        <defs>
+          <marker id="cycle-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <g transform="translate(0,16)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">① session</text><text class="life-note" x="14" y="44">an agent's work,</text><text class="life-note" x="14" y="60">marked, then taken</text></g>
+        <g transform="translate(196,16)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">② archive</text><text class="life-note" x="14" y="44">the transcript,</text><text class="life-note" x="14" y="60">held while named</text></g>
+        <g transform="translate(392,16)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">③ trace</text><text class="life-note" x="14" y="44">encoded or remembered,</text><text class="life-note" x="14" y="60">awaits consolidate</text></g>
+        <g transform="translate(588,16)"><rect class="life-box is-accent" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">④ memory|knowledge</text><text class="life-note" x="14" y="44">id, sessions, from:</text><text class="life-note" x="14" y="60">the active store</text></g>
+        <g transform="translate(588,152)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑤ recall</text><text class="life-note" x="14" y="44">a pointer sent,</text><text class="life-note" x="14" y="60">one ledger line</text></g>
+        <g transform="translate(392,152)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑥ rethink</text><text class="life-note" x="14" y="44">one verdict a send,</text><text class="life-note" x="14" y="60">in session or at encode</text></g>
+        <g transform="translate(196,152)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑦ strength</text><text class="life-note" x="14" y="44">counted from lines,</text><text class="life-note" x="14" y="60">never stored</text></g>
+        <g transform="translate(0,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑨ release</text><text class="life-note" x="14" y="44">unheld for 7 days:</text><text class="life-note" x="14" y="60">the transcript goes</text></g>
+        <g transform="translate(196,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ decay</text><text class="life-note" x="14" y="44">under the floor:</text><text class="life-note" x="14" y="60">pruned, an end</text></g>
+        <g transform="translate(392,288)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ reconsolidate</text><text class="life-note" x="14" y="44">a trace, a verdict:</text><text class="life-note" x="14" y="60">revise or merge</text></g>
+        <g transform="translate(588,288)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">⑧ graduate</text><text class="life-note" x="14" y="44">a page, a guidance</text><text class="life-note" x="14" y="60">line, a mechanism</text></g>
+        <g aria-hidden="true">
+          <path class="life-path" marker-end="url(#cycle-head)" d="M176,52H196" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M372,52H392" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M568,52H588" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M676,88V152" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M588,188H568" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M392,188H372" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M284,224V288" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M284,256H480V288" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M480,256H676V288" />
+          <path class="life-path" marker-end="url(#cycle-head)" d="M196,324H176" />
+          <path class="life-path is-back" marker-end="url(#cycle-head)" d="M480,360V380H784V52H764" />
+          <path class="life-path is-back" marker-end="url(#cycle-head)" d="M88,288V120H284V88" />
+        </g>
+        <text class="life-note" x="186" y="140" text-anchor="middle">no active note names it</text>
+        <text class="life-note" x="632" y="402" text-anchor="middle">back into the store: the same id, or a new one</text>
+      </svg>
+    </div>
+    <figcaption>The cycle, ①–⑨. Dashed boxes are not built yet; reconsolidate is built for a trace, not yet for a
+      verdict. A merge that writes a new note ends its parents, which, like decay, can leave a session unnamed.</figcaption>
+  </figure>
+
+  <h3 class="h3" id="cycle-note">The note</h3>
+  <p>Every memory, knowledge page and trace keeps the file format it has today, with three keys added and one
+    forbidden; writers put <code class="code">id</code> first, <code class="code">from</code> and <code class="code">origin</code>
+    just before <code class="code">sessions</code>:</p>
+  <pre class="snippet">---
+id: 3f9a0c1d2b4e                 12 lowercase hex from /dev/urandom, minted once, never changed
+name … archived                  as today
+from: 0a1b2c3d4e5f 9e8d7c6b5a4f  the notes it was merged from, sorted; only on a note a merge created
+origin: import|routine|hand      only on a note with neither sessions nor from
+sessions: &lt;uuid&gt; &lt;uuid&gt;          the archived sessions it descends from, sorted (built)
+source: &lt;stamp&gt;                  as today
+updated: &lt;now&gt;                   as today
+---</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>source</strong> — no writer produces a note without one: <code class="code">sessions</code> (chart's, from
+      <code class="code">sessions:</code>, <code class="code">session:</code> and the stamp), <code class="code">from:</code>, or
+      <code class="code">origin:</code>; never <code class="code">-</code> or an empty value. <code class="code">remember</code>
+      without <code class="code">--session</code> writes <code class="code">origin: hand</code>.</li>
+    <li><strong>continuing</strong> — a keep (the trace's id), a trace merged in, a revise, a retitle and a rehome are the
+      same note: the id stays, <code class="code">sessions:</code> and <code class="code">from:</code> gain what it absorbed.</li>
+    <li><strong>new</strong> — a merge of two or more notes, and a rung-1 graduation, write a new id, <code class="code">from:</code>
+      the parents, and no <code class="code">sessions:</code>, <code class="code">session:</code> or <code class="code">archived:</code>:
+      it starts clean. The parents end; their sessions stay on the rewrite line that ended them.</li>
+    <li><strong>end</strong> — merged into a new note, graduated, or pruned (by consolidate, or by decay); nothing else ends a
+      note. <code class="code">forget</code> is no end: it erases.</li>
+    <li><strong>strength</strong> — counted from the ledger, never stored; <code class="code">check</code> refuses a
+      <code class="code">strength:</code> key.</li>
+  </ul>
+
+  <h3 class="h3" id="cycle-rewrite">The rewrite line and lineage</h3>
+  <p>One ledger line per note rewritten, through <code class="code">mark</code>'s writer, never edited; recall's
+    <code class="code">sent</code> entries and the <code class="code">show</code>, <code class="code">remember</code> and
+    <code class="code">encode</code> lines gain <code class="code">id</code>, and a path in an older line resolves through these
+    lines' paths:</p>
+  <pre class="snippet">{"at","from":[{"digest":"&lt;SHA-256 of the file as it stood&gt;","id","path","sessions":[…]}],"kind":"rewrite","machine",
+ "model":"&lt;model&gt;"|null,"op":"keep"|"merge"|"revise"|"retitle"|"rehome"|"graduate"|"prune"|"release"|"revert",
+ "reason":str|null,"to":{"id","path"}|{"artifact":"&lt;path&gt;"}|null}</pre>
+  <div class="table-wrap">
+  <table data-table>
+    <thead><tr><th>op</th><th>from → to</th><th>written by</th></tr></thead>
+    <tbody>
+      <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate; <code class="code">done</code> on the owner's approval</td></tr>
+      <tr><td><code class="code">keep</code></td><td>a trace → the same id under <code class="code">memories/</code> or <code class="code">knowledge/</code></td><td>consolidate</td></tr>
+      <tr><td><code class="code">merge</code></td><td>a trace and a note → the note; two or more notes → a new id</td><td>consolidate</td></tr>
+      <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate; the weekly review (decay)</td></tr>
+      <tr><td><code class="code">rehome</code>, <code class="code">retitle</code></td><td>a note → the same id in another bank or topic, or under another name and file</td><td>consolidate</td></tr>
+      <tr><td><code class="code">release</code></td><td><code class="code">[{"path":&lt;archived&gt;,"session"}]</code> → null</td><td>the tick's release job</td></tr>
+      <tr><td><code class="code">revert</code></td><td>a pass's outputs → the notes it replaced</td><td>a pass that fails its measure</td></tr>
+      <tr><td><code class="code">revise</code></td><td>a note → the same id, body rewritten after a <code class="code">wrong</code> or <code class="code">stale</code> verdict</td><td>consolidate</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <figure class="figure">
+    <div class="chart-frame life" id="cycle-lineage">
+      <svg width="736" height="300" viewBox="0 0 736 300" role="img" aria-label="lineage at depth 1: an active note n merged from parents p1 and p2, whose bodies stay in .pruned; p1 was merged from a1 and a2, which survive only as rewrite lines holding their sessions">
+        <defs>
+          <marker id="lineage-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <text class="life-head" x="88" y="14" text-anchor="middle">two back: lines only</text>
+        <text class="life-head" x="368" y="14" text-anchor="middle">parents: bodies kept</text>
+        <text class="life-head" x="648" y="14" text-anchor="middle">active</text>
+        <g transform="translate(0,28)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">a1 · ended</text><text class="life-note" x="14" y="44">sessions: s1, on the line</text><text class="life-note" x="14" y="60">body deleted</text></g>
+        <g transform="translate(0,124)"><rect class="life-box is-next" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">a2 · ended</text><text class="life-note" x="14" y="44">sessions: s2, on the line</text><text class="life-note" x="14" y="60">body deleted</text></g>
+        <g transform="translate(280,28)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">p1 · ended</text><text class="life-note" x="14" y="44">from: a1 a2</text><text class="life-note" x="14" y="60">body in .pruned/</text></g>
+        <g transform="translate(280,124)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">p2 · ended</text><text class="life-note" x="14" y="44">sessions: s3 s4</text><text class="life-note" x="14" y="60">body in .pruned/</text></g>
+        <g transform="translate(560,76)"><rect class="life-box is-accent" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">n · active</text><text class="life-note" x="14" y="44">from: p1 p2</text><text class="life-note" x="14" y="60">sessions: none</text></g>
+        <g aria-hidden="true">
+          <path class="life-path" marker-end="url(#lineage-head)" d="M176,64H280" />
+          <path class="life-path" marker-end="url(#lineage-head)" d="M176,160H228V80H280" />
+          <path class="life-path" marker-end="url(#lineage-head)" d="M456,64H508V100H560" />
+          <path class="life-path" marker-end="url(#lineage-head)" d="M456,160H508V124H560" />
+        </g>
+        <text class="life-note" x="368" y="236" text-anchor="middle">a trace merged into n, a revise, a retitle or a rehome: n continues, its id kept, its sessions: extended</text>
+        <text class="life-note" x="368" y="256" text-anchor="middle">when n ends, the bodies of p1 and p2 are deleted; n's stays while the note it ended into is active</text>
+        <text class="life-note" x="368" y="276" text-anchor="middle">s1–s4 are named by no active note, so their transcripts are released</text>
+      </svg>
+    </div>
+    <figcaption>Lineage at depth 1, not built yet. The sessions live on the generation that read them; a note born of a
+      merge names its parents instead, and the ledger keeps every generation's ids, digests and sessions.</figcaption>
+  </figure>
+  <ul class="stack claims" role="list">
+    <li><strong>depth 1</strong> — <code class="code">.pruned/</code> keeps each active note's direct parents and its own
+      previous version, what a rollback needs; when a note ends, its parents' bodies are deleted. A pruned note's body
+      stays <code class="code">$SANDMAN_RELEASE_DAYS</code>. A file the next weekly review reads (written after the latest
+      reflect line, or among the latest <code class="code">$SANDMAN_REFLECT_REPLAY</code> replies and the copies they name)
+      stays until it is not. Older generations are rewrite lines only.</li>
+    <li><strong>order</strong> — each consolidate and weekly review line carries
+      <code class="code">"order":{"after":{"chars","eval"?,"notes"},"before":{…},"merges":n}</code> over the bank's, the topic's
+      or the store's active notes. A pass with an order op (a merge of notes, a graduation, a note pruned) that lowers
+      neither notes nor characters nor raises the recall evaluation's score, or that lowers the score, is reverted: its
+      copies back from <code class="code">.pruned/</code>, its writes removed, <code class="code">revert</code> lines, outcome
+      <code class="code">reverted</code>. A trace's intake and a verdict's revise are never reverted for order.</li>
+  </ul>
+
+  <h3 class="h3" id="cycle-rethink">rethink</h3>
+  <pre class="snippet">sandman rethink &lt;path&gt; --irrelevant|--used|--wrong|--stale [--why "&lt;text&gt;"] [--session &lt;uuid&gt;]
+rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}       # the MCP tool, passed as --&lt;verdict&gt;</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>at encode</strong> — the default, a cleanup on encode's one read of the transcript: the digest gains
+      <code class="code"># recalled</code>, <code class="code">- &lt;path&gt; · &lt;name&gt; — &lt;description&gt; · shown|not shown</code>
+      per note the session's recall lines sent and no in-session verdict judged; the reply gains
+      <code class="code">"verdicts":[{"file","verdict","why"}]</code>, one per listed note at most, a file not listed failing
+      the episode. A send nobody judged counts for nothing.</li>
+    <li><strong>in session</strong> — optional, and it outranks encode's verdict for the same session and note. The path as
+      <code class="code">show</code> takes it; stdout <code class="code">rethink: &lt;verdict&gt; &lt;path&gt;</code>; no note there,
+      exit 1; no verdict or two, exit 2. The seed's instructions gain one sentence naming it.</li>
+    <li><strong>eval</strong> — each verdict on a sent note also appends an example to <code class="code">eval/recall.jsonl</code>
+      through <code class="code">mark</code>'s writer, <code class="code">irrelevant</code> label 0, the rest 1;
+      <code class="code">forget</code> rewrites it as it rewrites the ledger:</li>
+  </ul>
+  <pre class="snippet">{"at","by":"agent"|"encode","cue":&lt;the send's&gt;|null,"file","id","kind":"rethink","machine","session","verdict","why":str|null}
+{"about","at","cue","digest","id","label":0|1,"path","session","verdict"}                  eval/recall.jsonl</pre>
+  <figure class="figure">
+    <div class="chart-frame life" id="cycle-verdicts">
+      <svg width="736" height="346" viewBox="0 0 736 346" role="img" aria-label="verdict paths: a send judged irrelevant counts against the recall classifier as a label-0 example and leaves the note alone; wrong or stale counts against the note; used raises the note">
+        <defs>
+          <marker id="verdict-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <text class="life-head" x="84" y="14" text-anchor="middle">the send</text>
+        <text class="life-head" x="364" y="14" text-anchor="middle">the verdict</text>
+        <text class="life-head" x="648" y="14" text-anchor="middle">counts against</text>
+        <g transform="translate(0,124)"><rect class="life-box" width="168" height="72" rx="8" /><text class="life-name" x="14" y="24">a send</text><text class="life-note" x="14" y="44">a cue and a note,</text><text class="life-note" x="14" y="60">one recall line</text></g>
+        <g transform="translate(264,28)"><rect class="life-box" width="200" height="72" rx="8" /><text class="life-name" x="14" y="24">irrelevant</text><text class="life-note" x="14" y="44">not about the cue</text><text class="life-note" x="14" y="60">the note untouched</text></g>
+        <g transform="translate(264,124)"><rect class="life-box" width="200" height="72" rx="8" /><text class="life-name" x="14" y="24">wrong | stale</text><text class="life-note" x="14" y="44">about the cue, but untrue</text><text class="life-note" x="14" y="60">or out of date</text></g>
+        <g transform="translate(264,220)"><rect class="life-box" width="200" height="72" rx="8" /><text class="life-name" x="14" y="24">used</text><text class="life-note" x="14" y="44">about the cue, true,</text><text class="life-note" x="14" y="60">acted on</text></g>
+        <g transform="translate(560,28)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">recall classifier</text><text class="life-note" x="14" y="44">a label-0 example</text><text class="life-note" x="14" y="60">for the recall eval</text></g>
+        <g transform="translate(560,124)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">the note, blamed</text><text class="life-note" x="14" y="44">−4 strength: revise</text><text class="life-note" x="14" y="60">or prune candidate</text></g>
+        <g transform="translate(560,220)"><rect class="life-box" width="176" height="72" rx="8" /><text class="life-name" x="14" y="24">the note, raised</text><text class="life-note" x="14" y="44">+3 strength,</text><text class="life-note" x="14" y="60">idle clock reset</text></g>
+        <g aria-hidden="true">
+          <path class="life-path" d="M168,160H216" />
+          <path class="life-path" marker-end="url(#verdict-head)" d="M216,160V64H264" />
+          <path class="life-path" marker-end="url(#verdict-head)" d="M216,160H264" />
+          <path class="life-path" marker-end="url(#verdict-head)" d="M216,160V256H264" />
+          <path class="life-path" marker-end="url(#verdict-head)" d="M464,64H560" />
+          <path class="life-path" marker-end="url(#verdict-head)" d="M464,160H560" />
+          <path class="life-path" marker-end="url(#verdict-head)" d="M464,256H560" />
+        </g>
+        <text class="life-note" x="368" y="318" text-anchor="middle">every judged send is also a classifier example: used, wrong and stale as label 1</text>
+        <text class="life-note" x="368" y="336" text-anchor="middle">a send nobody judged counts for nothing</text>
+      </svg>
+    </div>
+    <figcaption>Two blames, not built yet: relevance is the classifier's, truth the note's. An irrelevant send never weakens
+      the note it sent.</figcaption>
+  </figure>
+
+  <h3 class="h3" id="cycle-strength">Strength and decay</h3>
+  <pre class="snippet">strength = (1 + 3·used + 1·shown − 4·judged) × 2^(−idle ÷ 30)</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>terms</strong> — over the note's id: <code class="code">used</code> its <code class="code">used</code> verdicts,
+      <code class="code">shown</code> its show lines, <code class="code">judged</code> its <code class="code">wrong</code> and
+      <code class="code">stale</code> verdicts since its body last changed (a revise or a merge clears them),
+      <code class="code">idle</code> the days since the latest of its <code class="code">created</code>,
+      <code class="code">updated</code>, used verdicts and shows. <code class="code">$SANDMAN_USED_WEIGHT</code> (3),
+      <code class="code">$SANDMAN_SHOWN_WEIGHT</code> (1), <code class="code">$SANDMAN_JUDGED_WEIGHT</code> (4),
+      <code class="code">$SANDMAN_HALF_LIFE_DAYS</code> (30).</li>
+    <li><strong>floor</strong> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 100
+      days idle (30 · log₂ 10), shown once 130, used once 160, used five times 220.</li>
+    <li><strong>decay</strong> — the weekly review prunes, with no model run, each active note under the floor but a
+      <code class="code">type: user</code> note, a <code class="code">recall: pin</code> or <code class="code">mute</code> one,
+      one with a judged verdict outstanding (consolidate's to revise or prune), and a trace (consolidate's).</li>
+  </ul>
+
+  <h3 class="h3" id="cycle-graduate">Graduation</h3>
+  <figure class="figure">
+    <div class="chart-frame life" id="cycle-ladder">
+      <svg width="736" height="316" viewBox="0 0 736 316" role="img" aria-label="the graduation ladder: rung 1, memories merge into a knowledge page or playbook, automatic; rung 2, a note used across many sessions becomes standing guidance, owner approved; rung 3, a lesson relearned becomes a mechanism, owner approved; each rung costs more to keep true">
+        <defs>
+          <marker id="ladder-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
+        </defs>
+        <g transform="translate(0,176)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">① page or playbook</text><text class="life-note" x="14" y="46">memories converge on a subject</text><text class="life-note" x="14" y="64">automatic, in consolidate</text><text class="life-note" x="14" y="82">cost: reread at every merge</text></g>
+        <g transform="translate(252,96)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">② standing guidance</text><text class="life-note" x="14" y="46">used in 5 sessions, never wrong</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: context in every session</text></g>
+        <g transform="translate(504,16)"><rect class="life-box is-next" width="232" height="104" rx="8" /><text class="life-name" x="14" y="24">③ mechanism</text><text class="life-note" x="14" y="46">relearned in 3 sessions</text><text class="life-note" x="14" y="64">proposed weekly, owner approves</text><text class="life-note" x="14" y="82">cost: code, tests and a gate</text></g>
+        <g aria-hidden="true">
+          <path class="life-path" marker-end="url(#ladder-head)" d="M116,176V148H252" />
+          <path class="life-path" marker-end="url(#ladder-head)" d="M368,96V68H504" />
+        </g>
+        <text class="life-note" x="368" y="306" text-anchor="middle">a rung-2 line replaces a line or justifies the characters it adds; pinning is no rung</text>
+      </svg>
+    </div>
+    <figcaption>The ladder, 1 → 2 → 3, not built yet. Each rung costs more to keep true and less to apply: a page is
+      reread by a model, a line is read by every session in its scope, a mechanism runs without being read.</figcaption>
+  </figure>
+  <ul class="stack claims" role="list">
+    <li><strong>rung 1</strong> — consolidate's reply op <code class="code">graduate</code> (below)
+      writes a trace under <code class="code">traces/@&lt;topic&gt;/</code>, a new id, <code class="code">from:</code> the memories,
+      which end; the topic's consolidate keeps it as a page or merges it into one, the page continuing with its
+      <code class="code">from:</code> extended. A bank's input gains <code class="code"># elsewhere</code>: at most 5 notes of other
+      banks and topics whose cached embedding has cosine at least <code class="code">$SANDMAN_NEAR</code> (0.8) with a trace or memory
+      sent, listed and never written, so a subject converging across banks shows.</li>
+    <li><strong>rung 2</strong> — the weekly review's evidence gains <code class="code"># standing</code>: a note with
+      <code class="code">used</code> verdicts in <code class="code">$SANDMAN_GUIDE_SESSIONS</code> (5) distinct sessions and no
+      <code class="code">wrong</code> or <code class="code">stale</code> ever. Its reply gains <code class="code">propose</code>
+      (below), the artifact the most
+      specific one (a repository's <code class="code">AGENTS.md</code>, a rules file, a skill, <code class="code">CLAUDE.md</code>); a
+      rung-2 proposal with no <code class="code">replaces</code> justifies its characters in <code class="code">why</code> or is
+      dropped.</li>
+    <li><strong>rung 3</strong> — <code class="code"># relearned</code>: a note, or the line it graduated into, that traces of
+      <code class="code">$SANDMAN_MECHANISM_SESSIONS</code> (3) distinct sessions merged into since it was written: the same failure
+      needed the lesson again. Proposed as a hook, lint, test, gate or tool default.</li>
+    <li><strong>approval</strong> — each proposal becomes an <a class="link" href="intentions.html">intention</a>, due today,
+      <code class="code">about</code> the artifact's repository, <code class="code">graduate: &lt;note id&gt;</code>, which the seed
+      surfaces. The owner has it applied; <code class="code">done</code> on it ends the note (<code class="code">graduate</code>,
+      to the artifact); <code class="code">drop</code> declines, and the note is not proposed again until its body changes.</li>
+  </ul>
+  <pre class="snippet">{"op":"graduate","memories":[&lt;file&gt;,…],"topic","type":"knowledge"|"playbook","name","description","body","reason"}   consolidate's
+"propose":[{"artifact","line","note","replaces":str|null,"rung":2|3,"why"}]                                    the weekly review's</pre>
+
+  <h3 class="h3" id="cycle-release">Release</h3>
+  <ul class="stack claims" role="list">
+    <li><strong>held</strong> — a transcript while its session waits for encode, or an active note or a trace names it
+      (chart's <code class="code">sessions</code>). Unheld since the latest of its take, its encode line and the rewrite line that
+      ended the last note naming it.</li>
+    <li><strong>released</strong> — a tick job after settle, at most <code class="code">$SANDMAN_RELEASE_TICK</code> (20) a tick:
+      unheld for <code class="code">$SANDMAN_RELEASE_DAYS</code> (7), its archived file, <code class="code">-dir</code> and
+      <code class="code">.recent</code> pointer are deleted and a <code class="code">release</code> line written; the id stays in
+      the ledger and on ended notes' lines. The same job sweeps <code class="code">.pruned/</code> to depth 1. It runs only
+      while <code class="code">sandman check</code> passes, so a broken link never frees a transcript.</li>
+  </ul>
+
+  <h3 class="h3" id="cycle-check">check</h3>
+  <pre class="snippet">sandman check            # every violation, or check: &lt;n&gt; notes, &lt;n&gt; held, &lt;n&gt; released: clean
+sandman check --fix      # what can be repaired mechanically, then check
+sandman check --release  # what the release job would delete now, with its bytes; writes nothing</pre>
+  <ol class="stack" role="list">
+    <li>every note has <code class="code">id:</code>, 12 lowercase hex, unique across memories, knowledge and traces;</li>
+    <li>every note has a source (<code class="code">sessions</code>, <code class="code">from:</code> or <code class="code">origin: import|routine|hand</code>), and none of those keys is <code class="code">-</code> or empty;</li>
+    <li><code class="code">sessions:</code> holds uuids, <code class="code">from:</code> ids, each sorted and once; no note has <code class="code">strength:</code>;</li>
+    <li>every <code class="code">from:</code> id was ended by a rewrite line, and no active note's id was;</li>
+    <li>every rewrite line has the shape above, an id ends at most once, and every <code class="code">to</code> id is active or ended by a later line;</li>
+    <li><code class="code">.pruned/</code> holds no body past depth 1 and its grace;</li>
+    <li>no released transcript is on disk, and none an active note names is released.</li>
+  </ol>
+  <p>A violation is one stdout line, <code class="code">&lt;path&gt;: &lt;invariant n&gt;: &lt;detail&gt;</code>, and exit 1.
+    <code class="code">--fix</code> mints missing ids, gives a sourceless note <code class="code">origin</code> by its stamp's first
+    word (<code class="code">remember</code> → <code class="code">hand</code>; <code class="code">consolidate</code>,
+    <code class="code">dream</code>, <code class="code">reconsolidate</code>, <code class="code">reflect</code> →
+    <code class="code">routine</code>; none → <code class="code">import</code>), sorts and dedupes the two lists, each by temp + rename,
+    and writes <code class="code">{"at","fixed":n,"kind":"check","machine"}</code>.</p>
+
+  <h3 class="h3" id="cycle-chart">chart</h3>
+  <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]
+"ended":   [{"at","id","into":str|null,"op","path","sessions":[str],"state":"ended"}]
+"lineage": [{"at","from":&lt;id&gt;,"op","to":&lt;id&gt;}]
+"taken":   [{…,"held":bool,"released":str|null}]          a released one from its release line, state "released"</pre>
+</section>
+
 <section class="docs-section" id="next" data-component="next">
   <header>
     <h2 class="h2">Next</h2>
-    <p class="docs-note">Parts still to bring over.</p>
+    <p class="docs-note">Parts still to bring over, then the memory cycle in stages.</p>
   </header>
   <ul class="stack" role="list">
     <li>the cutover: the subether mod's guard hook moves from the old <code class="code">trail append --kind guard</code> to <code class="code">mark</code>'s guard, bifrost's portals page reads <code class="code">chart</code>'s <code class="code">guards</code> in place of <code class="code">trail/</code>, the <code class="code">/delete</code> skill and bridge's forget button call this <code class="code">forget</code>, and the old binary retires. The old sandman's upgrade agent is booted out before the first release of this build is cut: its swap would run this binary under the old manifest, whose kickstart of the retired <code class="code">.report</code> agent and <code class="code">shift status</code> probe both fail, and roll back. Once the release is out, one <code class="code">setup</code> (any build of this one) installs it, takes over <code class="code">~/.local/bin/sandman</code> and the upgrade agent.</li>
@@ -667,8 +969,33 @@ Why: "mocks hid a real ordering bug last year".</pre>
     <li><code class="code">recall</code>: the seed, the agent's pull and <code class="code">show</code> are built; the mod wiring is next, all on <a class="link" href="recall.html">its own page</a>.</li>
     <li><code class="code">knowledge</code>: the store is built; rehoming the existing memories and promoting a playbook to a skill are next, on <a class="link" href="knowledge.html#next">its own page</a>.</li>
     <li><code class="code">intentions</code>: the verbs and the seed's due block are built; matching an event-based one to a session and a timeline in bifrost are open, on <a class="link" href="intentions.html#next">its own page</a>.</li>
-    <li><code class="code">reflect</code>: corrections in later episodes that an existing memory should have prevented, as evidence; and recall's selection question, which stays fixed until the evidence can judge a rewrite of it.</li>
+    <li><code class="code">reflect</code>: recall's selection question, fixed until the recall evaluation (stage 10) can judge a rewrite of it.</li>
   </ul>
+  <p>The <a class="link" href="#cycle">memory cycle</a>, one stage a sitting, each leaving <code class="code">mise run check</code> green
+    and flipping its marks here and in <code class="code">AGENTS.md</code>:</p>
+  <ol class="stack" role="list">
+    <li><strong>ids and sources</strong> — <code class="code">id:</code> on every write (encode, remember, consolidate's keep and
+      merge), <code class="code">origin: hand</code> from <code class="code">remember</code> without a session; the reader's
+      <code class="code">id</code>, <code class="code">from</code>, <code class="code">origin</code>; chart's row keys and
+      <code class="code">state</code>; <code class="code">check</code> invariants 1–3 and <code class="code">--fix</code>. The owner then
+      runs <code class="code">check</code> and <code class="code">check --fix</code> on the root.</li>
+    <li><strong>rewrite lines</strong> — consolidate's ops as rewrite lines; <code class="code">id</code> on recall, show, remember
+      and encode lines; chart's <code class="code">ended</code> and <code class="code">lineage</code>; invariants 4–5.</li>
+    <li><strong>rethink in session</strong> — the verb, the MCP tool, the seed's sentence, <code class="code">eval/recall.jsonl</code>,
+      <code class="code">forget</code> over it.</li>
+    <li><strong>rethink at encode</strong> — <code class="code"># recalled</code>, encode's contract and <code class="code">verdicts</code>.</li>
+    <li><strong>strength</strong> — the count, chart's <code class="code">strength</code>, the knobs.</li>
+    <li><strong>order in a bank</strong> — consolidate's merge of notes, <code class="code"># judged</code> (revise, prune),
+      retitle; the order measure and its revert.</li>
+    <li><strong>across banks</strong> — rehome, rung-1 graduation, <code class="code"># elsewhere</code>.</li>
+    <li><strong>the weekly review</strong> — decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
+      proposals as intentions, <code class="code">done</code> and <code class="code">drop</code> on them.</li>
+    <li><strong>release</strong> — the job, the depth-1 sweep, chart's <code class="code">held</code> and <code class="code">released</code>,
+      invariants 6–7, <code class="code">check --release</code>. The owner reads <code class="code">check --release</code> on the root
+      before installing it: its first run releases every transcript no note names.</li>
+    <li><strong>the recall evaluation</strong> — a score over <code class="code">eval/recall.jsonl</code>, the order measure's
+      <code class="code">eval</code>.</li>
+  </ol>
 </section>
 
 <nav class="row link-row" aria-label="links">
