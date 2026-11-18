@@ -22,8 +22,6 @@
 .life .life-path { fill: none; stroke: var(--ui-fg-muted); stroke-width: 1.5; }
 .life .life-path.is-back { stroke-dasharray: 4 3; }
 .life marker path { fill: var(--ui-fg-muted); }
-/* the cycle's figures: a dashed box is not built yet */
-.life .life-box.is-next { fill: var(--ui-surface); stroke-dasharray: 4 3; }
 .life .life-head { fill: var(--ui-fg-muted); font-family: var(--ui-font-sans); font-weight: 600; }
 </style>
 </head>
@@ -104,16 +102,16 @@
       <tr><th>path</th><th>holds</th></tr>
     </thead>
     <tbody>
-      <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
-      <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a> moved aside: consumed traces, merged and pruned memories as they stood, each reply; deleted only by <a class="link" href="#forget">forget</a>, until the cycle's depth-1 sweep (<a class="link" href="#cycle-rewrite">not built</a>)</td></tr>
+      <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts, until <a class="link" href="#cycle-release">release</a> deletes one no note holds</td></tr>
+      <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a>, decay and a graduation moved aside: consumed traces, merged and pruned memories as they stood, each reply; swept to <a class="link" href="#cycle-rewrite">depth 1</a> by release, erased by <a class="link" href="#forget">forget</a></td></tr>
       <tr><td><code class="code">embeddings.jsonl</code></td><td><a class="link" href="recall.html#candidates">recall</a>'s embedding cache: <code class="code">{"h","path","v"}</code> a line, <code class="code">h</code> the SHA-256 of the model, 1024 and the text, the last line per hash winning; appended by recall and the tick, rewritten by the tick past twice its live size; about 14 MB for 635 memories, derived, so a synced root ignores it</td></tr>
       <tr><td><code class="code">eval/recall.jsonl</code></td><td><a class="link" href="#cycle-rethink">rethink</a>'s labelled (cue, note) examples, one per judged send, the recall evaluation's growing set</td></tr>
       <tr><td><code class="code">intentions/&lt;id&gt;.md</code></td><td><a class="link" href="intentions.html">intentions</a>, work the person deferred: <code class="code">due</code> a date or <code class="code">after</code> an event, <code class="code">state</code> <code class="code">open</code>, <code class="code">done</code> or <code class="code">dropped</code>, the body what; written by <code class="code">defer</code>, <code class="code">done</code> and <code class="code">drop</code>, never by the daemon</td></tr>
       <tr><td><code class="code">knowledge/&lt;topic&gt;/&lt;file&gt;.md</code></td><td>the <a class="link" href="knowledge.html">knowledge store</a>: knowledge pages and playbooks filed by topic, each revised in place; a memory file's format, <code class="code">type</code> <code class="code">knowledge</code> or <code class="code">playbook</code></td></tr>
-      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>, <code class="code">guard</code> (a denied tool call); <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code>, <code class="code">drop</code> and <code class="code">rethink</code>; the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code>; the <a class="link" href="#cycle">cycle</a>'s <code class="code">rewrite</code> and <code class="code">check</code></td></tr>
+      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>, <code class="code">guard</code> (a denied tool call); <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code>, <code class="code">drop</code> and <code class="code">rethink</code>; the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code>; the <a class="link" href="#cycle">cycle</a>'s <code class="code">rewrite</code> (a <code class="code">release</code> among them) and <code class="code">check</code></td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>the banks, the long-term store's memories, filed by repository: memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
-      <tr><td><code class="code">prompts/&lt;job&gt;.md</code></td><td>a model job's guidance (<code class="code">encode</code>, <code class="code">consolidate</code>, <code class="code">reflect</code>, <code class="code">judge</code>), read when present; written only by <a class="link" href="#reflect">reflect</a>, every version it replaced under <code class="code">.history/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;job&gt;.md</code></td></tr>
+      <tr><td><code class="code">prompts/&lt;job&gt;.md</code></td><td>a model job's guidance (<code class="code">encode</code>, <code class="code">consolidate</code>, <code class="code">reflect</code>, <code class="code">judge</code>) and recall's selection question (<code class="code">question</code>), read when present; written only by <a class="link" href="#reflect">reflect</a>, every version it replaced under <code class="code">.history/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;job&gt;.md</code></td></tr>
       <tr><td><code class="code">run/</code></td><td>the daemon's, mode 0700: <code class="code">serve.lock</code>, <code class="code">serve.pid</code>, <code class="code">serve.sock</code>, <code class="code">serve.log</code> and <code class="code">serve.log.1</code>, each model run's <code class="code">&lt;job&gt;.in</code>, <code class="code">.out</code>, <code class="code">.err</code></td></tr>
       <tr><td><code class="code">traces/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>traces, newly encoded or remembered memories awaiting consolidation, one dir per bank; a topic's knowledge and playbook traces under <code class="code">@&lt;topic&gt;</code>, a name no bank key can take</td></tr>
       <tr><td><code class="code">machine</code></td><td>this machine's id: one line, 32 lowercase hex from <code class="code">/dev/urandom</code>, minted on first use; <code class="code">$SANDMAN_MACHINE</code> overrides it</td></tr>
@@ -729,21 +727,8 @@ Does the agent need this memory to carry out the request correctly?
     <p class="docs-note">A session's transcript is encoded into traces, consolidated into memories and knowledge pages,
       sent by recall, judged, counted, then revised, merged, graduated or decayed; once no active note names the session,
       its transcript goes. Text and Rust, no database: every fact here is a file or a ledger line, and any index is a
-      cache rebuilt from them.</p>
+      cache rebuilt from them. Built in full, in the ten stages under <a class="link" href="#next">next</a>.</p>
   </header>
-  <p class="notice notice-warn"><span>Built: the trail inward (session → archive → trace → note, each note naming its
-    sessions on <code class="code">sessions:</code>), recall's and show's ledger lines, consolidate's trace ops, the
-    note's <code class="code">id</code>, <code class="code">from</code> and <code class="code">origin</code> and
-    <code class="code">check</code>'s invariants 1–3 (stage 1); consolidate's ops as rewrite lines, the ids on recall,
-    show, remember and encode lines, chart's <code class="code">ended</code> and <code class="code">lineage</code>, invariants
-    4–5 (stage 2); <code class="code">rethink</code> in session, its MCP tool and <code class="code">eval/recall.jsonl</code> (stage 3);
-    encode's <code class="code"># recalled</code> and <code class="code">verdicts</code> (stage 4); strength, on chart's rows (stage 5);
-    consolidate's merge of notes, <code class="code"># judged</code> with revise, retitle and the order measure (stage 6); rehome,
-    rung-1 graduation and <code class="code"># elsewhere</code> (stage 7); decay, <code class="code"># standing</code>, <code class="code"># relearned</code>,
-    rungs 2–3 as intentions and <code class="code">done</code> and <code class="code">drop</code> on them (stage 8); release, the
-    depth-1 sweep, invariants 6–7, <code class="code">check --release</code> and chart's <code class="code">held</code> and
-    <code class="code">released</code> (stage 9); the recall evaluation, the order measure's <code class="code">eval</code>,
-    its revert and the review's selection question (stage 10). The whole section is built.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -826,15 +811,15 @@ updated: &lt;now&gt;                   as today
   <table data-table>
     <thead><tr><th>op</th><th>from → to</th><th>written by</th></tr></thead>
     <tbody>
-      <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate; <code class="code">done</code> on the owner's approval <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">keep</code></td><td>a trace → the same id under <code class="code">memories/</code> or <code class="code">knowledge/</code></td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">merge</code></td><td>a trace and a note → the note; two or more notes → a new id</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate; the weekly review (decay) <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">rehome</code></td><td>a note → the same id in another bank or topic</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">release</code></td><td>per archived file <code class="code">{"bytes","digest","id":null,"path","sessions":[&lt;session&gt;]}</code> → null</td><td>the tick's release job <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">retitle</code></td><td>a note → the same id under another name and file</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">revert</code></td><td>a note an order op wrote → null; <code class="code">[]</code> → each note it ended, put back</td><td>a pass that fails its measure <span class="badge badge-ok">built</span></td></tr>
-      <tr><td><code class="code">revise</code></td><td>a note → the same id, body rewritten after a <code class="code">wrong</code> or <code class="code">stale</code> verdict</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
+      <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate; <code class="code">done</code> on the owner's approval</td></tr>
+      <tr><td><code class="code">keep</code></td><td>a trace → the same id under <code class="code">memories/</code> or <code class="code">knowledge/</code></td><td>consolidate</td></tr>
+      <tr><td><code class="code">merge</code></td><td>a trace and a note → the note; two or more notes → a new id</td><td>consolidate</td></tr>
+      <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate; the weekly review (decay)</td></tr>
+      <tr><td><code class="code">rehome</code></td><td>a note → the same id in another bank or topic</td><td>consolidate</td></tr>
+      <tr><td><code class="code">release</code></td><td>per archived file <code class="code">{"bytes","digest","id":null,"path","sessions":[&lt;session&gt;]}</code> → null</td><td>the tick's release job</td></tr>
+      <tr><td><code class="code">retitle</code></td><td>a note → the same id under another name and file</td><td>consolidate</td></tr>
+      <tr><td><code class="code">revert</code></td><td>a note an order op wrote → null; <code class="code">[]</code> → each note it ended, put back</td><td>a pass that fails its measure</td></tr>
+      <tr><td><code class="code">revise</code></td><td>a note → the same id, body rewritten after a <code class="code">wrong</code> or <code class="code">stale</code> verdict</td><td>consolidate</td></tr>
     </tbody>
   </table>
   </div>
@@ -868,12 +853,12 @@ updated: &lt;now&gt;                   as today
       <code class="code">lineage</code>; the oldest generation's bodies are deleted by release's depth-1 sweep.</figcaption>
   </figure>
   <ul class="stack claims" role="list">
-    <li><strong>depth 1</strong> <span class="badge badge-ok">built</span> — <code class="code">.pruned/</code> keeps the newest copy of each active note's direct parents and of its own
+    <li><strong>depth 1</strong> — <code class="code">.pruned/</code> keeps the newest copy of each active note's direct parents and of its own
       previous version, what a rollback needs; when a note ends, its parents' bodies are deleted. A pruned or graduated
       note's body stays <code class="code">$SANDMAN_RELEASE_DAYS</code> after its line. A file the next weekly review reads (written after the latest
       reflect line, or among the latest <code class="code">$SANDMAN_REFLECT_REPLAY</code> replies and the copies they name)
       stays until it is not. A copy without an id is outside the lineage and stays. Older generations are rewrite lines only.</li>
-    <li><strong>order</strong> <span class="badge badge-ok">built</span> — each consolidated and weekly
+    <li><strong>order</strong> — each consolidated and weekly
       review line carries <code class="code">"order":{"after":{"chars","eval"?,"notes"},"before":{…},"merges":n}</code>
       over the bank's or the topic's active notes, its traces among them, or the store's: their count, their files'
       characters, and the pass's merges of notes; <code class="code">eval</code>, with an example, is the store's recall
@@ -893,17 +878,17 @@ updated: &lt;now&gt;                   as today
   <pre class="snippet">sandman rethink &lt;path&gt; --irrelevant|--used|--wrong|--stale [--why "&lt;text&gt;"] [--session &lt;uuid&gt;]
 rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}       # the MCP tool, passed as --&lt;verdict&gt;</pre>
   <ul class="stack claims" role="list">
-    <li><strong>at encode</strong> <span class="badge badge-ok">built</span> — the default, a cleanup on encode's one read of the transcript: the digest gains
+    <li><strong>at encode</strong> — the default, a cleanup on encode's one read of the transcript: the digest gains
       <code class="code"># recalled</code>, <code class="code">- &lt;path&gt; · &lt;name&gt; — &lt;description&gt; · shown|not shown</code>
       per note on disk (by path, else id) the session's recall lines sent and no verdict of the session judged; the reply gains
       <code class="code">"verdicts":[{"file","verdict","why"}]</code>, one per listed note at most, optional; a file not listed, one judged twice or a
       verdict outside the four fails the episode (<code class="code">output: not a verdict: …</code>), nothing written. Each
       is a rethink line, <code class="code">by</code> <code class="code">encode</code>. A send nobody judged counts for nothing.</li>
-    <li><strong>in session</strong> <span class="badge badge-ok">built</span> — optional, and it outranks encode's verdict for the same session and note. The path as
+    <li><strong>in session</strong> — optional, and it outranks encode's verdict for the same session and note. The path as
       <code class="code">show</code> takes it; stdout <code class="code">rethink: &lt;verdict&gt; &lt;path&gt;</code>; no verdict or two,
       exit 2; no note there, exit 1. <code class="code">cue</code> is the session's latest send of the note, by path,
       else by id. The seed's instructions name it in one sentence.</li>
-    <li><strong>eval</strong> <span class="badge badge-ok">built</span> — each verdict on a sent note also appends an example to <code class="code">eval/recall.jsonl</code>
+    <li><strong>eval</strong> — each verdict on a sent note also appends an example to <code class="code">eval/recall.jsonl</code>
       through <code class="code">mark</code>'s writer, <code class="code">irrelevant</code> label 0, the rest 1,
       <code class="code">about</code> and <code class="code">cue</code> the send's, <code class="code">digest</code> the SHA-256 of the
       note as judged; <code class="code">forget</code> drops its session's examples:</li>
@@ -946,7 +931,7 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
   <h3 class="h3" id="cycle-strength">Strength and decay</h3>
   <pre class="snippet">strength = (1 + 3·used + 1·shown − 4·judged) × 2^(−idle ÷ 30)</pre>
   <ul class="stack claims" role="list">
-    <li><strong>terms</strong> <span class="badge badge-ok">built</span> — over the ledger's lines naming the note (by path, else id): <code class="code">used</code> its <code class="code">used</code> verdicts,
+    <li><strong>terms</strong> — over the ledger's lines naming the note (by path, else id): <code class="code">used</code> its <code class="code">used</code> verdicts,
       <code class="code">shown</code> its show lines, <code class="code">judged</code> its <code class="code">wrong</code> and
       <code class="code">stale</code> verdicts since its body last changed (a revise or a merge clears them),
       <code class="code">idle</code> the days since the latest of its <code class="code">created</code>,
@@ -955,9 +940,9 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
       <code class="code">$SANDMAN_HALF_LIFE_DAYS</code> (30). <code class="code">idle</code> counts whole days to the local
       today (<code class="code">$SANDMAN_TODAY</code>, as <a class="link" href="intentions.html">intentions</a> date), 0 for a note
       with none of those dates; chart rounds to 3 places, and a judged note can go below 0.</li>
-    <li><strong>floor</strong> <span class="badge badge-ok">built</span> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 100
+    <li><strong>floor</strong> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 100
       days idle (30 · log₂ 10), shown once 130, used once 160, used five times 220.</li>
-    <li><strong>decay</strong> <span class="badge badge-ok">built</span> — the weekly review first prunes, with no model run, each active note under the floor but a
+    <li><strong>decay</strong> — the weekly review first prunes, with no model run, each active note under the floor but a
       <code class="code">type: user</code> note, a <code class="code">recall: pin</code> or <code class="code">mute</code> one,
       one with a judged verdict outstanding (consolidate's to revise or prune), and a trace (consolidate's): moved to
       <code class="code">.pruned/</code> as consolidate's prune, its rewrite line <code class="code">model</code> null and
@@ -985,23 +970,23 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
       reread by a model, a line is read by every session in its scope, a mechanism runs without being read.</figcaption>
   </figure>
   <ul class="stack claims" role="list">
-    <li><strong>rung 1</strong> <span class="badge badge-ok">built</span> — consolidate's reply op <code class="code">graduate</code> (below)
+    <li><strong>rung 1</strong> — consolidate's reply op <code class="code">graduate</code> (below)
       writes a trace under <code class="code">traces/@&lt;topic&gt;/</code>, a new id, <code class="code">from:</code> the memories,
       which end; the topic's consolidate keeps it as a page or merges it into one, the page continuing with its
       <code class="code">from:</code> extended. <code class="code"># elsewhere</code> (<a class="link" href="#consolidate">consolidate</a>)
       shows a subject converging across banks.</li>
-    <li><strong>rung 2</strong> <span class="badge badge-ok">built</span> — the weekly review's evidence gains <code class="code"># standing</code>: a note with an id,
+    <li><strong>rung 2</strong> — the weekly review's evidence gains <code class="code"># standing</code>: a note with an id,
       <code class="code">used</code> verdicts in <code class="code">$SANDMAN_GUIDE_SESSIONS</code> (5) distinct sessions and no
       <code class="code">wrong</code> or <code class="code">stale</code> ever. Its reply gains <code class="code">propose</code>
       (below), the artifact the most
       specific one (a repository's <code class="code">AGENTS.md</code>, a rules file, a skill, <code class="code">CLAUDE.md</code>); a
       rung-2 proposal with no <code class="code">replaces</code> justifies its characters in <code class="code">why</code> or is
       dropped.</li>
-    <li><strong>rung 3</strong> <span class="badge badge-ok">built</span> — <code class="code"># relearned</code>: an active note that traces of
+    <li><strong>rung 3</strong> — <code class="code"># relearned</code>: an active note that traces of
       <code class="code">$SANDMAN_MECHANISM_SESSIONS</code> (3) distinct sessions merged into since its <code class="code">created</code>
       (the merge rewrite lines' trace entries): the same failure needed the lesson again. Proposed as a hook, lint, test,
       gate or tool default. A graduated line is outside the store, so nothing counts its relearning.</li>
-    <li><strong>approval</strong> <span class="badge badge-ok">built</span> — each proposal becomes an <a class="link" href="intentions.html">intention</a>, due today,
+    <li><strong>approval</strong> — each proposal becomes an <a class="link" href="intentions.html">intention</a>, due today,
       <code class="code">about</code> the artifact's directory, <code class="code">graduate: &lt;note id&gt;</code> and
       <code class="code">artifact: &lt;path&gt;</code>, its text <code class="code">Graduate &lt;name&gt; (rung &lt;n&gt;) into &lt;artifact&gt;: &lt;line&gt;[, replacing: …][ — &lt;why&gt;]</code>,
       which the seed's due block surfaces. The owner has it applied; <code class="code">done</code> on it first ends the note
@@ -1013,7 +998,7 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
   <pre class="snippet">{"op":"graduate","memories":[&lt;file&gt;,…],"topic","type":"knowledge"|"playbook","name","description","body","reason"}   consolidate's
 "propose":[{"artifact","line","note","replaces":str|null,"rung":2|3,"why"}]                                    the weekly review's</pre>
 
-  <h3 class="h3" id="cycle-release">Release <span class="badge badge-ok">built</span></h3>
+  <h3 class="h3" id="cycle-release">Release</h3>
   <ul class="stack claims" role="list">
     <li><strong>transcript</strong> — a file <code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;uuid&gt;.jsonl</code>;
       anything else under <code class="code">.archive/</code> (a tree made by hand) is neither released nor checked.</li>
@@ -1064,16 +1049,16 @@ sandman check --release  # what the release job would delete now, with its bytes
     first, exit 1 while any holds the job back.</p>
 
   <h3 class="h3" id="cycle-chart">chart</h3>
-  <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]   built
-"ended":   [{"at","id","into":str|null,"op","path","sessions":[str],"state":"ended"}]   built
-"lineage": [{"at","from":&lt;id&gt;,"op","to":&lt;id&gt;}]                                     built
-"taken":   [{…,"held":bool,"released":str|null}]          built; a released one from its release line, state "released"</pre>
+  <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]
+"ended":   [{"at","id","into":str|null,"op","path","sessions":[str],"state":"ended"}]
+"lineage": [{"at","from":&lt;id&gt;,"op","to":&lt;id&gt;}]
+"taken":   [{…,"held":bool,"released":str|null}]          a released one from its release line, state "released"</pre>
 </section>
 
 <section class="docs-section" id="next" data-component="next">
   <header>
     <h2 class="h2">Next</h2>
-    <p class="docs-note">Parts still to bring over, then the memory cycle in stages.</p>
+    <p class="docs-note">Parts still to bring over, and the memory cycle's ten stages, all built.</p>
   </header>
   <ul class="stack" role="list">
     <li>the cutover: the subether mod's guard hook moves from the old <code class="code">trail append --kind guard</code> to <code class="code">mark</code>'s guard, bifrost's portals page reads <code class="code">chart</code>'s <code class="code">guards</code> in place of <code class="code">trail/</code>, the <code class="code">/delete</code> skill and bridge's forget button call this <code class="code">forget</code>, and the old binary retires. The old sandman's upgrade agent is booted out before the first release of this build is cut: its swap would run this binary under the old manifest, whose kickstart of the retired <code class="code">.report</code> agent and <code class="code">shift status</code> probe both fail, and roll back. Once the release is out, one <code class="code">setup</code> (any build of this one) installs it, takes over <code class="code">~/.local/bin/sandman</code> and the upgrade agent.</li>
@@ -1082,8 +1067,7 @@ sandman check --release  # what the release job would delete now, with its bytes
     <li><code class="code">knowledge</code>: the store is built; rehoming the existing memories and promoting a playbook to a skill are next, on <a class="link" href="knowledge.html#next">its own page</a>.</li>
     <li><code class="code">intentions</code>: the verbs and the seed's due block are built; matching an event-based one to a session and a timeline in bifrost are open, on <a class="link" href="intentions.html#next">its own page</a>.</li>
   </ul>
-  <p>The <a class="link" href="#cycle">memory cycle</a>, one stage a sitting, each leaving <code class="code">mise run check</code> green
-    and flipping its marks here and in <code class="code">AGENTS.md</code>:</p>
+  <p>The <a class="link" href="#cycle">memory cycle</a>, built one stage a sitting, each leaving <code class="code">mise run check</code> green:</p>
   <ol class="stack" role="list">
     <li><strong>ids and sources</strong> <span class="badge badge-ok">built</span> — <code class="code">id:</code> on every write (encode, remember, consolidate's keep and
       merge), <code class="code">origin: hand</code> from <code class="code">remember</code> without a session; the reader's

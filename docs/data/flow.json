@@ -103,6 +103,6 @@
     {"col": 3, "doc": "reads the root, never writes it (bar the machine id)", "id": "chart", "kind": "verb", "label": "sandman chart", "row": 2},
     {"col": 4, "doc": "draws active, taken and memories as a timeline", "id": "bifrost", "kind": "sink", "label": "bifrost · pipeline", "row": 2},
     {"col": 1, "doc": "holds every note, rewrite line, .pruned/ copy and archived transcript to the memory cycle's seven invariants; --fix mends what is mechanical, --release prints what release would delete", "id": "check", "kind": "verb", "label": "sandman check", "row": 10},
-    {"col": 1, "doc": "a tick job after settle, only while check passes: deletes transcripts no note holds after a week unheld, a release line each, and sweeps .pruned/ to depth 1", "id": "release", "kind": "verb", "label": "release", "row": 11}
+    {"col": 1, "doc": "a tick job after settle, only while check passes: deletes transcripts no note holds after a week unheld, a release line each, and sweeps .pruned/ to depth 1", "id": "release", "kind": "verb", "label": "serve · release", "row": 11}
   ]
 }
