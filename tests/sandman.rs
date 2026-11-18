@@ -9,7 +9,7 @@ use signal_hook as _;
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::error::Error;
     use std::fs::{File, Permissions};
     use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
@@ -53,7 +53,7 @@ mod tests {
         ),
         (
             "memories/-work-alpha/project_vpn.md",
-            "---\nname: Alpha deploys need the vpn\ndescription: the deploy host is private\ntype: project\ncreated: 2026-11-01T00:00:00Z\nupdated: 2026-11-05T00:00:00Z\n---\n\nConnect first.\n",
+            "---\nid: 1a2b3c4d5e6f\nname: Alpha deploys need the vpn\ndescription: the deploy host is private\ntype: project\ncreated: 2026-11-01T00:00:00Z\nupdated: 2026-11-05T00:00:00Z\n---\n\nConnect first.\n",
         ),
         (
             "memories/-work-alpha/reference_grammar.md",
@@ -416,6 +416,11 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
                     format!(
                         r#"{{"at":"2026-11-10T07:50:00Z","kind":"guard","machine":"studio","rationale":"sample: ask before deleting","session":"{ID}g","tool":null}}"#
                     ),
+                    // a stale memory pruned, then two pages merged into the labels page
+                    r#"{"at":"2026-11-10T04:00:00Z","from":[{"digest":"sample","id":"7a7a7a7a7a7a","path":"-work-beta/project_stale.md","sessions":[]}],"kind":"rewrite","machine":"studio","model":"opus","op":"prune","reason":"sample: superseded","to":null}"#.to_owned(),
+                    format!(
+                        r#"{{"at":"2026-11-10T05:00:00Z","from":[{{"digest":"sample","id":"0a1b2c3d4e5f","path":"knowledge/launchd/knowledge_old_labels.md","sessions":["{ID}c"]}},{{"digest":"sample","id":"9e8d7c6b5a4f","path":"knowledge/launchd/knowledge_label_rule.md","sessions":["{ID}b"]}}],"kind":"rewrite","machine":"studio","model":"opus","op":"merge","reason":null,"to":{{"id":"3f9a0c1d2b4e","path":"knowledge/launchd/knowledge_labels.md"}}}}"#
+                    ),
                 ]
                 .join("\n"),
             ),
@@ -611,7 +616,7 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             ("memories/beta/loose.md", "no frontmatter\n"),
             (
                 "knowledge/topic/bad.md",
-                "---\nid: XYZ\nname: Bad\norigin: manual\nfrom: 1b1b1b1b1b1b nope 0a0a0a0a0a0a 0a0a0a0a0a0a\nsource: consolidate\n---\n\nbody\n",
+                "---\nid: XYZ\nname: Bad\norigin: manual\nfrom: 1b1b1b1b1b1b nope 0e0e0e0e0e0e 0e0e0e0e0e0e\nsource: consolidate\n---\n\nbody\n",
             ),
             (
                 "traces/b/empty.md",
@@ -623,14 +628,59 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             ),
         ];
         plant(&root, &notes)?;
+        // rewrite lines: a merge ending 1b and 0d into 4d, which a later prune ends; 0d ended
+        // again; a line of no rewrite's shape; odd's live id ended; a keep that ends 5f into 6a,
+        // which nothing accounts for; a keep that continues empty's note; a graduation to an
+        // artifact
+        let rewrite = |second: u8, op: &str, from: &[&str], to: Value| {
+            let entries: Vec<Value> = from
+                .iter()
+                .map(|id| json!({"digest": "d", "id": id, "path": "p", "sessions": []}))
+                .collect();
+            json!({"at": format!("2026-11-01T00:00:0{second}Z"), "from": entries, "kind": "rewrite", "machine": "studio", "model": null, "op": op, "reason": null, "to": to}).to_string()
+        };
+        let into = |id: &str| json!({"id": id, "path": "p"});
+        plant(
+            &root,
+            &[(
+                "ledger/2026/11/01.jsonl",
+                &[
+                    rewrite(
+                        1,
+                        "merge",
+                        &["1b1b1b1b1b1b", "0d0d0d0d0d0d"],
+                        into("4d4d4d4d4d4d"),
+                    ),
+                    rewrite(2, "prune", &["0d0d0d0d0d0d"], Value::Null),
+                    r#"{"at":"2026-11-01T00:00:03Z","from":"x","kind":"rewrite","op":"forget"}"#
+                        .to_owned(),
+                    rewrite(4, "prune", &["3c3c3c3c3c3c"], Value::Null),
+                    rewrite(5, "prune", &["4d4d4d4d4d4d"], Value::Null),
+                    rewrite(6, "keep", &["5f5f5f5f5f5f"], into("6a6a6a6a6a6a")),
+                    rewrite(7, "keep", &["2b2b2b2b2b2b"], into("2b2b2b2b2b2b")),
+                    rewrite(
+                        8,
+                        "graduate",
+                        &["7b7b7b7b7b7b"],
+                        json!({"artifact": "AGENTS.md"}),
+                    ),
+                ]
+                .join("\n"),
+            )],
+        )?;
         let envs = [("SANDMAN_ROOT", root.as_str())];
         let read = |path: &str| fs::read_to_string(format!("{root}/{path}")).unwrap_or_default();
         let all = || notes.map(|note| masked(&read(note.0))).concat();
         let before = all();
         let left = [
             "knowledge/topic/bad.md: 3: from: nope is not an id",
+            "knowledge/topic/bad.md: 4: from 0e0e0e0e0e0e was never ended",
             "traces/b/empty.md: 3: strength is counted, never stored",
             "traces/b/odd.md: 3: sessions: notuuid is not a session id",
+            "traces/b/odd.md: 4: id 3c3c3c3c3c3c was ended",
+            "ledger 2026-11-01T00:00:02Z: 5: id 0d0d0d0d0d0d ended again",
+            "ledger 2026-11-01T00:00:03Z: 5: not a rewrite line",
+            "ledger 2026-11-01T00:00:06Z: 5: to 6a6a6a6a6a6a is neither active nor ended later",
         ];
         let bad = [
             "alpha/noid.md: 1: no id",
@@ -642,13 +692,18 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             "knowledge/topic/bad.md: 2: origin manual is not hand, import or routine",
             left[0],
             "knowledge/topic/bad.md: 3: from is not sorted once",
+            left[1],
             "traces/b/empty.md: 2: from is \"\"",
             "traces/b/empty.md: 2: origin is \"-\"",
             "traces/b/empty.md: 2: sessions is \"\"",
             "traces/b/empty.md: 2: no source",
-            left[1],
             left[2],
+            left[3],
             "traces/b/odd.md: 3: sessions is not sorted once",
+            left[4],
+            left[5],
+            left[6],
+            left[7],
         ];
         same(
             &format!(
@@ -665,7 +720,14 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
             "",
         )?;
         same(
-            &format!("{fixed}{}\n{}", all().replace('@', ID), ledger(&root)?),
+            &format!(
+                "{fixed}{}\n{}",
+                all().replace('@', ID),
+                ledger(&root)?
+                    .lines()
+                    .find(|line| line.contains(r#""kind":"check""#))
+                    .unwrap_or_default()
+            ),
             &format!(
                 "1\ncheck: fixed 6\n{}\n{}\n{}",
                 left.join("\n"),
@@ -675,7 +737,7 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
                     "---\nid: <id>\nname: Second\nsession: @b\n---\n\nbody\n",
                     "never read\n",
                     "---\nid: <id>\norigin: import\n---\n\nno frontmatter\n",
-                    "---\nid: <id>\nname: Bad\nfrom: 0a0a0a0a0a0a 1b1b1b1b1b1b nope\nsource: consolidate\n---\n\nbody\n",
+                    "---\nid: <id>\nname: Bad\nfrom: 0e0e0e0e0e0e 1b1b1b1b1b1b nope\nsource: consolidate\n---\n\nbody\n",
                     "---\nid: <id>\nstrength: 3\norigin: routine\nsource: dream 2026-01-01\n---\n\nbody\n",
                     "---\nid: <id>\nsessions: @b @c notuuid\nsource: encode\n---\n\nbody\n",
                 ]
@@ -707,6 +769,7 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],
         ] {
             fs::remove_file(format!("{root}/{path}"))?;
         }
+        fs::remove_dir_all(format!("{root}/ledger"))?;
         same(
             &sandman(&envs, &["check"], "")?,
             "0\ncheck: 4 notes: clean\n",
@@ -1186,17 +1249,28 @@ esac
             ),
             "true Some(0)",
         )?;
+        // each encoded line's ids, the traces it wrote, counted here and matched to the files below
+        let mut minted = BTreeSet::new();
         let lines = read(&today)
             .lines()
             .map(|line| {
                 let mut entry: Value = serde_json::from_str(line)?;
                 entry["at"] = json!(entry["at"].as_str().map(str::len));
+                if let Some(ids) = entry["ids"].as_array() {
+                    minted.extend(ids.iter().filter_map(Value::as_str).map(str::to_owned));
+                    entry["ids"] = ids.len().into();
+                }
                 Ok(entry.to_string())
             })
             .collect::<Result<Vec<_>, serde_json::Error>>()?;
         let line = |letter: &str, outcome: &str, traces: u8, error: &str| {
+            let ids = if outcome == "encoded" {
+                format!(r#""ids":{traces},"#)
+            } else {
+                String::new()
+            };
             format!(
-                r#"{{"at":20,{error}"kind":"encode","machine":"studio","outcome":"{outcome}","session":"{ID}{letter}","traces":{traces}}}"#
+                r#"{{"at":20,{error}{ids}"kind":"encode","machine":"studio","outcome":"{outcome}","session":"{ID}{letter}","traces":{traces}}}"#
             )
         };
         same(
@@ -1262,6 +1336,17 @@ esac
             }
         }
         written.sort();
+        let held: BTreeSet<String> = written
+            .iter()
+            .filter_map(|file| {
+                read(&format!("{root}/traces/{file}"))
+                    .lines()
+                    .nth(1)
+                    .and_then(|said| said.strip_prefix("id: "))
+                    .map(str::to_owned)
+            })
+            .collect();
+        same(&format!("{} {}", minted.len(), held == minted), "7 true")?;
         let first = read(&format!(
             "{root}/traces/{}/feedback_sample_pass_the_clock_in.md",
             key(&format!("{work}/r"))
@@ -1401,7 +1486,7 @@ printf '{{"traces":[]}}\n'
             .collect();
         let line = |letter: &str, token: &str| {
             format!(
-                r#""kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}{letter}",{token}"traces":0}}"#
+                r#""ids":[],"kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}{letter}",{token}"traces":0}}"#
             )
         };
         same(
@@ -1640,14 +1725,43 @@ esac
         until(|| read(&today).contains(r#""bank":"slow""#))?;
         stop(again)?;
         fs::set_permissions(&locked, Permissions::from_mode(0o755))?;
+        // a rewrite line's digests by their length, the keep's checked against its copy below
+        let mut digests = Vec::new();
         let lines = read(&today)
             .lines()
             .map(|line| {
                 let mut entry: Value = serde_json::from_str(line)?;
                 entry["at"] = json!(entry["at"].as_str().map(str::len));
+                for from in entry
+                    .get_mut("from")
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                {
+                    digests.push(from["digest"].as_str().unwrap_or_default().to_owned());
+                    from["digest"] = json!(digests.last().map(String::len));
+                }
                 Ok(entry.to_string())
             })
             .collect::<Result<Vec<_>, serde_json::Error>>()?;
+        let fed = |id: Value, path: &str, letter: &str| {
+            let sessions: Vec<String> = (!letter.is_empty())
+                .then(|| format!("{ID}{letter}"))
+                .into_iter()
+                .collect();
+            json!({"digest": 64u8, "id": id, "path": path, "sessions": sessions})
+        };
+        let rewrite = |op: &str, from: Vec<Value>, reason: Value, to: Value| {
+            json!({"at": 20u8, "from": from, "kind": "rewrite", "machine": "studio", "model": "sample-model", "op": op, "reason": reason, "to": to}).to_string()
+        };
+        let cut = |file: &str, letter: &str, reason: &str| {
+            rewrite(
+                "prune",
+                vec![fed(Value::Null, file, letter)],
+                reason.into(),
+                Value::Null,
+            )
+        };
         let line = |bank: &str, counts: [u8; 3], error: &str| {
             let mut entry = json!({
                 "at": 20u8, "bank": bank, "kept": counts[0], "kind": "consolidate", "machine": "studio",
@@ -1667,6 +1781,23 @@ esac
             })
             .into();
         want.extend([
+            rewrite(
+                "keep",
+                vec![fed("0a0a0a0a0a0a".into(), "traces/alpha/feedback_t_keep.md", "a")],
+                Value::Null,
+                json!({"id": "0a0a0a0a0a0a", "path": "alpha/project_sample_kept.md"}),
+            ),
+            rewrite(
+                "merge",
+                vec![
+                    fed(Value::Null, "traces/alpha/feedback_t_merge.md", "b"),
+                    fed("2c2c2c2c2c2c".into(), "alpha/project_m_merge.md", "c"),
+                ],
+                Value::Null,
+                json!({"id": "2c2c2c2c2c2c", "path": "alpha/project_m_merge.md"}),
+            ),
+            cut("traces/alpha/feedback_t_prune.md", "c", "sample: says what project_m_merge.md says"),
+            cut("alpha/reference_m_prune.md", "", "sample: superseded"),
             line("alpha", [1, 1, 2], ""),
             line("exit", [0; 3], "exit status: 3: sample: broke"),
             line("junk", [0; 3], "output: EOF while parsing a value at line 1 column 1"),
@@ -1692,6 +1823,8 @@ esac
             line("unnamed", [0; 3], "output: trace not named: feedback_t.md"),
             line("locked", [0; 3], "Permission denied (os error 13)"),
             line("rearm", [0; 3], "exit status: 3: sample: broke"),
+            cut("traces/rearm/feedback_t.md", "d", "x"),
+            cut("traces/rearm/feedback_t2.md", "f", "x"),
             line("rearm", [0, 0, 2], ""),
             line("slow", [0; 3], "timed out after 300 ms"),
         ]);
@@ -1797,6 +1930,23 @@ esac
                 .unwrap_or_default();
             fs::read_to_string(path)
         };
+        // the keep's digest is the SHA-256 of the trace as it stood, its copy under `.pruned/`
+        let copy = fs::read_dir(format!("{root}/{aside_dir}"))?
+            .flatten()
+            .map(|kid| kid.path())
+            .find(|path| path.to_string_lossy().ends_with("alpha-feedback_t_keep.md"))
+            .ok_or("no copy")?;
+        let summed = Command::new("shasum")
+            .args(["-a", "256"])
+            .arg(&copy)
+            .output()?;
+        same(
+            String::from_utf8(summed.stdout)?
+                .split(' ')
+                .next()
+                .unwrap_or_default(),
+            digests.first().map_or("", String::as_str),
+        )?;
         let source = |letter: &str| {
             format!("source: consolidate <now> \u{b7} {ID}{letter} \u{b7} model=sample-model")
         };
@@ -1956,14 +2106,23 @@ esac
             ),
             "true Some(0)",
         )?;
-        let lines = read(&today)
+        let parsed = read(&today)
             .lines()
-            .map(|line| {
-                let mut entry: Value = serde_json::from_str(line)?;
-                entry["at"] = "A".into();
-                Ok(entry.to_string())
+            .map(serde_json::from_str)
+            .collect::<Result<Vec<Value>, serde_json::Error>>()?;
+        // the rewrite lines apart, below; an encode's ids counted
+        let lines: Vec<String> = parsed
+            .iter()
+            .filter(|entry| entry["kind"] != "rewrite")
+            .map(|entry| {
+                let mut shown = entry.clone();
+                shown["at"] = "A".into();
+                if let Some(ids) = entry["ids"].as_array() {
+                    shown["ids"] = ids.len().into();
+                }
+                shown.to_string()
             })
-            .collect::<Result<Vec<_>, serde_json::Error>>()?;
+            .collect();
         let bank = work.replace(|letter: char| !letter.is_ascii_alphanumeric(), "-");
         let line = |key: &str, counts: [u8; 3]| {
             format!(
@@ -1974,14 +2133,61 @@ esac
         same(
             &lines.join("\n"),
             &[
-                format!(r#"{{"at":"A","kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}a","traces":3}}"#),
+                format!(r#"{{"at":"A","ids":3,"kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}a","traces":3}}"#),
                 format!(
                     r#"{{"at":"A","error":"output: not a trace: {{\"body\":\"x\",\"description\":\"x\",\"name\":\"x\",\"type\":\"knowledge\"}}","kind":"encode","machine":"studio","outcome":"failed","session":"{ID}c","traces":0}}"#
                 ),
                 line(&bank, [0, 0, 1]),
                 line("@launchd", [2, 0, 0]),
-                format!(r#"{{"at":"A","kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}b","traces":1}}"#),
+                format!(r#"{{"at":"A","ids":1,"kind":"encode","machine":"studio","outcome":"encoded","session":"{ID}b","traces":1}}"#),
                 line("@launchd", [0, 1, 0]),
+            ]
+            .join("\n"),
+        )?;
+        // the ids carry through: a keep continues its trace, b's merge ends its trace into the page
+        // a's keep made; each id named by the encode that minted it, `<session><n>`
+        let mut named = BTreeMap::new();
+        for entry in parsed.iter().filter(|entry| entry["kind"] == "encode") {
+            for (at, id) in entry["ids"].as_array().into_iter().flatten().enumerate() {
+                let session = entry["session"]
+                    .as_str()
+                    .and_then(|said| said.strip_prefix(ID))
+                    .unwrap_or_default();
+                drop(named.insert(id.to_string(), format!("{session}{at}")));
+            }
+        }
+        let name = |id: &Value| {
+            named
+                .get(&id.to_string())
+                .cloned()
+                .unwrap_or_else(|| id.to_string())
+        };
+        let rewrites: Vec<String> = parsed
+            .iter()
+            .filter(|entry| entry["kind"] == "rewrite")
+            .map(|rewritten| {
+                let from: Vec<String> = rewritten["from"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|entry| name(&entry["id"]))
+                    .collect();
+                format!(
+                    "{} {} into {} {}",
+                    rewritten["op"],
+                    from.join(","),
+                    name(&rewritten["to"]["id"]),
+                    rewritten["to"]["path"]
+                )
+            })
+            .collect();
+        same(
+            &rewrites.join("\n"),
+            &[
+                r#""prune" a0 into null null"#,
+                r#""keep" a1 into a1 "knowledge/launchd/knowledge_launchd_exittimeout.md""#,
+                r#""keep" a2 into a2 "knowledge/launchd/playbook_swap_a_launchd_daemon.md""#,
+                r#""merge" b0,a2 into a2 "knowledge/launchd/playbook_swap_a_launchd_daemon.md""#,
             ]
             .join("\n"),
         )?;
@@ -3248,7 +3454,12 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     .iter()
                     .find(|pair| pair.0 == *file)
                     .map_or("", |pair| pair.1);
-                    format!(r#"{{"file":"{file}","score":{score}}}"#)
+                    let id = if *file == "-work-alpha/project_vpn.md" {
+                        r#""1a2b3c4d5e6f""#
+                    } else {
+                        "null"
+                    };
+                    format!(r#"{{"file":"{file}","id":{id},"score":{score}}}"#)
                 })
                 .collect::<Vec<_>>()
                 .join(",")
@@ -3317,7 +3528,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 "d",
                 "fix it",
                 lexical,
-                r#"{"file":"traces/-work-beta/feedback_retry.md","score":0.0},{"file":"-work-alpha/project_vpn.md","score":0.0},{"file":"-work-beta/feedback_tie.md","score":0.0},{"file":"-work-alpha/feedback_clock.md","score":0.0},{"file":"-work-alpha/reference_grammar.md","score":0.0}"#,
+                r#"{"file":"traces/-work-beta/feedback_retry.md","id":null,"score":0.0},{"file":"-work-alpha/project_vpn.md","id":"1a2b3c4d5e6f","score":0.0},{"file":"-work-beta/feedback_tie.md","id":null,"score":0.0},{"file":"-work-alpha/feedback_clock.md","id":null,"score":0.0},{"file":"-work-alpha/reference_grammar.md","id":null,"score":0.0}"#,
             ),
         ] {
             let session = format!("{ID}{letter}");
@@ -4034,14 +4245,17 @@ printf '{"ops":[],"under":"%s"}\n' $u
             ]
             .concat(),
         )?;
+        let read = |file: &str| fs::read_to_string(format!("{root}/{file}")).unwrap_or_default();
         same(
             &ledger(&root)?,
             &files
                 .iter()
                 .zip(["feedback", "user", "feedback", "feedback"])
                 .map(|(file, kind)| {
-                    let id = if kind == "user" { format!("\"{session}\"") } else { "null".to_owned() };
-                    format!(r#"{{"at":"A","file":"{file}","kind":"remember","machine":"studio","session":{id},"type":"{kind}"}}"#)
+                    let by = if kind == "user" { format!("\"{session}\"") } else { "null".to_owned() };
+                    // the line names the trace's own id
+                    let id = read(file).lines().nth(1).and_then(|line| line.strip_prefix("id: ")).unwrap_or_default().to_owned();
+                    format!(r#"{{"at":"A","file":"{file}","id":"{id}","kind":"remember","machine":"studio","session":{by},"type":"{kind}"}}"#)
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
@@ -4768,7 +4982,7 @@ bootstrap {gui} {file}
         same(
             &ledger(&root)?,
             &format!(
-                "{{\"at\":\"A\",\"file\":\"-work-alpha/project_vpn.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":\"{session}\"}}\n{{\"at\":\"A\",\"file\":\"-work-alpha/feedback_clock.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}\n{{\"at\":\"A\",\"file\":\"common/user_short.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}\n{{\"at\":\"A\",\"file\":\"traces/-work-beta/feedback_retry.md\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}"
+                "{{\"at\":\"A\",\"file\":\"-work-alpha/project_vpn.md\",\"id\":\"1a2b3c4d5e6f\",\"kind\":\"show\",\"machine\":\"studio\",\"session\":\"{session}\"}}\n{{\"at\":\"A\",\"file\":\"-work-alpha/feedback_clock.md\",\"id\":null,\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}\n{{\"at\":\"A\",\"file\":\"common/user_short.md\",\"id\":null,\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}\n{{\"at\":\"A\",\"file\":\"traces/-work-beta/feedback_retry.md\",\"id\":null,\"kind\":\"show\",\"machine\":\"studio\",\"session\":null}}"
             ),
         )
     }

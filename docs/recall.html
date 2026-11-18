@@ -415,9 +415,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     </tbody>
   </table>
 </div>
-  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"embedded":true,"error"?,"kind":"recall","machine":…,"ms":n,"scorer":"pplx","seed"?:true,"sent":[{"file":"&lt;path&gt;","score":0.97}],"session":…,"tokens":n}
-{"at":…,"file":"&lt;path&gt;","kind":"show","machine":…,"session":…}
-{"at":…,"file":"traces/&lt;bank&gt;/&lt;file&gt;","kind":"remember","machine":…,"session":…,"type":"feedback"}</pre>
+  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"embedded":true,"error"?,"kind":"recall","machine":…,"ms":n,"scorer":"pplx","seed"?:true,"sent":[{"file":"&lt;path&gt;","id":"&lt;its id&gt;","score":0.97}],"session":…,"tokens":n}
+{"at":…,"file":"&lt;path&gt;","id":"&lt;its id&gt;","kind":"show","machine":…,"session":…}
+{"at":…,"file":"traces/&lt;bank&gt;/&lt;file&gt;","id":"&lt;its id&gt;","kind":"remember","machine":…,"session":…,"type":"feedback"}</pre>
   <p class="docs-note"><strong>Proposed:</strong> sent, then read, then pinned or muted is the whole feedback loop, and two of its three parts exist already.</p>
   <ul class="stack claims" role="list">
     <li><strong>use</strong> — a <code class="code">show</code> line of a sent memory in the same session; before the seed and the pulls pass <code class="code">--session</code>, a read of the file in the tool log (194 on record).</li>

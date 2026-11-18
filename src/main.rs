@@ -79,6 +79,11 @@ const KINDS: [&str; 4] = ["feedback", "project", "reference", "user"];
 /// one episode) and a `playbook` (procedural memory, how a recurring task is done).
 const KNOWN: [&str; 2] = ["knowledge", "playbook"];
 
+/// A rewrite line's `op` (docs/index.html#cycle-rewrite).
+const OPS: [&str; 9] = [
+    "graduate", "keep", "merge", "prune", "rehome", "release", "retitle", "revert", "revise",
+];
+
 /// A note's `origin`, its source when it descends from no session and no note: `hand` (remembered
 /// without a session), `import` (brought in from elsewhere), `routine` (a pipeline's).
 const ORIGINS: [&str; 3] = ["hand", "import", "routine"];
@@ -376,6 +381,24 @@ fn embed(texts: &[String], begun: Instant, limit: Duration) -> io::Result<Vec<Ve
     })
 }
 
+/// Each note a `rewrite` line of `lines` ended, in ledger order: `(the line's index, the line, its
+/// from entry)` per entry with an id that is not the line's `to` id (a keep continues the note).
+fn ended(lines: &[Value]) -> Vec<(usize, &Value, &Value)> {
+    lines
+        .iter()
+        .enumerate()
+        .filter(|pair| pair.1["kind"] == "rewrite")
+        .flat_map(|(at, line)| {
+            line["from"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(move |entry| entry["id"].is_string() && entry["id"] != line["to"]["id"])
+                .map(move |entry| (at, line, entry))
+        })
+        .collect()
+}
+
 /// Ends `session`'s ledger story with one end line, returned as written: `decided` (skipped,
 /// held) as is, else the take — the transcript and its sidecar renamed into the archive, then the
 /// pointer — or `gone` when there is no transcript.
@@ -549,136 +572,9 @@ fn guide(root: &Path, job: &str) -> String {
     }
 }
 
-/// An embedding's cache key, the reference's: SHA-256 (FIPS 180-4) hex of
-/// `<model>\n1024\n<text>`.
+/// An embedding's cache key, the reference's: the SHA-256 of `<model>\n1024\n<text>`.
 fn hash(text: &str) -> String {
-    const ROUND: [u32; 64] = [
-        0x428a_2f98,
-        0x7137_4491,
-        0xb5c0_fbcf,
-        0xe9b5_dba5,
-        0x3956_c25b,
-        0x59f1_11f1,
-        0x923f_82a4,
-        0xab1c_5ed5,
-        0xd807_aa98,
-        0x1283_5b01,
-        0x2431_85be,
-        0x550c_7dc3,
-        0x72be_5d74,
-        0x80de_b1fe,
-        0x9bdc_06a7,
-        0xc19b_f174,
-        0xe49b_69c1,
-        0xefbe_4786,
-        0x0fc1_9dc6,
-        0x240c_a1cc,
-        0x2de9_2c6f,
-        0x4a74_84aa,
-        0x5cb0_a9dc,
-        0x76f9_88da,
-        0x983e_5152,
-        0xa831_c66d,
-        0xb003_27c8,
-        0xbf59_7fc7,
-        0xc6e0_0bf3,
-        0xd5a7_9147,
-        0x06ca_6351,
-        0x1429_2967,
-        0x27b7_0a85,
-        0x2e1b_2138,
-        0x4d2c_6dfc,
-        0x5338_0d13,
-        0x650a_7354,
-        0x766a_0abb,
-        0x81c2_c92e,
-        0x9272_2c85,
-        0xa2bf_e8a1,
-        0xa81a_664b,
-        0xc24b_8b70,
-        0xc76c_51a3,
-        0xd192_e819,
-        0xd699_0624,
-        0xf40e_3585,
-        0x106a_a070,
-        0x19a4_c116,
-        0x1e37_6c08,
-        0x2748_774c,
-        0x34b0_bcb5,
-        0x391c_0cb3,
-        0x4ed8_aa4a,
-        0x5b9c_ca4f,
-        0x682e_6ff3,
-        0x748f_82ee,
-        0x78a5_636f,
-        0x84c8_7814,
-        0x8cc7_0208,
-        0x90be_fffa,
-        0xa450_6ceb,
-        0xbef9_a3f7,
-        0xc671_78f2,
-    ];
-    let mut state: [u32; 8] = [
-        0x6a09_e667,
-        0xbb67_ae85,
-        0x3c6e_f372,
-        0xa54f_f53a,
-        0x510e_527f,
-        0x9b05_688c,
-        0x1f83_d9ab,
-        0x5be0_cd19,
-    ];
-    let mut data = format!("{}\n1024\n{text}", EMBED[0]).into_bytes();
-    let bits = u64::try_from(data.len())
-        .unwrap_or_default()
-        .wrapping_mul(8);
-    data.push(0x80);
-    while data.len() & 63 != 56 {
-        data.push(0);
-    }
-    data.extend(bits.to_be_bytes());
-    for block in data.chunks_exact(64) {
-        let mut w = [0u32; 64];
-        for (slot, word) in w.iter_mut().zip(block.chunks_exact(4)) {
-            *slot = u32::from_be_bytes(<[u8; 4]>::try_from(word).unwrap_or_default());
-        }
-        for i in 16..64usize {
-            let (early, late) = (w[i.wrapping_sub(15)], w[i.wrapping_sub(2)]);
-            w[i] = w[i.wrapping_sub(16)]
-                .wrapping_add(
-                    early.rotate_right(7) ^ early.rotate_right(18) ^ early.wrapping_shr(3),
-                )
-                .wrapping_add(w[i.wrapping_sub(7)])
-                .wrapping_add(
-                    late.rotate_right(17) ^ late.rotate_right(19) ^ late.wrapping_shr(10),
-                );
-        }
-        let mut round = state;
-        for (constant, word) in ROUND.iter().zip(w) {
-            let [ra, rb, rc, rd, re, rf, rg, rh] = round;
-            let one = rh
-                .wrapping_add(re.rotate_right(6) ^ re.rotate_right(11) ^ re.rotate_right(25))
-                .wrapping_add((re & rf) ^ (!re & rg))
-                .wrapping_add(*constant)
-                .wrapping_add(word);
-            let two = (ra.rotate_right(2) ^ ra.rotate_right(13) ^ ra.rotate_right(22))
-                .wrapping_add((ra & rb) ^ (ra & rc) ^ (rb & rc));
-            round = [
-                one.wrapping_add(two),
-                ra,
-                rb,
-                rc,
-                rd.wrapping_add(one),
-                re,
-                rf,
-                rg,
-            ];
-        }
-        for (held, add) in state.iter_mut().zip(round) {
-            *held = held.wrapping_add(add);
-        }
-    }
-    state.map(|word| format!("{word:08x}")).concat()
+    sha256(&format!("{}\n1024\n{text}", EMBED[0]))
 }
 
 /// A candidate's head as the reference writes it: `<label> · <name>\n<description, one-lined to
@@ -1389,6 +1285,137 @@ fn setting<T: FromStr>(key: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
+/// SHA-256 (FIPS 180-4) of `text`, hex.
+fn sha256(text: &str) -> String {
+    const ROUND: [u32; 64] = [
+        0x428a_2f98,
+        0x7137_4491,
+        0xb5c0_fbcf,
+        0xe9b5_dba5,
+        0x3956_c25b,
+        0x59f1_11f1,
+        0x923f_82a4,
+        0xab1c_5ed5,
+        0xd807_aa98,
+        0x1283_5b01,
+        0x2431_85be,
+        0x550c_7dc3,
+        0x72be_5d74,
+        0x80de_b1fe,
+        0x9bdc_06a7,
+        0xc19b_f174,
+        0xe49b_69c1,
+        0xefbe_4786,
+        0x0fc1_9dc6,
+        0x240c_a1cc,
+        0x2de9_2c6f,
+        0x4a74_84aa,
+        0x5cb0_a9dc,
+        0x76f9_88da,
+        0x983e_5152,
+        0xa831_c66d,
+        0xb003_27c8,
+        0xbf59_7fc7,
+        0xc6e0_0bf3,
+        0xd5a7_9147,
+        0x06ca_6351,
+        0x1429_2967,
+        0x27b7_0a85,
+        0x2e1b_2138,
+        0x4d2c_6dfc,
+        0x5338_0d13,
+        0x650a_7354,
+        0x766a_0abb,
+        0x81c2_c92e,
+        0x9272_2c85,
+        0xa2bf_e8a1,
+        0xa81a_664b,
+        0xc24b_8b70,
+        0xc76c_51a3,
+        0xd192_e819,
+        0xd699_0624,
+        0xf40e_3585,
+        0x106a_a070,
+        0x19a4_c116,
+        0x1e37_6c08,
+        0x2748_774c,
+        0x34b0_bcb5,
+        0x391c_0cb3,
+        0x4ed8_aa4a,
+        0x5b9c_ca4f,
+        0x682e_6ff3,
+        0x748f_82ee,
+        0x78a5_636f,
+        0x84c8_7814,
+        0x8cc7_0208,
+        0x90be_fffa,
+        0xa450_6ceb,
+        0xbef9_a3f7,
+        0xc671_78f2,
+    ];
+    let mut state: [u32; 8] = [
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    let mut data = text.as_bytes().to_vec();
+    let bits = u64::try_from(data.len())
+        .unwrap_or_default()
+        .wrapping_mul(8);
+    data.push(0x80);
+    while data.len() & 63 != 56 {
+        data.push(0);
+    }
+    data.extend(bits.to_be_bytes());
+    for block in data.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (slot, word) in w.iter_mut().zip(block.chunks_exact(4)) {
+            *slot = u32::from_be_bytes(<[u8; 4]>::try_from(word).unwrap_or_default());
+        }
+        for i in 16..64usize {
+            let (early, late) = (w[i.wrapping_sub(15)], w[i.wrapping_sub(2)]);
+            w[i] = w[i.wrapping_sub(16)]
+                .wrapping_add(
+                    early.rotate_right(7) ^ early.rotate_right(18) ^ early.wrapping_shr(3),
+                )
+                .wrapping_add(w[i.wrapping_sub(7)])
+                .wrapping_add(
+                    late.rotate_right(17) ^ late.rotate_right(19) ^ late.wrapping_shr(10),
+                );
+        }
+        let mut round = state;
+        for (constant, word) in ROUND.iter().zip(w) {
+            let [ra, rb, rc, rd, re, rf, rg, rh] = round;
+            let one = rh
+                .wrapping_add(re.rotate_right(6) ^ re.rotate_right(11) ^ re.rotate_right(25))
+                .wrapping_add((re & rf) ^ (!re & rg))
+                .wrapping_add(*constant)
+                .wrapping_add(word);
+            let two = (ra.rotate_right(2) ^ ra.rotate_right(13) ^ ra.rotate_right(22))
+                .wrapping_add((ra & rb) ^ (ra & rc) ^ (rb & rc));
+            round = [
+                one.wrapping_add(two),
+                ra,
+                rb,
+                rc,
+                rd.wrapping_add(one),
+                re,
+                rf,
+                rg,
+            ];
+        }
+        for (held, add) in state.iter_mut().zip(round) {
+            *held = held.wrapping_add(add);
+        }
+    }
+    state.map(|word| format!("{word:08x}")).concat()
+}
+
 /// A bank's directory and its memories: a topic's (`@<topic>`) knowledge pages under
 /// `knowledge/<topic>/`, else `memories/<bank>/`.
 fn shelf(root: &Path, bank: &str) -> (PathBuf, Vec<Value>) {
@@ -1838,8 +1865,11 @@ fn main() -> ExitCode {
                     .any(|arg| arg == "--fix")
                     .then(fix)
                     .transpose()?;
-                let (all, mut ids) = (every(&root), BTreeMap::new());
-                let found: Vec<String> = all
+                let (all, mut ids, lines) = (every(&root), BTreeMap::new(), ledger(&root));
+                let ends = ended(&lines);
+                let over: BTreeSet<&str> =
+                    ends.iter().filter_map(|end| end.2["id"].as_str()).collect();
+                let mut found: Vec<String> = all
                     .iter()
                     .flat_map(|note| {
                         let (path, field) = (text(&note["path"]), |key: &str| {
@@ -1915,11 +1945,76 @@ fn main() -> ExitCode {
                                 field("strength")
                                     .map(|_| "strength is counted, never stored".to_owned()),
                             ),
+                            (
+                                4,
+                                words(field("from"))
+                                    .into_iter()
+                                    .find(|parent| !over.contains(parent))
+                                    .map(|parent| format!("from {parent} was never ended")),
+                            ),
+                            (4, over.contains(id).then(|| format!("id {id} was ended"))),
                         ])
                         .filter_map(|(rule, detail)| Some(format!("{path}: {rule}: {}", detail?)))
                         .collect::<Vec<_>>()
                     })
                     .collect();
+                // then each rewrite line: its shape, an id ended once, its `to` still or later accounted for
+                let active: BTreeSet<&str> =
+                    all.iter().filter_map(|note| note["id"].as_str()).collect();
+                let mut counted = BTreeSet::new();
+                let twice: Vec<(usize, &str)> = ends
+                    .iter()
+                    .filter_map(|&(at, _, entry)| {
+                        let id = text(&entry["id"]);
+                        (!counted.insert(id)).then_some((at, id))
+                    })
+                    .collect();
+                for (at, line) in lines
+                    .iter()
+                    .enumerate()
+                    .filter(|pair| pair.1["kind"] == "rewrite")
+                {
+                    let (maybe, to) = (
+                        |value: &Value| value.is_null() || value.is_string(),
+                        &line["to"],
+                    );
+                    let shaped = line["from"].as_array().is_some_and(|entries| {
+                        entries.iter().all(|entry| {
+                            entry["digest"].is_string()
+                                && maybe(&entry["id"])
+                                && entry["path"].is_string()
+                                && entry["sessions"]
+                                    .as_array()
+                                    .is_some_and(|held| held.iter().all(Value::is_string))
+                        })
+                    }) && OPS.contains(&text(&line["op"]))
+                        && maybe(&line["model"])
+                        && maybe(&line["reason"])
+                        && (to.is_null()
+                            || (to["id"].is_string() && to["path"].is_string())
+                            || to["artifact"].is_string());
+                    let lost = to["id"].as_str().filter(|into| {
+                        !active.contains(into)
+                            && !ends
+                                .iter()
+                                .any(|&(later, _, entry)| later > at && entry["id"] == *into)
+                    });
+                    found.extend(
+                        [
+                            (!shaped).then(|| "not a rewrite line".to_owned()),
+                            lost.map(|into| format!("to {into} is neither active nor ended later")),
+                        ]
+                        .into_iter()
+                        .chain(
+                            twice
+                                .iter()
+                                .filter(|pair| pair.0 == at)
+                                .map(|pair| Some(format!("id {} ended again", pair.1))),
+                        )
+                        .flatten()
+                        .map(|detail| format!("ledger {}: 5: {detail}", text(&line["at"]))),
+                    );
+                }
                 Ok((all.len(), found))
             };
             audit().map_or_else(
@@ -2020,6 +2115,17 @@ fn main() -> ExitCode {
                 })));
             }
             let lines = ledger(&root);
+            // the notes rewrite lines ended, and each edge from a parent to the note it went into
+            let ends = ended(&lines);
+            let gone: Vec<Value> = ends
+                .iter()
+                .map(|&(_, line, entry)| json!({"at": line["at"], "id": entry["id"], "into": line["to"]["id"], "op": line["op"], "path": entry["path"], "sessions": entry["sessions"], "state": "ended"}))
+                .collect();
+            let edges: Vec<Value> = ends
+                .iter()
+                .filter(|end| end.1["to"]["id"].is_string())
+                .map(|&(_, line, entry)| json!({"at": line["at"], "from": entry["id"], "op": line["op"], "to": line["to"]["id"]}))
+                .collect();
             let guards = lines
                 .iter()
                 .filter(|line| line["kind"] == "guard")
@@ -2056,9 +2162,9 @@ fn main() -> ExitCode {
                 io::stdout().lock(),
                 "{}",
                 json!({
-                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "guards": sorted(guards, "at"),
+                    "active": sorted(active, "start"), "at": utc(SystemTime::now()), "ended": sorted(gone, "at"), "guards": sorted(guards, "at"),
                     "intentions": sorted(intended, "created"),
-                    "knowledge": knowledge,
+                    "knowledge": knowledge, "lineage": sorted(edges, "at"),
                     "machine": machine(&root), "memories": memories, "taken": sorted(taken.into_values().collect(), "taken"), "traces": traces,
                 })
             ));
@@ -3037,7 +3143,7 @@ fn main() -> ExitCode {
                     }
                     if let Some(figure) = score {
                         digest.push_str(&row);
-                        sent.push(json!({"file": path(memory), "score": figure.parse::<f64>().unwrap_or_default()}));
+                        sent.push(json!({"file": path(memory), "id": memory["id"], "score": figure.parse::<f64>().unwrap_or_default()}));
                     } else {
                         listed.push_str(&row);
                         carried.push(path(memory));
@@ -3116,10 +3222,10 @@ fn main() -> ExitCode {
                 &title,
                 &mut BTreeSet::new(),
             );
-            let (now, session) = (utc(SystemTime::now()), pull.as_deref());
+            let (now, session, id) = (utc(SystemTime::now()), pull.as_deref(), mint());
             let contents = note(
                 &[
-                    ("id", &mint()),
+                    ("id", &id),
                     ("name", one_line(&title, 200).as_str()),
                     ("description", one_line(&line, 400).as_str()),
                     ("type", &kind),
@@ -3145,7 +3251,7 @@ fn main() -> ExitCode {
             let path = format!("traces/{bank}/{}", name(&file));
             drop(record(
                 &root,
-                &mut json!({"file": path, "kind": "remember", "session": pull, "type": kind}),
+                &mut json!({"file": path, "id": id, "kind": "remember", "session": pull, "type": kind}),
             ));
             println!("{me} show {path}");
             ExitCode::SUCCESS
@@ -3524,7 +3630,7 @@ fn main() -> ExitCode {
                                     one_line(&bad.to_string(), 200)
                                 )));
                             }
-                            let now = utc(SystemTime::now());
+                            let (now, mut ids) = (utc(SystemTime::now()), Vec::new());
                             for trace in traces.into_iter().flatten() {
                                 let (kind, name, about) = (
                                     text(&trace["type"]),
@@ -3551,9 +3657,10 @@ fn main() -> ExitCode {
                                     name,
                                     &mut BTreeSet::new(),
                                 );
+                                ids.push(mint());
                                 let contents = note(
                                     &[
-                                        ("id", &mint()),
+                                        ("id", ids.last().map_or("", String::as_str)),
                                         ("name", one_line(name, 200).as_str()),
                                         (
                                             "description",
@@ -3578,7 +3685,7 @@ fn main() -> ExitCode {
                                 );
                                 put(&file, &contents)?;
                             }
-                            Ok(json!({"outcome": "encoded", "traces": traces.map_or(0, Vec::len)}))
+                            Ok(json!({"ids": ids, "outcome": "encoded", "traces": ids.len()}))
                         };
                         (
                             "encode",
@@ -3673,6 +3780,7 @@ fn main() -> ExitCode {
                                     format!("{reply}\n"),
                                 )],
                             );
+                            let mut rewrites = Vec::new();
                             for op in ops.into_iter().flatten() {
                                 let trace = op["trace"].as_str().and_then(|file| given.get(file));
                                 let memory = op["memory"]
@@ -3786,6 +3894,15 @@ fn main() -> ExitCode {
                                     }
                                     _ => {}
                                 }
+                                // a line per op, each input as it stood and where it went, if anywhere
+                                let landed = writes.last().filter(|_| op["op"] != "prune").map(|pending| {
+                                    let under = pending.0.strip_prefix(&data).unwrap_or(&pending.0).to_string_lossy();
+                                    json!({"id": id, "path": under.strip_prefix("memories/").unwrap_or(&under)})
+                                });
+                                rewrites.push(json!({
+                                    "from": inputs().map(|part| json!({"digest": sha256(text(&part["text"])), "id": part["id"], "path": part["path"], "sessions": lineage([part])})).collect::<Vec<_>>(),
+                                    "kind": "rewrite", "model": model(&consolidator), "op": op["op"], "reason": op["reason"], "to": landed,
+                                }));
                             }
                             if let Err(error) = writes.iter().try_for_each(|pending| {
                                 pending.0.parent().map_or(Ok(()), fs::create_dir_all)?;
@@ -3802,6 +3919,9 @@ fn main() -> ExitCode {
                             }
                             for pending in &writes {
                                 fs::rename(staged(&pending.0), &pending.0)?;
+                            }
+                            for mut line in rewrites {
+                                drop(record(&data, &mut line));
                             }
                             let count = |op: &str| {
                                 ops.into_iter()
@@ -4386,7 +4506,7 @@ fn main() -> ExitCode {
             );
             drop(record(
                 &root,
-                &mut json!({"file": wanted, "kind": "show", "session": pull}),
+                &mut json!({"file": wanted, "id": memory["id"], "kind": "show", "session": pull}),
             ));
             ExitCode::SUCCESS
         }

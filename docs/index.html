@@ -201,9 +201,11 @@
   </header>
   <pre class="snippet">{"active":[{"cwd":str|null,"encoded":str|null,"end":str|null,"interactive":bool|null,"machine":str,"outcome":str|null,"seen":str|null,"session":str,"start":str|null}],
  "at":"&lt;now, RFC 3339 UTC&gt;",
+ "ended":[{"at":str,"id":str,"into":str|null,"op":str,"path":str,"sessions":[str],"state":"ended"}],
  "guards":[{"at":str,"rationale":str,"session":str,"tool":str|null}],
  "intentions":[{"about":str|null,"after":str|null,"closed":str|null,"created":str|null,"due":str|null,"id":str,"session":str|null,"state":str|null,"what":str}],
  "knowledge":[{"created":str|null,"file":str,"from":[str],"id":str|null,"name":str,"origin":str|null,"session":str|null,"sessions":[str],"source":…,"state":"active","topic":str,"type":str}],
+ "lineage":[{"at":str,"from":str,"op":str,"to":str}],
  "machine":"&lt;this machine's id&gt;",
  "memories":[{"bank":str,"created":str|null,"file":str,"from":[str],"id":str|null,"name":str,"origin":str|null,"session":str|null,"sessions":[str],"source":"consolidate"|"dream"|"reflect"|"remember"|"other","state":"active","type":str}],
  "taken":[{"bytes":int,"cwd":str|null,"dreamed":str|null,"highlights":int,"memories":int,"session":str,"state":"waiting"|"dreamed"|"archived","taken":str,"title":str|null}],
@@ -218,6 +220,9 @@
       <code class="code">interactive</code> true when a start mark says so, else false when one says false,
       else null; <code class="code">seen</code> the live transcript's mtime, null without one. By
       <code class="code">start</code>, then session.</li>
+    <li><strong>ended</strong>, <strong>lineage</strong> — one per note a <a class="link" href="#cycle-rewrite">rewrite line</a>
+      ended (an input whose id is not the line's <code class="code">to</code>), <code class="code">into</code> that id, null
+      for a prune; and one edge per such note with a <code class="code">to</code>. By <code class="code">at</code>.</li>
     <li><strong>guards</strong> — one per guard line in the ledger, by <code class="code">at</code>: the denied tool calls bifrost's portals page lists.</li>
     <li><strong>taken</strong> — one per archived transcript, a file directly in a day dir named
       <code class="code">&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code>; the latest wins when a session
@@ -455,7 +460,7 @@ install -m 600 /dev/stdin ~/Codes/claude-oauth-token        # paste it, then Ctr
     </tbody>
   </table>
   </div>
-  <pre class="snippet">{"at":…,"error":"&lt;one line&gt;"?,"kind":"encode","machine":…,"outcome":"encoded"|"skipped"|"gone"|"failed","session":…,"token":…?,"traces":&lt;count&gt;}</pre>
+  <pre class="snippet">{"at":…,"error":"&lt;one line&gt;"?,"ids":["&lt;each trace's id&gt;"]?,"kind":"encode","machine":…,"outcome":"encoded"|"skipped"|"gone"|"failed","session":…,"token":…?,"traces":&lt;count&gt;}</pre>
   <ul class="stack claims" role="list">
     <li><strong>digest</strong> — what the model reads, built from the archive:
       <code class="code"># episode</code> (the take's time, the cwd as the pointer finds it), <code class="code"># already remembered</code>
@@ -584,6 +589,8 @@ Why: "mocks hid a real ordering bug last year".</pre>
       <code class="code">sessions:</code> are the unions of the trace's and the memory's, so the sessions it descends from
       outlive the stamp it replaces, and <code class="code">origin:</code> stays only without either. <code class="code">MEMORY.md</code> is left alone: the earlier recall reads memory
       files, never the index, and the earlier commit path regenerates it whole.</li>
+    <li><strong>lines</strong> — once applied, one <a class="link" href="#cycle-rewrite">rewrite line</a> per op, each input
+      as it stood and where it went, then the consolidate line.</li>
     <li><strong>stop</strong> — as encode's: no line, the bank runs again after the next start.</li>
   </ul>
   <pre class="snippet">{"at":…,"bank":…,"error":"&lt;one line&gt;"?,"kind":"consolidate","kept":n,"machine":…,"merged":n,"outcome":"consolidated"|"failed","pruned":n,"token":…?}</pre>
@@ -616,7 +623,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
 2026-11-07T09:00:00Z
 
 # runs
-- {"at":…,"kind":"encode","machine":…,"outcome":"encoded","session":…,"traces":1}
+- {"at":…,"ids":["7d3e9a0b4c21"],"kind":"encode","machine":…,"outcome":"encoded","session":…,"traces":1}
 
 # ops
 - -work-ledger-api: {"op":"prune","reason":"the session's story: a fix the repo's history records","trace":"project_fixed_the_retry_test.md"}
@@ -677,8 +684,9 @@ Why: "mocks hid a real ordering bug last year".</pre>
   <p class="notice notice-warn"><span>Built: the trail inward (session → archive → trace → note, each note naming its
     sessions on <code class="code">sessions:</code>), recall's and show's ledger lines, consolidate's trace ops, the
     note's <code class="code">id</code>, <code class="code">from</code> and <code class="code">origin</code> and
-    <code class="code">check</code>'s invariants 1–3 (stage 1). Not built: the rest of this section, in the stages under
-    <a class="link" href="#next">next</a>.</span></p>
+    <code class="code">check</code>'s invariants 1–3 (stage 1); consolidate's ops as rewrite lines, the ids on recall,
+    show, remember and encode lines, chart's <code class="code">ended</code> and <code class="code">lineage</code>, invariants
+    4–5 (stage 2). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -749,9 +757,10 @@ updated: &lt;now&gt;                   as today
 
   <h3 class="h3" id="cycle-rewrite">The rewrite line and lineage</h3>
   <p>One ledger line per note rewritten, through <code class="code">mark</code>'s writer, never edited; recall's
-    <code class="code">sent</code> entries and the <code class="code">show</code>, <code class="code">remember</code> and
-    <code class="code">encode</code> lines gain <code class="code">id</code>, and a path in an older line resolves through these
-    lines' paths:</p>
+    <code class="code">sent</code> entries and the <code class="code">show</code> and <code class="code">remember</code> lines
+    carry the note's <code class="code">id</code>, an encoded line its traces' <code class="code">ids</code>, and a path in an
+    older line resolves through these lines' paths. Built for consolidate's <code class="code">keep</code>,
+    <code class="code">merge</code> and <code class="code">prune</code>, written once the ops have landed, before its line:</p>
   <pre class="snippet">{"at","from":[{"digest":"&lt;SHA-256 of the file as it stood&gt;","id","path","sessions":[…]}],"kind":"rewrite","machine",
  "model":"&lt;model&gt;"|null,"op":"keep"|"merge"|"revise"|"retitle"|"rehome"|"graduate"|"prune"|"release"|"revert",
  "reason":str|null,"to":{"id","path"}|{"artifact":"&lt;path&gt;"}|null}</pre>
@@ -760,9 +769,9 @@ updated: &lt;now&gt;                   as today
     <thead><tr><th>op</th><th>from → to</th><th>written by</th></tr></thead>
     <tbody>
       <tr><td><code class="code">graduate</code></td><td>memories → a new <code class="code">traces/@&lt;topic&gt;/</code> trace (rung 1); a note → <code class="code">{"artifact"}</code> (rungs 2, 3)</td><td>consolidate; <code class="code">done</code> on the owner's approval</td></tr>
-      <tr><td><code class="code">keep</code></td><td>a trace → the same id under <code class="code">memories/</code> or <code class="code">knowledge/</code></td><td>consolidate</td></tr>
-      <tr><td><code class="code">merge</code></td><td>a trace and a note → the note; two or more notes → a new id</td><td>consolidate</td></tr>
-      <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate; the weekly review (decay)</td></tr>
+      <tr><td><code class="code">keep</code></td><td>a trace → the same id under <code class="code">memories/</code> or <code class="code">knowledge/</code></td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
+      <tr><td><code class="code">merge</code></td><td>a trace and a note → the note (built); two or more notes → a new id</td><td>consolidate <span class="badge badge-ok">built</span></td></tr>
+      <tr><td><code class="code">prune</code></td><td>a note → null</td><td>consolidate <span class="badge badge-ok">built</span>; the weekly review (decay)</td></tr>
       <tr><td><code class="code">rehome</code>, <code class="code">retitle</code></td><td>a note → the same id in another bank or topic, or under another name and file</td><td>consolidate</td></tr>
       <tr><td><code class="code">release</code></td><td><code class="code">[{"path":&lt;archived&gt;,"session"}]</code> → null</td><td>the tick's release job</td></tr>
       <tr><td><code class="code">revert</code></td><td>a pass's outputs → the notes it replaced</td><td>a pass that fails its measure</td></tr>
@@ -795,8 +804,10 @@ updated: &lt;now&gt;                   as today
         <text class="life-note" x="368" y="276" text-anchor="middle">s1–s4 are named by no active note, so their transcripts are released</text>
       </svg>
     </div>
-    <figcaption>Lineage at depth 1, not built yet. The sessions live on the generation that read them; a note born of a
-      merge names its parents instead, and the ledger keeps every generation's ids, digests and sessions.</figcaption>
+    <figcaption>Lineage at depth 1. The sessions live on the generation that read them; a note born of a merge names its
+      parents instead, and the ledger keeps every generation's ids, digests and sessions: the rewrite lines and chart's
+      <code class="code">lineage</code> are built, the merge of notes and the dashed generation's deleted bodies (the
+      depth-1 sweep) are not.</figcaption>
   </figure>
   <ul class="stack claims" role="list">
     <li><strong>depth 1</strong> — <code class="code">.pruned/</code> keeps each active note's direct parents and its own
@@ -939,7 +950,7 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
 
   <h3 class="h3" id="cycle-check">check</h3>
   <p class="notice notice-warn"><span>Built: <code class="code">check</code> and <code class="code">--fix</code> over
-    invariants 1–3. Not built: 4–7, <code class="code">--release</code>, and the clean line's held and released counts,
+    invariants 1–5. Not built: 6–7, <code class="code">--release</code>, and the clean line's held and released counts,
     which come with release.</span></p>
   <pre class="snippet">sandman check            # every violation, or check: &lt;n&gt; notes: clean; writes nothing
 sandman check --fix      # what can be repaired mechanically, then check
@@ -961,13 +972,16 @@ sandman check --release  # what the release job would delete now, with its bytes
     <code class="code">hand</code>; <code class="code">consolidate</code>, <code class="code">dream</code>,
     <code class="code">reconsolidate</code>, <code class="code">reflect</code> → <code class="code">routine</code>; else
     <code class="code">import</code>), prints <code class="code">check: fixed &lt;n&gt;</code>, writes
-    <code class="code">{"at","fixed":n,"kind":"check","machine"}</code>, then checks. A bad word on a list and a
-    <code class="code">strength:</code> are left for a person.</p>
+    <code class="code">{"at","fixed":n,"kind":"check","machine"}</code>, then checks. A bad word on a list, a
+    <code class="code">strength:</code> and the ledger are left for a person. A rewrite line's violation reads
+    <code class="code">ledger &lt;its at&gt;: 5: …</code>, after every note's. A <code class="code">forget</code> drops each
+    rewrite line naming its session, other sessions' entries with it, so 4–5 can flag the notes such a line touched;
+    rewriting that line without the session instead is open.</p>
 
   <h3 class="h3" id="cycle-chart">chart</h3>
   <pre class="snippet">"memories"|"knowledge"|"traces": [{…,"from":[str],"id":str|null,"origin":str|null,"state":"active","strength":number}]   built, strength aside
-"ended":   [{"at","id","into":str|null,"op","path","sessions":[str],"state":"ended"}]
-"lineage": [{"at","from":&lt;id&gt;,"op","to":&lt;id&gt;}]
+"ended":   [{"at","id","into":str|null,"op","path","sessions":[str],"state":"ended"}]   built
+"lineage": [{"at","from":&lt;id&gt;,"op","to":&lt;id&gt;}]                                     built
 "taken":   [{…,"held":bool,"released":str|null}]          a released one from its release line, state "released"</pre>
 </section>
 
@@ -992,8 +1006,8 @@ sandman check --release  # what the release job would delete now, with its bytes
       <code class="code">id</code>, <code class="code">from</code>, <code class="code">origin</code>; chart's row keys and
       <code class="code">state</code>; <code class="code">check</code> invariants 1–3 and <code class="code">--fix</code>. The owner then
       runs <code class="code">check</code> and <code class="code">check --fix</code> on the root.</li>
-    <li><strong>rewrite lines</strong> — consolidate's ops as rewrite lines; <code class="code">id</code> on recall, show, remember
-      and encode lines; chart's <code class="code">ended</code> and <code class="code">lineage</code>; invariants 4–5.</li>
+    <li><strong>rewrite lines</strong> <span class="badge badge-ok">built</span> — consolidate's ops as rewrite lines; <code class="code">id</code> on recall, show and remember
+      lines, <code class="code">ids</code> on encode's; chart's <code class="code">ended</code> and <code class="code">lineage</code>; invariants 4–5.</li>
     <li><strong>rethink in session</strong> — the verb, the MCP tool, the seed's sentence, <code class="code">eval/recall.jsonl</code>,
       <code class="code">forget</code> over it.</li>
     <li><strong>rethink at encode</strong> — <code class="code"># recalled</code>, encode's contract and <code class="code">verdicts</code>.</li>
