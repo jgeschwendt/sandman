@@ -2,7 +2,8 @@
 //! `docs/data/chart.json`, the sample the docs page draws; every daemon a test starts is killed
 //! when its guard drops.
 
-// the binary's dependency, unused by the suite
+// the binary's dependencies, unused by the suite
+use hotswap as _;
 use signal_hook as _;
 
 #[cfg(test)]
@@ -12,7 +13,7 @@ mod tests {
     use std::error::Error;
     use std::fs::{File, Permissions};
     use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
-    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _};
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _, symlink};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::os::unix::process::CommandExt as _;
     use std::path::PathBuf;
@@ -89,8 +90,8 @@ mod tests {
     ];
     /// Session ids for the fixture: `5a000000-0000-4000-8000-00000000000<letter>`.
     const ID: &str = "5a000000-0000-4000-8000-00000000000";
-    /// The binary's version and build, as `version` prints it.
-    const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("SANDMAN_BUILD"));
+    /// The binary's release (a checkout's: the crate version) and build, as `version` prints it.
+    const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"));
     /// A test's fallible outcome.
     type Outcome = Result<(), Box<dyn Error>>;
 
@@ -4236,17 +4237,24 @@ printf '{"ops":[],"under":"%s"}\n' $u
         )
     }
 
-    /// `setup --print` prints the launchd plist for `dev.gigantic.sandman` and writes nothing;
-    /// `setup`, against a stub `launchctl` (`launchctl.log` its calls, `loaded/` its jobs, a bootout
-    /// letting go one `print` later), boots out the old sandman's agents and removes their plists,
-    /// writes the plist and bootstraps it, kickstarts the same plist loaded, reloads a changed one,
-    /// fails on a failed bootstrap or a job still loaded past `$SANDMAN_BOOTOUT_MS`, and without a
-    /// `launchctl` fails before writing anything; `--remove` boots it out and removes its plist.
+    /// `setup --print` prints the launchd plist for `dev.gigantic.sandman` on hotswap's link and
+    /// writes nothing; `setup`, against a stub `launchctl` (`launchctl.log` its calls, `loaded/`
+    /// its jobs, a bootout letting go one `print` later) over a HOME hotswap already laid out,
+    /// boots out the old sandman's agents and removes their plists, has hotswap link
+    /// `~/.local/bin/sandman` and load the upgrade agent, writes the plist and bootstraps it,
+    /// kickstarts the same plist loaded, reloads a changed one, fails on a failed bootstrap or a job
+    /// still loaded past `$SANDMAN_BOOTOUT_MS`, and without a `launchctl` fails before writing
+    /// anything; `upgrade` swaps under the manifest, green once the restarted daemon answers with
+    /// the new version; `--remove` has hotswap forget the layout and the upgrade agent, then boots
+    /// the daemon out and removes its plist and the link.
     #[test]
     fn setup() -> Outcome {
         let (root, path) = (temp("setup")?, env::var("PATH")?);
         let (home, bin) = (format!("{root}/home"), format!("{root}/bin"));
-        let agents = format!("{home}/Library/LaunchAgents");
+        let (agents, link) = (
+            format!("{home}/Library/LaunchAgents"),
+            format!("{home}/.local/bin/sandman"),
+        );
         let plist = |searched: &str| {
             format!(
                 r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -4262,7 +4270,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
   <key>Label</key>
   <string>dev.gigantic.sandman</string>
   <key>ProgramArguments</key>
-  <array><string>{exe}</string><string>serve</string></array>
+  <array><string>{link}</string><string>serve</string></array>
   <key>RunAtLoad</key>
   <true/>
   <key>StandardErrorPath</key>
@@ -4271,8 +4279,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
   <integer>10</integer>
 </dict>
 </plist>
-"#,
-                exe = env!("CARGO_BIN_EXE_sandman")
+"#
             )
         };
         same(
@@ -4302,6 +4309,10 @@ printf '{"ops":[],"under":"%s"}\n' $u
             &root,
             &[
                 (
+                    "bin/curl",
+                    "#!/bin/sh\nprintf https://github.com/jgeschwendt/sandman/releases/tag/v1\n",
+                ),
+                (
                     "bin/launchctl",
                     &format!(
                         r#"#!/bin/sh
@@ -4323,16 +4334,15 @@ esac
                     "home/Library/LaunchAgents/dev.gigantic.sandman.report.plist",
                     "",
                 ),
-                (
-                    "home/Library/LaunchAgents/dev.gigantic.sandman.upgrade.plist",
-                    "",
-                ),
                 ("home/Library/LaunchAgents/io.jlg.kev.plist", ""),
                 ("loaded/dev.gigantic.sandman.report", ""),
-                ("loaded/dev.gigantic.sandman.upgrade", ""),
             ],
         )?;
-        fs::set_permissions(format!("{bin}/launchctl"), Permissions::from_mode(0o755))?;
+        for tool in ["curl", "launchctl"] {
+            fs::set_permissions(format!("{bin}/{tool}"), Permissions::from_mode(0o755))?;
+        }
+        // hotswap's layout, its version 1 this build
+        let layout = format!("{home}/.local/share/hotswap/sandman");
         let stubbed = format!("{bin}:{path}");
         let gui = format!(
             "gui/{}",
@@ -4340,18 +4350,36 @@ esac
         );
         let label = format!("{gui}/dev.gigantic.sandman");
         let file = format!("{agents}/dev.gigantic.sandman.plist");
-        let setup = |searched: &str, bound: &str, args: &[&str]| {
+        let upgrade = format!("{agents}/dev.gigantic.sandman.upgrade.plist");
+        let linked = format!(
+            "linked {link} \u{2192} {}\n",
+            fs::canonicalize(env!("CARGO_BIN_EXE_sandman"))?.display()
+        );
+        let swapped = format!(
+            "print {gui}/dev.gigantic.sandman.upgrade\nprint-disabled {gui}\nbootstrap {gui} {upgrade}\n"
+        );
+        let run = |searched: &str, bound: &str, args: &[&str]| {
             sandman(
                 &[
                     ("HOME", &home),
+                    ("HOTSWAP_TEST_HOME", &home),
                     ("PATH", searched),
                     ("SANDMAN_BOOTOUT_MS", bound),
                     ("SANDMAN_ROOT", &root),
                 ],
-                &[&["setup"], args].concat(),
+                args,
                 "",
             )
         };
+        let setup = |searched: &str, bound: &str, args: &[&str]| {
+            run(searched, bound, &[&["setup"], args].concat())
+        };
+        let lay = || -> Outcome {
+            fs::create_dir_all(format!("{layout}/1"))?;
+            symlink(env!("CARGO_BIN_EXE_sandman"), format!("{layout}/1/sandman"))?;
+            Ok(symlink("1", format!("{layout}/current"))?)
+        };
+        lay()?;
         let calls = || {
             let log = fs::read_to_string(format!("{root}/launchctl.log"))?;
             fs::remove_file(format!("{root}/launchctl.log")).map(|()| log)
@@ -4364,9 +4392,7 @@ esac
 removed {agents}/dev.gigantic.sandman.breathe.plist
 launchctl bootout {gui}/dev.gigantic.sandman.report
 removed {agents}/dev.gigantic.sandman.report.plist
-launchctl bootout {gui}/dev.gigantic.sandman.upgrade
-removed {agents}/dev.gigantic.sandman.upgrade.plist
-wrote {file}
+{linked}wrote {file}
 launchctl bootstrap {gui} {file}
 print {gui}/dev.gigantic.sandman.breathe
 print {gui}/dev.gigantic.sandman.breathe
@@ -4376,11 +4402,7 @@ print {gui}/dev.gigantic.sandman.report
 bootout {gui}/dev.gigantic.sandman.report
 print {gui}/dev.gigantic.sandman.report
 print {gui}/dev.gigantic.sandman.report
-print {gui}/dev.gigantic.sandman.upgrade
-bootout {gui}/dev.gigantic.sandman.upgrade
-print {gui}/dev.gigantic.sandman.upgrade
-print {gui}/dev.gigantic.sandman.upgrade
-print {label}
+{swapped}print {label}
 print {label}
 bootstrap {gui} {file}
 "
@@ -4391,21 +4413,43 @@ bootstrap {gui} {file}
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();
         same(
-            &format!("{kept:?}{}", fs::read_to_string(&file)? == plist(&stubbed)),
-            r#"{"dev.gigantic.sandman.plist", "io.jlg.kev.plist"}true"#,
+            &format!(
+                "{kept:?}{}{}",
+                fs::read_to_string(&file)? == plist(&stubbed),
+                fs::read_link(&link)?.display()
+            ),
+            &format!(
+                r#"{{"dev.gigantic.sandman.plist", "dev.gigantic.sandman.upgrade.plist", "io.jlg.kev.plist"}}true{layout}/current/sandman"#
+            ),
         )?;
         // the same plist loaded: one kickstart; a changed one (another PATH) reloaded
+        let retired = format!(
+            "print {gui}/dev.gigantic.sandman.breathe\nprint {gui}/dev.gigantic.sandman.breathe\nprint {gui}/dev.gigantic.sandman.reflect\nprint {gui}/dev.gigantic.sandman.reflect\nprint {gui}/dev.gigantic.sandman.report\nprint {gui}/dev.gigantic.sandman.report\n"
+        );
         same(
             &format!("{}{}", setup(&stubbed, "0", &[])?, calls()?),
             &format!(
-                "0\nwrote {file}\nlaunchctl kickstart -k {label}\nprint {gui}/dev.gigantic.sandman.breathe\nprint {gui}/dev.gigantic.sandman.breathe\nprint {gui}/dev.gigantic.sandman.reflect\nprint {gui}/dev.gigantic.sandman.reflect\nprint {gui}/dev.gigantic.sandman.report\nprint {gui}/dev.gigantic.sandman.report\nprint {gui}/dev.gigantic.sandman.upgrade\nprint {gui}/dev.gigantic.sandman.upgrade\nprint {label}\nkickstart -k {label}\n"
+                "0\n{linked}wrote {file}\nlaunchctl kickstart -k {label}\n{retired}{swapped}print {label}\nkickstart -k {label}\n"
             ),
+        )?;
+        // the swap: setup (hotswap's PATH leads with ~/.local/bin, so the plist changed and is
+        // reloaded), the daemon's kickstart, then the smoke against the daemon it restarted
+        let (_daemon, _) = serve(&root, &[])?;
+        same(
+            &format!("{}{}", run(&stubbed, "30000", &["upgrade"])?, calls()?),
+            &format!(
+                "0\nsandman 1: green, 2 smoke probes\n{retired}{swapped}print {label}\nbootout {label}\nprint {label}\nprint {label}\nbootstrap {gui} {file}\nkickstart -k {label}\n"
+            ),
+        )?;
+        same(
+            &run(&stubbed, "0", &["upgrade", "--x"])?,
+            "2\nusage: sandman upgrade [--check | --back | --retry]\n",
         )?;
         let moved = format!("{bin}:/moved:{path}");
         same(
             &setup(&moved, "30000", &[])?,
             &format!(
-                "0\nwrote {file}\nlaunchctl bootout {label}\nlaunchctl bootstrap {gui} {file}\n"
+                "0\n{linked}wrote {file}\nlaunchctl bootout {label}\nlaunchctl bootstrap {gui} {file}\n"
             ),
         )?;
         fs::write(format!("{root}/stuck"), "")?;
@@ -4416,15 +4460,22 @@ bootstrap {gui} {file}
             ),
         )?;
         fs::remove_file(format!("{root}/stuck"))?;
-        fs::write(format!("{root}/fail"), "")?;
         same(
             &setup(&moved, "30000", &["--remove"])?,
-            &format!("0\nlaunchctl bootout {label}\nremoved {file}\n"),
+            &format!("0\nlaunchctl bootout {label}\nremoved {file}\nremoved {link}\n"),
         )?;
+        same(
+            &format!("{}{}", fs::exists(&upgrade)?, fs::exists(&layout)?),
+            "falsefalse",
+        )?;
+        // nothing loaded, every bootstrap failing: hotswap's refused load is one line, the
+        // daemon's fails setup
+        lay()?;
+        fs::write(format!("{root}/fail"), "")?;
         same(
             &setup(&moved, "0", &[])?,
             &format!(
-                "1\nwrote {file}\nsandman setup: launchctl bootstrap {gui} {file}: Bootstrap failed: 5: Input/output error\n"
+                "1\n{linked}wrote {file}\nhotswap: {gui}/dev.gigantic.sandman.upgrade not loaded from {upgrade}: Bootstrap failed: 5: Input/output error\nsandman setup: launchctl bootstrap {gui} {file}: Bootstrap failed: 5: Input/output error\n"
             ),
         )
     }
@@ -4733,17 +4784,17 @@ bootstrap {gui} {file}
         same(&earlier, &"earlier\n".repeat(4))
     }
 
-    /// `version` prints the crate version and the build (the commit, `-dirty` over uncommitted
+    /// `version` prints the release (a checkout's: the crate version) and the build (the commit, `-dirty` over uncommitted
     /// work), one word, what the daemon's health carries.
     #[test]
     fn version() -> Outcome {
         let build = VERSION
-            .strip_prefix(concat!(env!("CARGO_PKG_VERSION"), "-"))
+            .strip_prefix(concat!(env!("SANDMAN_RELEASE"), "-"))
             .filter(|build| !build.is_empty() && !build.contains(' '))
             .ok_or(VERSION)?;
         same(
             &sandman(&[], &["version"], "")?,
-            &format!("0\n{}-{build}\n", env!("CARGO_PKG_VERSION")),
+            &format!("0\n{}-{build}\n", env!("SANDMAN_RELEASE")),
         )
     }
 
