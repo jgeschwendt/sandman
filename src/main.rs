@@ -88,9 +88,10 @@ const OPS: [&str; 9] = [
 /// without a session), `import` (brought in from elsewhere), `routine` (a pipeline's).
 const ORIGINS: [&str; 3] = ["hand", "import", "routine"];
 
-/// Each model job's default guidance and its fixed contract, sent before its data; `guide` reads
-/// `<root>/prompts/<job>.md` in place of the guidance.
-const PROMPTS: [(&str, [&str; 2]); 4] = [
+/// Each model job's default guidance and its fixed contract, sent before its data, and recall's
+/// selection question (no contract); `guide` reads `<root>/prompts/<job>.md` in place of the
+/// default.
+const PROMPTS: [(&str, [&str; 2]); 5] = [
     (
         "consolidate",
         [
@@ -112,6 +113,7 @@ const PROMPTS: [(&str, [&str; 2]); 4] = [
             include_str!("prompts/judge.contract.md"),
         ],
     ),
+    ("question", [QUESTION, ""]),
     (
         "reflect",
         [
@@ -121,8 +123,9 @@ const PROMPTS: [(&str, [&str; 2]); 4] = [
     ),
 ];
 
-/// Recall's fixed question, after each candidate's record: never read from a memory. The
-/// reference's, byte for byte (docs/recall.html#chosen).
+/// Recall's default selection question, after each candidate's record: never read from a memory.
+/// The reference's, byte for byte (docs/recall.html#chosen); the weekly review may put another in
+/// force, `<root>/prompts/question.md`, once the recall evaluation judges it no worse.
 const QUESTION: &str = "Does the agent need this memory to carry out the request correctly?";
 
 /// The old sandman's launchd agents, retired with the cutover (2026-11-14): `setup` boots each out
@@ -157,6 +160,12 @@ const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"
 
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
+
+/// A scorer's answer: its name, its nouls and its input tokens.
+type Decision = Option<(String, (Vec<f64>, u64))>;
+
+/// One order op to revert: the note it wrote, and each note it moved aside as (where, the copy).
+type Undo = (Option<PathBuf>, Vec<(PathBuf, PathBuf)>);
 
 /// What the release job would do now (docs/index.html#cycle-release).
 struct Plan {
@@ -470,6 +479,83 @@ fn audit(root: &Path, lines: &[Value], plan: &Plan) -> (usize, usize, Vec<(u8, S
     (all.len(), freed.len(), found)
 }
 
+/// Recall's BM25 (k1 1.2, b .75) per candidate, `labelled` its bank's label: its head, body and
+/// file stem against `query`'s distinct tokens, plus 4 in `about`'s bank, else 1 in home's or the
+/// grove root's, unless it claims its own importance (docs/recall.html#chosen).
+#[expect(clippy::float_arithmetic, reason = "BM25 is float math")]
+fn bm25(candidates: &[Value], labelled: &[String], query: &str, about: Option<&str>) -> Vec<f64> {
+    let count = |items: usize| f64::from(u32::try_from(items).unwrap_or(u32::MAX));
+    let docs: Vec<Vec<String>> = candidates
+        .iter()
+        .zip(labelled)
+        .map(|(memory, repo)| {
+            let file = text(&memory["file"]);
+            toks(&format!(
+                "{}\n{} {}",
+                head(memory, repo),
+                text(&memory["body"]),
+                file.strip_suffix(".md").unwrap_or(file)
+            ))
+        })
+        .collect();
+    let size = count(docs.len());
+    let mean = count(docs.iter().map(Vec::len).sum()) / size;
+    let idf: Vec<(String, f64)> = toks(query)
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|word| {
+            let df = count(docs.iter().filter(|doc| doc.contains(&word)).count());
+            let weight = ((size - df + 0.5) / (df + 0.5)).ln_1p();
+            (word, weight)
+        })
+        .collect();
+    docs.iter()
+        .zip(candidates.iter().zip(labelled))
+        .map(|(doc, (memory, repo))| {
+            let told = format!("{} {}", text(&memory["name"]), text(&memory["description"]))
+                .to_lowercase();
+            let ends = |tail: &str| {
+                !tail.starts_with(|letter: char| letter.is_alphanumeric() || letter == '_')
+            };
+            let claims = CLAIM.iter().any(|phrase| told.contains(phrase))
+                || ["every request", "any request", "all request"]
+                    .iter()
+                    .any(|phrase| {
+                        told.match_indices(phrase).any(|(at, _)| {
+                            let tail = told
+                                .get(at.saturating_add(phrase.len())..)
+                                .unwrap_or_default();
+                            ends(tail) || tail.strip_prefix('s').is_some_and(ends)
+                        })
+                    });
+            let bonus = if claims {
+                0.0f64
+            } else if about == Some(repo.as_str()) {
+                4.0f64
+            } else if GENERAL.contains(&repo.as_str()) {
+                1.0f64
+            } else {
+                0.0f64
+            };
+            let length = count(doc.len());
+            idf.iter()
+                .map(|pair| {
+                    (
+                        pair.1,
+                        count(doc.iter().filter(|token| **token == pair.0).count()),
+                    )
+                })
+                .filter(|pair| pair.1 > 0.0f64)
+                .fold(0.0f64, |sum, (weight, tf)| {
+                    sum + weight * tf * 2.2f64
+                        / 1.2f64.mul_add(0.75f64.mul_add(length / mean, 0.25f64), tf)
+                })
+                + bonus
+        })
+        .collect()
+}
+
 /// The common git dir of the linked worktree at `dir`: its `.git` a file naming
 /// `<common>/worktrees/<name>`, the shape `git worktree add` writes and a submodule's does not.
 fn common(dir: &Path) -> Option<PathBuf> {
@@ -595,10 +681,18 @@ fn embed(texts: &[String], begun: Instant, limit: Duration) -> io::Result<Vec<Ve
 /// Each note a `rewrite` line of `lines` ended, in ledger order: `(the line's index, the line, its
 /// from entry)` per entry with an id that is not the line's `to` id (a keep continues the note).
 fn ended(lines: &[Value]) -> Vec<(usize, &Value, &Value)> {
-    lines
-        .iter()
-        .enumerate()
-        .filter(|pair| pair.1["kind"] == "rewrite")
+    let rewrites = || {
+        lines
+            .iter()
+            .enumerate()
+            .filter(|pair| pair.1["kind"] == "rewrite")
+    };
+    // a revert's `to` puts the note back: no end before it counts
+    let restored: Vec<(usize, &Value)> = rewrites()
+        .filter(|pair| pair.1["op"] == "revert" && pair.1["to"]["id"].is_string())
+        .map(|pair| (pair.0, &pair.1["to"]["id"]))
+        .collect();
+    rewrites()
         .flat_map(|(at, line)| {
             line["from"]
                 .as_array()
@@ -606,6 +700,11 @@ fn ended(lines: &[Value]) -> Vec<(usize, &Value, &Value)> {
                 .flatten()
                 .filter(move |entry| entry["id"].is_string() && entry["id"] != line["to"]["id"])
                 .map(move |entry| (at, line, entry))
+        })
+        .filter(|end| {
+            !restored
+                .iter()
+                .any(|back| back.0 > end.0 && *back.1 == end.2["id"])
         })
         .collect()
 }
@@ -773,6 +872,28 @@ fn episode(
 /// the sessions it descends from.
 fn entry(note: &Value) -> Value {
     json!({"digest": sha256(text(&note["text"])), "id": note["id"], "path": note["path"], "sessions": lineage([note])})
+}
+
+/// The recall evaluation's examples, `<root>/eval/recall.jsonl`, each with the candidate it
+/// judges now: by id, followed through the rewrite lines to the note it went into, else by path.
+fn examples(root: &Path, candidates: &[Value]) -> Vec<(Value, Option<usize>)> {
+    let lines = ledger(root);
+    let into: BTreeMap<&str, &str> = ended(&lines)
+        .into_iter()
+        .filter_map(|end| Some((end.2["id"].as_str()?, end.1["to"]["id"].as_str()?)))
+        .collect();
+    jsonl(&root.join("eval/recall.jsonl"))
+        .into_iter()
+        .map(|example| {
+            let id = iter::successors(example["id"].as_str(), |held| into.get(held).copied())
+                .take(into.len().saturating_add(1))
+                .last();
+            let at = candidates.iter().position(|note| {
+                id.map_or(note["path"] == example["path"], |held| note["id"] == held)
+            });
+            (example, at)
+        })
+        .collect()
 }
 
 /// Every note recall and `show` read, in reader order: the memories, the knowledge pages, the
@@ -1049,6 +1170,17 @@ fn labels(home: &Path, claude: &Path) -> (PathBuf, Vec<(String, String)>, impl F
     (grove, repos, label)
 }
 
+/// Whether a pass with an order op fails its measure (docs/index.html#cycle-rewrite): it lowers
+/// the recall evaluation's score, or lowers neither notes nor characters and raises no score.
+fn worse(before: &Value, after: &Value) -> bool {
+    let (score, lower) = (
+        |side: &Value| side["eval"].as_f64(),
+        |key: &str| after[key].as_u64() < before[key].as_u64(),
+    );
+    score(after) < score(before)
+        || !(lower("notes") || lower("chars") || score(after) > score(before))
+}
+
 /// A file's bytes, a directory's files' summed; 0 for what is not there.
 fn weight(path: &Path) -> u64 {
     if path.is_dir() {
@@ -1088,6 +1220,146 @@ fn lineage<'note, I: IntoIterator<Item = &'note Value>>(notes: I) -> BTreeSet<&'
         .flat_map(str::split_whitespace)
         .filter(|word| uuid(word))
         .collect()
+}
+
+/// `questions` (keyed by rank) and `state` to each of `$SANDMAN_SCORERS` until one answers a noul
+/// per question, Jev skipped while `<root>/jev-down.json` holds it down: the scorer, its nouls and
+/// its input tokens; and each failure, `(scorer, cause)` (AGENTS.md `### sandman recall`).
+fn decide(
+    root: &Path,
+    home: &Path,
+    questions: &Map<String, Value>,
+    state: &str,
+    begun: Instant,
+    limit: Duration,
+) -> (Decision, Vec<(String, String)>) {
+    let secret = env::var("TYPESAFE_API_KEY")
+        .or_else(|_| fs::read_to_string(home.join(".config/typesafe/api_key")))
+        .map(|key| key.trim().to_owned())
+        .unwrap_or_default();
+    let now = || {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            })
+    };
+    let (down, tried, mut errors) = (
+        root.join("jev-down.json"),
+        setting("SANDMAN_SCORERS", "pplx,kev,jev".to_owned()),
+        Vec::new(),
+    );
+    let held_down = serde_json::from_str::<Value>(&fs::read_to_string(&down).unwrap_or_default())
+        .ok()
+        .and_then(|stamp| stamp["until"].as_u64())
+        .is_some_and(|until| until > now());
+    let ollama = setting("SANDMAN_OLLAMA", "http://127.0.0.1:11434".to_owned());
+    let decided = tried
+        .split(',')
+        .filter(|scorer| !(*scorer == "jev" && held_down))
+        .find_map(|scorer| {
+            let (url, model) = match scorer {
+                "pplx" => (format!("{ollama}/v1/systemone"), "pplx-decider-flash:4b"),
+                "kev" => ("http://127.0.0.1:1703/v1/systemone".to_owned(), "kev-latest"),
+                "jev" => ("https://api.typesafe.ai/v1/systemone".to_owned(), "jev-latest"),
+                _ => return None,
+            };
+            let key = if scorer == "jev" { secret.as_str() } else { "" };
+            let request = json!({"model": model, "questions": questions, "state": state});
+            let (answer, replied) = if scorer == "jev" && secret.is_empty() {
+                (
+                    Err(io::Error::other(
+                        "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
+                    )),
+                    String::new(),
+                )
+            } else {
+                post(&url, &request.to_string(), key, begun, limit)
+            };
+            let scored = answer.and_then(|reply| {
+                let nouls = (0..questions.len()).map(|rank| {
+                    reply["answers"][rank.to_string()]["noul"]
+                        .as_f64()
+                        .ok_or_else(|| {
+                            io::Error::other(format!("reply: no noul for question {rank}"))
+                        })
+                });
+                Ok((
+                    nouls.collect::<io::Result<Vec<f64>>>()?,
+                    reply["usage"]["input_tokens"].as_u64().unwrap_or(0),
+                ))
+            });
+            scored
+                .map_err(|error| {
+                    // out of credit or refused: down for 6 h, else for 60 s
+                    let refused = ["billing_error", "error: 401", "error: 402", "error: 403"]
+                        .iter()
+                        .any(|marker| replied.contains(marker));
+                    let expiry = setting(
+                        ["SANDMAN_JEV_DOWN_MS", "SANDMAN_JEV_HELD_MS"][usize::from(refused)],
+                        [60_000, 21_600_000][usize::from(refused)],
+                    );
+                    let until = json!({"error": one_line(&error.to_string(), 400), "until": now().saturating_add(expiry)});
+                    drop((scorer == "jev").then(|| put(&down, &until.to_string())));
+                    errors.push((scorer.to_owned(), one_line(&error.to_string(), 400)));
+                })
+                .ok()
+                .map(|found| (scorer.to_owned(), found))
+        });
+    (decided, errors)
+}
+
+/// `question` as recall's selection question, scored over the recall evaluation's latest
+/// `$SANDMAN_EVAL_CAP` (50) examples whose note is a candidate now: per example one question to
+/// `decide`, its state the example's repository and cue, right when the noul is at least .5 for a
+/// label 1 and under it for a label 0; the share to 3 places, none without such an example, the
+/// scorers' failures when none answers one.
+fn questioned(
+    root: &Path,
+    home: &Path,
+    label: &dyn Fn(&str) -> String,
+    question: &str,
+) -> io::Result<Option<f64>> {
+    let candidates = pool(root).1;
+    let judged: Vec<(Value, usize)> = examples(root, &candidates)
+        .into_iter()
+        .rev()
+        .filter_map(|pair| Some((pair.0, pair.1?)))
+        .take(setting("SANDMAN_EVAL_CAP", 50))
+        .collect();
+    let limit = Duration::from_millis(setting("SANDMAN_RECALL_MS", 10_000));
+    let mut right = 0usize;
+    for pair in &judged {
+        let (example, note) = (&pair.0, &candidates[pair.1]);
+        let instructions = format!(
+            "Memory ({}): {} \u{2014} {}. {question}",
+            label(text(&note["bank"])),
+            text(&note["name"]),
+            one_line(text(&note["description"]), 160)
+        );
+        let cue = text(&example["cue"]);
+        let state = example["about"].as_str().map_or_else(
+            || cue.to_owned(),
+            |about| format!("repository: {about}\n{cue}"),
+        );
+        let questions: Map<String, Value> = iter::once((
+            "0".to_owned(),
+            json!({"instructions": instructions, "type": "noul"}),
+        ))
+        .collect();
+        let (decided, failures) = decide(root, home, &questions, &state, Instant::now(), limit);
+        let noul = decided
+            .and_then(|found| found.1.0.first().copied())
+            .ok_or_else(|| {
+                let causes: Vec<String> = failures
+                    .iter()
+                    .map(|failure| format!("{}: {}", failure.0, failure.1))
+                    .collect();
+                io::Error::other(format!("question: {}", causes.join("; ")))
+            })?;
+        right = right.saturating_add(usize::from((noul >= 0.5f64) == (example["label"] == 1u8)));
+    }
+    Ok((!judged.is_empty()).then(|| share(right, judged.len())))
 }
 
 /// Where `note` is on disk: its path under the root, a memory's under `memories/`.
@@ -1146,13 +1418,41 @@ fn manifest() -> hotswap::Manifest {
 }
 
 /// A bank's order, else the store's (docs/index.html#cycle-rewrite): its active notes, its traces
-/// among them, and their characters.
-fn measure(root: &Path, bank: Option<&str>) -> Value {
+/// among them, their characters, and the store's recall evaluation when it has an example.
+fn measure(root: &Path, bank: Option<&str>, label: &dyn Fn(&str) -> String) -> Value {
     let held: Vec<Value> = every(root)
         .into_iter()
         .filter(|note| bank.is_none_or(|one| note["bank"] == one))
         .collect();
-    json!({"chars": held.iter().map(|note| text(&note["text"]).chars().count()).sum::<usize>(), "notes": held.len()})
+    let mut order = json!({"chars": held.iter().map(|note| text(&note["text"]).chars().count()).sum::<usize>(), "notes": held.len()});
+    // the share of the examples recall's lexical rank now gets right: a label-1 one's note among
+    // the top 5 scoring above 0, a label-0 one's not
+    let candidates = pool(root).1;
+    let labelled: Vec<String> = candidates
+        .iter()
+        .map(|note| label(text(&note["bank"])))
+        .collect();
+    let judged = examples(root, &candidates);
+    let right = judged.iter().filter(|pair| {
+        let scores = bm25(
+            &candidates,
+            &labelled,
+            text(&pair.0["cue"]),
+            pair.0["about"].as_str(),
+        );
+        let mut ranked: Vec<usize> = (0..candidates.len())
+            .filter(|&at| scores[at] > 0.0f64)
+            .collect();
+        ranked.sort_by(|left, right| scores[*right].total_cmp(&scores[*left]));
+        let sent = pair
+            .1
+            .is_some_and(|at| ranked.iter().take(5).any(|&top| top == at));
+        sent == (pair.0["label"] == 1u8)
+    });
+    if !judged.is_empty() {
+        order["eval"] = share(right.count(), judged.len()).into();
+    }
+    order
 }
 
 /// A new note's id: 12 lowercase hex digits from `/dev/urandom`.
@@ -1654,8 +1954,9 @@ fn reply(status: ExitStatus, out: &str, err: &str) -> io::Result<Value> {
 }
 
 /// Ends `note` outside consolidate (decay, a graduation approved): its file moved aside to
-/// `<root>/.pruned/<yyyy>/<mm>/<dd>/<HHMMSS>-<bank>-<file>`, then one `rewrite` line of `op`.
-fn retire(root: &Path, note: &Value, op: &str, reason: &Value, to: &Value) -> io::Result<()> {
+/// `<root>/.pruned/<yyyy>/<mm>/<dd>/<HHMMSS>-<bank>-<file>`, then one `rewrite` line of `op`; the
+/// copy's path.
+fn retire(root: &Path, note: &Value, op: &str, reason: &Value, to: &Value) -> io::Result<PathBuf> {
     let aside = dated(
         root,
         ".pruned",
@@ -1663,11 +1964,12 @@ fn retire(root: &Path, note: &Value, op: &str, reason: &Value, to: &Value) -> io
         &mut BTreeSet::new(),
     );
     aside.parent().map_or(Ok(()), fs::create_dir_all)?;
-    fs::rename(located(root, note), aside)?;
+    fs::rename(located(root, note), &aside)?;
     record(
         root,
         &mut json!({"from": [entry(note)], "kind": "rewrite", "model": null, "op": op, "reason": reason, "to": to}),
     )
+    .map(|()| aside)
 }
 
 /// One verdict on `note` (docs/index.html#cycle-rethink): `line`, holding `by`, `session`,
@@ -2083,6 +2385,13 @@ fn stack<'note>(
     (input, full)
 }
 
+/// `part` of `whole` to 3 places.
+#[expect(clippy::float_arithmetic, reason = "a share is float math")]
+fn share(part: usize, whole: usize) -> f64 {
+    let count = |items: usize| f64::from(u32::try_from(items).unwrap_or(u32::MAX));
+    (count(part) / count(whole) * 1000.0f64).round() / 1000.0f64
+}
+
 /// `.<file>.<pid>` beside `path`: a temp name every reader skips.
 fn staged(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{}.{}", name(path), id()))
@@ -2267,6 +2576,40 @@ fn tree(path: &Path, depth: usize) -> Vec<PathBuf> {
         .collect();
     kids.sort();
     kids.iter().flat_map(|kid| tree(kid, next)).collect()
+}
+
+/// Reverts a pass's order ops (docs/index.html#cycle-rewrite), each `(the note it wrote, the notes
+/// it moved aside as (where, the copy))`: the note written removed, a `revert` line ending it, then
+/// each moved one put back, a `revert` line whose `to` is it (one with an id).
+fn unwind(root: &Path, undo: &[Undo], reason: &Value) -> io::Result<()> {
+    let line = |from: Value, to: Value| {
+        record(
+            root,
+            &mut json!({"from": from, "kind": "rewrite", "model": null, "op": "revert", "reason": reason, "to": to}),
+        )
+    };
+    let shown_note = |path: &Path| -> io::Result<Value> {
+        let mut note = read(json!({}), fs::read_to_string(path)?);
+        let under = shown(root, path);
+        note["path"] = under.strip_prefix("memories/").unwrap_or(&under).into();
+        Ok(note)
+    };
+    for step in undo {
+        if let Some(path) = step.0.as_ref() {
+            let gone = shown_note(path)?;
+            fs::remove_file(path)?;
+            line(json!([entry(&gone)]), Value::Null)?;
+        }
+        for pair in &step.1 {
+            fs::rename(&pair.1, &pair.0)?;
+            let back = shown_note(&pair.0)?;
+            let to = back["id"]
+                .as_str()
+                .map(|id| json!({"id": id, "path": back["path"]}));
+            to.map_or(Ok(()), |restored| line(json!([]), restored))?;
+        }
+    }
+    Ok(())
 }
 
 /// `time` as RFC 3339 UTC to the second (Howard Hinnant's `civil_from_days`).
@@ -2837,7 +3180,7 @@ fn main() -> ExitCode {
                         let artifact = text(&hit["artifact"]);
                         let to = json!({"artifact": artifact});
                         Some(
-                            retire(&root, &ending, "graduate", &Value::Null, &to).map(|()| {
+                            retire(&root, &ending, "graduate", &Value::Null, &to).map(|_| {
                                 format!(
                                     "\ngraduated: {} \u{2192} {artifact}",
                                     text(&ending["path"])
@@ -3283,21 +3626,6 @@ fn main() -> ExitCode {
             let ask = toks(&cue)
                 .iter()
                 .any(|word| !STEER.split(' ').any(|steer| steer == word));
-            let secret = env::var("TYPESAFE_API_KEY")
-                .or_else(|_| fs::read_to_string(home.join(".config/typesafe/api_key")))
-                .map(|key| key.trim().to_owned())
-                .unwrap_or_default();
-            let now = || {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(0, |since| {
-                        u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
-                    })
-            };
-            let (down, tried) = (
-                root.join("jev-down.json"),
-                setting("SANDMAN_SCORERS", "pplx,kev,jev".to_owned()),
-            );
             // the pass, the reference's (docs/recall.html#proposed): BM25 and cosine ranks fused,
             // the fused top 10 to one decision model, the two orders fused again and cut; each
             // line `(its score, its candidate)`, at most so many, the path taken, the scorer, the
@@ -3307,7 +3635,7 @@ fn main() -> ExitCode {
                 reason = "BM25, cosine and reciprocal-rank fusion are float math"
             )]
             let pass = || {
-                let mut errors: Vec<(&str, String)> = Vec::new();
+                let mut errors: Vec<(String, String)> = Vec::new();
                 let count = |items: usize| f64::from(u32::try_from(items).unwrap_or(u32::MAX));
                 let reciprocal = |rank: usize| 1.0f64 / count(rank.saturating_add(61));
                 // descending, a tie in the order given
@@ -3323,83 +3651,12 @@ fn main() -> ExitCode {
                     .iter()
                     .map(|memory| label(text(&memory["bank"])))
                     .collect();
-                // BM25 (k1 1.2, b .75) of the head, the body and the file's stem for the cue's
-                // distinct tokens and the given repository's, plus 4 in the about's bank, else 1
-                // in home's or the grove root's, unless the memory claims its own importance
-                let docs: Vec<Vec<String>> = candidates
-                    .iter()
-                    .zip(&labelled)
-                    .map(|(memory, repo)| {
-                        let file = text(&memory["file"]);
-                        toks(&format!(
-                            "{}\n{} {}",
-                            head(memory, repo),
-                            text(&memory["body"]),
-                            file.strip_suffix(".md").unwrap_or(file)
-                        ))
-                    })
-                    .collect();
-                let size = count(docs.len());
-                let mean = count(docs.iter().map(Vec::len).sum()) / size;
-                let idf: Vec<(String, f64)> =
-                    toks(&format!("{cue} {}", given.as_deref().unwrap_or_default()))
-                        .into_iter()
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .map(|word| {
-                            let df = count(docs.iter().filter(|doc| doc.contains(&word)).count());
-                            let weight = ((size - df + 0.5) / (df + 0.5)).ln_1p();
-                            (word, weight)
-                        })
-                        .collect();
-                let lexical: Vec<f64> = docs
-                    .iter()
-                    .zip(candidates.iter().zip(&labelled))
-                    .map(|(doc, (memory, repo))| {
-                        let told =
-                            format!("{} {}", text(&memory["name"]), text(&memory["description"]))
-                                .to_lowercase();
-                        let ends = |tail: &str| {
-                            !tail.starts_with(|letter: char| {
-                                letter.is_alphanumeric() || letter == '_'
-                            })
-                        };
-                        let claims = CLAIM.iter().any(|phrase| told.contains(phrase))
-                            || ["every request", "any request", "all request"].iter().any(
-                                |phrase| {
-                                    told.match_indices(phrase).any(|(at, _)| {
-                                        let tail = told
-                                            .get(at.saturating_add(phrase.len())..)
-                                            .unwrap_or_default();
-                                        ends(tail) || tail.strip_prefix('s').is_some_and(ends)
-                                    })
-                                },
-                            );
-                        let bonus = if claims {
-                            0.0f64
-                        } else if about.as_ref() == Some(repo) {
-                            4.0f64
-                        } else if GENERAL.contains(&repo.as_str()) {
-                            1.0f64
-                        } else {
-                            0.0f64
-                        };
-                        let length = count(doc.len());
-                        idf.iter()
-                            .map(|pair| {
-                                (
-                                    pair.1,
-                                    count(doc.iter().filter(|token| **token == pair.0).count()),
-                                )
-                            })
-                            .filter(|pair| pair.1 > 0.0f64)
-                            .fold(0.0f64, |sum, (weight, tf)| {
-                                sum + weight * tf * 2.2f64
-                                    / 1.2f64.mul_add(0.75f64.mul_add(length / mean, 0.25f64), tf)
-                            })
-                            + bonus
-                    })
-                    .collect();
+                let lexical = bm25(
+                    &candidates,
+                    &labelled,
+                    &format!("{cue} {}", given.as_deref().unwrap_or_default()),
+                    about.as_deref(),
+                );
                 let by_word = order(&lexical, (0..candidates.len()).collect());
                 // the cosine rank: the query embedded, each candidate's vector from the cache,
                 // at most `$SANDMAN_RECALL_EMBED` missing ones (the lexically best) embedded and
@@ -3425,8 +3682,8 @@ fn main() -> ExitCode {
                     .collect();
                 let query = embed(&[format!("{}{state}", EMBED[1])], begun, limit)
                     .map(|mut found| found.pop().unwrap_or_default());
-                let mut fail = |scorer, error: io::Error| {
-                    errors.push((scorer, one_line(&error.to_string(), 400)));
+                let mut fail = |error: io::Error| {
+                    errors.push(("embed".to_owned(), one_line(&error.to_string(), 400)));
                 };
                 let missing: Vec<usize> = by_word
                     .iter()
@@ -3454,7 +3711,7 @@ fn main() -> ExitCode {
                         append(&root.join("embeddings.jsonl"), &rows.concat())
                     })
                 {
-                    fail("embed", error);
+                    fail(error);
                 }
                 let fused = match query {
                     Ok(vector) => {
@@ -3483,7 +3740,7 @@ fn main() -> ExitCode {
                         Some(fused)
                     }
                     Err(error) => {
-                        fail("embed", error);
+                        fail(error);
                         None
                     }
                 };
@@ -3493,17 +3750,21 @@ fn main() -> ExitCode {
                     .map_or_else(|| by_word.clone(), |scores| order(scores, by_word.clone()));
                 // the decision: the first order's top 10 in one request, keyed by rank, to each
                 // scorer in `$SANDMAN_SCORERS` until one answers; Jev skipped while it is down
-                let shortlist: Vec<usize> = first.iter().copied().take(10).collect();
+                let (shortlist, asked) = (
+                    first.iter().copied().take(10).collect::<Vec<usize>>(),
+                    guide(&root, "question"),
+                );
                 let questions: Map<String, Value> = shortlist
                     .iter()
                     .enumerate()
                     .map(|(rank, &index)| {
                         let memory = &candidates[index];
                         let instructions = format!(
-                            "Memory ({}): {} \u{2014} {}. {QUESTION}",
+                            "Memory ({}): {} \u{2014} {}. {}",
                             labelled[index],
                             text(&memory["name"]),
-                            one_line(text(&memory["description"]), 160)
+                            one_line(text(&memory["description"]), 160),
+                            asked.trim()
                         );
                         (
                             rank.to_string(),
@@ -3511,64 +3772,8 @@ fn main() -> ExitCode {
                         )
                     })
                     .collect();
-                let held_down =
-                    serde_json::from_str::<Value>(&fs::read_to_string(&down).unwrap_or_default())
-                        .ok()
-                        .and_then(|stamp| stamp["until"].as_u64())
-                        .is_some_and(|until| until > now());
-                let ollama = setting("SANDMAN_OLLAMA", "http://127.0.0.1:11434".to_owned());
-                let decided = tried
-                    .split(',')
-                    .filter(|scorer| !(*scorer == "jev" && held_down))
-                    .find_map(|scorer| {
-                        let (url, model) = match scorer {
-                            "pplx" => (format!("{ollama}/v1/systemone"), "pplx-decider-flash:4b"),
-                            "kev" => ("http://127.0.0.1:1703/v1/systemone".to_owned(), "kev-latest"),
-                            "jev" => ("https://api.typesafe.ai/v1/systemone".to_owned(), "jev-latest"),
-                            _ => return None,
-                        };
-                        let key = if scorer == "jev" { secret.as_str() } else { "" };
-                        let request = json!({"model": model, "questions": questions, "state": state});
-                        let (answer, replied) = if scorer == "jev" && secret.is_empty() {
-                            (
-                                Err(io::Error::other(
-                                    "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
-                                )),
-                                String::new(),
-                            )
-                        } else {
-                            post(&url, &request.to_string(), key, begun, limit)
-                        };
-                        let scored = answer.and_then(|reply| {
-                            let nouls = (0..shortlist.len()).map(|rank| {
-                                reply["answers"][rank.to_string()]["noul"]
-                                    .as_f64()
-                                    .ok_or_else(|| {
-                                        io::Error::other(format!("reply: no noul for question {rank}"))
-                                    })
-                            });
-                            Ok((
-                                nouls.collect::<io::Result<Vec<f64>>>()?,
-                                reply["usage"]["input_tokens"].as_u64().unwrap_or(0),
-                            ))
-                        });
-                        scored
-                            .map_err(|error| {
-                                // out of credit or refused: down for 6 h, else for 60 s
-                                let refused = ["billing_error", "error: 401", "error: 402", "error: 403"]
-                                    .iter()
-                                    .any(|marker| replied.contains(marker));
-                                let expiry = setting(
-                                    ["SANDMAN_JEV_DOWN_MS", "SANDMAN_JEV_HELD_MS"][usize::from(refused)],
-                                    [60_000, 21_600_000][usize::from(refused)],
-                                );
-                                let until = json!({"error": one_line(&error.to_string(), 400), "until": now().saturating_add(expiry)});
-                                drop((scorer == "jev").then(|| put(&down, &until.to_string())));
-                                fail(scorer, error);
-                            })
-                            .ok()
-                            .map(|found| (scorer.to_owned(), found))
-                    });
+                let (decided, failures) = decide(&root, &home, &questions, &state, begun, limit);
+                errors.extend(failures);
                 let embedded = fused.is_some();
                 let (lines, max, route, scorer, tokens) = match (decided, fused) {
                     // the decision's order and the first order fused within the 10, a tie
@@ -3640,7 +3845,7 @@ fn main() -> ExitCode {
             let fits = |listed: usize, used: usize| listed < max && used <= budget;
             let failing = errors
                 .iter()
-                .map(|error| error.0)
+                .map(|error| error.0.as_str())
                 .collect::<Vec<_>>()
                 .join(" and ");
             let head = |sent: usize| {
@@ -3993,6 +4198,7 @@ fn main() -> ExitCode {
                     thread::park_timeout(tick);
                     let lines = ledger(&data);
                     let story = sessions(&lines);
+                    let (_, _, label) = labels(&home, &claude);
                     // this machine's sessions started before the grace with no end since, no job
                     // naming them: without a transcript gone, idle past the window taken; at most
                     // 20 gone and one taken a tick
@@ -4027,7 +4233,6 @@ fn main() -> ExitCode {
                     // then what recall would embed and it lacks, in reader order, at most
                     // `$SANDMAN_EMBED_TICK` a tick
                     {
-                        let (_, _, label) = labels(&home, &claude);
                         let (cache, file) = (vectors(&data), data.join("embeddings.jsonl"));
                         let wanted: Vec<(String, String, String)> = pool(&data)
                             .1
@@ -4455,7 +4660,7 @@ fn main() -> ExitCode {
                             bank.strip_prefix('@').unwrap_or_default(),
                         );
                         let consolidate = || -> io::Result<Value> {
-                            let before = measure(&data, Some(bank));
+                            let before = measure(&data, Some(bank), &label);
                             // the wrong and stale verdicts its memories still answer to
                             let blamed: BTreeMap<&str, Vec<&Value>> = memories
                                 .iter()
@@ -4479,7 +4684,6 @@ fn main() -> ExitCode {
                                 .collect();
                             // the notes of other banks and topics nearest one sent, by the cosine of
                             // their cached embeddings, at most 5
-                            let (_, _, label) = labels(&home, &claude);
                             let cache = vectors(&data);
                             let vector = |note: &Value| -> Option<Vec<f64>> {
                                 let hashed = hash(&excerpt(note, &label(text(&note["bank"]))));
@@ -4656,7 +4860,7 @@ fn main() -> ExitCode {
                                     format!("{reply}\n"),
                                 )],
                             );
-                            let mut rewrites = Vec::new();
+                            let (mut rewrites, mut undo) = (Vec::new(), Vec::new());
                             for op in ops.into_iter().flatten() {
                                 let trace = op["trace"].as_str().and_then(|file| given.get(file));
                                 let memory = op["memory"]
@@ -4687,6 +4891,7 @@ fn main() -> ExitCode {
                                             .map(|found| (dir.as_path(), found)),
                                     )
                                     .collect();
+                                let first = aside.len();
                                 for &(tier, found) in &inputs {
                                     let file = text(&found["file"]);
                                     aside.push((
@@ -4857,6 +5062,16 @@ fn main() -> ExitCode {
                                     "from": values().map(entry).collect::<Vec<_>>(),
                                     "kind": "rewrite", "model": model(&consolidator), "op": op["op"], "reason": op["reason"], "to": landed,
                                 }));
+                                // an order op (a merge of notes, a graduation, a memory pruned), so
+                                // a lowered score can put it back
+                                let ordering = fresh || (op["op"] == "prune" && memory.is_some());
+                                undo.extend(ordering.then(|| {
+                                    let written = writes
+                                        .last()
+                                        .filter(|_| fresh)
+                                        .map(|pending| pending.0.clone());
+                                    (written, aside.get(first..).unwrap_or_default().to_vec())
+                                }));
                             }
                             if let Err(error) = writes.iter().try_for_each(|pending| {
                                 pending.0.parent().map_or(Ok(()), fs::create_dir_all)?;
@@ -4881,10 +5096,18 @@ fn main() -> ExitCode {
                                 ops.into_iter().flatten().filter(|done| pick(done)).count()
                             };
                             let tally = |op: &str| count(&|done| done["op"] == op);
+                            let measured = measure(&data, Some(bank), &label);
+                            let reverted = !undo.is_empty() && worse(&before, &measured);
+                            let cause = json!(format!(
+                                "order: eval {} \u{2192} {}",
+                                before["eval"], measured["eval"]
+                            ));
+                            let _: Option<()> =
+                                reverted.then(|| unwind(&data, &undo, &cause)).transpose()?;
                             Ok(json!({
                                 "kept": tally("keep"), "merged": tally("merge"),
-                                "order": {"after": measure(&data, Some(bank)), "before": before, "merges": count(&|done| done["op"] == "merge" && done["memories"].is_array())},
-                                "outcome": "consolidated", "pruned": tally("prune"),
+                                "order": {"after": measured, "before": before, "merges": count(&|done| done["op"] == "merge" && done["memories"].is_array())},
+                                "outcome": (["consolidated", "reverted"][usize::from(reverted)]), "pruned": tally("prune"),
                             }))
                         };
                         (
@@ -4897,12 +5120,12 @@ fn main() -> ExitCode {
                     } else if due {
                         // decay first, with no model run: each note under the floor but one about
                         // the person, pinned or muted, or with a verdict consolidate still answers
-                        let decay = || -> io::Result<usize> {
+                        let decay = || -> io::Result<Vec<(PathBuf, PathBuf)>> {
                             let (floor, now) = (
                                 setting("SANDMAN_DECAY_FLOOR", 0.1f64),
                                 day(&today()).unwrap_or_default(),
                             );
-                            let mut pruned = 0usize;
+                            let mut moved = Vec::new();
                             for note in
                                 [notes(&data, "memories"), notes(&data, "knowledge")].concat()
                             {
@@ -4914,11 +5137,12 @@ fn main() -> ExitCode {
                                 {
                                     let cause =
                                         json!(format!("decay: strength {force} under {floor}"));
-                                    retire(&data, &note, "prune", &cause, &Value::Null)?;
-                                    pruned = pruned.saturating_add(1);
+                                    let aside =
+                                        retire(&data, &note, "prune", &cause, &Value::Null)?;
+                                    moved.push((located(&data, &note), aside));
                                 }
                             }
-                            Ok(pruned)
+                            Ok(moved)
                         };
                         let review = || -> io::Result<Value> {
                             let mine = |kind: &str| -> Vec<&Value> {
@@ -5112,10 +5336,26 @@ fn main() -> ExitCode {
                                     ));
                                 }
                             }
+                            // recall's misses since: sends judged not about their cue
+                            let irrelevant: Vec<String> = jsonl(&data.join("eval/recall.jsonl"))
+                                .iter()
+                                .filter(|example| {
+                                    example["label"] == 0u8
+                                        && example["at"].as_str() > last["at"].as_str()
+                                })
+                                .map(|example| {
+                                    format!(
+                                        "{} \u{b7} {}",
+                                        text(&example["path"]),
+                                        one_line(text(&example["cue"]), 160)
+                                    )
+                                })
+                                .collect();
                             let input = format!(
-                                "<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n\n# since\n{}\n\n{}",
+                                "<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n<question>\n{}\n</question>\n\n# since\n{}\n\n{}",
                                 guide(&data, "encode").trim_end(),
                                 guide(&data, "consolidate").trim_end(),
+                                guide(&data, "question").trim(),
                                 last["at"].as_str().unwrap_or("the start"),
                                 cut(
                                     sections(&[
@@ -5136,6 +5376,7 @@ fn main() -> ExitCode {
                                         ("merged again", again.into_iter().collect()),
                                         ("remembered by hand", remembered),
                                         ("sent, never read", unread.into_iter().collect()),
+                                        ("irrelevant", irrelevant),
                                         (
                                             "standing",
                                             standing.values().map(|pair| pair.0.clone()).collect()
@@ -5157,7 +5398,10 @@ fn main() -> ExitCode {
                                 reflect_limit,
                                 &noted,
                             )?;
-                            let jobs = ["consolidate", "encode"];
+                            let (jobs, proposals) = (
+                                ["consolidate", "encode"],
+                                ["consolidate", "encode", "question"],
+                            );
                             // a proposal per note the evidence lists on its rung, at most once
                             let (mut proposed, rungs) = (BTreeSet::new(), [&standing, &relearned]);
                             let fits = |one: &Value| {
@@ -5174,7 +5418,7 @@ fn main() -> ExitCode {
                                     && proposed.insert(text(&one["note"]).to_owned())
                             };
                             if !reply["reason"].is_string()
-                                || jobs
+                                || proposals
                                     .iter()
                                     .any(|job| !(reply[job].is_null() || reply[job].is_string()))
                                 || !(reply["propose"].is_null()
@@ -5187,8 +5431,9 @@ fn main() -> ExitCode {
                                     one_line(&reply.to_string(), 200)
                                 )));
                             }
-                            if let Some(job) =
-                                jobs.iter().find(|job| text(&reply[**job]).len() > ceiling)
+                            if let Some(job) = proposals
+                                .iter()
+                                .find(|job| text(&reply[**job]).len() > ceiling)
                             {
                                 return Err(io::Error::other(format!(
                                     "output: {job} guidance over {ceiling} bytes"
@@ -5326,7 +5571,7 @@ fn main() -> ExitCode {
                                     let verdict = judge(&asked)?;
                                     let pick = ["a", "b", "same"]
                                         .iter()
-                                        .position(|label| verdict["better"] == *label)
+                                        .position(|choice| verdict["better"] == *choice)
                                         .ok_or_else(|| {
                                             io::Error::other(format!(
                                                 "output: not a verdict: {}",
@@ -5343,6 +5588,21 @@ fn main() -> ExitCode {
                                 if !inputs.is_empty() && tally[2] == 0 {
                                     adopted.push((job, new.to_owned()));
                                 }
+                            }
+                            // a selection question, scored with the one in force over the recall
+                            // evaluation's examples: adopted when it scores no worse
+                            if let Some(new) = reply["question"].as_str() {
+                                let current = guide(&data, "question");
+                                let old = questioned(&data, &home, &label, current.trim())?;
+                                let fresh = questioned(&data, &home, &label, new)?;
+                                drop(judged.insert(
+                                    "question".to_owned(),
+                                    json!({"new": fresh, "old": old}),
+                                ));
+                                adopted.extend(
+                                    (old.is_some() && fresh >= old)
+                                        .then(|| ("question", new.to_owned())),
+                                );
                             }
                             let history = adopt(&data, &adopted)?;
                             // each proposal an intention due today, about the artifact's directory;
@@ -5402,18 +5662,29 @@ fn main() -> ExitCode {
                                 "proposed": written, "reason": one_line(text(&reply["reason"]), 400), "replay": judged, "history": history,
                             }))
                         };
-                        // the review's line carries the store's order before decay and after the pass
+                        // the review's line carries the store's order before decay and after the pass;
+                        // a decay that lowers the recall evaluation's score is put back first
                         let reflect = || -> io::Result<Value> {
-                            let before = measure(&data, None);
-                            let pruned = decay()?;
+                            let before = measure(&data, None, &label);
+                            let moved = decay()?;
+                            let decayed = measure(&data, None, &label);
+                            let back = !moved.is_empty() && worse(&before, &decayed);
+                            let cause = json!(format!(
+                                "order: eval {} \u{2192} {}",
+                                before["eval"], decayed["eval"]
+                            ));
+                            let _: Option<()> = back
+                                .then(|| unwind(&data, &[(None, moved.clone())], &cause))
+                                .transpose()?;
                             let mut line = review().or_else(|error| match STOP.get() {
                                 Some(_) => Err(error),
                                 None => Ok(json!({"error": one_line(&error.to_string(), 400), "history": {}, "outcome": "failed"})),
                             })?;
                             (line["order"], line["pruned"]) = (
-                                json!({"after": measure(&data, None), "before": before, "merges": 0u8}),
-                                pruned.into(),
+                                json!({"after": measure(&data, None, &label), "before": before, "merges": 0u8}),
+                                moved.len().into(),
                             );
+                            let _: Option<()> = back.then(|| line["reverted"] = true.into());
                             Ok(line)
                         };
                         (

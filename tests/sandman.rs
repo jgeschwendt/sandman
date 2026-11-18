@@ -8,7 +8,7 @@ use signal_hook as _;
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::{Map, Value, json};
     use std::collections::{BTreeMap, BTreeSet};
     use std::error::Error;
     use std::fs::{File, Permissions};
@@ -3232,7 +3232,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
         same(
             &read("reflector.sh.first"),
             &format!(
-                "{}\n{}\n<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n\n# since\nthe start\n\n{}",
+                "{}\n{}\n<guidance job=\"encode\">\n{}\n</guidance>\n<guidance job=\"consolidate\">\n{}\n</guidance>\n<question>\nDoes the agent need this memory to carry out the request correctly?\n</question>\n\n# since\nthe start\n\n{}",
                 include_str!("../src/prompts/reflect.md"),
                 include_str!("../src/prompts/reflect.contract.md"),
                 encode.trim_end(),
@@ -4068,6 +4068,319 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 archive("080800", '9').replace('@', ID),
                 released_at.trim_matches('"')
             ),
+        )
+    }
+
+    /// The recall evaluation: each order block carries `eval`, the share of `eval/recall.jsonl`'s
+    /// examples recall's lexical rank gets right. A consolidate whose merge of notes lowers it is
+    /// reverted (the merge's note removed, its parents put back, `revert` lines, the intake kept);
+    /// one that lowers notes and keeps the score stands. A decay that lowers it is put back before
+    /// the review's model run. A selection question the review proposes is scored with the one in
+    /// force over the examples by the decision model, adopted when no worse, and recall asks it;
+    /// a scorer that answers nothing fails the review.
+    #[test]
+    fn evaluation() -> Outcome {
+        let root = temp("evaluation")?;
+        let note = |id: &str, name: &str, description: &str, extra: &str| {
+            format!(
+                "---\nid: {id}\nname: {name}\ndescription: {description}\ntype: feedback\ncreated: 2026-11-10T00:00:00Z\n{extra}origin: import\n---\n\nsample: {name}\n"
+            )
+        };
+        let example = |id: &str, path: &str, cue: &str, label: u8| {
+            json!({"about": null, "at": "2026-11-10T00:00:00Z", "cue": cue, "digest": "x", "id": id, "label": label, "path": path, "session": format!("{ID}a"), "verdict": (["irrelevant", "used"][usize::from(label)])}).to_string()
+        };
+        let keep = |trace: &str| {
+            format!(
+                r#"{{"op":"keep","trace":"{trace}","type":"feedback","name":"Sample kept {trace}","description":"sample","body":"sample"}}"#
+            )
+        };
+        let script = format!(
+            "cat > \"$0.in\"\nc=$(head -n 1 \"$0.cases\"); tail -n +2 \"$0.cases\" > \"$0.rest\"; mv \"$0.rest\" \"$0.cases\"\ncase $c in\n  merge) echo '{{\"ops\":[{},{{\"op\":\"merge\",\"memories\":[\"feedback_clock.md\",\"feedback_wall.md\"],\"type\":\"feedback\",\"name\":\"Sample merged\",\"description\":\"sample\",\"body\":\"sample\"}}]}}';;\n  prune) echo '{{\"ops\":[{},{{\"op\":\"prune\",\"memory\":\"feedback_wall.md\",\"reason\":\"sample: superseded\"}}]}}';;\nesac\n",
+            keep("feedback_new.md"),
+            keep("feedback_more.md")
+        );
+        let clock = note(
+            "e00000000001",
+            "Pass a clock in",
+            "tests take an injected clock",
+            "",
+        );
+        let wall = note(
+            "e00000000002",
+            "Wall time in logs",
+            "logs print the wall clock",
+            "",
+        );
+        plant(
+            &root,
+            &[
+                ("consolidator.sh", &script),
+                ("consolidator.sh.cases", "merge\nprune\n"),
+                (
+                    "eval/recall.jsonl",
+                    &example("e00000000001", "-e/feedback_clock.md", "inject a clock", 1),
+                ),
+                ("memories/-e/feedback_clock.md", &clock),
+                ("memories/-e/feedback_wall.md", &wall),
+                (
+                    "traces/-e/feedback_new.md",
+                    &note("e00000000003", "New", "sample", ""),
+                ),
+            ],
+        )?;
+        let consolidator = format!("sh {root}/consolidator.sh");
+        let envs = [
+            ("SANDMAN_CONSOLIDATE_QUIET_MS", "0"),
+            ("SANDMAN_CONSOLIDATOR", consolidator.as_str()),
+            ("SANDMAN_TICK_MS", "10"),
+        ];
+        let read = |path: &str| fs::read_to_string(format!("{root}/{path}")).unwrap_or_default();
+        let today = format!("ledger/{}.jsonl", date(&["+%Y/%m/%d"])?);
+        let kinds = |kind: &str| -> Vec<Value> {
+            read(&today)
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|line| line["kind"] == kind)
+                .map(|mut line| {
+                    drop(line.as_object_mut().map(|fields| fields.remove("at")));
+                    line
+                })
+                .collect()
+        };
+        let stop = |mut daemon: Daemon| -> Outcome {
+            same(
+                &format!(
+                    "{} {:?}",
+                    kill("-TERM", &daemon.0.id().to_string())?,
+                    daemon.0.wait()?.code()
+                ),
+                "true Some(0)",
+            )
+        };
+        // an order block without its characters, which `fewer` compares
+        let order = |line: &Value| {
+            let mut block = line["order"].clone();
+            for side in ["after", "before"] {
+                drop(
+                    block[side]
+                        .as_object_mut()
+                        .map(|fields| fields.remove("chars")),
+                );
+            }
+            block
+        };
+        let fewer = |line: &Value| {
+            line["order"]["after"]["chars"].as_u64() < line["order"]["before"]["chars"].as_u64()
+        };
+        // the merge loses the example's words: reverted, the keep stands
+        let (first, _) = serve(&root, &envs)?;
+        until(|| kinds("consolidate").len() == 1)?;
+        stop(first)?;
+        let pass = kinds("consolidate").pop().unwrap_or_default();
+        same(
+            &format!("{} {} {}", pass["outcome"], order(&pass), fewer(&pass)),
+            &format!(
+                "\"reverted\" {} true",
+                json!({"after": {"eval": 0.0f64, "notes": 2u8}, "before": {"eval": 1.0f64, "notes": 3u8}, "merges": 1u8})
+            ),
+        )?;
+        let lines: Vec<String> = kinds("rewrite")
+            .iter()
+            .map(|line| {
+                let from: Vec<String> = line["from"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|entry| entry["path"].as_str().unwrap_or_default().to_owned())
+                    .collect();
+                format!(
+                    "{} {from:?} {} {}",
+                    line["op"], line["to"]["path"], line["reason"]
+                )
+            })
+            .collect();
+        let cause = "\"order: eval 1.0 \u{2192} 0.0\"";
+        same(
+            &lines.join("\n"),
+            &[
+                "\"keep\" [\"traces/-e/feedback_new.md\"] \"-e/feedback_sample_kept_feedback_new_md.md\" null".to_owned(),
+                "\"merge\" [\"-e/feedback_clock.md\", \"-e/feedback_wall.md\"] \"-e/feedback_sample_merged.md\" null".to_owned(),
+                format!("\"revert\" [\"-e/feedback_sample_merged.md\"] null {cause}"),
+                format!("\"revert\" [] \"-e/feedback_clock.md\" {cause}"),
+                format!("\"revert\" [] \"-e/feedback_wall.md\" {cause}"),
+            ]
+            .join("\n"),
+        )?;
+        same(
+            &format!(
+                "{} {} {}",
+                read("memories/-e/feedback_clock.md") == clock,
+                read("memories/-e/feedback_wall.md") == wall,
+                read("memories/-e/feedback_sample_merged.md").is_empty()
+            ),
+            "true true true",
+        )?;
+        let verbs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        same(
+            &sandman(&verbs, &["check"], "")?,
+            "0\ncheck: 3 notes, 0 held, 0 released: clean\n",
+        )?;
+        // a prune that keeps the score lowers the notes: it stands
+        plant(
+            &root,
+            &[(
+                "traces/-e/feedback_more.md",
+                &note("e00000000004", "More", "sample", ""),
+            )],
+        )?;
+        let (second, _) = serve(&root, &envs)?;
+        until(|| kinds("consolidate").len() == 2)?;
+        stop(second)?;
+        let stood = kinds("consolidate").pop().unwrap_or_default();
+        same(
+            &format!("{} {}", stood["outcome"], order(&stood)),
+            &format!(
+                "\"consolidated\" {}",
+                json!({"after": {"eval": 1.0f64, "notes": 3u8}, "before": {"eval": 1.0f64, "notes": 4u8}, "merges": 0u8})
+            ),
+        )?;
+        same(
+            &sandman(&verbs, &["check"], "")?,
+            "0\ncheck: 3 notes, 0 held, 0 released: clean\n",
+        )?;
+        // the weekly review: a decay that loses an example is put back; a question no worse is
+        // adopted, a worse one kept out, a scorer's silence fails the review
+        let weekly = temp("evaluation-weekly")?;
+        let vpn = note(
+            "f00000000001",
+            "Deploy needs the vpn",
+            "the deploy host is private",
+            "",
+        )
+        .replace("2026-11-10", "2026-06-01");
+        let reflector = r#"c=$(head -n 1 "$0.cases"); tail -n +2 "$0.cases" > "$0.rest"; mv "$0.rest" "$0.cases"
+cat > "$0.$c"
+case $c in '') q=null;; *) q="\"sample: $c question?\"";; esac
+printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$q"
+"#;
+        plant(
+            &weekly,
+            &[
+                (
+                    "answers",
+                    r#"{"answers":{"0":{"noul":0.1}},"usage":{"input_tokens":3}}"#,
+                ),
+                (
+                    "eval/recall.jsonl",
+                    &[
+                        example(
+                            "f00000000001",
+                            "-q/feedback_vpn.md",
+                            "deploy behind the vpn",
+                            1,
+                        ),
+                        example(
+                            "f00000000002",
+                            "-q/feedback_notes.md",
+                            "deploy behind the vpn",
+                            0,
+                        )
+                        .replace("\"about\":null", "\"about\":\"elsewhere\""),
+                    ]
+                    .join("\n"),
+                ),
+                (
+                    "memories/-q/feedback_notes.md",
+                    &note("f00000000002", "Beta release notes", "cut weekly", ""),
+                ),
+                ("memories/-q/feedback_vpn.md", &vpn),
+                (
+                    "pplx.fail",
+                    "case \"$body\" in *failing*) exit 22;; *worse*) echo '{\"answers\":{\"0\":{\"noul\":0.1}}}'; exit;; *Deploy*) echo '{\"answers\":{\"0\":{\"noul\":0.9}}}'; exit;; esac\n",
+                ),
+                ("reflector.sh", reflector),
+                ("reflector.sh.cases", "better\nworse\nfailing\n"),
+            ],
+        )?;
+        let path = stub(&weekly)?;
+        let reflecting = format!("sh {weekly}/reflector.sh");
+        let (third, _) = serve(
+            &weekly,
+            &[
+                ("PATH", path.as_str()),
+                ("SANDMAN_REFLECT_MIN", "0"),
+                ("SANDMAN_REFLECT_MS", "0"),
+                ("SANDMAN_REFLECTOR", reflecting.as_str()),
+                ("SANDMAN_SCORERS", "pplx"),
+                ("SANDMAN_TICK_MS", "10"),
+                ("SANDMAN_TODAY", "2026-11-18"),
+            ],
+        )?;
+        let reviews = || -> Vec<Value> {
+            fs::read_to_string(format!("{weekly}/{today}"))
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|line| line["kind"] == "reflect")
+                .collect()
+        };
+        until(|| reviews().len() >= 3)?;
+        stop(third)?;
+        let seen: Vec<String> = reviews()
+            .iter()
+            .take(3)
+            .map(|line| {
+                format!(
+                    "{} {} {} {} {} {}",
+                    line["outcome"],
+                    line["pruned"],
+                    line["reverted"],
+                    line["replay"]["question"],
+                    line["history"].as_object().map_or(0, Map::len),
+                    line["error"]
+                )
+            })
+            .collect();
+        same(
+            &seen.join("\n"),
+            &[
+                "\"adopted\" 1 true {\"new\":1.0,\"old\":1.0} 1 null",
+                "\"kept\" 1 true {\"new\":0.5,\"old\":1.0} 0 null",
+                "\"failed\" 1 true null 0 \"question: pplx: exit status: 22:\"",
+            ]
+            .join("\n"),
+        )?;
+        let pulled = [
+            ("PATH", path.as_str()),
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", weekly.as_str()),
+        ];
+        drop(sandman(
+            &pulled,
+            &["recall", "--cue", "deploy behind the vpn"],
+            "",
+        )?);
+        same(
+            &format!(
+                "{} {} {} {}",
+                fs::read_to_string(format!("{weekly}/prompts/question.md"))?,
+                fs::read_to_string(format!("{weekly}/pplx.in"))?
+                    .lines()
+                    .last()
+                    .unwrap_or_default()
+                    .contains("sample: better question?"),
+                fs::read_to_string(format!("{weekly}/reflector.sh.worse"))?
+                    .contains("<question>\nsample: better question?\n</question>"),
+                fs::read_to_string(format!("{weekly}/memories/-q/feedback_vpn.md"))? == vpn
+            ),
+            "sample: better question? true true true",
+        )?;
+        same(
+            &sandman(&pulled, &["check"], "")?,
+            "0\ncheck: 2 notes, 0 held, 0 released: clean\n",
         )
     }
 
