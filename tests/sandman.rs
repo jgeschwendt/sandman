@@ -2807,6 +2807,8 @@ printf '{"ops":[],"under":"%s"}\n' $u
             call(14, "due", json!({"all": false})),
             call(15, "drop", json!({"id": "zz"})),
             call(16, "defer", json!({"id": "6e7f", "when": "+1w"})),
+            call(17, "rethink", json!({"path": "-work-alpha/project_vpn.md", "verdict": "used", "why": "sample: by tool"})),
+            call(18, "rethink", json!({"path": "-work-alpha/project_vpn.md", "verdict": "bogus"})),
             "not json".to_owned(),
             "[]".to_owned(),
             String::new(),
@@ -2880,7 +2882,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             &got.join("\n")
                 .replace(&key, "<key>")
                 .replace(&root, "<root>"),
-            "0\n{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":\"probe\",\"jsonrpc\":\"2.0\"}\n{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":\"\\\"defer\\\" [\\\"what\\\",\\\"when\\\"] about,id,session,what,when | \\\"done\\\" [\\\"id\\\"] id,note,session | \\\"drop\\\" [\\\"id\\\"] id,note,session | \\\"due\\\" [] all,session | \\\"recall\\\" [\\\"cue\\\"] about,budget,cue,session | \\\"remember\\\" [\\\"body\\\"] about,body,session,topic,type | \\\"show\\\" [\\\"path\\\"] path,session\"}\n{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed failed\\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":5,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 1 of 6 \u{b7} lexical: embed failed\\n.00 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":6,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman: --session takes a session id\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":7,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Alpha deploys need the vpn (project) \u{b7} 2026-11-05T00:00:00Z\\nConnect first.\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":8,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show: no memory  (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under <root>)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":9,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show traces/<key>-work/feedback_sample_by_tool.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":10,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman remember: takes a non-empty \\\"<body>\\\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32602,\"message\":\"Unknown tool: nap\"},\"id\":11,\"jsonrpc\":\"2.0\"}\n{\"id\":12,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"due \u{b7} deferred work: raise it with the person, never start it unasked\\n  \u{b7} 0a1b2c3d 2026-11-03 \u{2014} Rerun the alpha bench on the new box (~/work/alpha)\\n  \u{b7} 6e7f8a9b 2026-11-10 \u{2014} Draft the beta release notes\\n  \u{b7} 4e5f6a7b waiting: after grove ships \u{2014} Cut sandman over to the rewrite\\n  \u{b7} 8c9d0e1f 2099-01-01 \u{2014} Renew the signing key\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":13,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"0a1b2c3d done\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":14,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"due \u{b7} deferred work: raise it with the person, never start it unasked\\n  \u{b7} 6e7f8a9b 2026-11-10 \u{2014} Draft the beta release notes\\n  \u{b7} 4e5f6a7b waiting: after grove ships \u{2014} Cut sandman over to the rewrite\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":15,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman drop: zz is not one intention's id (0 match)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":16,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"6e7f8a9b 2026-11-21\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n\"recall\" c\n\"recall\" c\n\"show\" c\n\"remember\" c\n\"done\" c\n\"push\" c\n\"recall\" minted\n\"recall\" minted\n\"recall\" d",
+            "0\n{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":\"probe\",\"jsonrpc\":\"2.0\"}\n{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"sandman\",\"version\":\"0.1.0\"}}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":\"\\\"defer\\\" [\\\"what\\\",\\\"when\\\"] about,id,session,what,when | \\\"done\\\" [\\\"id\\\"] id,note,session | \\\"drop\\\" [\\\"id\\\"] id,note,session | \\\"due\\\" [] all,session | \\\"recall\\\" [\\\"cue\\\"] about,budget,cue,session | \\\"remember\\\" [\\\"body\\\"] about,body,session,topic,type | \\\"rethink\\\" [\\\"path\\\",\\\"verdict\\\"] path,session,verdict,why | \\\"show\\\" [\\\"path\\\"] path,session\"}\n{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed failed\\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":5,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"recall \u{b7} add a clock to the alpha tests \u{b7} 1 of 6 \u{b7} lexical: embed failed\\n.00 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\\nread one in full: sandman show <path>\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":6,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman: --session takes a session id\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":7,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"Alpha deploys need the vpn (project) \u{b7} 2026-11-05T00:00:00Z\\nConnect first.\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":8,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show: no memory  (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under <root>)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":9,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman show traces/<key>-work/feedback_sample_by_tool.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":10,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman remember: takes a non-empty \\\"<body>\\\" first and --type user|feedback|project|reference, or knowledge|playbook with --topic <slug>\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32602,\"message\":\"Unknown tool: nap\"},\"id\":11,\"jsonrpc\":\"2.0\"}\n{\"id\":12,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"due \u{b7} deferred work: raise it with the person, never start it unasked\\n  \u{b7} 0a1b2c3d 2026-11-03 \u{2014} Rerun the alpha bench on the new box (~/work/alpha)\\n  \u{b7} 6e7f8a9b 2026-11-10 \u{2014} Draft the beta release notes\\n  \u{b7} 4e5f6a7b waiting: after grove ships \u{2014} Cut sandman over to the rewrite\\n  \u{b7} 8c9d0e1f 2099-01-01 \u{2014} Renew the signing key\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":13,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"0a1b2c3d done\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":14,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"due \u{b7} deferred work: raise it with the person, never start it unasked\\n  \u{b7} 6e7f8a9b 2026-11-10 \u{2014} Draft the beta release notes\\n  \u{b7} 4e5f6a7b waiting: after grove ships \u{2014} Cut sandman over to the rewrite\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":15,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman drop: zz is not one intention's id (0 match)\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"id\":16,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"6e7f8a9b 2026-11-21\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":17,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"rethink: used -work-alpha/project_vpn.md\\n\",\"type\":\"text\"}],\"isError\":false}}\n{\"id\":18,\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"text\":\"sandman rethink: takes <path> first and one of --irrelevant, --used, --wrong, --stale\\n\",\"type\":\"text\"}],\"isError\":true}}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n\"recall\" c\n\"recall\" c\n\"show\" c\n\"remember\" c\n\"done\" c\n\"push\" c\n\"rethink\" c\n\"recall\" minted\n\"recall\" minted\n\"recall\" d",
         )
     }
 
@@ -2964,6 +2966,10 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 ),
                 ("embeddings.jsonl", embeddings),
                 (
+                    "eval/recall.jsonl",
+                    "{\"session\":\"@a\"}\n{\"session\":\"@b\"}\n",
+                ),
+                (
                     "intentions/1f2e3d4c.md",
                     "---\ndue: 2026-11-12\nsession: @a\nstate: open\n---\n\nsample\n",
                 ),
@@ -3003,7 +3009,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             ],
         )?;
         let forget = |letter: &str| sandman(&envs, &["forget", &format!("{ID}{letter}")], "");
-        same(&forget("a")?, "0\nforgot: 15 removed, 8 rewritten\n")?;
+        same(&forget("a")?, "0\nforgot: 15 removed, 9 rewritten\n")?;
         // what is left, each file under the root by path, and the rewritten ones' text
         let mut left = Vec::new();
         let mut dirs = vec![PathBuf::from(&root)];
@@ -3028,7 +3034,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
         };
         same(
             &format!(
-                "{}\n{}{}{}{}{}{}{}{}",
+                "{}\n{}{}{}{}{}{}{}{}{}",
                 left.join("\n"),
                 read("ledger/2026/11/09.jsonl")?,
                 read(".pruned/2026/11/10/040000--work-alpha-ops.json")?,
@@ -3037,10 +3043,11 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 read("memories/-work-alpha/project_other.md")?,
                 read("intentions/1f2e3d4c.md")?,
                 read("embeddings.jsonl")?,
+                read("eval/recall.jsonl")?,
                 read("run/serve.log")?,
             ),
             &format!(
-                "{}\n{}\n{}\n{}\n{}{}{}{}{}{}",
+                "{}\n{}\n{}\n{}\n{}{}{}{}{}{}{}",
                 [
                     ".archive/claude/2026/11/09/120000-projects--work-alpha-@b.jsonl",
                     ".pruned/2026/11/10/040000--work-alpha-feedback_b.md",
@@ -3048,6 +3055,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                     ".pruned/2026/11/10/040001--work-alpha-feedback_merged.md",
                     "claude/projects/-work-alpha/@b.jsonl",
                     "embeddings.jsonl",
+                    "eval/recall.jsonl",
                     "intentions/1f2e3d4c.md",
                     "intentions/9c8b7a6d.md",
                     "ledger/2026/11/09.jsonl",
@@ -3076,6 +3084,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 other,
                 "---\ndue: 2026-11-12\nstate: open\n---\n\nsample\n",
                 "{\"h\":\"2\",\"path\":\"traces/-work-alpha/feedback_b.md\"}\nnot json\n",
+                "{\"session\":\"@b\"}\n",
                 "{\"event\":\"take\",\"session\":\"@b\"}\n",
             ),
         )?;
@@ -3614,7 +3623,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 next.matches("`sandman-next ").count(),
                 next.lines().nth(4).unwrap_or_default()
             ),
-            "5 read one in full: sandman-next show <path>",
+            "6 read one in full: sandman-next show <path>",
         )
     }
 
@@ -4265,6 +4274,107 @@ printf '{"ops":[],"under":"%s"}\n' $u
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
+        )
+    }
+
+    /// `rethink` records one verdict on a note `show` would print: its `cue` the session's latest
+    /// send of it (by path, else by id), and a judged send an example in `eval/recall.jsonl`,
+    /// `irrelevant` label 0; a note no send of the session holds, no cue and no example. No verdict
+    /// or two is exit 2, no note exit 1, a failed write exit 1.
+    #[test]
+    fn rethink() -> Outcome {
+        let root = temp("rethink")?;
+        plant(&root, &CORPUS)?;
+        plant(
+            &root,
+            &[(
+                "ledger/2026/11/09.jsonl",
+                &[
+                    r#"{"at":"2026-11-09T08:00:00Z","cue":"first","kind":"recall","sent":[{"file":"-work-alpha/project_vpn.md","id":null}],"session":"@a"}"#,
+                    r#"{"about":"alpha","at":"2026-11-09T08:01:00Z","cue":"second","kind":"recall","sent":[{"file":"-work-alpha/old_vpn.md","id":"1a2b3c4d5e6f"}],"session":"@a"}"#,
+                    r#"{"at":"2026-11-09T08:02:00Z","cue":"third","kind":"recall","sent":[{"file":"-work-beta/feedback_tie.md","id":null},{"file":"-work-alpha/feedback_clock.md","id":null}],"session":"@b"}"#,
+                ]
+                .join("\n"),
+            )],
+        )?;
+        let envs = [
+            ("SANDMAN_MACHINE", "studio"),
+            ("SANDMAN_ROOT", root.as_str()),
+        ];
+        let judge = |args: &[&str]| sandman(&envs, &[&["rethink"], args].concat(), "");
+        let (first, second) = (format!("{ID}a"), format!("{ID}b"));
+        let mut got = [
+            judge(&[
+                "-work-alpha/project_vpn.md",
+                "--used",
+                "--why",
+                "it held",
+                "--session",
+                &first,
+            ])?,
+            judge(&[
+                "-work-alpha/feedback_clock.md",
+                "--irrelevant",
+                "--session",
+                &first,
+            ])?,
+            judge(&[
+                "-work-beta/feedback_tie.md",
+                "--irrelevant",
+                "--session",
+                &second,
+            ])?,
+            judge(&["-work-beta/feedback_tie.md"])?,
+            judge(&["-work-beta/feedback_tie.md", "--used", "--wrong"])?,
+            judge(&["-work-beta/nothing.md", "--stale"])?,
+        ]
+        .concat()
+        .replace(&root, "<root>");
+        let digest = |path: &str| -> Result<String, Box<dyn Error>> {
+            let out = Command::new("shasum")
+                .args(["-a", "256", &format!("{root}/memories/{path}")])
+                .output()?;
+            Ok(String::from_utf8(out.stdout)?
+                .get(..64)
+                .unwrap_or_default()
+                .to_owned())
+        };
+        for line in fs::read_to_string(format!("{root}/eval/recall.jsonl"))?.lines() {
+            let mut example: Value = serde_json::from_str(line)?;
+            example["at"] = "A".into();
+            got.extend([example.to_string(), "\n".to_owned()]);
+        }
+        got.push_str(
+            &ledger(&root)?
+                .lines()
+                .filter(|line| line.contains("rethink"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        // the ledger a file: the line cannot be written
+        let broken = temp("rethink-broken")?;
+        plant(&broken, &[CORPUS[6], ("ledger", "")])?;
+        got.push_str(&sandman(
+            &[("SANDMAN_MACHINE", "studio"), ("SANDMAN_ROOT", &broken)],
+            &["rethink", "-work-alpha/project_vpn.md", "--stale"],
+            "",
+        )?);
+        let (vpn, tie) = (
+            digest("-work-alpha/project_vpn.md")?,
+            digest("-work-beta/feedback_tie.md")?,
+        );
+        let usage = "2\nsandman rethink: takes <path> first and one of --irrelevant, --used, --wrong, --stale\n";
+        same(
+            &got.replace(ID, "@"),
+            &format!(
+                "0\nrethink: used -work-alpha/project_vpn.md\n0\nrethink: irrelevant -work-alpha/feedback_clock.md\n0\nrethink: irrelevant -work-beta/feedback_tie.md\n{usage}{usage}1\nsandman rethink: no memory -work-beta/nothing.md (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under <root>)\n{{\"about\":\"alpha\",\"at\":\"A\",\"cue\":\"second\",\"digest\":\"{vpn}\",\"id\":\"1a2b3c4d5e6f\",\"label\":1,\"path\":\"-work-alpha/project_vpn.md\",\"session\":\"@a\",\"verdict\":\"used\"}}\n{{\"about\":null,\"at\":\"A\",\"cue\":\"third\",\"digest\":\"{tie}\",\"id\":null,\"label\":0,\"path\":\"-work-beta/feedback_tie.md\",\"session\":\"@b\",\"verdict\":\"irrelevant\"}}\n{}1\nsandman rethink: Not a directory (os error 20)\n",
+                [
+                    r#"{"at":"A","by":"agent","cue":"second","file":"-work-alpha/project_vpn.md","id":"1a2b3c4d5e6f","kind":"rethink","machine":"studio","session":"@a","verdict":"used","why":"it held"}"#,
+                    r#"{"at":"A","by":"agent","cue":null,"file":"-work-alpha/feedback_clock.md","id":null,"kind":"rethink","machine":"studio","session":"@a","verdict":"irrelevant","why":null}"#,
+                    r#"{"at":"A","by":"agent","cue":"third","file":"-work-beta/feedback_tie.md","id":null,"kind":"rethink","machine":"studio","session":"@b","verdict":"irrelevant","why":null}"#,
+                ]
+                .join("\n"),
+            ),
         )
     }
 
@@ -5257,7 +5367,7 @@ bootstrap {gui} {file}
         )
     }
 
-    /// No verb, or an unknown one, prints the eleven-line usage and exits 2; `$HOME` stands in
+    /// No verb, or an unknown one, prints the twelve-line usage and exits 2; `$HOME` stands in
     /// for an unset `SANDMAN_ROOT`.
     #[test]
     fn usage() -> Outcome {
@@ -5270,7 +5380,7 @@ bootstrap {gui} {file}
                     out.get(..2).unwrap_or_default(),
                     out.lines().count()
                 ),
-                "2\n 12",
+                "2\n 13",
             )?;
         }
         Ok(())

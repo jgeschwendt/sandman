@@ -2,7 +2,7 @@
 //! day's ledger file, `take` archives a marked session at its end, `chart` prints what the data
 //! root holds as one JSON object, `check` holds every note to the memory cycle's invariants,
 //! `recall` scores the memories against an agent's cue and `show` prints one, over the memories,
-//! the knowledge pages and the traces of both, `defer`, `due`, `done` and `drop` keep work put off
+//! the knowledge pages and the traces of both, `rethink` records a verdict on one, `defer`, `due`, `done` and `drop` keep work put off
 //! for later, `mcp` serves the agent's verbs as MCP tools,
 //! `serve` is the daemon (reconcile, settle, encode, consolidate, reflect), `status` asks it for its
 //! health, `setup` installs its launchd agent, `forget` erases one session from every store,
@@ -136,7 +136,7 @@ const RETIRED: [&str; 3] = [
 
 /// The seed's instructions, first in a session's context; `<id>` is the session's id, `<me>` the
 /// name the binary was invoked as.
-const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, one fact per call, with `--about <repository path>` when it holds in one repository, `--type knowledge|playbook --topic <topic>` for general knowledge or a playbook. When the person defers work (later, tomorrow, after X), run `<me> defer \"<their words>\" --when <today|tomorrow|friday|YYYY-MM-DD|+3d|the event> --session <id>` at once; close it with `<me> done <its id>` once finished.";
+const SEED: &str = "Memory from earlier sessions is yours to pull: run `<me> recall --session <id> --cue \"<what you are about to do>\"`, with `--about <repository path>` when the work is in one repository, before work in a repository, before a choice the person may already have ruled on, and when a correction may already be recorded; not every turn. Each line is a pointer: read it with `<me> show <path> --session <id>` before acting on it; a `~` marks one remembered but not yet consolidated. When the person states a preference, corrects you, or decides something a later session needs, run `<me> remember \"<their words>\" --session <id>` at once, one fact per call, with `--about <repository path>` when it holds in one repository, `--type knowledge|playbook --topic <topic>` for general knowledge or a playbook. When the person defers work (later, tomorrow, after X), run `<me> defer \"<their words>\" --when <today|tomorrow|friday|YYYY-MM-DD|+3d|the event> --session <id>` at once; close it with `<me> done <its id>` once finished. Once a recalled note proves used, wrong, stale or irrelevant, run `<me> rethink <path> --used|--wrong|--stale|--irrelevant --session <id>`.";
 
 /// Recall's lexical gate: a cue whose every token is one of these asks for nothing.
 const STEER: &str = "go yes yeah yep ok okay continue next thanks thank done saved good great morning back hi hello signed sure fine cool nice where we are what now";
@@ -146,6 +146,10 @@ const STOPWORDS: &str = "a an and are as at be by can do for from has have i if 
 
 /// The three stores of notes, in reader order.
 const STORES: [&str; 3] = ["memories", "knowledge", "traces"];
+
+/// A `rethink` verdict: `irrelevant` blames the recall that sent the note, `stale` and `wrong`
+/// the note, `used` raises it (docs/index.html#cycle-rethink).
+const VERDICTS: [&str; 4] = ["irrelevant", "stale", "used", "wrong"];
 
 /// The release (else the crate version) and the build, the commit it was built from (`build.rs`):
 /// what `version` prints, the daemon's health carries and `status` compares.
@@ -2507,7 +2511,7 @@ fn main() -> ExitCode {
                     .then(|| line.to_owned())
                 };
                 done[1] = done[1].saturating_add(purge(&root.join("embeddings.jsonl"), &cached)?);
-                for log in ["run/serve.log", "run/serve.log.1"] {
+                for log in ["eval/recall.jsonl", "run/serve.log", "run/serve.log.1"] {
                     done[1] = done[1].saturating_add(purge(&root.join(log), &unnamed)?);
                 }
                 Ok(done)
@@ -2571,6 +2575,9 @@ fn main() -> ExitCode {
                 {"description": "Write a memory at once when the person states a preference, corrects you, or decides something a later session needs: their words, one fact per call. Knowledge true beyond this project is type `knowledge`, the steps of a task done more than once type `playbook`, each with a topic.",
                  "inputSchema": {"properties": {"about": string("the repository path, when it holds in one repository"), "body": string("the person's words"), "session": sessioned, "topic": string("a knowledge or playbook's topic, a slug: launchd, llama-cpp"), "type": string("user, feedback, project or reference (by repository), knowledge or playbook (by topic); feedback by default, knowledge with a topic")}, "required": ["body"], "type": "object"},
                  "name": "remember"},
+                {"description": "Judge a note a recall sent, once you know: `used` when you acted on it, `wrong` or `stale` when it is untrue or out of date, `irrelevant` when it was not about what you were doing.",
+                 "inputSchema": {"properties": {"path": string("the path the recall line gave"), "session": sessioned, "verdict": string("used, wrong, stale or irrelevant"), "why": string("a line on why")}, "required": ["path", "verdict"], "type": "object"},
+                 "name": "rethink"},
                 {"description": "Read one memory in full, by the path a recall line gives, before acting on it.",
                  "inputSchema": {"properties": {"path": string("the path a recall line gives"), "session": sessioned}, "required": ["path"], "type": "object"},
                  "name": "show"},
@@ -2612,12 +2619,14 @@ fn main() -> ExitCode {
                             let mut line = vec![called.to_owned()];
                             let keys = schema["properties"].as_object().into_iter().flat_map(Map::keys);
                             for key in iter::once(required).chain(keys.map(String::as_str).filter(|key| *key != required)) {
+                                // a verdict is its own flag: `--used`
                                 let value = params["arguments"]
                                     .get(key)
                                     .map(|given| given.as_str().map_or_else(|| given.to_string(), str::to_owned))
+                                    .map(|given| if key == "verdict" { format!("--{given}") } else { given })
                                     .or_else(|| (key == required).then(String::new))
                                     .or_else(|| (key == "session").then(|| session.clone()));
-                                let named = (key != required || called == "recall").then(|| format!("--{key}"));
+                                let named = ((key != required && key != "verdict") || called == "recall").then(|| format!("--{key}"));
                                 line.extend(value.into_iter().flat_map(|given| named.clone().into_iter().chain([given])));
                             }
                             let out = Command::new(&exe).args(&line).stdin(Stdio::null()).output().ok();
@@ -3273,6 +3282,66 @@ fn main() -> ExitCode {
                 &mut json!({"file": path, "id": id, "kind": "remember", "session": pull, "type": kind}),
             ));
             println!("{me} show {path}");
+            ExitCode::SUCCESS
+        }
+        "rethink" => {
+            let wanted = args.get(2).cloned().unwrap_or_default();
+            let given: Vec<&str> = VERDICTS
+                .into_iter()
+                .filter(|verdict| args.contains(&format!("--{verdict}")))
+                .collect();
+            let [verdict] = given[..] else {
+                eprintln!(
+                    "sandman rethink: takes <path> first and one of --irrelevant, --used, --wrong, --stale"
+                );
+                return ExitCode::from(2);
+            };
+            let Some(memory) = every(&root)
+                .into_iter()
+                .find(|note| note["path"] == wanted.as_str())
+            else {
+                eprintln!(
+                    "sandman rethink: no memory {wanted} (want [traces/]<bank>/<file>.md or knowledge/<topic>/<file>.md under {})",
+                    root.display()
+                );
+                return ExitCode::FAILURE;
+            };
+            // the session's latest send of the note, by path, else by id (docs/index.html#cycle-rethink)
+            let (lines, mut line) = (
+                ledger(&root),
+                json!({"by": "agent", "session": pull, "verdict": verdict, "why": flag("--why")}),
+            );
+            let mut judge = || -> io::Result<()> {
+                let recalled = lines.iter().rev().find(|sent| {
+                    sent["kind"] == "recall"
+                        && sent["session"] == line["session"]
+                        && sent["sent"].as_array().into_iter().flatten().any(|entry| {
+                            entry["file"] == memory["path"]
+                                || (memory["id"].is_string() && entry["id"] == memory["id"])
+                        })
+                });
+                (line["cue"], line["file"], line["id"], line["kind"]) = (
+                    recalled.map_or(Value::Null, |sent| sent["cue"].clone()),
+                    memory["path"].clone(),
+                    memory["id"].clone(),
+                    "rethink".into(),
+                );
+                record(&root, &mut line)?;
+                recalled.map_or(Ok(()), |sent| {
+                    let example = json!({
+                        "about": sent["about"], "at": line["at"], "cue": sent["cue"], "digest": sha256(text(&memory["text"])),
+                        "id": memory["id"], "label": u8::from(line["verdict"] != "irrelevant"), "path": memory["path"],
+                        "session": line["session"], "verdict": line["verdict"],
+                    });
+                    fs::create_dir_all(root.join("eval"))?;
+                    append(&root.join("eval/recall.jsonl"), &format!("{example}\n"))
+                })
+            };
+            if let Err(error) = judge() {
+                eprintln!("sandman rethink: {error}");
+                return ExitCode::FAILURE;
+            }
+            println!("rethink: {verdict} {wanted}");
             ExitCode::SUCCESS
         }
         "serve" => {
@@ -4559,7 +4628,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove] | upgrade [--check | --back | --retry]\n       sandman check [--fix] | chart | mcp | serve | status | version"
+                "usage: sandman mark < {{\"kind\":\"start\"|\"end\"|\"guard\",\"session\":\"<uuid>\",...}}\n       sandman take < {{\"session\":\"<uuid>\",...}}\n       sandman recall < {{\"session\":\"<uuid>\",...}} | --cue \"<text>\" [--about <path>] [--session <uuid>] [--budget <chars>]\n       sandman remember \"<body>\" [--type <type>] [--topic <topic>] [--name <name>] [--description <line>] [--about <path>] [--session <uuid>]\n       sandman show <path> [--session <uuid>]\n       sandman rethink <path> --irrelevant|--used|--wrong|--stale [--why \"<text>\"] [--session <uuid>]\n       sandman defer \"<what>\" --when <when> [--about <path>] [--session <uuid>] | --id <id> --when <when>\n       sandman done|drop <id> [--note \"<text>\"] [--session <uuid>]\n       sandman due [--all]\n       sandman forget <session>\n       sandman setup [--print | --remove] | upgrade [--check | --back | --retry]\n       sandman check [--fix] | chart | mcp | serve | status | version"
             );
             ExitCode::from(2)
         }

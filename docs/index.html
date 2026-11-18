@@ -107,10 +107,10 @@
       <tr><td><code class="code">.archive/claude/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-…-&lt;session&gt;.jsonl</code></td><td>archived transcripts</td></tr>
       <tr><td><code class="code">.pruned/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;bank&gt;-&lt;file&gt;</code></td><td>what <a class="link" href="#consolidate">consolidate</a> moved aside: consumed traces, merged and pruned memories as they stood, each reply; deleted only by <a class="link" href="#forget">forget</a>, until the cycle's depth-1 sweep (<a class="link" href="#cycle-rewrite">not built</a>)</td></tr>
       <tr><td><code class="code">embeddings.jsonl</code></td><td><a class="link" href="recall.html#candidates">recall</a>'s embedding cache: <code class="code">{"h","path","v"}</code> a line, <code class="code">h</code> the SHA-256 of the model, 1024 and the text, the last line per hash winning; appended by recall and the tick, rewritten by the tick past twice its live size; about 14 MB for 635 memories, derived, so a synced root ignores it</td></tr>
-      <tr><td><code class="code">eval/recall.jsonl</code></td><td>not built: <a class="link" href="#cycle-rethink">rethink</a>'s labelled (cue, note) examples, the recall evaluation's growing set</td></tr>
+      <tr><td><code class="code">eval/recall.jsonl</code></td><td><a class="link" href="#cycle-rethink">rethink</a>'s labelled (cue, note) examples, one per judged send, the recall evaluation's growing set</td></tr>
       <tr><td><code class="code">intentions/&lt;id&gt;.md</code></td><td><a class="link" href="intentions.html">intentions</a>, work the person deferred: <code class="code">due</code> a date or <code class="code">after</code> an event, <code class="code">state</code> <code class="code">open</code>, <code class="code">done</code> or <code class="code">dropped</code>, the body what; written by <code class="code">defer</code>, <code class="code">done</code> and <code class="code">drop</code>, never by the daemon</td></tr>
       <tr><td><code class="code">knowledge/&lt;topic&gt;/&lt;file&gt;.md</code></td><td>the <a class="link" href="knowledge.html">knowledge store</a>: knowledge pages and playbooks filed by topic, each revised in place; a memory file's format, <code class="code">type</code> <code class="code">knowledge</code> or <code class="code">playbook</code></td></tr>
-      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>, <code class="code">guard</code> (a denied tool call); <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code> and <code class="code">drop</code>; and the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code>; not built, the <a class="link" href="#cycle">cycle</a>'s <code class="code">rethink</code>, <code class="code">rewrite</code> and <code class="code">check</code></td></tr>
+      <tr><td><code class="code">ledger/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;.jsonl</code></td><td>every mod event, one per line, by UTC day: <code class="code">start</code>, <code class="code">end</code>, <code class="code">guard</code> (a denied tool call); <code class="code">call</code> and <code class="code">prompt</code> not built yet; the agent's <code class="code">recall</code>, <code class="code">show</code>, <code class="code">remember</code>, <code class="code">defer</code>, <code class="code">push</code>, <code class="code">done</code>, <code class="code">drop</code> and <code class="code">rethink</code>; the daemon's <code class="code">encode</code>, <code class="code">consolidate</code> and <code class="code">reflect</code>; the <a class="link" href="#cycle">cycle</a>'s <code class="code">rewrite</code> and <code class="code">check</code></td></tr>
       <tr><td><code class="code">memories/.recent/&lt;session&gt;.json</code></td><td>an archived session's short-term pointer: <code class="code">title</code>, <code class="code">cwd</code>, <code class="code">highlights</code>, <code class="code">dreamed</code> once dreamed</td></tr>
       <tr><td><code class="code">memories/&lt;bank&gt;/&lt;file&gt;.md</code></td><td>the banks, the long-term store's memories, filed by repository: memory files; flat <code class="code">key: value</code> frontmatter between <code class="code">---</code> fences</td></tr>
       <tr><td><code class="code">prompts/&lt;job&gt;.md</code></td><td>a model job's guidance (<code class="code">encode</code>, <code class="code">consolidate</code>, <code class="code">reflect</code>, <code class="code">judge</code>), read when present; written only by <a class="link" href="#reflect">reflect</a>, every version it replaced under <code class="code">.history/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;HHMMSS&gt;-&lt;job&gt;.md</code></td></tr>
@@ -686,7 +686,7 @@ Why: "mocks hid a real ordering bug last year".</pre>
     note's <code class="code">id</code>, <code class="code">from</code> and <code class="code">origin</code> and
     <code class="code">check</code>'s invariants 1–3 (stage 1); consolidate's ops as rewrite lines, the ids on recall,
     show, remember and encode lines, chart's <code class="code">ended</code> and <code class="code">lineage</code>, invariants
-    4–5 (stage 2). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
+    4–5 (stage 2); <code class="code">rethink</code> in session, its MCP tool and <code class="code">eval/recall.jsonl</code> (stage 3). Not built: the rest of this section, in the stages under <a class="link" href="#next">next</a>.</span></p>
   <figure class="figure">
     <div class="chart-frame life" id="cycle-loop">
       <svg width="800" height="410" viewBox="0 0 800 410" role="img" aria-label="the memory cycle: session, archive, trace, memory or knowledge, recall, rethink, strength, then decay, reconsolidate or graduate; reconsolidate returns to the store, decay leads to release, and release deletes the archived transcript">
@@ -832,12 +832,14 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
       per note the session's recall lines sent and no in-session verdict judged; the reply gains
       <code class="code">"verdicts":[{"file","verdict","why"}]</code>, one per listed note at most, a file not listed failing
       the episode. A send nobody judged counts for nothing.</li>
-    <li><strong>in session</strong> — optional, and it outranks encode's verdict for the same session and note. The path as
-      <code class="code">show</code> takes it; stdout <code class="code">rethink: &lt;verdict&gt; &lt;path&gt;</code>; no note there,
-      exit 1; no verdict or two, exit 2. The seed's instructions gain one sentence naming it.</li>
-    <li><strong>eval</strong> — each verdict on a sent note also appends an example to <code class="code">eval/recall.jsonl</code>
-      through <code class="code">mark</code>'s writer, <code class="code">irrelevant</code> label 0, the rest 1;
-      <code class="code">forget</code> rewrites it as it rewrites the ledger:</li>
+    <li><strong>in session</strong> <span class="badge badge-ok">built</span> — optional, and it outranks encode's verdict for the same session and note. The path as
+      <code class="code">show</code> takes it; stdout <code class="code">rethink: &lt;verdict&gt; &lt;path&gt;</code>; no verdict or two,
+      exit 2; no note there, exit 1. <code class="code">cue</code> is the session's latest send of the note, by path,
+      else by id. The seed's instructions name it in one sentence.</li>
+    <li><strong>eval</strong> <span class="badge badge-ok">built</span> — each verdict on a sent note also appends an example to <code class="code">eval/recall.jsonl</code>
+      through <code class="code">mark</code>'s writer, <code class="code">irrelevant</code> label 0, the rest 1,
+      <code class="code">about</code> and <code class="code">cue</code> the send's, <code class="code">digest</code> the SHA-256 of the
+      note as judged; <code class="code">forget</code> drops its session's examples:</li>
   </ul>
   <pre class="snippet">{"at","by":"agent"|"encode","cue":&lt;the send's&gt;|null,"file","id","kind":"rethink","machine","session","verdict","why":str|null}
 {"about","at","cue","digest","id","label":0|1,"path","session","verdict"}                  eval/recall.jsonl</pre>
@@ -1007,7 +1009,7 @@ sandman check --release  # what the release job would delete now, with its bytes
       runs <code class="code">check</code> and <code class="code">check --fix</code> on the root.</li>
     <li><strong>rewrite lines</strong> <span class="badge badge-ok">built</span> — consolidate's ops as rewrite lines; <code class="code">id</code> on recall, show and remember
       lines, <code class="code">ids</code> on encode's; chart's <code class="code">ended</code> and <code class="code">lineage</code>; invariants 4–5.</li>
-    <li><strong>rethink in session</strong> — the verb, the MCP tool, the seed's sentence, <code class="code">eval/recall.jsonl</code>,
+    <li><strong>rethink in session</strong> <span class="badge badge-ok">built</span> — the verb, the MCP tool, the seed's sentence, <code class="code">eval/recall.jsonl</code>,
       <code class="code">forget</code> over it.</li>
     <li><strong>rethink at encode</strong> — <code class="code"># recalled</code>, encode's contract and <code class="code">verdicts</code>.</li>
     <li><strong>strength</strong> — the count, chart's <code class="code">strength</code>, the knobs.</li>
