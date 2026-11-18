@@ -4209,9 +4209,10 @@ printf '{"ops":[],"under":"%s"}\n' $u
         same(
             &format!(
                 "{logged:?}\n{latest:?}\n{}",
+                // the 10 ms tick may encode a taken session before the TERM lands
                 read(&log)
                     .lines()
-                    .last()
+                    .rfind(|line| !line.contains(r#""event":"encode""#))
                     .and_then(|line| line.get(28..))
                     .unwrap_or_default()
             ),
