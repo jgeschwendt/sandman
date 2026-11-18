@@ -23,4 +23,4 @@ jobs:
           tool: cargo-llvm-cov@0.9.1
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo llvm-cov --fail-under-lines 100
+      - run: cargo llvm-cov --fail-under-lines 100 --show-missing-lines
