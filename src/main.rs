@@ -4301,7 +4301,7 @@ fn main() -> ExitCode {
             let (minimum, replays, ceiling, evidence) = (
                 setting("SANDMAN_REFLECT_MIN", 5usize),
                 setting("SANDMAN_REFLECT_REPLAY", 3usize),
-                setting("SANDMAN_GUIDANCE_BYTES", 8000usize),
+                setting("SANDMAN_GUIDANCE_BYTES", 12_000usize),
                 setting("SANDMAN_REFLECT_BYTES", 300_000usize),
             );
             let command = |key: &str| env::var(key).unwrap_or_else(|_| CLAUDE.to_owned());

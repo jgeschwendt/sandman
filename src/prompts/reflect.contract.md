@@ -24,7 +24,7 @@ A program applies your reply; no person reviews it first. Reply with exactly one
 {"encode":"<the whole new guidance>"|null,"consolidate":"<the whole new guidance>"|null,"question":"<the whole new question>"|null,"reason":"<one line>","propose":[{"artifact":"<path>","line":"<the line>","note":"<id>","replaces":"<the line it replaces>"|null,"rung":2|3,"why":"<one line>"}]}
 ```
 
-- `null` leaves that job's guidance as it is. A string replaces it whole once a replay judges it no worse; past the size cap (8,000 bytes by default) the reply is rejected and nothing changes.
+- `null` leaves that job's guidance as it is. A string replaces it whole once a replay judges it no worse; past the size cap (12,000 bytes by default) the reply is rejected and nothing changes.
 - `question` replaces recall's question once it scores no worse on the judged sends; `null` leaves it.
 - `reason` is required: one line naming the pattern and its count, or why nothing changes.
 - `propose` is optional, at most one per note, each `note` an id from `# standing` (`rung` 2) or `# relearned` (`rung` 3); any other note, rung or shape rejects the whole reply. Each becomes a task for the person, who applies it or declines it; nothing is changed for you.
