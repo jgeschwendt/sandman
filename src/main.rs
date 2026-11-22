@@ -5755,11 +5755,19 @@ fn main() -> ExitCode {
                                     Some((one, &rung.get(text(&one["note"]))?.1))
                                 })
                             {
-                                let (artifact, minted, line) = (
+                                let (named, minted, line) = (
                                     text(&one["artifact"]),
                                     random(),
                                     one_line(text(&one["line"]), usize::MAX),
                                 );
+                                // a `~/` the model wrote is the home: `done` opens the path as kept
+                                let whole = named.strip_prefix("~/").map_or_else(
+                                    || named.to_owned(),
+                                    |rest| {
+                                        format!("{}/{rest}", env::var("HOME").unwrap_or_default())
+                                    },
+                                );
+                                let artifact = whole.as_str();
                                 let about = Path::new(artifact).parent().map(Path::to_string_lossy);
                                 let tail = |field: &str, lead: &str| {
                                     Some(text(&one[field]).trim())

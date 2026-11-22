@@ -3456,7 +3456,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             {"artifact": format!("{root}/repo/AGENTS.md"), "line": "Sample: a, always.", "note": "a00000000001", "replaces": null, "rung": 2u8, "why": "sample: saves a recall a session"},
             {"artifact": format!("{root}/repo/AGENTS.md"), "line": "Sample: d.", "note": "a00000000004", "replaces": "Sample: the old d.", "rung": 2u8, "why": ""},
             {"artifact": format!("{root}/repo/AGENTS.md"), "line": "Sample: e.", "note": "a00000000005", "replaces": null, "rung": 2u8, "why": " "},
-            {"artifact": format!("{root}/repo/hk.pkl"), "line": "Sample: a gate for b.", "note": "a00000000002", "replaces": null, "rung": 3u8, "why": "sample: relearned"},
+            {"artifact": "~/repo/hk.pkl", "line": "Sample: a gate for b.", "note": "a00000000002", "replaces": null, "rung": 3u8, "why": "sample: relearned"},
         ]);
         let script = format!(
             "c=$(head -n 1 \"$0.cases\"); tail -n +2 \"$0.cases\" > \"$0.rest\"; mv \"$0.rest\" \"$0.cases\"\ncat > \"$0.${{c:-none}}\"\ncase $c in\n  bad) echo '{}';;\n  good) echo '{}';;\n  *) echo '{{\"encode\":null,\"consolidate\":null,\"reason\":\"sample: none\"}}';;\nesac\n",
@@ -3479,6 +3479,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
         plant(&root, &files)?;
         let reflector = format!("sh {root}/reflector.sh");
         let envs = [
+            ("HOME", root.as_str()),
             ("SANDMAN_REFLECT_MIN", "0"),
             ("SANDMAN_REFLECT_MS", "0"),
             ("SANDMAN_REFLECTOR", reflector.as_str()),
