@@ -356,11 +356,13 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
     <li><strong>state</strong> — <code class="code">ready</code> whenever it answers today: there is
       nothing to derive before the socket is bound, and a stopping daemon no longer accepts.</li>
     <li><strong>child</strong> — <code class="code">sandman-infer</code>, the models
-      (<a class="link" href="recall.html#needs">recall's needs</a>), started after the start line: the file beside the
+      (<a class="link" href="recall.html#needs">recall's needs</a>), started after the start line:
+      <code class="code">$SANDMAN_INFER</code>'s command when it is set (empty: none), else the file beside the
       daemon's own executable named with <code class="code">sandman</code> read <code class="code">sandman-infer</code>
-      (<code class="code">sandman-next</code> → <code class="code">sandman-infer-next</code>), else
-      <code class="code">$SANDMAN_INFER</code>'s command, else none (<code class="code">absent</code>, the Linux release). Its
-      own process group, stderr the daemon's; an exit is logged and respawned after 1 s, doubling to 60 s.</li>
+      (<code class="code">sandman-next</code> → <code class="code">sandman-infer-next</code>), else none
+      (<code class="code">absent</code>, the Linux release). Its own process group, stderr the daemon's, stdin a pipe the
+      daemon holds and never writes: any death of the daemon closes it and the child stops, so none outlives it. An exit
+      is logged and respawned after 1 s, doubling to 60 s and back to 1 s once a child has lived 60 s.</li>
     <li><strong>reconcile</strong> — every 30 s (<code class="code">$SANDMAN_TICK_MS</code>), from disk,
       first: a session of this machine whose latest start mark is later than its
       latest end, or that has none, older than 10 min (<code class="code">$SANDMAN_GRACE_MS</code>; its

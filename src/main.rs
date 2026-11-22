@@ -962,8 +962,9 @@ fn excerpt(memory: &Value, label: &str) -> String {
 
 /// `request` to the daemon on `<root>/run/<daemon>.sock`, one line each way, inside what is left
 /// of `limit` past `begun` and never retried (every request is read-only): the reply; else
-/// `<daemon>: not running` without a listener, `timed out after <limit> ms`, `output: <parse
-/// error>`, or a reply's `"ok":false` as its `code`, then `: <reason>` when it gives one.
+/// `<daemon>: not running` without a listener, `timed out after <limit> ms` (the write's, or the
+/// read's in what the write left), `output: <parse error>`, or a reply's `"ok":false` as its
+/// `code`, then `: <reason>` when it gives one.
 fn exchange(
     root: &Path,
     daemon: &str,
@@ -973,25 +974,28 @@ fn exchange(
 ) -> io::Result<Value> {
     let late = || io::Error::other(format!("timed out after {} ms", limit.as_millis()));
     // a socket timeout of zero is refused, so a spent bound fails here
-    let left = limit
-        .checked_sub(begun.elapsed())
-        .filter(|left| !left.is_zero())
-        .ok_or_else(late)?;
+    let left = || {
+        limit
+            .checked_sub(begun.elapsed())
+            .filter(|rest| !rest.is_zero())
+            .ok_or_else(late)
+    };
+    // a unix socket's timeout, a write's or a read's, reads as WouldBlock
+    let timeout = |error: io::Error| {
+        (error.kind() == io::ErrorKind::WouldBlock)
+            .then(late)
+            .unwrap_or(error)
+    };
+    let write = left()?;
     let mut stream = UnixStream::connect(root.join(format!("run/{daemon}.sock")))
-        .ok()
-        .ok_or_else(|| io::Error::other(format!("{daemon}: not running")))?;
-    stream.set_read_timeout(Some(left))?;
-    stream.set_write_timeout(Some(left))?;
-    writeln!(stream, "{request}")?;
+        .map_err(|_refused| io::Error::other(format!("{daemon}: not running")))?;
+    stream.set_write_timeout(Some(write))?;
+    writeln!(stream, "{request}").map_err(timeout)?;
+    stream.set_read_timeout(Some(left()?))?;
     let mut line = String::new();
     let _: usize = BufReader::new(stream)
         .read_line(&mut line)
-        // a unix socket's timeout reads as WouldBlock
-        .map_err(|error| {
-            (error.kind() == io::ErrorKind::WouldBlock)
-                .then(late)
-                .unwrap_or(error)
-        })?;
+        .map_err(timeout)?;
     let reply: Value = serde_json::from_str(&line)
         .map_err(|error| io::Error::other(format!("output: {error}")))?;
     if reply["ok"] == false {
@@ -2041,7 +2045,7 @@ fn reap(child: &mut Child, begun: Instant, limit: Duration) -> io::Result<ExitSt
         if STOP.get().is_some() || begun.elapsed() > limit {
             // the whole group: whatever the command started dies with it
             drop(
-                Command::new("kill")
+                Command::new("/bin/kill")
                     .args(["-KILL", &format!("-{}", child.id())])
                     .status(),
             );
@@ -4377,14 +4381,17 @@ fn main() -> ExitCode {
                         .args(["-c", &script])
                         .arg(&sibling)
                         .process_group(0)
-                        .stdin(Stdio::null())
+                        // held, never written: its end closes on any death of this process, and the
+                        // child stops at the EOF
+                        .stdin(Stdio::piped())
                         .stdout(Stdio::null())
                         .spawn()
                         .and_then(|mut child| {
                             let group = format!("-{}", child.id());
+                            // by path: a PATH without it would leave the group alive
                             let signal = |name: &str| {
                                 drop(
-                                    Command::new("kill")
+                                    Command::new("/bin/kill")
                                         .args([name, group.as_str()])
                                         .stderr(Stdio::null())
                                         .status(),
@@ -4395,27 +4402,22 @@ fn main() -> ExitCode {
                             );
                             // a stop TERMs the group and KILLs it a second later
                             let mut termed = None;
-                            let status = loop {
-                                if let Some(status) = child.try_wait()? {
-                                    break status;
-                                }
-                                if STOP.get().is_some()
-                                    && termed
+                            while matches!(child.try_wait(), Ok(None))
+                                && (STOP.get().is_none()
+                                    || termed
                                         .get_or_insert_with(|| {
                                             signal("-TERM");
                                             Instant::now()
                                         })
                                         .elapsed()
-                                        > Duration::from_secs(1)
-                                {
-                                    signal("-KILL");
-                                    break child.wait()?;
-                                }
+                                        <= Duration::from_secs(1))
+                            {
                                 thread::sleep(Duration::from_millis(20));
-                            };
-                            // whatever of its group outlived it
+                            }
+                            // whatever of its group outlived it, the leader by std's own kill
                             signal("-KILL");
-                            Ok(status.to_string())
+                            drop(child.kill());
+                            child.wait().map(|status| status.to_string())
                         });
                     herald(
                         json!({"event": "infer", "outcome": "exited", "status": status.unwrap_or_else(|error| error.to_string())}),

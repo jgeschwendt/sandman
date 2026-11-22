@@ -23,16 +23,6 @@ workspace = true
 [workspace]
 members = ["infer"]
 
-[workspace.package]
-categories = ["command-line-utilities"]
-edition = "2024"
-keywords = ["agents", "memory"]
-# SPDX id, not `license-file`: crates.io and dependency scanners read `license`.
-license = "PolyForm-Noncommercial-1.0.0"
-readme = "README.md"
-repository = "https://github.com/jgeschwendt/sandman"
-version = "0.1.0"
-
 # The canonical lints for jgeschwendt crates: maximalist opt-out. Every rustc allow-by-default
 # lint and every clippy lint is on; an `allow` is an opt-out and carries its reason on the line
 # above. Paste both tables into Cargo.toml as-is (or under `[workspace.lints.*]`); a crate's own
@@ -262,6 +252,16 @@ unwrap_used = "warn"
 use_debug = "warn"
 verbose_file_reads = "warn"
 wildcard_enum_match_arm = "warn"
+
+[workspace.package]
+categories = ["command-line-utilities"]
+edition = "2024"
+keywords = ["agents", "memory"]
+# SPDX id, not `license-file`: crates.io and dependency scanners read `license`.
+license = "PolyForm-Noncommercial-1.0.0"
+readme = "README.md"
+repository = "https://github.com/jgeschwendt/sandman"
+version = "0.1.0"
 
 [profile.release]
 strip = true
