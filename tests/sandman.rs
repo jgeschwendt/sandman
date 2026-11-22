@@ -5368,7 +5368,8 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
     /// line the always-set; the query embedded alone, then every candidate missing from the cache
     /// in lexical order, their lines appended (the key the reference's SHA-256); the fused top ten
     /// to pplx in one request, keyed in fused order; the decision's order and the fused one fused
-    /// again, a tie newer first, then the decision's order; a later pull of the session repeats
+    /// again, a tie newer first, then the decision's order, the header naming the engine that
+    /// answered and the ledger line its version; a later pull of the session repeats
     /// nothing sent, embeds only its query; a pull's stdout under a budget is
     /// `docs/data/recall-digest.txt`, and `$SANDMAN_RECALL_CAP` caps its lines.
     #[test]
@@ -5378,7 +5379,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         let path = stub(&root)?;
         fs::write(
             format!("{root}/answers"),
-            r#"{"answers":{"0":{"noul":0.8},"1":{"noul":0.9},"2":{"noul":0.2},"3":{"noul":0.7},"4":{"noul":0.7},"5":{"noul":0.1}},"usage":{"input_tokens":300}}"#,
+            r#"{"answers":{"0":{"noul":0.8},"1":{"noul":0.9},"2":{"noul":0.2},"3":{"noul":0.7},"4":{"noul":0.7},"5":{"noul":0.1}},"usage":{"input_tokens":300},"version":"2026.11.4-1a2b3c4"}"#,
         )?;
         let session = format!("{ID}a");
         let run = |args: &[&str], stdin: &str, envs: &[(&str, &str)]| {
@@ -5484,7 +5485,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 &[],
             )?,
             &format!(
-                "0\nrecall \u{b7} then the beta release \u{b7} 0 of 6 \u{b7} pplx\nnothing recalled\n{}",
+                "0\nrecall \u{b7} then the beta release \u{b7} 0 of 6 \u{b7} pplx (infer 2026.11.4-1a2b3c4)\nnothing recalled\n{}",
                 stats(0, 0)
             ),
         )?;
@@ -5503,7 +5504,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 &[("SANDMAN_RECALL_CAP", "1")],
             )?,
             &format!(
-                "0\nrecall \u{b7} {clocked} \u{b7} 1 of 6 \u{b7} pplx\n.99 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\nread one in full: sandman show <path>\n{}",
+                "0\nrecall \u{b7} {clocked} \u{b7} 1 of 6 \u{b7} pplx (infer 2026.11.4-1a2b3c4)\n.99 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\nread one in full: sandman show <path>\n{}",
                 stats(1, 5)
             ),
         )?;
@@ -5555,7 +5556,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         );
         let line = |cue: &str, cut: u8, files: &[&str], id: &str| {
             format!(
-                r#"{{"ask":true,"at":"A","considered":6,"cue":"{cue}","cut":{cut},"embedded":true,"kind":"recall","machine":"studio","ms":0,"scorer":"pplx","sent":[{}],"session":{id},"tokens":300}}"#,
+                r#"{{"ask":true,"at":"A","considered":6,"cue":"{cue}","cut":{cut},"embedded":true,"engine":"2026.11.4-1a2b3c4","kind":"recall","machine":"studio","ms":0,"scorer":"pplx","sent":[{}],"session":{id},"tokens":300}}"#,
                 sent(files)
             )
         };
@@ -5566,7 +5567,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                     r#"{{"at":"A","cwd":"/work/alpha","interactive":true,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{session}","surface":"cli"}}"#
                 ),
                 format!(
-                    r#"{{"always":["common/project_pinned.md","common/user_short.md","traces/common/user_terse.md"],"ask":true,"at":"A","considered":6,"cue":"{clocked}","cut":0,"embedded":true,"kind":"recall","machine":"studio","ms":0,"scorer":"pplx","seed":true,"sent":[{}],"session":"{session}","tokens":300}}"#,
+                    r#"{{"always":["common/project_pinned.md","common/user_short.md","traces/common/user_terse.md"],"ask":true,"at":"A","considered":6,"cue":"{clocked}","cut":0,"embedded":true,"engine":"2026.11.4-1a2b3c4","kind":"recall","machine":"studio","ms":0,"scorer":"pplx","seed":true,"sent":[{}],"session":"{session}","tokens":300}}"#,
                     sent(&[vpn, clock_file, tie, grammar, node, retry])
                 ),
                 line("then the beta release", 0, &[], &format!("\"{session}\"")),
@@ -5647,7 +5648,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 r#"{{"at":"A","cwd":null,"interactive":true,"kind":"start","machine":"studio","reason":null,"resume":null,"session":"{session}","surface":null}}"#
             )));
             want.push(format!(
-                r#"{{"always":["common/project_pinned.md","common/user_short.md","traces/common/user_terse.md"],"ask":{ranks},"at":"A","considered":6,"cue":"{prompt}","cut":{},"embedded":false,{}"kind":"recall","machine":"studio","ms":0,"scorer":null,"seed":true,"sent":[{sent}],"session":"{session}","tokens":0}}"#,
+                r#"{{"always":["common/project_pinned.md","common/user_short.md","traces/common/user_terse.md"],"ask":{ranks},"at":"A","considered":6,"cue":"{prompt}","cut":{},"embedded":false,"engine":null,{}"kind":"recall","machine":"studio","ms":0,"scorer":null,"seed":true,"sent":[{sent}],"session":"{session}","tokens":0}}"#,
                 u8::from(ranks),
                 if ranks {
                     format!(r#""error":"{error}","#)

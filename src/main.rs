@@ -165,8 +165,9 @@ const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"
 /// The stop signal's name (`TERM`, `INT`, `HUP`), set by the signal thread before it wakes `accept`.
 static STOP: OnceLock<&str> = OnceLock::new();
 
-/// A scorer's answer: its name, its nouls and its input tokens.
-type Decision = Option<(String, (Vec<f64>, u64))>;
+/// A scorer's answer: its name, its nouls, its input tokens and `pplx`'s engine, the reply's
+/// `version`.
+type Decision = Option<(String, (Vec<f64>, u64, Option<String>))>;
 
 /// One order op to revert: the note it wrote, and each note it moved aside as (where, the copy).
 type Undo = (Option<PathBuf>, Vec<(PathBuf, PathBuf)>);
@@ -1332,8 +1333,8 @@ fn lineage<'note, I: IntoIterator<Item = &'note Value>>(notes: I) -> BTreeSet<&'
 
 /// `questions` (keyed by rank) and `state` to each of `$SANDMAN_SCORERS` until one answers a noul
 /// per question, `pplx` on `sandman-infer`'s socket, Kev and Jev by curl, Jev skipped while
-/// `<root>/jev-down.json` holds it down: the scorer, its nouls and
-/// its input tokens; and each failure, `(scorer, cause)` (AGENTS.md `### sandman recall`).
+/// `<root>/jev-down.json` holds it down: the scorer, its nouls, its input tokens and, for `pplx`,
+/// the reply's `version`; and each failure, `(scorer, cause)` (AGENTS.md `### sandman recall`).
 fn decide(
     root: &Path,
     home: &Path,
@@ -1411,6 +1412,10 @@ fn decide(
                 Ok((
                     nouls.collect::<io::Result<Vec<f64>>>()?,
                     reply["usage"]["input_tokens"].as_u64().unwrap_or(0),
+                    reply["version"]
+                        .as_str()
+                        .filter(|_| scorer == "pplx")
+                        .map(str::to_owned),
                 ))
             });
             scored
@@ -3945,7 +3950,7 @@ fn main() -> ExitCode {
                     // the decision's order and the first order fused within the 10, a tie
                     // newer first, then the decision's order; kept at 2/66 or more, at most
                     // `$SANDMAN_RECALL_CAP` (6)
-                    (Some((scorer, (nouls, tokens))), _) => {
+                    (Some((scorer, (nouls, tokens, engine))), _) => {
                         let positions = order(&nouls, (0..nouls.len()).collect());
                         let mut place = vec![0usize; nouls.len()];
                         for (rank, &at) in positions.iter().enumerate() {
@@ -3967,8 +3972,11 @@ fn main() -> ExitCode {
                         (
                             lines,
                             setting("SANDMAN_RECALL_CAP", 6),
-                            scorer.clone(),
-                            Some(scorer),
+                            engine.as_ref().map_or_else(
+                                || scorer.clone(),
+                                |version| format!("{scorer} (infer {version})"),
+                            ),
+                            Some((scorer, engine)),
                             tokens,
                         )
                     }
@@ -4037,8 +4045,10 @@ fn main() -> ExitCode {
             });
             let mut line = json!({
                 "ask": ask, "considered": candidates.len(), "cue": one_line(&cue, 200), "cut": 0u8,
-                "embedded": embedded, "kind": "recall", "ms": begun.elapsed().as_millis(),
-                "scorer": scorer, "sent": [], "session": session, "tokens": tokens,
+                "embedded": embedded, "engine": scorer.as_ref().and_then(|pair| pair.1.as_ref()),
+                "kind": "recall", "ms": begun.elapsed().as_millis(),
+                "scorer": scorer.as_ref().map(|pair| &pair.0), "sent": [], "session": session,
+                "tokens": tokens,
             });
             for (field, value) in [("about", &about), ("error", &failed)] {
                 if let Some(set) = value.as_ref() {
