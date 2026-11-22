@@ -1,7 +1,8 @@
 //! `sandman-infer`, sandman's models in process: the embeddings and the decision model run by
 //! llama.cpp, served on `<root>/run/infer.sock`, one JSON request and one reply a connection. The
 //! accept loop answers health itself and hands the model ops to one worker thread, which loads both
-//! models after the socket is up and owns them for the process's life.
+//! models after the socket is up and owns them for the process's life; a stop signal, EOF on stdin
+//! (`serve`'s pipe) or the worker's death ends it.
 #![expect(
     clippy::multiple_crate_versions,
     reason = "llama-cpp-2's own tree: thiserror 2.0.21 on syn 3, bindgen and tracing on syn 2"
@@ -23,7 +24,7 @@ use signal_hook::low_level::signal_name;
 use std::cmp::Reverse;
 use std::fmt::Display;
 use std::fs::{self, DirBuilder, File, OpenOptions, TryLockError};
-use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
+use std::io::{self, BufReader, Read as _, Write as _};
 use std::num::NonZeroU32;
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -34,6 +35,8 @@ use std::time::{Duration, Instant, SystemTime};
 use std::{env, iter, panic, thread};
 use utc::utc;
 
+/// A request line's cap in bytes: 16 texts of 1,500 characters, each escaped six bytes a character.
+const CAP: usize = 1 << 20;
 /// The bytes of each GGUF value type by its number, 0 for an array (never an array's element).
 const SIZES: [usize; 13] = [1, 1, 2, 2, 4, 4, 4, 1, 8, 0, 8, 8, 8];
 /// The decision model's system prompt, the official encoder's (`pplx_decider/protocol.py`).
@@ -45,14 +48,28 @@ const VERSION: &str = concat!(env!("SANDMAN_RELEASE"), "-", env!("SANDMAN_BUILD"
 
 /// Set once by the worker after the load: `{"models":{"decide","embed"},"state"}`.
 static LOADED: OnceLock<Value> = OnceLock::new();
-/// The stop signal's name, set once by the signal thread.
-static STOP: OnceLock<&str> = OnceLock::new();
-/// Set by the worker as it leaves, the request in hand answered.
+/// The stop's reason, `signal <NAME>` or `stdin closed`, set once.
+static STOP: OnceLock<String> = OnceLock::new();
+/// Set by the worker as it leaves, the request in hand answered, or as it panics.
 static DONE: OnceLock<()> = OnceLock::new();
 
-/// A failure's reply, `failed` with the error as its reason: a model's load, or llama.cpp mid-op.
+/// A model op: a request in, its reply or its refusal out.
+type Op<'model> = Box<dyn FnMut(&Value) -> Result<Value, Value> + 'model>;
+
+/// llama.cpp's error mid-op or at a load as its refusal, `failed`: a fn, so the map from an error
+/// that never comes is no closure llvm-cov counts unrun.
 fn failed(error: impl Display) -> Value {
-    json!({"code": "failed", "ok": false, "reason": error.to_string()})
+    refused("failed", error)
+}
+
+/// A refusal's reply: `code`, and `reason` unless it is empty.
+fn refused(code: &str, reason: impl Display) -> Value {
+    let mut reply = json!({"code": code, "ok": false});
+    let text = reason.to_string();
+    if !text.is_empty() {
+        reply["reason"] = text.into();
+    }
+    reply
 }
 
 fn main() -> ExitCode {
@@ -127,16 +144,21 @@ fn main() -> ExitCode {
         hook(json!({"event": "panic", "reason": info.to_string()}));
     }));
     let wake = sock.clone();
+    let stop = move |reason: String| {
+        STOP.set(reason).unwrap_or_default();
+        drop(UnixStream::connect(&wake));
+    };
+    let halt = stop.clone();
     drop(thread::spawn(move || {
         for signal in signals.forever() {
-            STOP.set(
-                signal_name(signal)
-                    .unwrap_or_default()
-                    .trim_start_matches("SIG"),
-            )
-            .unwrap_or_default();
-            drop(UnixStream::connect(&wake));
+            let name = signal_name(signal).unwrap_or_default();
+            stop(format!("signal {}", name.trim_start_matches("SIG")));
         }
+    }));
+    // serve's pipe, whose end the kernel closes on any death of serve: no orphan outlives it
+    drop(thread::spawn(move || {
+        drop(io::copy(&mut io::stdin(), &mut io::sink()));
+        halt("stdin closed".to_owned());
     }));
     let health =
         json!({"ok": true, "pid": id(), "since": utc(SystemTime::now()), "version": VERSION});
@@ -156,100 +178,118 @@ fn main() -> ExitCode {
     write(json!({"event": "start", "pid": id(), "version": VERSION}));
     // the ready line, `booting`: whoever spawned the daemon reads it, so nothing polls for the socket
     println!("{}", answer(false));
-    let bare = |name: &str| json!({"code": name, "ok": false});
-    let fail = |name: &str, reason: &str| json!({"code": name, "ok": false, "reason": reason});
     let (sender, queue) = mpsc::channel::<(UnixStream, Value)>();
     let (scribe, knock) = (write.clone(), sock.clone());
     let worker = thread::spawn(move || {
-        let mut begun = Instant::now();
-        // before the backend: its init already logs
-        send_logs_to_tracing(LogOptions::default().with_logs_enabled(false));
-        let backend = LlamaBackend::init().map_err(failed);
-        let octets = |file: &mut BufReader<File>, size: usize| -> io::Result<[u8; 8]> {
-            let mut bytes = [0u8; 8];
-            file.read_exact(&mut bytes[..size])?;
-            Ok(bytes)
-        };
-        // one GGUF value of type `kind`: a string, an i32 or an f64 as JSON, any other skipped
-        let scalar = |file: &mut BufReader<File>, kind: u64| -> io::Result<Value> {
-            let size = usize::try_from(kind)
-                .ok()
-                .and_then(|index| SIZES.get(index).copied())
-                .filter(|&size| size > 0)
-                .ok_or(io::ErrorKind::InvalidData)?;
-            let bytes = octets(file, size)?;
-            Ok(match kind {
-                5 => i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]).into(),
-                8 => {
-                    let mut text = Vec::new();
-                    let _: usize = file
-                        .by_ref()
-                        .take(u64::from_le_bytes(bytes))
-                        .read_to_end(&mut text)?;
-                    String::from_utf8_lossy(&text).into()
-                }
-                12 => f64::from_le_bytes(bytes).into(),
-                _ => Value::Null,
-            })
-        };
-        // the GGUF's metadata as one object: llama.cpp's model keeps no array and prints numbers
-        // to six places
-        let metadata = |path: &Path| -> io::Result<Value> {
-            let mut file = BufReader::new(File::open(path)?);
-            if octets(&mut file, 8)?[..4] != *b"GGUF" {
-                return Err(io::Error::other("not a GGUF file"));
-            }
-            let mut meta = Map::new();
-            let _tensors = octets(&mut file, 8)?;
-            for _ in 0..u64::from_le_bytes(octets(&mut file, 8)?) {
-                let key = scalar(&mut file, 8)?;
-                let kind = u64::from_le_bytes(octets(&mut file, 4)?);
-                let value = if kind == 9 {
-                    let inner = u64::from_le_bytes(octets(&mut file, 4)?);
-                    let mut list = Vec::new();
-                    for _ in 0..u64::from_le_bytes(octets(&mut file, 8)?) {
-                        list.push(scalar(&mut file, inner)?);
+        // a panic ends the worker too: the accept loop then ends the process, which serve respawns
+        drop(panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let mut begun = Instant::now();
+            // before the backend: its init already logs
+            send_logs_to_tracing(LogOptions::default().with_logs_enabled(false));
+            let backend = LlamaBackend::init().map_err(failed);
+            let octets = |file: &mut BufReader<File>, size: usize| -> io::Result<[u8; 8]> {
+                let mut bytes = [0u8; 8];
+                file.read_exact(&mut bytes[..size])?;
+                Ok(bytes)
+            };
+            // one GGUF value of type `kind`: an i32, a string or an f64 as JSON, any other null; a
+            // string not kept is skipped unread
+            let scalar = |file: &mut BufReader<File>, kind: u64, keep: bool| -> io::Result<Value> {
+                let size = usize::try_from(kind)
+                    .ok()
+                    .and_then(|index| SIZES.get(index).copied())
+                    .filter(|&size| size > 0)
+                    .ok_or(io::ErrorKind::InvalidData)?;
+                let bytes = octets(file, size)?;
+                let length = u64::from_le_bytes(bytes);
+                Ok(match kind {
+                    5 => i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]).into(),
+                    8 if keep => {
+                        let mut text = Vec::new();
+                        let _: usize = file.by_ref().take(length).read_to_end(&mut text)?;
+                        String::from_utf8_lossy(&text).into()
                     }
-                    list.into()
-                } else {
-                    scalar(&mut file, kind)?
-                };
-                drop(meta.insert(key.as_str().unwrap_or_default().to_owned(), value));
-            }
-            Ok(meta.into())
-        };
-        let params = |tokens: u32, sequences: u32| {
-            LlamaContextParams::default()
-                .with_n_ctx(NonZeroU32::new(tokens))
-                .with_n_batch(tokens)
-                .with_n_ubatch(tokens)
-                .with_n_seq_max(sequences)
-        };
-        // a model and its metadata; its op builds the context that borrows it
-        let load = |file: &str| -> Result<(LlamaModel, Value), Value> {
-            let path = models.join(file);
-            let meta =
-                metadata(&path).map_err(|error| failed(format!("{}: {error}", path.display())))?;
-            let model = LlamaModel::load_from_file(
-                backend.as_ref().map_err(Clone::clone)?,
-                &path,
-                &LlamaModelParams::default().with_n_gpu_layers(999),
-            )
-            .map_err(failed)?;
-            Ok((model, meta))
-        };
-        let logged = |op: &str, from: Instant, error: Option<&Value>| {
-            let mut line = json!({"event": "load", "ms": from.elapsed().as_millis(), "op": op, "outcome": "loaded"});
-            if let Some(reason) = error {
-                (line["outcome"], line["reason"]) = ("failed".into(), reason["reason"].clone());
-            }
-            scribe(line);
-        };
-        let decider = load("decider-flash-v1.2-q8_0.gguf");
-        #[expect(clippy::float_arithmetic, reason = "a softmax is float math")]
-        let mut decide = decider.as_ref().map_err(Clone::clone).and_then(
-            |loaded| {
-                let (model, meta) = (&loaded.0, &loaded.1);
+                    8 => {
+                        file.seek_relative(i64::try_from(length).map_err(io::Error::other)?)?;
+                        Value::Null
+                    }
+                    12 => f64::from_le_bytes(bytes).into(),
+                    _ => Value::Null,
+                })
+            };
+            // the GGUF's `pplx_decider.*` keys, every other value walked past unkept (a vocabulary's
+            // 151k strings): llama.cpp's model keeps no array and prints numbers to six places
+            let metadata = |path: &Path| -> io::Result<Value> {
+                let mut file = BufReader::new(File::open(path)?);
+                if octets(&mut file, 8)?[..4] != *b"GGUF" {
+                    return Err(io::Error::other("not a GGUF file"));
+                }
+                let mut meta = Map::new();
+                let _tensors = octets(&mut file, 8)?;
+                for _ in 0..u64::from_le_bytes(octets(&mut file, 8)?) {
+                    let key = scalar(&mut file, 8, true)?;
+                    let keep = key
+                        .as_str()
+                        .is_some_and(|name| name.starts_with("pplx_decider."));
+                    let kind = u64::from_le_bytes(octets(&mut file, 4)?);
+                    // a scalar read as an array of one
+                    let (inner, count) = if kind == 9 {
+                        let inner = u64::from_le_bytes(octets(&mut file, 4)?);
+                        (inner, u64::from_le_bytes(octets(&mut file, 8)?))
+                    } else {
+                        (kind, 1)
+                    };
+                    let mut list = Vec::new();
+                    for _ in 0..count {
+                        let value = scalar(&mut file, inner, keep)?;
+                        list.extend(keep.then_some(value));
+                    }
+                    if keep {
+                        let value = if kind == 9 {
+                            list.into()
+                        } else {
+                            list.pop().unwrap_or_default()
+                        };
+                        drop(meta.insert(key.as_str().unwrap_or_default().to_owned(), value));
+                    }
+                }
+                Ok(meta.into())
+            };
+            let params = |tokens: u32, sequences: u32| {
+                LlamaContextParams::default()
+                    .with_n_ctx(NonZeroU32::new(tokens))
+                    .with_n_batch(tokens)
+                    .with_n_ubatch(tokens)
+                    .with_n_seq_max(sequences)
+            };
+            // a model and its metadata; its op builds the context that borrows it
+            let load = |file: &str| -> Result<(LlamaModel, Value), Value> {
+                let path = models.join(file);
+                let meta = metadata(&path)
+                    .map_err(|error| refused("failed", format!("{}: {error}", path.display())))?;
+                let model = LlamaModel::load_from_file(
+                    backend.as_ref().map_err(Clone::clone)?,
+                    &path,
+                    &LlamaModelParams::default().with_n_gpu_layers(999),
+                )
+                .map_err(failed)?;
+                Ok((model, meta))
+            };
+            let logged = |op: &str, from: Instant, error: Option<&Value>| {
+                let mut line = json!({"event": "load", "ms": from.elapsed().as_millis(), "op": op, "outcome": "loaded"});
+                if let Some(reason) = error {
+                    (line["outcome"], line["reason"]) = ("failed".into(), reason["reason"].clone());
+                }
+                scribe(line);
+            };
+            // declared before both ops, which share one lifetime, so it outlives them
+            let embedder;
+            let mut decider = load("decider-flash-v1.2-q8_0.gguf");
+            #[expect(clippy::float_arithmetic, reason = "a softmax is float math")]
+        let mut decide = decider.as_mut().map_err(|error| error.clone()).and_then(
+            |loaded| -> Result<Op<'_>, Value> {
+                // the metadata dropped once read: the op keeps only what it extracts
+                let (meta, model) = (loaded.1.take(), &loaded.0);
                 let mut context = model
                     .new_context(backend.as_ref().map_err(Clone::clone)?, params(8192, 1))
                     .map_err(failed)?;
@@ -258,12 +298,17 @@ fn main() -> ExitCode {
                 let codes = field("codes")
                     .as_array()
                     .and_then(|codes| Some([codes.first()?.as_str()?, codes.get(1)?.as_str()?]));
-                let token_ids = field("token_ids").as_array().and_then(|ids| {
-                    Some([
-                        usize::try_from(ids.first()?.as_u64()?).ok()?,
-                        usize::try_from(ids.get(1)?.as_u64()?).ok()?,
-                    ])
-                });
+                // in the vocabulary: an id past it would index past the logits mid-op
+                let size = usize::try_from(vocab.n_tokens()).unwrap_or_default();
+                let token_ids = field("token_ids")
+                    .as_array()
+                    .and_then(|ids| {
+                        Some([
+                            usize::try_from(ids.first()?.as_u64()?).ok()?,
+                            usize::try_from(ids.get(1)?.as_u64()?).ok()?,
+                        ])
+                    })
+                    .filter(|ids| ids.iter().all(|&id| id < size));
                 let (
                     &[marker_id],
                     Some(temperature),
@@ -280,7 +325,10 @@ fn main() -> ExitCode {
                     field("template").as_str(),
                 )
                 else {
-                    return Err(failed(format!("not a {TEMPLATE} model: no pplx_decider metadata")));
+                    return Err(refused(
+                        "failed",
+                        format!("not a {TEMPLATE} model: pplx_decider metadata missing or invalid"),
+                    ));
                 };
                 // the marker escaped too, as the official encoder does; longest first
                 let mut escapes: Vec<(String, String)> = listed
@@ -300,7 +348,7 @@ fn main() -> ExitCode {
                 };
                 // `Question <i>:` lines in the questions' key order, serde_json's: sorted
                 let options = format!("\nOptions:\n{no}: No / false\n{yes}: Yes / true\n{marker}");
-                Ok(move |request: &Value| -> Result<Value, Value> {
+                Ok(Box::new(move |request: &Value| -> Result<Value, Value> {
                     let (Some(state), Some(questions)) = (
                         request["state"].as_str(),
                         request["questions"].as_object().filter(|questions| {
@@ -318,7 +366,7 @@ fn main() -> ExitCode {
                                 })
                         }),
                     ) else {
-                        return Err(fail(
+                        return Err(refused(
                             "bad_request",
                             r#"decide takes {"questions":{"<id>":{"instructions"?:str,"type":"noul"}},"state":str}"#,
                         ));
@@ -339,9 +387,9 @@ fn main() -> ExitCode {
                     );
                     let tokens = vocab.tokenize(text.as_bytes(), false, true);
                     if tokens.len() > 8192 {
-                        return Err(fail(
+                        return Err(refused(
                             "too_long",
-                            &format!("{} tokens, over 8192", tokens.len()),
+                            format!("{} tokens, over 8192", tokens.len()),
                         ));
                     }
                     context.clear_kv_cache();
@@ -366,86 +414,97 @@ fn main() -> ExitCode {
                         })
                         .collect();
                     Ok(json!({"answers": answers, "ok": true, "usage": {"input_tokens": tokens.len()}}))
-                })
+                }))
             },
         );
-        logged("decide", begun, decide.as_ref().err());
-        begun = Instant::now();
-        let settings = params(16 * 1024, 16)
-            .with_embeddings(true)
-            .with_pooling_type(LlamaPoolingType::Last);
-        let embedder = load("qwen3-embedding-0.6b-q8_0.gguf");
-        #[expect(clippy::float_arithmetic, reason = "the norm is float math")]
-        let mut embed = embedder.as_ref().map_err(Clone::clone).and_then(|loaded| {
-            let mut context = loaded
-                .0
-                .new_context(backend.as_ref().map_err(Clone::clone)?, settings)
-                .map_err(failed)?;
-            let vocab = loaded.0.vocab();
-            Ok(move |request: &Value| -> Result<Value, Value> {
-                let texts = request["texts"]
-                    .as_array()
-                    .and_then(|texts| texts.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
-                    .ok_or_else(|| fail("bad_request", r#"embed takes {"texts":[str]}"#))?;
-                let mut embeddings = Vec::new();
-                for chunk in texts.chunks(16) {
-                    // each text raw, cut to 1,023 tokens, then the end token, as the reference's
-                    let tokens: Vec<_> = chunk
-                        .iter()
-                        .map(|text| {
-                            let mut ids = vocab.tokenize(text.as_bytes(), false, false);
-                            ids.truncate(1023);
-                            ids.push(vocab.eos());
-                            ids
-                        })
-                        .collect();
-                    context.clear_kv_cache();
-                    let mut batch = LlamaBatch::new(tokens.iter().map(Vec::len).sum(), 16);
-                    for (sequence, ids) in (0i32..).zip(&tokens) {
-                        let last = ids.len().saturating_sub(1);
-                        for (index, (position, &id)) in (0i32..).zip(ids).enumerate() {
-                            batch
-                                .add(id, position, &[sequence], index == last)
-                                .map_err(failed)?;
+            logged("decide", begun, decide.as_ref().err());
+            begun = Instant::now();
+            let settings = params(16 * 1024, 16)
+                .with_embeddings(true)
+                .with_pooling_type(LlamaPoolingType::Last);
+            embedder = load("qwen3-embedding-0.6b-q8_0.gguf");
+            #[expect(clippy::float_arithmetic, reason = "the norm is float math")]
+            let mut embed = embedder.as_ref().map_err(Clone::clone).and_then(
+                |loaded| -> Result<Op<'_>, Value> {
+                    let mut context = loaded
+                        .0
+                        .new_context(backend.as_ref().map_err(Clone::clone)?, settings)
+                        .map_err(failed)?;
+                    let vocab = loaded.0.vocab();
+                    Ok(Box::new(move |request: &Value| -> Result<Value, Value> {
+                        let texts = request["texts"]
+                            .as_array()
+                            .and_then(|texts| {
+                                texts.iter().map(Value::as_str).collect::<Option<Vec<_>>>()
+                            })
+                            .ok_or_else(|| {
+                                refused("bad_request", r#"embed takes {"texts":[str]}"#)
+                            })?;
+                        let mut embeddings = Vec::new();
+                        for chunk in texts.chunks(16) {
+                            // each text raw, cut to 1,023 tokens, then the end token, as the reference's
+                            let tokens: Vec<_> = chunk
+                                .iter()
+                                .map(|text| {
+                                    let mut ids = vocab.tokenize(text.as_bytes(), false, false);
+                                    ids.truncate(1023);
+                                    ids.push(vocab.eos());
+                                    ids
+                                })
+                                .collect();
+                            context.clear_kv_cache();
+                            let mut batch = LlamaBatch::new(tokens.iter().map(Vec::len).sum(), 16);
+                            for (sequence, ids) in (0i32..).zip(&tokens) {
+                                let last = ids.len().saturating_sub(1);
+                                for (index, (position, &id)) in (0i32..).zip(ids).enumerate() {
+                                    batch
+                                        .add(id, position, &[sequence], index == last)
+                                        .map_err(failed)?;
+                                }
+                            }
+                            context.decode(&mut batch).map_err(failed)?;
+                            for (sequence, _) in (0i32..).zip(&tokens) {
+                                let vector =
+                                    context.embeddings_seq_ith(sequence).map_err(failed)?;
+                                let norm =
+                                    vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+                                embeddings.push(
+                                    vector.iter().map(|value| value / norm).collect::<Vec<_>>(),
+                                );
+                            }
                         }
-                    }
-                    context.decode(&mut batch).map_err(failed)?;
-                    for (sequence, _) in (0i32..).zip(&tokens) {
-                        let vector = context.embeddings_seq_ith(sequence).map_err(failed)?;
-                        let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
-                        embeddings
-                            .push(vector.iter().map(|value| value / norm).collect::<Vec<_>>());
-                    }
-                }
-                Ok(json!({"embeddings": embeddings, "ok": true}))
-            })
-        });
-        logged("embed", begun, embed.as_ref().err());
-        let readiness = if decide.is_ok() && embed.is_ok() {
-            "ready"
-        } else {
-            "degraded"
-        };
-        LOADED
+                        Ok(json!({"embeddings": embeddings, "ok": true}))
+                    }))
+                },
+            );
+            logged("embed", begun, embed.as_ref().err());
+            let readiness = if decide.is_ok() && embed.is_ok() {
+                "ready"
+            } else {
+                "degraded"
+            };
+            LOADED
             .set(json!({"models": {"decide": decide.is_ok(), "embed": embed.is_ok()}, "state": readiness}))
             .unwrap_or_default();
-        for (mut conn, request) in queue {
-            // queued before the stop: never started
-            let reply = if STOP.get().is_some() {
-                Err(bare("stopping"))
-            } else if request["op"] == "decide" {
-                decide
+            for (mut conn, request) in queue {
+                // queued before the stop: never started
+                let reply = if STOP.get().is_some() {
+                    Err(refused("stopping", ""))
+                } else {
+                    (if request["op"] == "decide" {
+                        &mut decide
+                    } else {
+                        &mut embed
+                    })
                     .as_mut()
-                    .map_err(|error| fail("no_model", error["reason"].as_str().unwrap_or_default()))
+                    .map_err(|error| {
+                        refused("no_model", error["reason"].as_str().unwrap_or_default())
+                    })
                     .and_then(|run| run(&request))
-            } else {
-                embed
-                    .as_mut()
-                    .map_err(|error| fail("no_model", error["reason"].as_str().unwrap_or_default()))
-                    .and_then(|run| run(&request))
-            };
-            drop(writeln!(conn, "{}", reply.unwrap_or_else(|error| error)));
-        }
+                };
+                drop(writeln!(conn, "{}", reply.unwrap_or_else(|error| error)));
+            }
+        })));
         DONE.set(()).unwrap_or_default();
         drop(UnixStream::connect(&knock));
     });
@@ -453,27 +512,51 @@ fn main() -> ExitCode {
     let serve = move || {
         let mut work = Some(sender);
         let reason = loop {
-            let (mut conn, _) = match listener.accept().and_then(|pair| match STOP.get() {
-                Some(signal) if DONE.get().is_some() || worker.is_finished() => {
-                    Err(io::Error::other(format!("signal {signal}")))
-                }
-                _ => Ok(pair),
+            // the worker gone, its stop's reason, else its panic's
+            let (mut conn, _) = match listener.accept().and_then(|pair| {
+                DONE.get().map_or(Ok(pair), |&()| {
+                    Err(io::Error::other(
+                        STOP.get().map_or("worker died", String::as_str),
+                    ))
+                })
             }) {
                 Ok(pair) => pair,
                 Err(reason) => break reason.to_string(),
             };
+            let accepted = Instant::now();
             // stopping: the worker finishes the request in hand, answers what is queued, and leaves
             work = work.filter(|_| STOP.get().is_none());
-            let mut line = String::new();
-            if conn
-                .set_read_timeout(Some(Duration::from_secs(1)))
-                .and_then(|()| conn.set_write_timeout(Some(Duration::from_secs(1))))
-                .and_then(|()| BufReader::new(&conn).read_line(&mut line))
-                .is_err()
+            // the whole line inside 1 s of the accept and under the cap: a trickle stalls nothing
+            let (mut line, mut chunk) = (Vec::new(), [0u8; 1 << 14]);
+            let whole = loop {
+                let read = Duration::from_secs(1)
+                    .checked_sub(accepted.elapsed())
+                    .filter(|left| !left.is_zero())
+                    .ok_or(io::ErrorKind::TimedOut)
+                    .map_err(io::Error::from)
+                    .and_then(|left| conn.set_read_timeout(Some(left)))
+                    .and_then(|()| conn.read(&mut chunk));
+                let Ok(size @ 1..) = read else {
+                    break read.is_ok();
+                };
+                let part = &chunk[..size];
+                line.extend_from_slice(part);
+                if part.contains(&b'\n') || line.len() > CAP {
+                    break line.len() <= CAP;
+                }
+            };
+            if !whole
+                || conn
+                    .set_write_timeout(Some(Duration::from_secs(1)))
+                    .is_err()
             {
                 continue;
             }
-            let request = serde_json::from_str::<Value>(&line).unwrap_or_default();
+            let request = line
+                .split(|&byte| byte == b'\n')
+                .next()
+                .and_then(|first| serde_json::from_slice::<Value>(first).ok())
+                .unwrap_or_default();
             let op = request["op"].as_str().unwrap_or_default().to_owned();
             let model = matches!(op.as_str(), "decide" | "embed");
             if let (Some(open), Some(_), true) = (work.as_ref(), LOADED.get(), model) {
@@ -483,12 +566,15 @@ fn main() -> ExitCode {
             let reply = if op == "health" {
                 answer(work.is_none())
             } else {
-                bare(match (op.as_str(), model, work.is_some()) {
-                    ("", ..) => "bad_request",
-                    (_, false, _) => "unknown_op",
-                    (_, true, true) => "booting",
-                    (_, true, false) => "stopping",
-                })
+                refused(
+                    match (op.as_str(), model, work.is_some()) {
+                        ("", ..) => "bad_request",
+                        (_, false, _) => "unknown_op",
+                        (_, true, true) => "booting",
+                        (_, true, false) => "stopping",
+                    },
+                    "",
+                )
             };
             drop(writeln!(conn, "{reply}"));
         };
@@ -499,5 +585,6 @@ fn main() -> ExitCode {
     let reason = serve();
     drop(fs::remove_file(&sock));
     write(json!({"event": "exit", "reason": reason}));
-    ExitCode::SUCCESS
+    // a stop asked for is a clean exit; the worker's death or an accept error is not
+    ExitCode::from(u8::from(STOP.get().is_none()))
 }

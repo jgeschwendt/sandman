@@ -17,9 +17,9 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::os::unix::process::CommandExt as _;
     use std::path::PathBuf;
-    use std::process::{Child, Command, Stdio, id};
+    use std::process::{Child, Command, ExitStatus, Stdio, id};
     use std::sync::OnceLock;
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use std::{env, fs, iter, thread};
 
     /// Recall's corpus: candidates in two banks (one description past 160 characters, a tie on
@@ -5888,6 +5888,19 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         same(
             &errors.join("\n"),
             "\"pplx\" false \"embed: no_model: not loaded\"\n\"kev\" true \"pplx: booting\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\"\nnull true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 7:\"\nnull false \"embed: reply: not one embedding per text; pplx: booting; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\"\nnull true null\nnull true \"kev: reply: no noul for question 0\"\nnull false \"embed: infer: not running; pplx: infer: not running\"",
+        )?;
+        // a listener that never accepts and a request past the socket's buffer: the write times
+        // out as the read does, inside the bound
+        let _deaf: UnixListener = UnixListener::bind(format!("{root}/run/infer.sock"))?;
+        let cue = "clock ".repeat(40_000);
+        let tight = envs(&[("SANDMAN_RECALL_MS", "500"), ("SANDMAN_SCORERS", "pplx")]);
+        same(
+            pull(&tight, &["recall", "--cue", &cue])?
+                .lines()
+                .rev()
+                .nth(1)
+                .unwrap_or_default(),
+            "sandman recall: embed: timed out after 500 ms; pplx: timed out after 500 ms",
         )
     }
 
@@ -6601,10 +6614,12 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
 
     /// `serve` supervises `sandman-infer`: each spawn a `started` line with its pid, an exit an
     /// `exited` line (a failed spawn's error its status) and a respawn after the backoff; a stop
-    /// TERMs the child's group, its own child with it, and KILLs a group ignoring TERM a second on,
-    /// the daemon still exiting 0 inside launchd's 2 s with its exit line last. `$SANDMAN_INFER`
-    /// unset, the child is the file beside the daemon's executable, its link resolved, named as it
-    /// is with `sandman` read `sandman-infer`; no such file, `absent`.
+    /// TERMs the child's group, its own child with it, and KILLs a group outliving TERM a second
+    /// on, with no `kill` on `PATH`, the daemon still exiting 0 with its exit line last. A daemon
+    /// killed by SIGKILL closes the child's stdin, so the child stops and the next daemon's child
+    /// holds what it held. `$SANDMAN_INFER` unset, the child is the file beside the daemon's
+    /// executable, its link resolved, named as it is with `sandman` read `sandman-infer`; no such
+    /// file, `absent`.
     #[test]
     fn supervise() -> Outcome {
         let root = temp("supervise")?;
@@ -6628,9 +6643,8 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        // TERM, timed; the exit line last
-        let stop = |mut daemon: Daemon| -> Result<Duration, Box<dyn Error>> {
-            let begun = Instant::now();
+        // TERM; the exit line last
+        let stop = |mut daemon: Daemon| -> Outcome {
             same(
                 &format!(
                     "{} {:?}",
@@ -6639,15 +6653,13 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 ),
                 "true Some(0)",
             )?;
-            let spent = begun.elapsed();
             same(
                 &logged()
                     .last()
                     .map_or(Value::Null, |line| line["event"].clone())
                     .to_string(),
                 "\"exit\"",
-            )?;
-            Ok(spent)
+            )
         };
         // the first run exits 3, the next waits on its own child
         let child = format!(
@@ -6662,7 +6674,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         )?;
         until(|| !read("grandchild").is_empty() && infer().lines().count() == 3)?;
         let grandchild = read("grandchild").trim().to_owned();
-        let _: Duration = stop(restarting)?;
+        stop(restarting)?;
         let pids: Vec<String> = read("pids").lines().map(str::to_owned).collect();
         same(
             &format!("{}\n{}", infer(), pids.join(" ")),
@@ -6674,19 +6686,26 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             ),
         )?;
         until(|| !kill("-0", &grandchild).unwrap_or(true))?;
-        // TERM ignored, by the child and so by its children: KILLed a second on, inside the 2 s
-        let stubborn = "trap '' TERM; while :; do sleep 1; done";
+        // TERM caught and outlived, on a PATH of `sh` and `sleep` alone: TERM first, then KILL
+        let lean = format!("{root}/lean");
+        fs::create_dir_all(&lean)?;
+        for tool in ["sh", "sleep"] {
+            symlink(format!("/bin/{tool}"), format!("{lean}/{tool}"))?;
+        }
+        let stubborn = format!(
+            "exec 2>/dev/null; trap 'echo term >> {root}/termed' TERM; while :; do sleep 1; done"
+        );
         fs::remove_file(format!("{root}/run/serve.log"))?;
-        let (deaf, _) = serve(&root, &[("SANDMAN_INFER", stubborn)])?;
+        let (deaf, _) = serve(&root, &[("PATH", &lean), ("SANDMAN_INFER", &stubborn)])?;
         until(|| infer().contains("started"))?;
-        let spent = stop(deaf)?;
+        stop(deaf)?;
         same(
             &format!(
-                "{} {}",
-                spent >= Duration::from_secs(1) && spent < Duration::from_secs(2),
+                "{}{}",
+                read("termed"),
                 infer().lines().last().unwrap_or_default()
             ),
-            "true {\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"signal: 9 (SIGKILL)\"}",
+            "term\n{\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"signal: 9 (SIGKILL)\"}",
         )?;
         // no `sh` to spawn: the failure is the exit line, retried after the backoff
         fs::remove_file(format!("{root}/run/serve.log"))?;
@@ -6699,11 +6718,35 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             ],
         )?;
         until(|| infer().lines().count() >= 2)?;
-        let _: Duration = stop(lost)?;
+        stop(lost)?;
         same(
             infer().lines().next().unwrap_or_default(),
             "{\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"No such file or directory (os error 2)\"}",
         )?;
+        // SIGKILLed: the child reads EOF and leaves, releasing its lock (a dir), so the next
+        // daemon's child takes it and stays
+        let reader = format!(
+            "mkdir {root}/held || exit 1; echo $$ >> {root}/readers; while read -r _; do :; done; rmdir {root}/held"
+        );
+        fs::remove_file(format!("{root}/run/serve.log"))?;
+        let (mut killed, _) = serve(&root, &[("SANDMAN_INFER", &reader)])?;
+        until(|| !read("readers").is_empty())?;
+        killed.0.kill()?;
+        let _: ExitStatus = killed.0.wait()?;
+        let first = read("readers").trim().to_owned();
+        until(|| !kill("-0", &first).unwrap_or(true))?;
+        let (again, _) = serve(&root, &[("SANDMAN_INFER", &reader)])?;
+        until(|| read("readers").lines().count() == 2)?;
+        thread::sleep(Duration::from_millis(300));
+        same(
+            &format!(
+                "{} {}",
+                kill("-0", read("readers").lines().nth(1).unwrap_or_default())?,
+                infer().matches("exited").count()
+            ),
+            "true 0",
+        )?;
+        stop(again)?;
         // the default: a copy of this build as `sandman-next`, run through a link named `sandman`
         let bin = format!("{root}/bin");
         fs::create_dir_all(&bin)?;
@@ -6743,7 +6786,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             Ok(spawned)
         };
         fs::remove_file(format!("{root}/run/serve.log"))?;
-        let _: Duration = stop(linked()?)?;
+        stop(linked()?)?;
         same(&infer(), "{\"event\":\"infer\",\"outcome\":\"absent\"}")?;
         plant(
             &root,
@@ -6759,7 +6802,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         fs::remove_file(format!("{root}/run/serve.log"))?;
         let sibled = linked()?;
         until(|| !read("sibling").is_empty())?;
-        let _: Duration = stop(sibled)?;
+        stop(sibled)?;
         same(
             &format!("{}{}", read("sibling"), infer()),
             &format!(

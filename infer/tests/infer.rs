@@ -22,7 +22,7 @@ mod tests {
     use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _, symlink};
     use std::os::unix::net::UnixStream;
     use std::path::Path;
-    use std::process::{Child, Command, ExitStatus, Stdio, id};
+    use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio, id};
     use std::time::{Duration, Instant};
     use std::{env, iter, thread};
 
@@ -36,8 +36,9 @@ mod tests {
     /// A test's fallible outcome.
     type Outcome = Result<(), Box<dyn Error>>;
 
-    /// A running `sandman-infer`, killed and reaped when it drops.
-    struct Daemon(Child);
+    /// A running `sandman-infer` and its stdin, held apart from the child (whose `wait` would close
+    /// it, racing a signal's stop) as `serve` holds it; killed and reaped when it drops.
+    struct Daemon(Child, Option<ChildStdin>);
 
     impl Drop for Daemon {
         fn drop(&mut self) {
@@ -107,18 +108,20 @@ mod tests {
         }
     }
 
-    /// `sandman-infer` over `root` with `envs`, and the health line it prints once listening.
+    /// `sandman-infer` over `root` with `envs`, stdin a pipe the guard holds, and the health line it
+    /// prints once listening.
     fn start(root: &str, envs: &[(&str, &str)]) -> Result<(Daemon, Value), Box<dyn Error>> {
-        let mut daemon = Daemon(
-            Command::new(env!("CARGO_BIN_EXE_sandman-infer"))
-                // not env_clear: llvm-cov reaches the child through LLVM_PROFILE_FILE
-                .env("SANDMAN_ROOT", root)
-                .env_remove("SANDMAN_LOG_CAP")
-                .env_remove("SANDMAN_MODELS")
-                .envs(envs.iter().copied())
-                .stdout(Stdio::piped())
-                .spawn()?,
-        );
+        let mut child = Command::new(env!("CARGO_BIN_EXE_sandman-infer"))
+            // not env_clear: llvm-cov reaches the child through LLVM_PROFILE_FILE
+            .env("SANDMAN_ROOT", root)
+            .env_remove("SANDMAN_LOG_CAP")
+            .env_remove("SANDMAN_MODELS")
+            .envs(envs.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let stdin = child.stdin.take();
+        let mut daemon = Daemon(child, stdin);
         let mut ready = String::new();
         let _: usize =
             BufReader::new(daemon.0.stdout.take().ok_or("stdout")?).read_line(&mut ready)?;
@@ -393,7 +396,7 @@ mod tests {
     /// A model missing or unloadable disables its op alone, `degraded` naming which, each load line
     /// `failed` with its reason and each op's reply `no_model` with the same: a GGUF without the
     /// decider's metadata, a file that is no GGUF, one cut inside its metadata, one cut in its
-    /// tensors, no file.
+    /// tensors, no file, a decider whose first code's token id is past its vocabulary.
     #[test]
     fn degraded() -> Outcome {
         let fixture = |name: &str| {
@@ -404,13 +407,20 @@ mod tests {
             )
         };
         let decider = fixture("decider.gguf")?;
+        // `pplx_decider.token_ids`' first i32, past its key, type, element type and count
+        let key = b"pplx_decider.token_ids";
+        let at = decider
+            .windows(key.len())
+            .position(|window| window == key)
+            .ok_or("no token_ids")?
+            .saturating_add(key.len() + 16);
+        let mut past = decider.clone();
+        drop(past.splice(at..at + 4, 1000i32.to_le_bytes()));
+        let embedder = fixture("embed.gguf")?;
         let cases = [
-            ("bare", &*fixture("embed.gguf")?, Some(&b"not a model"[..])),
-            (
-                "cut",
-                decider.get(..64).ok_or("short")?,
-                Some(&*fixture("embed.gguf")?),
-            ),
+            ("bare", &*embedder, Some(&b"not a model"[..])),
+            ("cut", decider.get(..64).ok_or("short")?, Some(&*embedder)),
+            ("ids", &*past, Some(&*embedder)),
             (
                 "tensors",
                 decider
@@ -460,10 +470,12 @@ mod tests {
         same(
             &seen.join("\n"),
             &[
-                r#"bare: "degraded" {"decide":false,"embed":false} "no_model" "not a joint-question-inline-readout-v1 model: no pplx_decider metadata" "no_model" "<models>/qwen3-embedding-0.6b-q8_0.gguf: not a GGUF file""#,
-                r#"{"at":"A","event":"load","ms":0,"op":"decide","outcome":"failed","reason":"not a joint-question-inline-readout-v1 model: no pplx_decider metadata"} {"at":"A","event":"load","ms":0,"op":"embed","outcome":"failed","reason":"<models>/qwen3-embedding-0.6b-q8_0.gguf: not a GGUF file"}"#,
+                r#"bare: "degraded" {"decide":false,"embed":false} "no_model" "not a joint-question-inline-readout-v1 model: pplx_decider metadata missing or invalid" "no_model" "<models>/qwen3-embedding-0.6b-q8_0.gguf: not a GGUF file""#,
+                r#"{"at":"A","event":"load","ms":0,"op":"decide","outcome":"failed","reason":"not a joint-question-inline-readout-v1 model: pplx_decider metadata missing or invalid"} {"at":"A","event":"load","ms":0,"op":"embed","outcome":"failed","reason":"<models>/qwen3-embedding-0.6b-q8_0.gguf: not a GGUF file"}"#,
                 r#"cut: "degraded" {"decide":false,"embed":true} "no_model" "<models>/decider-flash-v1.2-q8_0.gguf: failed to fill whole buffer" ok"#,
                 r#"{"at":"A","event":"load","ms":0,"op":"decide","outcome":"failed","reason":"<models>/decider-flash-v1.2-q8_0.gguf: failed to fill whole buffer"} {"at":"A","event":"load","ms":0,"op":"embed","outcome":"loaded"}"#,
+                r#"ids: "degraded" {"decide":false,"embed":true} "no_model" "not a joint-question-inline-readout-v1 model: pplx_decider metadata missing or invalid" ok"#,
+                r#"{"at":"A","event":"load","ms":0,"op":"decide","outcome":"failed","reason":"not a joint-question-inline-readout-v1 model: pplx_decider metadata missing or invalid"} {"at":"A","event":"load","ms":0,"op":"embed","outcome":"loaded"}"#,
                 r#"tensors: "degraded" {"decide":false,"embed":false} "no_model" "null result from llama cpp" "no_model" "<models>/qwen3-embedding-0.6b-q8_0.gguf: No such file or directory (os error 2)""#,
                 r#"{"at":"A","event":"load","ms":0,"op":"decide","outcome":"failed","reason":"null result from llama cpp"} {"at":"A","event":"load","ms":0,"op":"embed","outcome":"failed","reason":"<models>/qwen3-embedding-0.6b-q8_0.gguf: No such file or directory (os error 2)"}"#,
             ]
@@ -505,8 +517,9 @@ mod tests {
         same(&stopped(daemon)?, "true Some(0)")
     }
 
-    /// The drain: SIGTERM while the worker is writing a reply its client reads slowly; health says
-    /// `stopping`, a new op is refused `stopping`, the reply in hand is finished whole, an op
+    /// The drain: SIGTERM while the worker is writing a reply its client reads slowly, 4 KB every
+    /// 50 ms (each read well inside the 1 s write timeout, the whole well past the stop); health
+    /// says `stopping`, a new op is refused `stopping`, the reply in hand is finished whole, an op
     /// queued behind it is answered `stopping`, then exit 0.
     #[test]
     fn drain() -> Outcome {
@@ -523,6 +536,16 @@ mod tests {
         writeln!(slow, "{}", json!({"op": "embed", "texts": texts}))?;
         let mut head = [0u8; 1];
         slow.read_exact(&mut head)?;
+        let reader = thread::spawn(move || -> io::Result<Vec<u8>> {
+            let (mut rest, mut chunk) = (vec![head[0]], [0u8; 4096]);
+            loop {
+                thread::sleep(Duration::from_millis(50));
+                match slow.read(&mut chunk)? {
+                    0 => return Ok(rest),
+                    size => rest.extend_from_slice(chunk.get(..size).unwrap_or_default()),
+                }
+            }
+        });
         let mut queued = UnixStream::connect(&sock)?;
         writeln!(
             queued,
@@ -536,9 +559,8 @@ mod tests {
             call(&dir, &json!({"op": "health"})).is_ok_and(|reply| reply["state"] == "stopping")
         })?;
         let refused = call(&dir, &json!({"op": "embed", "texts": []}))?;
-        let mut rest = String::new();
-        let _: usize = slow.read_to_string(&mut rest)?;
-        let whole: Value = serde_json::from_str(&format!("{}{rest}", char::from(head[0])))?;
+        let whole: Value =
+            serde_json::from_slice(&reader.join().map_err(|_panic| "reader panicked")??)?;
         let mut answer = String::new();
         let _: usize = queued.read_to_string(&mut answer)?;
         same(
@@ -553,6 +575,96 @@ mod tests {
             log(&dir, "infer.log")?.last().map_or("", String::as_str),
             r#"{"at":"A","event":"exit","reason":"signal TERM"}"#,
         )
+    }
+
+    /// EOF on stdin, `serve`'s pipe closed by its death, stops the daemon as a signal does: exit 0,
+    /// its exit line `stdin closed`.
+    #[test]
+    fn orphan() -> Outcome {
+        let dir = root("orphan", &[(EMBEDDER, "embed.gguf")])?;
+        let (mut daemon, _) = start(&dir, &[])?;
+        drop(daemon.1.take());
+        same(&format!("{:?}", daemon.0.wait()?.code()), "Some(0)")?;
+        same(
+            log(&dir, "infer.log")?.last().map_or("", String::as_str),
+            r#"{"at":"A","event":"exit","reason":"stdin closed"}"#,
+        )
+    }
+
+    /// A worker panic ends the process, exit 1, so `serve` respawns it: never a live socket whose
+    /// model ops go unanswered. The trigger is a decider file gone between the metadata read and
+    /// llama.cpp's load (a FIFO unlinked once open), which llama-cpp-2's `debug_assert` of the
+    /// path turns into a panic in this, the suite's, build.
+    #[test]
+    fn dies() -> Outcome {
+        let dir = root("dies", &[])?;
+        let fifo = format!("{dir}/models/{DECIDER}");
+        same(
+            &format!("{:?}", Command::new("mkfifo").arg(&fifo).status()?.code()),
+            "Some(0)",
+        )?;
+        let (mut daemon, _) = start(&dir, &[])?;
+        let mut pipe = OpenOptions::new().write(true).open(&fifo)?;
+        fs::remove_file(&fifo)?;
+        // the metadata read, then the reader closes its end: the rest meets EPIPE
+        drop(pipe.write_all(&fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/decider.gguf"),
+        )?));
+        until(10, || call(&dir, &json!({"op": "health"})).is_err())?;
+        let text = fs::read_to_string(format!("{dir}/run/infer.log"))?;
+        same(
+            &format!(
+                "{:?} {} {}",
+                daemon.0.wait()?.code(),
+                text.contains("does not exist"),
+                log(&dir, "infer.log")?.last().map_or("", String::as_str)
+            ),
+            r#"Some(1) true {"at":"A","event":"exit","reason":"worker died"}"#,
+        )
+    }
+
+    /// A client trickling its line holds the accept loop no longer than the line's 1 s deadline:
+    /// health behind it answers within 1.5 s. A line over the 1 MiB cap is closed unanswered, one
+    /// just under it answered.
+    #[test]
+    fn trickle() -> Outcome {
+        let dir = root("trickle", &[])?;
+        let (daemon, _) = start(&dir, &[])?;
+        drop(settled(&dir, 60)?);
+        let sock = format!("{dir}/run/infer.sock");
+        let mut slow = UnixStream::connect(&sock)?;
+        let dripping = thread::spawn(move || {
+            for _ in 0u8..6 {
+                drop(slow.write_all(b" "));
+                thread::sleep(Duration::from_millis(500));
+            }
+        });
+        let begun = Instant::now();
+        let health = call(&dir, &json!({"op": "health"}))?;
+        let spent = begun.elapsed();
+        let padded = |size: usize| -> io::Result<String> {
+            let mut stream = UnixStream::connect(&sock)?;
+            drop(writeln!(
+                stream,
+                "{}",
+                json!({"op": "health", "pad": "x".repeat(size)})
+            ));
+            let mut reply = String::new();
+            drop(stream.read_to_string(&mut reply));
+            Ok(reply)
+        };
+        same(
+            &format!(
+                "{} {} {:?} {}",
+                health["ok"],
+                spent < Duration::from_millis(1500),
+                padded(1usize << 20u8)?,
+                padded((1usize << 20u8) - 64)?.contains(r#""ok":true"#)
+            ),
+            r#"true true "" true"#,
+        )?;
+        drop(dripping.join());
+        same(&stopped(daemon)?, "true Some(0)")
     }
 
     /// A SIGKILL leaves the socket behind; the next start, holding the lock, binds over it.

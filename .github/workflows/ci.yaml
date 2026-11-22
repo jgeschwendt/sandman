@@ -21,10 +21,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.9.1
-      # the workspace: sandman-infer's llama.cpp builds for the CPU here; llama-cpp-sys-2's build.rs
-      # wants cmake, a C++17 compiler and, for bindgen at build time, a libclang it loads at run
-      # time, all in the ubuntu-latest image (cmake 3.31, gcc, clang 16-18), so no install step
-      # (unverified 2026-11-22 · not yet run on the runner)
+      # llama-cpp-sys-2's bindgen (runtime feature) dlopens a libclang that clang-sys finds by glob;
+      # the image's clang packages are not a contract, so the library is named here (cmake and a
+      # C++17 compiler for llama.cpp's CPU build come with the image; unverified 2026-11-22 · no run yet)
+      - run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo llvm-cov --workspace --fail-under-lines 100 --show-missing-lines

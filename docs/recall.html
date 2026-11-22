@@ -577,12 +577,17 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     sources for; about 8 GB resident, both loaded at start. It reports <code class="code">booting</code> for the first
     seconds, about 13 s on the first start after an install while Metal compiles its shaders, and recall falls back
     meanwhile and says so (<code class="code">embed: booting</code>); Kev on <code class="code">127.0.0.1:1703</code> is
-    the next scorer, hosted Jev the last. Without the child, recall answers from BM25 alone and says so; without the
-    cache, a pull embeds 8 and the tick fills the rest.</p>
+    the next scorer, hosted Jev the last. Without the child, recall loses its cosine rank and the pplx scorer and says
+    so: Kev or Jev still decide over the BM25 order, and only with no scorer answering either does it answer from BM25
+    alone; without the cache, a pull embeds 8 and the tick fills the rest.</p>
   <p>Parity with what it replaced (measured 2026-11-22, M4 Max · <code class="code">infer/tests/infer.rs</code>
     <code class="code">parity</code>): the decision prompt tokenises to the official encoder's ids, nouls within
     1.5e-7 of the prototype's native run; embeddings at cosine .99999955 or more against Ollama's over 50 texts.
-    Ten questions decide in about 415 ms, 16 embeddings in about 124 ms.</p>
+    Ten questions decide in about 415 ms, 16 embeddings in about 124 ms. Side by side with the installed Ollama path
+    over copies of the live store, 98 cues (measured 2026-11-22), this build's figure first: the decider answered on the
+    same 85 cues on both (13 closed by the gate on both), the top result agreed on 90 of 98, the sent set was identical
+    on 67 of the 85, 429 lines sent against 430, a pull's p50 860 ms against 967 ms; the differences sit at the keep
+    threshold, the two paths running different quantisations of the decider (this Q8 GGUF against Ollama's MLX mxfp8).</p>
 </section>
 
 <section class="docs-section" id="open">
