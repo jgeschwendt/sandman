@@ -355,6 +355,12 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
   <ul class="stack claims" role="list">
     <li><strong>state</strong> — <code class="code">ready</code> whenever it answers today: there is
       nothing to derive before the socket is bound, and a stopping daemon no longer accepts.</li>
+    <li><strong>child</strong> — <code class="code">sandman-infer</code>, the models
+      (<a class="link" href="recall.html#needs">recall's needs</a>), started after the start line: the file beside the
+      daemon's own executable named with <code class="code">sandman</code> read <code class="code">sandman-infer</code>
+      (<code class="code">sandman-next</code> → <code class="code">sandman-infer-next</code>), else
+      <code class="code">$SANDMAN_INFER</code>'s command, else none (<code class="code">absent</code>, the Linux release). Its
+      own process group, stderr the daemon's; an exit is logged and respawned after 1 s, doubling to 60 s.</li>
     <li><strong>reconcile</strong> — every 30 s (<code class="code">$SANDMAN_TICK_MS</code>), from disk,
       first: a session of this machine whose latest start mark is later than its
       latest end, or that has none, older than 10 min (<code class="code">$SANDMAN_GRACE_MS</code>; its
@@ -368,8 +374,8 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
     <li><strong>embed</strong> — the cache rewritten to its live lines once it passes twice their
       size, then every candidate <a class="link" href="recall.html#candidates">recall</a> would embed
       and the cache lacks, in reader order, at most 128 a tick (<code class="code">$SANDMAN_EMBED_TICK</code>),
-      16 a request to <code class="code">$SANDMAN_OLLAMA</code>; a first build of 635 takes about 22 s
-      of an idle Ollama, so it lands over a few ticks. A stop kills the request in hand.</li>
+      16 a request to <code class="code">sandman-infer</code> (about 124 ms each, measured 2026-11-22), so a
+      first build of 635 lands within a few ticks. At a stop the child answers the request in hand.</li>
     <li><strong>settle</strong> — a session whose latest end is <code class="code">held</code> on this
       machine with no start since, no unfinished job naming it any more, its transcript untouched for 120 s
       (<code class="code">$SANDMAN_QUIET_MS</code>), is taken as <a class="link" href="#take">take</a> does:
@@ -379,11 +385,12 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       <a class="link" href="#cycle-release">release</a> of unheld transcripts and the sweep of <code class="code">.pruned/</code>.</li>
     <li><strong>signals</strong> — SIGTERM, SIGINT and SIGHUP take the shutdown path; SIGPIPE is
       ignored. The drain budget is 2 s, launchd's <code class="code">ExitTimeOut</code>: the one
-      connection in hand, at most its 1 s read, and the tick's job in hand (a running model command
-      is killed); the tick starts no other. On exit it removes <code class="code">serve.pid</code>
+      connection in hand, at most its 1 s read, the tick's job in hand (a running model command
+      is killed) and, beside them, the child: TERMed at the stop, its group KILLed 1 s later; the tick starts no other. On exit it removes <code class="code">serve.pid</code>
       and <code class="code">serve.sock</code> while the pid file still holds its pid.</li>
     <li><strong>log</strong> — <code class="code">run/serve.log</code>, one compact object per line
       with <code class="code">at</code>: <code class="code">start</code> (pid, version),
+      <code class="code">infer</code> (the child <code class="code">absent</code>, <code class="code">started</code> with its pid, <code class="code">exited</code> with its status),
       <code class="code">exit</code> (reason: <code class="code">signal TERM</code>,
       <code class="code">shutdown request</code>, an accept error), <code class="code">embed</code>
       (<code class="code">embedded</code>, or the failure as <code class="code">reason</code>), <code class="code">reconcile</code>, <code class="code">take</code>,
@@ -395,9 +402,10 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
     <li><strong>version</strong> — <code class="code">sandman version</code> prints <code class="code">&lt;release&gt;-&lt;build&gt;</code>: the
       <code class="code">YYYY.M.N</code> the release workflow stamps (a checkout's build: the crate version), then the commit
       it was built from (<code class="code">-dirty</code> over uncommitted work), the same string health carries: an installer's smoke check.</li>
-    <li><strong>status</strong> — sends health and prints the reply, exit 0, with one stderr line
+    <li><strong>status</strong> — sends health and prints the reply with the child's own health added as
+      <code class="code">infer</code> (null when it does not answer), exit 0, with one stderr line
       naming both versions and the fix, <code class="code">sandman setup</code>,
-      when the daemon's is not the client's; no daemon prints
+      for each of the daemon and the child whose version is not the client's; no daemon prints
       <code class="code">{"code":"down","ok":false}</code>, exit 1.</li>
     <li><strong>setup</strong> — installs the release and the agent. First it boots out the old sandman's agents
       (<code class="code">dev.gigantic.sandman.breathe</code>, <code class="code">.reflect</code>, <code class="code">.report</code>) and removes their plists;
@@ -411,8 +419,9 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       <code class="code">serve</code>, the root it ran with and the caller's <code class="code">PATH</code> (launchd's
       finds no <code class="code">claude</code>), KeepAlive, RunAtLoad, ThrottleInterval 10,
       ExitTimeOut 2, stderr to <code class="code">serve.err</code> beside <code class="code">run/</code> for failures before the log;
-      <code class="code">--print</code> prints it and writes nothing. <code class="code">setup</code>
-      writes <code class="code">~/Library/LaunchAgents/dev.gigantic.sandman.plist</code> by temp + rename, then kickstarts it when that plist was already
+      <code class="code">--print</code> prints it and writes nothing. <code class="code">setup</code> creates
+      <code class="code">&lt;root&gt;/models</code> and, while a model is missing there, prints one line naming both files and their
+      sources (it fetches nothing), then writes <code class="code">~/Library/LaunchAgents/dev.gigantic.sandman.plist</code> by temp + rename, then kickstarts it when that plist was already
       loaded and loads it afresh otherwise. After a bootout it polls <code class="code">launchctl print</code> until the job is gone
       (at most <code class="code">$SANDMAN_BOOTOUT_MS</code>, 30 s): a bootstrap before then fails. Without <code class="code">launchctl</code> (Linux) it stops
       before writing anything; <code class="code">--remove</code> has hotswap forget the upgrade agent, the layout and its record,

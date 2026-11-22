@@ -1,8 +1,9 @@
 # A GitHub Release per merge to main, YYYY.M.N (N counts the month's releases from 0), signed by
 # packslip: what `sandman setup` installs and `sandman upgrade` swaps in
 # (https://gigantic.dev/hotswap/ § release). Two targets, as routines builds: the daemon runs on a
-# Mac; the Linux build serves the verbs without launchd. The path and ref (release.yaml on main)
-# are the identity every earlier release was signed under.
+# Mac, its child sandman-infer at the archive's root beside it; the Linux build serves the verbs
+# without launchd and builds sandman alone, so it never compiles llama.cpp. The path and ref
+# (release.yaml on main) are the identity every earlier release was signed under.
 concurrency:
   # N counts the tags already cut, so two releases never race for one
   group: release
@@ -17,10 +18,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # mise.toml's rust pin alone: hk and cargo-llvm-cov are the gate's, not the build's
+      # mise.toml's rust and cmake pins (llama.cpp's build): hk and cargo-llvm-cov are the gate's
       - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
         with:
-          install_args: rust
+          install_args: cmake rust
       # releases stay off shared compiler caches: local, never restored or saved
       - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
         with:
@@ -30,19 +31,22 @@ jobs:
           SANDMAN_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          cargo build --release --locked
+          cargo build --release --locked $(printf -- '-p %s ' ${{ matrix.bins }})
           mkdir dist
-          tar -czf dist/sandman-${{ matrix.target }}.tar.gz -C target/release sandman
+          tar -czf dist/sandman-${{ matrix.target }}.tar.gz -C target/release ${{ matrix.bins }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sandman-${{ matrix.target }}
           path: dist/sandman-${{ matrix.target }}.tar.gz
     strategy:
       matrix:
+        # each a package and the binary it builds, packed at the archive's root
         include:
-          - os: macos-15
+          - bins: sandman sandman-infer
+            os: macos-15
             target: aarch64-apple-darwin
-          - os: ubuntu-latest
+          - bins: sandman
+            os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
   # packslip reads each archive's os and arch from its target triple: one glob, no release.toml
   release:
