@@ -5889,10 +5889,11 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             &errors.join("\n"),
             "\"pplx\" false \"embed: no_model: not loaded\"\n\"kev\" true \"pplx: booting\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\"\nnull true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 7:\"\nnull false \"embed: reply: not one embedding per text; pplx: booting; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\"\nnull true null\nnull true \"kev: reply: no noul for question 0\"\nnull false \"embed: infer: not running; pplx: infer: not running\"",
         )?;
-        // a listener that never accepts and a request past the socket's buffer: the write times
-        // out as the read does, inside the bound
+        // a listener that never accepts and a request past macOS's socket buffer: the write times
+        // out as the read does, inside the bound (Linux buffers it and the read times out; the
+        // cue stays under Linux's 128 KiB an argument)
         let _deaf: UnixListener = UnixListener::bind(format!("{root}/run/infer.sock"))?;
-        let cue = "clock ".repeat(40_000);
+        let cue = "clock ".repeat(20_000);
         let tight = envs(&[("SANDMAN_RECALL_MS", "500"), ("SANDMAN_SCORERS", "pplx")]);
         same(
             pull(&tight, &["recall", "--cue", &cue])?
