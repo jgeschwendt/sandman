@@ -1,0 +1,26 @@
+[package]
+# the root's: one build identity for both binaries
+build = "../build.rs"
+categories.workspace = true
+description = "sandman-infer — sandman's embeddings and decision model in process, llama.cpp over a unix socket"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "sandman-infer"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+# llama.cpp's bindings: the models run in process. No default features: neither openmp nor `common` is used.
+llama-cpp-2 = { default-features = false, version = "=0.1.161" }
+serde_json = "1"
+# SIGTERM, SIGINT, SIGHUP into a thread: std has no signal handling and `unsafe_code` is forbidden.
+signal-hook = "0.4"
+
+[lints]
+workspace = true
+
+# Metal on macOS only, so Linux CI builds llama.cpp for the CPU.
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { default-features = false, features = ["metal"], version = "=0.1.161" }

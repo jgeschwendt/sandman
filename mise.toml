@@ -1,21 +1,23 @@
 # Pinned to the rust base (jgeschwendt/rust): its lints.toml enumerates this toolchain's lints.
 [tools]
 "cargo:cargo-llvm-cov" = "0.9.1"
+# llama-cpp-sys-2 builds llama.cpp with it (sandman-infer).
+cmake = "4.5.0"
 # hk runs the pre-push gate (hk.pkl); `hk install --mise` wires it.
 hk = "2.5.0"
 rust = "1.94.0"
 
 [tasks.check]
-description = "the gate hk's pre-push runs: fmt, clippy, 100 % line coverage"
+description = "the gate hk's pre-push runs over the workspace: fmt, clippy, 100 % line coverage"
 run = [
-  "cargo fmt --check",
-  "cargo clippy --all-targets -- -D warnings",
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets -- -D warnings",
   { task = "cover" },
 ]
 
 [tasks.cover]
-description = "the end-to-end suite under llvm-cov; anything under 100 % of lines fails, naming the lines"
-run = "cargo llvm-cov --fail-under-lines 100 --show-missing-lines"
+description = "both end-to-end suites under llvm-cov; anything under 100 % of lines fails, naming the lines"
+run = "cargo llvm-cov --workspace --fail-under-lines 100 --show-missing-lines"
 
 [tasks.install]
 description = "a dev build to ~/.local/bin/sandman-next, beside the release"

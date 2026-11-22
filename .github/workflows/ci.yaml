@@ -21,6 +21,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.9.1
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo llvm-cov --fail-under-lines 100 --show-missing-lines
+      # the workspace: sandman-infer's llama.cpp builds for the CPU here, with the image's cmake and
+      # libclang (unverified 2026-11-22 · not yet run on the runner)
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo llvm-cov --workspace --fail-under-lines 100 --show-missing-lines

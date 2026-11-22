@@ -1,6 +1,6 @@
-//! The build identity `sandman version` prints and the daemon's health carries: the release (else
-//! the crate version), then the short commit, `-dirty` over uncommitted work, `unknown` outside a
-//! git checkout; it never fails the build.
+//! The build identity `sandman version` prints and both daemons' health carries (`sandman-infer`
+//! builds with this script too): the release (else the crate version), then the short commit,
+//! `-dirty` over uncommitted work, `unknown` outside a git checkout; it never fails the build.
 
 use std::{env, process::Command};
 
