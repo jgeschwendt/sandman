@@ -696,17 +696,18 @@ fn daily(path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Each of `texts` embedded by `$SANDMAN_OLLAMA`'s `/api/embed`, 16 a request, as the reference
-/// sends them (raw, truncated to 1,024 tokens), L2-normalised.
+/// Each of `texts` embedded by `sandman-infer` (`exchange`), 16 a request, as the reference sends
+/// them (raw, cut to 1,024 tokens), L2-normalised.
 #[expect(clippy::float_arithmetic, reason = "the norm is float math")]
-fn embed(texts: &[String], begun: Instant, limit: Duration) -> io::Result<Vec<Vec<f64>>> {
-    let url = format!(
-        "{}/api/embed",
-        setting("SANDMAN_OLLAMA", "http://127.0.0.1:11434".to_owned())
-    );
+fn embed(
+    root: &Path,
+    texts: &[String],
+    begun: Instant,
+    limit: Duration,
+) -> io::Result<Vec<Vec<f64>>> {
     texts.chunks(16).try_fold(Vec::new(), |mut done, batch| {
-        let request = json!({"input": batch, "model": EMBED[0], "options": {"num_ctx": 1024u16}, "truncate": true});
-        let reply = post(&url, &request.to_string(), "", begun, limit).0?;
+        let request = json!({"op": "embed", "texts": batch});
+        let reply = exchange(root, "infer", &request, begun, limit)?;
         for vector in reply["embeddings"]
             .as_array()
             .filter(|vectors| vectors.len() == batch.len())
@@ -957,6 +958,51 @@ fn excerpt(memory: &Value, label: &str) -> String {
         head(memory, label),
         text(&memory["body"]).chars().take(1500).collect::<String>()
     )
+}
+
+/// `request` to the daemon on `<root>/run/<daemon>.sock`, one line each way, inside what is left
+/// of `limit` past `begun` and never retried (every request is read-only): the reply; else
+/// `<daemon>: not running` without a listener, `timed out after <limit> ms`, `output: <parse
+/// error>`, or a reply's `"ok":false` as its `code`, then `: <reason>` when it gives one.
+fn exchange(
+    root: &Path,
+    daemon: &str,
+    request: &Value,
+    begun: Instant,
+    limit: Duration,
+) -> io::Result<Value> {
+    let late = || io::Error::other(format!("timed out after {} ms", limit.as_millis()));
+    // a socket timeout of zero is refused, so a spent bound fails here
+    let left = limit
+        .checked_sub(begun.elapsed())
+        .filter(|left| !left.is_zero())
+        .ok_or_else(late)?;
+    let mut stream = UnixStream::connect(root.join(format!("run/{daemon}.sock")))
+        .ok()
+        .ok_or_else(|| io::Error::other(format!("{daemon}: not running")))?;
+    stream.set_read_timeout(Some(left))?;
+    stream.set_write_timeout(Some(left))?;
+    writeln!(stream, "{request}")?;
+    let mut line = String::new();
+    let _: usize = BufReader::new(stream)
+        .read_line(&mut line)
+        // a unix socket's timeout reads as WouldBlock
+        .map_err(|error| {
+            (error.kind() == io::ErrorKind::WouldBlock)
+                .then(late)
+                .unwrap_or(error)
+        })?;
+    let reply: Value = serde_json::from_str(&line)
+        .map_err(|error| io::Error::other(format!("output: {error}")))?;
+    if reply["ok"] == false {
+        let reason = reply["reason"].as_str().map(|reason| format!(": {reason}"));
+        return Err(io::Error::other(format!(
+            "{}{}",
+            text(&reply["code"]),
+            reason.unwrap_or_default()
+        )));
+    }
+    Ok(reply)
 }
 
 /// The first of `names` under `dir` that no file holds and this run has not claimed, claimed.
@@ -1281,7 +1327,8 @@ fn lineage<'note, I: IntoIterator<Item = &'note Value>>(notes: I) -> BTreeSet<&'
 }
 
 /// `questions` (keyed by rank) and `state` to each of `$SANDMAN_SCORERS` until one answers a noul
-/// per question, Jev skipped while `<root>/jev-down.json` holds it down: the scorer, its nouls and
+/// per question, `pplx` on `sandman-infer`'s socket, Kev and Jev by curl, Jev skipped while
+/// `<root>/jev-down.json` holds it down: the scorer, its nouls and
 /// its input tokens; and each failure, `(scorer, cause)` (AGENTS.md `### sandman recall`).
 fn decide(
     root: &Path,
@@ -1311,28 +1358,43 @@ fn decide(
         .ok()
         .and_then(|stamp| stamp["until"].as_u64())
         .is_some_and(|until| until > now());
-    let ollama = setting("SANDMAN_OLLAMA", "http://127.0.0.1:11434".to_owned());
+    let request = |model: &str| json!({"model": model, "questions": questions, "state": state});
     let decided = tried
         .split(',')
         .filter(|scorer| !(*scorer == "jev" && held_down))
         .find_map(|scorer| {
-            let (url, model) = match scorer {
-                "pplx" => (format!("{ollama}/v1/systemone"), "pplx-decider-flash:4b"),
-                "kev" => ("http://127.0.0.1:1703/v1/systemone".to_owned(), "kev-latest"),
-                "jev" => ("https://api.typesafe.ai/v1/systemone".to_owned(), "jev-latest"),
-                _ => return None,
-            };
-            let key = if scorer == "jev" { secret.as_str() } else { "" };
-            let request = json!({"model": model, "questions": questions, "state": state});
-            let (answer, replied) = if scorer == "jev" && secret.is_empty() {
-                (
+            let (answer, replied) = match scorer {
+                "pplx" => (
+                    exchange(
+                        root,
+                        "infer",
+                        &json!({"op": "decide", "questions": questions, "state": state}),
+                        begun,
+                        limit,
+                    ),
+                    String::new(),
+                ),
+                "kev" => post(
+                    "http://127.0.0.1:1703/v1/systemone",
+                    &request("kev-latest").to_string(),
+                    "",
+                    begun,
+                    limit,
+                ),
+                "jev" if secret.is_empty() => (
                     Err(io::Error::other(
                         "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
                     )),
                     String::new(),
-                )
-            } else {
-                post(&url, &request.to_string(), key, begun, limit)
+                ),
+                "jev" => post(
+                    "https://api.typesafe.ai/v1/systemone",
+                    &request("jev-latest").to_string(),
+                    &secret,
+                    begun,
+                    limit,
+                ),
+                _ => return None,
             };
             let scored = answer.and_then(|reply| {
                 let nouls = (0..questions.len()).map(|rank| {
@@ -3780,7 +3842,7 @@ fn main() -> ExitCode {
                     .iter()
                     .map(|hashed| cache.get(hashed).map(|line| floats(&line["v"])))
                     .collect();
-                let query = embed(&[format!("{}{state}", EMBED[1])], begun, limit)
+                let query = embed(&root, &[format!("{}{state}", EMBED[1])], begun, limit)
                     .map(|mut found| found.pop().unwrap_or_default());
                 let mut fail = |error: io::Error| {
                     errors.push(("embed".to_owned(), one_line(&error.to_string(), 400)));
@@ -3796,7 +3858,7 @@ fn main() -> ExitCode {
                 if let Err(error) = if missing.is_empty() {
                     Ok(Vec::new())
                 } else {
-                    embed(&inline, begun, limit)
+                    embed(&root, &inline, begun, limit)
                 }
                     .and_then(|found| {
                         let rows: Vec<String> = missing
@@ -4291,6 +4353,79 @@ fn main() -> ExitCode {
                 (line["event"], line[key]) = (event.into(), value.into());
                 settle(line);
             };
+            write(json!({"event": "start", "pid": id(), "version": VERSION}));
+            // the child: `$SANDMAN_INFER` through `sh -c`, else the file beside this executable,
+            // its links resolved, named as it is with `sandman` read `sandman-infer`; else none
+            let exe = env::current_exe()
+                .and_then(fs::canonicalize)
+                .unwrap_or_default();
+            let sibling = exe.with_file_name(name(&exe).replacen("sandman", "sandman-infer", 1));
+            let script = env::var("SANDMAN_INFER")
+                .ok()
+                .or_else(|| sibling.is_file().then(|| r#"exec "$0""#.to_owned()))
+                .unwrap_or_default();
+            let (herald, base) = (write.clone(), ms("SANDMAN_INFER_BACKOFF_MS", 1_000));
+            let supervisor = thread::spawn(move || {
+                if script.is_empty() {
+                    herald(json!({"event": "infer", "outcome": "absent"}));
+                    return;
+                }
+                let (mut pause, minute) = (base, Duration::from_secs(60));
+                while STOP.get().is_none() {
+                    let born = Instant::now();
+                    let status = Command::new("sh")
+                        .args(["-c", &script])
+                        .arg(&sibling)
+                        .process_group(0)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .spawn()
+                        .and_then(|mut child| {
+                            let group = format!("-{}", child.id());
+                            let signal = |name: &str| {
+                                drop(
+                                    Command::new("kill")
+                                        .args([name, group.as_str()])
+                                        .stderr(Stdio::null())
+                                        .status(),
+                                );
+                            };
+                            herald(
+                                json!({"event": "infer", "outcome": "started", "pid": child.id()}),
+                            );
+                            // a stop TERMs the group and KILLs it a second later
+                            let mut termed = None;
+                            let status = loop {
+                                if let Some(status) = child.try_wait()? {
+                                    break status;
+                                }
+                                if STOP.get().is_some()
+                                    && termed
+                                        .get_or_insert_with(|| {
+                                            signal("-TERM");
+                                            Instant::now()
+                                        })
+                                        .elapsed()
+                                        > Duration::from_secs(1)
+                                {
+                                    signal("-KILL");
+                                    break child.wait()?;
+                                }
+                                thread::sleep(Duration::from_millis(20));
+                            };
+                            // whatever of its group outlived it
+                            signal("-KILL");
+                            Ok(status.to_string())
+                        });
+                    herald(
+                        json!({"event": "infer", "outcome": "exited", "status": status.unwrap_or_else(|error| error.to_string())}),
+                    );
+                    // the backoff doubles to a minute, reset once a child has lived one
+                    pause = [pause, base][usize::from(born.elapsed() >= minute)];
+                    thread::park_timeout(pause);
+                    pause = pause.saturating_mul(2).min(minute);
+                }
+            });
             let ticker = thread::spawn(move || {
                 // the UTC day release last said it was held back, so it says so once a day
                 let mut gated = String::new();
@@ -4372,21 +4507,22 @@ fn main() -> ExitCode {
                         if !missing.is_empty() && STOP.get().is_none() {
                             let texts: Vec<String> =
                                 missing.iter().map(|row| row.2.clone()).collect();
-                            let done = embed(&texts, Instant::now(), Duration::from_secs(60))
-                                .and_then(|found| {
-                                    let rows: Vec<String> = missing
-                                        .iter()
-                                        .zip(found)
-                                        .map(|(row, vector)| {
-                                            format!(
-                                                "{}\n",
-                                                json!({"h": row.0, "path": row.1, "v": vector})
-                                            )
-                                        })
-                                        .collect();
-                                    append(&file, &rows.concat())
-                                        .map(|()| json!({"embedded": rows.len()}))
-                                });
+                            let done =
+                                embed(&data, &texts, Instant::now(), Duration::from_secs(60))
+                                    .and_then(|found| {
+                                        let rows: Vec<String> = missing
+                                            .iter()
+                                            .zip(found)
+                                            .map(|(row, vector)| {
+                                                format!(
+                                                    "{}\n",
+                                                    json!({"h": row.0, "path": row.1, "v": vector})
+                                                )
+                                            })
+                                            .collect();
+                                        append(&file, &rows.concat())
+                                            .map(|()| json!({"embedded": rows.len()}))
+                                    });
                             logged("embed", "event", "embed", done);
                         }
                     }
@@ -5838,7 +5974,6 @@ fn main() -> ExitCode {
             let health = json!({
                 "machine": machine(&root), "ok": true, "pid": id(), "since": utc(SystemTime::now()), "state": "ready", "version": VERSION,
             });
-            write(json!({"event": "start", "pid": id(), "version": VERSION}));
             // the ready line: whoever spawned the daemon reads it, so nothing polls
             println!("{health}");
             let reason = loop {
@@ -5871,10 +6006,13 @@ fn main() -> ExitCode {
                 };
                 drop(writeln!(conn, "{reply}"));
             };
-            // the tick finishes the job in hand and leaves its loop, starting no other
+            // the tick finishes the job in hand and leaves its loop, starting no other; the child,
+            // signalled at the stop, drains beside it
             STOP.set("").unwrap_or_default();
             ticker.thread().unpark();
+            supervisor.thread().unpark();
             drop(ticker.join());
+            drop(supervisor.join());
             let pid = rundir.join("serve.pid");
             if fs::read_to_string(&pid).is_ok_and(|text| text == id().to_string()) {
                 drop(fs::remove_file(&pid));
@@ -5995,6 +6133,23 @@ fn main() -> ExitCode {
                     linked.display(),
                     fs::canonicalize(&linked)?.display()
                 );
+                // sandman-infer's models: named, never fetched (an upgrade runs setup)
+                let (models, wanted) = (
+                    root.join("models"),
+                    [
+                        "qwen3-embedding-0.6b-q8_0.gguf",
+                        "decider-flash-v1.2-q8_0.gguf",
+                    ],
+                );
+                fs::create_dir_all(&models)?;
+                if wanted.iter().any(|file| !models.join(file).exists()) {
+                    println!(
+                        "models: {} wants {} (https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf, SHA-256 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439) and {} (Perplexity's gated pplx-decider-flash-v1.2 GGUF repository, SHA-256 ffb27ade8976765b0e6943a0b7f5f3fd0f7042d45ad90256a76d608bcd3942c2)",
+                        models.display(),
+                        wanted[0],
+                        wanted[1]
+                    );
+                }
                 let path = agents.join(format!("{label}.plist"));
                 let same = fs::read_to_string(&path).is_ok_and(|held| held == plist);
                 put(&path, &plist)?;
@@ -6051,27 +6206,38 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "status" => {
-            let reply = UnixStream::connect(root.join("run/serve.sock"))
-                .and_then(|mut stream| {
-                    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
-                    writeln!(stream, r#"{{"op":"health"}}"#)?;
-                    let mut line = String::new();
-                    BufReader::new(stream).read_line(&mut line).map(|_| line)
-                })
+            let health = |daemon: &str| {
+                let request = json!({"op": "health"});
+                exchange(
+                    &root,
+                    daemon,
+                    &request,
+                    Instant::now(),
+                    Duration::from_secs(1),
+                )
                 .ok()
-                .and_then(|line| serde_json::from_str::<Value>(&line).ok())
-                .filter(|health| health["ok"] == true);
-            let Some(health) = reply else {
+                .filter(|health| health["ok"] == true)
+            };
+            let Some(mut reply) = health("serve") else {
                 println!("{}", json!({"code": "down", "ok": false}));
                 return ExitCode::FAILURE;
             };
-            if health["version"] != VERSION {
+            // the child's own health, null when it does not answer
+            reply["infer"] = health("infer").unwrap_or_default();
+            [
+                ("the daemon", &reply["version"]),
+                ("sandman-infer", &reply["infer"]["version"]),
+            ]
+            .iter()
+            .filter(|pair| pair.1.as_str().is_some_and(|theirs| theirs != VERSION))
+            .for_each(|pair| {
                 eprintln!(
-                    "sandman status: the daemon is {}, this client {VERSION}; swap it: {me} setup",
-                    health["version"].as_str().unwrap_or_default()
+                    "sandman status: {} is {}, this client {VERSION}; swap it: {me} setup",
+                    pair.0,
+                    text(pair.1)
                 );
-            }
-            println!("{health}");
+            });
+            println!("{reply}");
             ExitCode::SUCCESS
         }
         "version" => {

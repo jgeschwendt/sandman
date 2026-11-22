@@ -20,5 +20,5 @@ description = "both end-to-end suites under llvm-cov; anything under 100 % of li
 run = "cargo llvm-cov --workspace --fail-under-lines 100 --show-missing-lines"
 
 [tasks.install]
-description = "a dev build to ~/.local/bin/sandman-next, beside the release"
-run = "cargo build --release && install -m 755 target/release/sandman ~/.local/bin/sandman-next"
+description = "a dev build to ~/.local/bin/sandman-next and its child sandman-infer-next, beside the release"
+run = "cargo build --release --workspace && install -m 755 target/release/sandman ~/.local/bin/sandman-next && install -m 755 target/release/sandman-infer ~/.local/bin/sandman-infer-next"

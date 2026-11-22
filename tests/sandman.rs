@@ -19,7 +19,7 @@ mod tests {
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio, id};
     use std::sync::OnceLock;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     use std::{env, fs, iter, thread};
 
     /// Recall's corpus: candidates in two banks (one description past 160 characters, a tie on
@@ -122,8 +122,9 @@ mod tests {
         stream.read_to_string(&mut reply).map(|_| reply)
     }
 
-    /// `sandman args` with `envs` in place of `HOME` and the `SANDMAN_*` vars; every transport is
-    /// curl, and the first on `PATH` refuses (exit 7) unless a test names its own (`stub`).
+    /// `sandman args` with `envs` in place of `HOME` and the `SANDMAN_*` vars; no `sandman-infer`
+    /// child, and no socket answers unless a test fakes one (`stub`); Kev and Jev are curl, and the
+    /// first on `PATH` refuses (exit 7) unless a test names its own (`stub`).
     fn command(envs: &[(&str, &str)], args: &[&str]) -> Command {
         static REFUSE: OnceLock<String> = OnceLock::new();
         let bin = REFUSE.get_or_init(|| {
@@ -151,7 +152,7 @@ mod tests {
             .env_remove("SANDMAN_ROOT")
             .env_remove("TYPESAFE_API_KEY")
             .env("PATH", bin)
-            .env("SANDMAN_OLLAMA", "http://ollama.test")
+            .env("SANDMAN_INFER", "")
             .envs(envs.iter().copied());
         command
     }
@@ -280,11 +281,13 @@ mod tests {
         Ok((daemon, ready))
     }
 
-    /// A stub `curl` in `<root>/bin`, and `PATH` with it first: each request appended to
-    /// `<root>/<name>.in` (`embed`, `pplx`, `kev` or `jev` by its URL), its argv to `<name>.argv`,
-    /// the key variable to `<name>.env` and Jev's config to `jev.config`; `<root>/<name>.fail`,
-    /// when present, is sourced first; an embedding is `[clock, deploy, beta, 1]`, each 1 when the
-    /// text holds the word, a decision `<root>/answers`.
+    /// A stub `curl` in `<root>/bin`, and `PATH` with it first, and a fake `sandman-infer` on
+    /// `<root>/run/infer.sock`: each request appended to `<root>/<name>.in` (`kev` or `jev` by its
+    /// URL, `embed` or `pplx` by its op), curl's argv to `<name>.argv`, the key variable to
+    /// `<name>.env` and Jev's config to `jev.config`; `<root>/<name>.fail`, when present, is sourced
+    /// first, the request in `$body`; an embedding is `[clock, deploy, beta, 1]`, each 1 when the
+    /// text holds the word, a decision `<root>/answers`. The fake replies with what its script
+    /// prints, a connection at a time, each in its own thread.
     fn stub(root: &str) -> Result<String, Box<dyn Error>> {
         let bin = format!("{root}/bin");
         fs::create_dir_all(&bin)?;
@@ -293,18 +296,43 @@ mod tests {
             format!(
                 r#"#!/bin/sh
 for arg; do url=$arg; done
-case $url in */api/embed) n=embed;; *1703*) n=kev;; *typesafe*) n=jev;; *) n=pplx;; esac
+case $url in *1703*) n=kev;; *) n=jev;; esac
 printf '%s\n' "$@" > {root}/$n.argv
 printf '[%s]' "$SANDMAN_SYSTEMONE_KEY" > {root}/$n.env
 case "$*" in *-K*) cat > {root}/jev.config; body=$(cat <&3);; *) body=$(cat);; esac
 printf '%s\n' "$body" >> {root}/$n.in
 [ -f {root}/$n.fail ] && . {root}/$n.fail
-[ $n = embed ] || exec cat {root}/answers
-printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"input":\["/, "", s); sub(/"\],"model".*$/, "", s); n = split(s, t, /","/); printf "{{\"embeddings\":["; for (i = 1; i <= n; i++) printf "%s[%d,%d,%d,1]", (i > 1 ? "," : ""), (index(t[i], "clock") > 0), (index(t[i], "deploy") > 0), (index(t[i], "beta") > 0); print "]}}" }}'
+exec cat {root}/answers
 "#
             ),
         )?;
         fs::set_permissions(format!("{bin}/curl"), Permissions::from_mode(0o755))?;
+        let run = format!("{root}/run");
+        fs::create_dir_all(&run)?;
+        fs::set_permissions(&run, Permissions::from_mode(0o700))?;
+        let listener = UnixListener::bind(format!("{run}/infer.sock"))?;
+        let script = format!(
+            r#"case $body in '{{"op":"embed"'*) n=embed;; *) n=pplx;; esac
+printf '%s\n' "$body" >> {root}/$n.in
+[ -f {root}/$n.fail ] && . {root}/$n.fail
+[ $n = embed ] || exec cat {root}/answers
+printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"op":"embed","texts":\["/, "", s); sub(/"\]\}}$/, "", s); n = split(s, t, /","/); printf "{{\"embeddings\":["; for (i = 1; i <= n; i++) printf "%s[%d,%d,%d,1]", (i > 1 ? "," : ""), (index(t[i], "clock") > 0), (index(t[i], "deploy") > 0), (index(t[i], "beta") > 0); print "],\"ok\":true}}" }}'
+"#
+        );
+        drop(thread::spawn(move || {
+            for conn in listener.incoming().flatten() {
+                let answer = script.clone();
+                drop(thread::spawn(move || -> io::Result<()> {
+                    let mut body = String::new();
+                    let _: usize = BufReader::new(&conn).read_line(&mut body)?;
+                    let out = Command::new("sh")
+                        .args(["-c", &answer])
+                        .env("body", body.trim_end())
+                        .output()?;
+                    (&conn).write_all(&out.stdout)
+                }));
+            }
+        }));
         Ok(format!("{bin}:{}", env::var("PATH")?))
     }
 
@@ -4650,7 +4678,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             &[
                 "\"adopted\" 1 true {\"new\":1.0,\"old\":1.0} 1 null",
                 "\"kept\" 1 true {\"new\":0.5,\"old\":1.0} 0 null",
-                "\"failed\" 1 true null 0 \"question: pplx: exit status: 22:\"",
+                "\"failed\" 1 true null 0 \"question: pplx: output: EOF while parsing a value at line 1 column 0\"",
             ]
             .join("\n"),
         )?;
@@ -5397,7 +5425,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         )?;
         let query = |cue: &str| {
             format!(
-                r#"{{"input":["Instruct: Given what an AI coding agent is about to do, retrieve the memory notes it needs to do it correctly\nQuery: {cue}"],"model":"qwen3-embedding:0.6b","options":{{"num_ctx":1024}},"truncate":true}}"#
+                r#"{{"op":"embed","texts":["Instruct: Given what an AI coding agent is about to do, retrieve the memory notes it needs to do it correctly\nQuery: {cue}"]}}"#
             )
         };
         let clock = "/work/alpha \u{b7} Pass a clock in\nTests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\u{e9} clocks lose\nInject the clock.";
@@ -5415,7 +5443,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             &format!(
                 "{}\n{}\n",
                 query(clocked),
-                json!({"input": excerpts, "model": "qwen3-embedding:0.6b", "options": {"num_ctx": 1024u16}, "truncate": true})
+                json!({"op": "embed", "texts": excerpts})
             ),
         )?;
         let cache = fs::read_to_string(format!("{root}/embeddings.jsonl"))?;
@@ -5441,9 +5469,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 .lines()
                 .next()
                 .unwrap_or_default(),
-            &format!(
-                r#"{{"model":"pplx-decider-flash:4b","questions":{{{asked}}},"state":"{clocked}"}}"#
-            ),
+            &format!(r#"{{"op":"decide","questions":{{{asked}}},"state":"{clocked}"}}"#),
         )?;
         same(
             &run(
@@ -5719,22 +5745,17 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             "2\nsandman: --session takes a session id\n",
         )?;
         // the embeddings down: the decision over the lexical order
-        fail("embed", "echo 'curl: (7) Failed to connect' >&2; exit 7\n")?;
+        fail(
+            "embed",
+            "echo '{\"code\":\"no_model\",\"ok\":false,\"reason\":\"not loaded\"}'; exit\n",
+        )?;
         same(
             &pull(&envs(&[]), &clocked)?,
-            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} pplx: embed failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.98 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.97 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.96 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.94 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\n.92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: embed: exit status: 7: curl: (7) Failed to connect\nrecall: scorer=\"pplx\" embedded=false ask=true about=null",
-        )?;
-        same(
-            &read("embed.argv"),
-            "-q\n-sS\n--fail-with-body\n--max-time\n2\n-H\nContent-Type: application/json\n--data-binary\n@-\nhttp://ollama.test/api/embed\n",
-        )?;
-        same(
-            &read("pplx.argv"),
-            "-q\n-sS\n--fail-with-body\n--max-time\n2\n-H\nContent-Type: application/json\n--data-binary\n@-\nhttp://ollama.test/v1/systemone\n",
+            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} pplx: embed failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.98 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.97 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.96 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.94 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\n.92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: embed: no_model: not loaded\nrecall: scorer=\"pplx\" embedded=false ask=true about=null",
         )?;
         mend("embed")?;
-        // pplx down: Kev, the same request but its model
-        fail("pplx", "exit 7\n")?;
+        // pplx booting: Kev, the same request but its model
+        fail("pplx", "echo '{\"code\":\"booting\",\"ok\":false}'; exit\n")?;
         same(
             &head(&pull(&envs(&[]), &clocked)?),
             "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} kev: pplx failed",
@@ -5745,7 +5766,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 .lines()
                 .last()
                 .unwrap_or_default()
-                .replace("pplx-decider-flash:4b", "kev-latest"),
+                .replace(r#""op":"decide""#, r#""model":"kev-latest""#),
         )?;
         same(
             &format!("{}{}", read("kev.argv"), read("kev.env")),
@@ -5801,7 +5822,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         )?;
         same(
             &pull(&envs(&[]), &clocked)?,
-            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} hybrid, no decision model: pplx and kev and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.98 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.98 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.95 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.94 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\n.92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: pplx: exit status: 7:; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\nrecall: scorer=null embedded=true ask=true about=null",
+            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} hybrid, no decision model: pplx and kev and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.98 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.98 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.95 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.94 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\n.92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: pplx: booting; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\nrecall: scorer=null embedded=true ask=true about=null",
         )?;
         downed(
             21_600_000,
@@ -5827,7 +5848,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         fail("embed", "exec echo '{\"embeddings\":[]}'\n")?;
         same(
             &pull(&envs(&[]), &clocked)?,
-            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed and pplx and kev and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\nread one in full: sandman show <path>\nsandman recall: embed: reply: not one embedding per text; pplx: exit status: 7:; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\nrecall: scorer=null embedded=false ask=true about=null",
+            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed and pplx and kev and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\nread one in full: sandman show <path>\nsandman recall: embed: reply: not one embedding per text; pplx: booting; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\nrecall: scorer=null embedded=false ask=true about=null",
         )?;
         mend("embed")?;
         // the order is one setting: none, the hybrid; an unknown name skipped
@@ -5844,6 +5865,16 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 .join("\n"),
             ".92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: kev: reply: no noul for question 0\nrecall: scorer=null embedded=true ask=true about=null",
         )?;
+        // no listener: not running, nothing retried
+        fs::remove_file(format!("{root}/run/infer.sock"))?;
+        same(
+            pull(&envs(&[("SANDMAN_SCORERS", "pplx")]), &clocked)?
+                .lines()
+                .rev()
+                .nth(1)
+                .unwrap_or_default(),
+            "sandman recall: embed: infer: not running; pplx: infer: not running",
+        )?;
         let errors: Vec<String> = ledger(&root)?
             .lines()
             .map(|text| {
@@ -5856,7 +5887,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             .collect::<Result<_, Box<dyn Error>>>()?;
         same(
             &errors.join("\n"),
-            "\"pplx\" false \"embed: exit status: 7: curl: (7) Failed to connect\"\n\"kev\" true \"pplx: exit status: 7:\"\n\"jev\" true \"pplx: exit status: 7:; kev: exit status: 7:\"\n\"jev\" true \"pplx: exit status: 7:; kev: exit status: 7:\"\nnull true \"pplx: exit status: 7:; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\"\nnull true \"pplx: exit status: 7:; kev: exit status: 7:\"\nnull true \"pplx: exit status: 7:; kev: exit status: 7:; jev: exit status: 7:\"\nnull false \"embed: reply: not one embedding per text; pplx: exit status: 7:; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\"\nnull true null\nnull true \"kev: reply: no noul for question 0\"",
+            "\"pplx\" false \"embed: no_model: not loaded\"\n\"kev\" true \"pplx: booting\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\"\nnull true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 7:\"\nnull false \"embed: reply: not one embedding per text; pplx: booting; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\"\nnull true null\nnull true \"kev: reply: no noul for question 0\"\nnull false \"embed: infer: not running; pplx: infer: not running\"",
         )
     }
 
@@ -6073,7 +6104,10 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             "\"-work-alpha/feedback_clock.md\" [0.7071067811865475,0.0,0.0,0.7071067811865475]\n\"-work-alpha/project_vpn.md\" [0.0,0.7071067811865475,0.0,0.7071067811865475]",
         )?;
         // the query embeds, the candidates do not
-        fs::write(&fail, "case $body in *Instruct*) ;; *) exit 7;; esac\n")?;
+        fs::write(
+            &fail,
+            "case $body in *Instruct*) ;; *) echo '{\"code\":\"booting\",\"ok\":false}'; exit;; esac\n",
+        )?;
         let out = pull(&[])?;
         same(
             &out.lines()
@@ -6081,7 +6115,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 .map(|line| line.split(" ms=").next().unwrap_or_default())
                 .collect::<Vec<_>>()
                 .join("\n"),
-            "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} pplx: embed failed\nsandman recall: embed: exit status: 7:\nrecall: scorer=\"pplx\" embedded=true ask=true about=null",
+            "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} pplx: embed failed\nsandman recall: embed: booting\nrecall: scorer=\"pplx\" embedded=true ask=true about=null",
         )?;
         fs::remove_file(&fail)?;
         // a stale line per byte of the live ones, an earlier line for a live hash
@@ -6099,7 +6133,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 stale.repeat(live.len().div_euclid(stale.len()).saturating_add(1))
             ),
         )?;
-        fs::write(&fail, "exit 7\n")?;
+        fs::write(&fail, "echo '{\"code\":\"booting\",\"ok\":false}'; exit\n")?;
         let log = format!("{root}/run/serve.log");
         let (mut daemon, _) = serve(
             &root,
@@ -6146,7 +6180,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
-            "{\"at\":\"A\",\"event\":\"embed\",\"reason\":\"exit status: 7: \"} {\"at\":\"A\",\"embedded\":3,\"event\":\"embed\"} {\"at\":\"A\",\"embedded\":1,\"event\":\"embed\"}",
+            "{\"at\":\"A\",\"event\":\"embed\",\"reason\":\"booting\"} {\"at\":\"A\",\"embedded\":3,\"event\":\"embed\"} {\"at\":\"A\",\"embedded\":1,\"event\":\"embed\"}",
         )?;
         // a cosine whose sum needs Neumaier's compensation, as Python 3.12's `sum`
         let asked = read(&format!("{root}/embed.in")).lines().count();
@@ -6509,7 +6543,10 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             ),
             &format!(r#""studio" {pid} "ready" "{version}" 20"#),
         )?;
-        same(&sandman(&envs, &["status"], "")?, &format!("0\n{ready}"))?;
+        same(
+            &sandman(&envs, &["status"], "")?,
+            &format!("0\n{{\"infer\":null,{}", ready.get(1..).unwrap_or_default()),
+        )?;
         same(
             &sandman(&envs, &["serve"], "")?,
             "1\nsandman serve: already running\n",
@@ -6556,12 +6593,184 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                         .map_or("", |text| text.get(28..).unwrap_or_default())
                 })
                 .collect::<String>(),
-            &format!(
-                ",\"event\":\"exit\",\"reason\":\"signal TERM\"}}\n,\"event\":\"start\",\"pid\":{pid},\"version\":\"{version}\"}}\n"
-            ),
+            ",\"event\":\"exit\",\"reason\":\"signal TERM\"}\n,\"event\":\"infer\",\"outcome\":\"absent\"}\n",
         )?;
         let left = ["pid", "sock"].map(|kind| fs::exists(format!("{run}/serve.{kind}")));
         same(&format!("{left:?}"), "[Ok(false), Ok(false)]")
+    }
+
+    /// `serve` supervises `sandman-infer`: each spawn a `started` line with its pid, an exit an
+    /// `exited` line (a failed spawn's error its status) and a respawn after the backoff; a stop
+    /// TERMs the child's group, its own child with it, and KILLs a group ignoring TERM a second on,
+    /// the daemon still exiting 0 inside launchd's 2 s with its exit line last. `$SANDMAN_INFER`
+    /// unset, the child is the file beside the daemon's executable, its link resolved, named as it
+    /// is with `sandman` read `sandman-infer`; no such file, `absent`.
+    #[test]
+    fn supervise() -> Outcome {
+        let root = temp("supervise")?;
+        let read = |file: &str| fs::read_to_string(format!("{root}/{file}")).unwrap_or_default();
+        // the log's lines, `at` dropped, and the supervisor's alone
+        let logged = || -> Vec<Value> {
+            read("run/serve.log")
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .map(|mut line| {
+                    drop(line.as_object_mut().map(|fields| fields.remove("at")));
+                    line
+                })
+                .collect()
+        };
+        let infer = || -> String {
+            logged()
+                .iter()
+                .filter(|line| line["event"] == "infer")
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        // TERM, timed; the exit line last
+        let stop = |mut daemon: Daemon| -> Result<Duration, Box<dyn Error>> {
+            let begun = Instant::now();
+            same(
+                &format!(
+                    "{} {:?}",
+                    kill("-TERM", &daemon.0.id().to_string())?,
+                    daemon.0.wait()?.code()
+                ),
+                "true Some(0)",
+            )?;
+            let spent = begun.elapsed();
+            same(
+                &logged()
+                    .last()
+                    .map_or(Value::Null, |line| line["event"].clone())
+                    .to_string(),
+                "\"exit\"",
+            )?;
+            Ok(spent)
+        };
+        // the first run exits 3, the next waits on its own child
+        let child = format!(
+            "n=$(cat {root}/runs 2>/dev/null || echo 0); echo $((n + 1)) > {root}/runs; echo $$ >> {root}/pids; [ $n = 0 ] && exit 3; sleep 30 & echo $! > {root}/grandchild; wait"
+        );
+        let (restarting, _) = serve(
+            &root,
+            &[
+                ("SANDMAN_INFER", &child),
+                ("SANDMAN_INFER_BACKOFF_MS", "50"),
+            ],
+        )?;
+        until(|| !read("grandchild").is_empty() && infer().lines().count() == 3)?;
+        let grandchild = read("grandchild").trim().to_owned();
+        let _: Duration = stop(restarting)?;
+        let pids: Vec<String> = read("pids").lines().map(str::to_owned).collect();
+        same(
+            &format!("{}\n{}", infer(), pids.join(" ")),
+            &format!(
+                "{{\"event\":\"infer\",\"outcome\":\"started\",\"pid\":{}}}\n{{\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"exit status: 3\"}}\n{{\"event\":\"infer\",\"outcome\":\"started\",\"pid\":{}}}\n{{\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"signal: 15 (SIGTERM)\"}}\n{}",
+                pids.first().ok_or("no first pid")?,
+                pids.get(1).ok_or("no second pid")?,
+                pids.join(" ")
+            ),
+        )?;
+        until(|| !kill("-0", &grandchild).unwrap_or(true))?;
+        // TERM ignored, by the child and so by its children: KILLed a second on, inside the 2 s
+        let stubborn = "trap '' TERM; while :; do sleep 1; done";
+        fs::remove_file(format!("{root}/run/serve.log"))?;
+        let (deaf, _) = serve(&root, &[("SANDMAN_INFER", stubborn)])?;
+        until(|| infer().contains("started"))?;
+        let spent = stop(deaf)?;
+        same(
+            &format!(
+                "{} {}",
+                spent >= Duration::from_secs(1) && spent < Duration::from_secs(2),
+                infer().lines().last().unwrap_or_default()
+            ),
+            "true {\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"signal: 9 (SIGKILL)\"}",
+        )?;
+        // no `sh` to spawn: the failure is the exit line, retried after the backoff
+        fs::remove_file(format!("{root}/run/serve.log"))?;
+        let (lost, _) = serve(
+            &root,
+            &[
+                ("PATH", "/nonexistent"),
+                ("SANDMAN_INFER", "x"),
+                ("SANDMAN_INFER_BACKOFF_MS", "50"),
+            ],
+        )?;
+        until(|| infer().lines().count() >= 2)?;
+        let _: Duration = stop(lost)?;
+        same(
+            infer().lines().next().unwrap_or_default(),
+            "{\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"No such file or directory (os error 2)\"}",
+        )?;
+        // the default: a copy of this build as `sandman-next`, run through a link named `sandman`
+        let bin = format!("{root}/bin");
+        fs::create_dir_all(&bin)?;
+        fs::create_dir_all(format!("{root}/link"))?;
+        let _: u64 = fs::copy(env!("CARGO_BIN_EXE_sandman"), format!("{bin}/sandman-next"))?;
+        symlink(
+            format!("{bin}/sandman-next"),
+            format!("{root}/link/sandman"),
+        )?;
+        let linked = || -> Result<Daemon, Box<dyn Error>> {
+            let base = command(
+                &[
+                    ("SANDMAN_CONSOLIDATOR", "exit 9"),
+                    ("SANDMAN_ENCODER", "exit 9"),
+                    ("SANDMAN_MACHINE", "studio"),
+                    ("SANDMAN_REFLECTOR", "exit 9"),
+                    ("SANDMAN_ROOT", &root),
+                ],
+                &["serve"],
+            );
+            let mut program = Command::new(format!("{root}/link/sandman"));
+            for (key, value) in base.get_envs() {
+                let _: &mut Command = match value {
+                    Some(set) => program.env(key, set),
+                    None => program.env_remove(key),
+                };
+            }
+            let mut spawned = Daemon(
+                program
+                    .arg("serve")
+                    .env_remove("SANDMAN_INFER")
+                    .stdout(Stdio::piped())
+                    .spawn()?,
+            );
+            let _: usize = BufReader::new(spawned.0.stdout.take().ok_or("stdout")?)
+                .read_line(&mut String::new())?;
+            Ok(spawned)
+        };
+        fs::remove_file(format!("{root}/run/serve.log"))?;
+        let _: Duration = stop(linked()?)?;
+        same(&infer(), "{\"event\":\"infer\",\"outcome\":\"absent\"}")?;
+        plant(
+            &root,
+            &[(
+                "bin/sandman-infer-next",
+                &format!("#!/bin/sh\necho \"$0\" > {root}/sibling\nexec sleep 30\n"),
+            )],
+        )?;
+        fs::set_permissions(
+            format!("{bin}/sandman-infer-next"),
+            Permissions::from_mode(0o755),
+        )?;
+        fs::remove_file(format!("{root}/run/serve.log"))?;
+        let sibled = linked()?;
+        until(|| !read("sibling").is_empty())?;
+        let _: Duration = stop(sibled)?;
+        same(
+            &format!("{}{}", read("sibling"), infer()),
+            &format!(
+                "{}/sandman-infer-next\n{{\"event\":\"infer\",\"outcome\":\"started\",\"pid\":{}}}\n{{\"event\":\"infer\",\"outcome\":\"exited\",\"status\":\"signal: 15 (SIGTERM)\"}}",
+                fs::canonicalize(&bin)?.display(),
+                logged()
+                    .iter()
+                    .find(|line| line["outcome"] == "started")
+                    .map_or(Value::Null, |line| line["pid"].clone())
+            ),
+        )
     }
 
     /// The tick's first job ends what never ended, of this machine's sessions started before the
@@ -6992,7 +7201,8 @@ esac
 removed {agents}/dev.gigantic.sandman.breathe.plist
 launchctl bootout {gui}/dev.gigantic.sandman.report
 removed {agents}/dev.gigantic.sandman.report.plist
-{linked}wrote {file}
+{linked}models: {root}/models wants qwen3-embedding-0.6b-q8_0.gguf (https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf, SHA-256 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439) and decider-flash-v1.2-q8_0.gguf (Perplexity's gated pplx-decider-flash-v1.2 GGUF repository, SHA-256 ffb27ade8976765b0e6943a0b7f5f3fd0f7042d45ad90256a76d608bcd3942c2)
+wrote {file}
 launchctl bootstrap {gui} {file}
 print {gui}/dev.gigantic.sandman.breathe
 print {gui}/dev.gigantic.sandman.breathe
@@ -7021,6 +7231,14 @@ bootstrap {gui} {file}
             &format!(
                 r#"{{"dev.gigantic.sandman.plist", "dev.gigantic.sandman.upgrade.plist", "io.jlg.kev.plist"}}true{layout}/current/sandman"#
             ),
+        )?;
+        // both models in place: no models line from here on
+        plant(
+            &root,
+            &[
+                ("models/decider-flash-v1.2-q8_0.gguf", ""),
+                ("models/qwen3-embedding-0.6b-q8_0.gguf", ""),
+            ],
         )?;
         // the same plist loaded: one kickstart; a changed one (another PATH) reloaded
         let retired = format!(
@@ -7144,26 +7362,56 @@ bootstrap {gui} {file}
     }
 
     /// `status` with no daemon prints down and exits 1; against a daemon of another version it
-    /// passes the health through and names both versions and the fix on stderr.
+    /// passes the health through and names both versions and the fix on stderr. Its `infer` is the
+    /// child's own health, null while it does not answer, and a child of another version is named
+    /// the same way.
     #[test]
     fn status() -> Outcome {
         let root = temp("status")?;
-        same(
-            &sandman(&[("SANDMAN_ROOT", &root)], &["status"], "")?,
-            "1\n{\"code\":\"down\",\"ok\":false}\n",
-        )?;
+        let status = || sandman(&[("SANDMAN_ROOT", &root)], &["status"], "");
+        same(&status()?, "1\n{\"code\":\"down\",\"ok\":false}\n")?;
         fs::create_dir_all(format!("{root}/run"))?;
-        let listener = UnixListener::bind(format!("{root}/run/serve.sock"))?;
-        drop(thread::spawn(move || -> io::Result<()> {
-            let (mut conn, _) = listener.accept()?;
-            // read the request first: closing on an unread request resets the client's write
-            let _: usize = BufReader::new(&conn).read_line(&mut String::new())?;
-            conn.write_all(b"{\"ok\":true,\"version\":\"0.0.0\"}\n")
-        }));
+        // a fake daemon on `<root>/run/<daemon>.sock` answering every connection with `reply`
+        let answer = |daemon: &str, reply: String| -> Outcome {
+            let sock = format!("{root}/run/{daemon}.sock");
+            drop(fs::remove_file(&sock));
+            let listener = UnixListener::bind(sock)?;
+            drop(thread::spawn(move || -> io::Result<()> {
+                for mut conn in listener.incoming().flatten() {
+                    // read the request first: closing on an unread request resets the client's write
+                    let _: usize = BufReader::new(&conn).read_line(&mut String::new())?;
+                    conn.write_all(reply.as_bytes())?;
+                }
+                Ok(())
+            }));
+            Ok(())
+        };
+        answer("serve", "{\"ok\":true,\"version\":\"0.0.0\"}\n".to_owned())?;
+        let daemon = format!(
+            "sandman status: the daemon is 0.0.0, this client {VERSION}; swap it: sandman setup\n"
+        );
         same(
-            &sandman(&[("SANDMAN_ROOT", &root)], &["status"], "")?,
+            &status()?,
+            &format!("0\n{{\"infer\":null,\"ok\":true,\"version\":\"0.0.0\"}}\n{daemon}"),
+        )?;
+        answer(
+            "infer",
+            format!("{{\"ok\":true,\"state\":\"ready\",\"version\":\"{VERSION}\"}}\n"),
+        )?;
+        same(
+            &status()?,
             &format!(
-                "0\n{{\"ok\":true,\"version\":\"0.0.0\"}}\nsandman status: the daemon is 0.0.0, this client {VERSION}; swap it: sandman setup\n"
+                "0\n{{\"infer\":{{\"ok\":true,\"state\":\"ready\",\"version\":\"{VERSION}\"}},\"ok\":true,\"version\":\"0.0.0\"}}\n{daemon}"
+            ),
+        )?;
+        answer(
+            "infer",
+            "{\"ok\":true,\"state\":\"booting\",\"version\":\"0.0.1\"}\n".to_owned(),
+        )?;
+        same(
+            &status()?,
+            &format!(
+                "0\n{{\"infer\":{{\"ok\":true,\"state\":\"booting\",\"version\":\"0.0.1\"}},\"ok\":true,\"version\":\"0.0.0\"}}\n{daemon}sandman status: sandman-infer is 0.0.1, this client {VERSION}; swap it: sandman setup\n"
             ),
         )
     }

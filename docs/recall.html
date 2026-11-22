@@ -81,8 +81,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p class="lead docs-lead"><code class="code">recall</code> is the agent's tool: it pulls the memories that
     bear on what it is about to do, by its own cue, whenever it needs them. A session's start gets a seed.</p>
   <p class="notice notice-warn"><span>Partly built: <code class="code">sandman recall</code>, the seed and the pull,
-    <code class="code">sandman show</code> and <code class="code">sandman remember</code> run (<a class="link" href="#tool">the tools</a>), on one
-    local Ollama (<a class="link" href="#needs">needs</a>); the mod wiring and the pane are not, and the earlier sandman's
+    <code class="code">sandman show</code> and <code class="code">sandman remember</code> run (<a class="link" href="#tool">the tools</a>), both
+    models in <code class="code">sandman-infer</code>, the daemon's child (<a class="link" href="#needs">needs</a>); the mod wiring and the pane are not, and the earlier sandman's
     recall runs at every session's start. A decision is open until its badge says settled; the pipeline and its cut are
     <a class="link" href="#chosen">the evaluation's choice</a>.</span></p>
   <nav class="row docs-toc" aria-label="sections">
@@ -182,7 +182,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
         <text class="flow-note" x="482" y="448" text-anchor="middle">the seed runs the same pass in 4 s, a pull in 10 s; a stage that has not answered by then is skipped</text>
       </svg>
 </div>
-    <figcaption>Every station runs today as <code class="code">sandman recall</code>, both models in one local Ollama;
+    <figcaption>Every station runs today as <code class="code">sandman recall</code>, both models in <code class="code">sandman-infer</code>;
       the mod does not run the seed yet. pplx's p50 is the evaluation's over 98 cues
       (<a class="link" href="#latency">latency</a>).</figcaption>
   </figure>
@@ -369,7 +369,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p>At most 4 s for the whole pass, every embedding and every scorer tried (<code class="code">$SANDMAN_SEED_MS</code>),
     inside the mod's 10 s; a pull has <code class="code">$SANDMAN_RECALL_MS</code>, 10 s. Over the real corpus of 635
     a pull takes about 0.95 s with pplx answering, 0.27 s with no decision model and 0.14 s with neither, the read of
-    the 14 MB cache included (measured 2026-11-13, an idle Ollama). The seed never fails the prompt: past the bound it
+    the 14 MB cache included (measured 2026-11-13, both models then served by an idle Ollama). The seed never fails the prompt: past the bound it
     prints what the stages that answered allow, exits 0 and records why. ① is written before any of it, so nothing
     loses the start mark.</p>
 </section>
@@ -385,8 +385,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <code class="code">· kev: pplx failed</code>, <code class="code">· hybrid, no decision model</code>,
     <code class="code">· lexical: embed and pplx and kev and jev failed</code>) and the ledger line keeps each cause.</p>
   <ul class="stack claims" role="list">
-    <li>Down is a refused connection, a timeout, an HTTP error, a reply without a noul or an embedding per text, or
-      Jev without a key. A missing model in Ollama falls through the same way.</li>
+    <li>Down is no socket or a refused connection, a timeout, an HTTP error or a refusal
+      (<code class="code">booting</code>, <code class="code">no_model</code>), a reply without a noul or an embedding per
+      text, or Jev without a key.</li>
     <li>Jev out of credit or refused (<code class="code">billing_error</code>, 401, 402, 403) is held down for 6 hours,
       anything else for 60 s, in <code class="code">&lt;root&gt;/jev-down.json</code>; while it holds, Jev is skipped.</li>
   </ul>
@@ -559,8 +560,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
       the judged sends, and <code class="code">reflect</code> watches for memories sent often and never used. A stricter question measured as noise and is not shipped.</li>
     <li><strong>the number</strong> — a fused score ranks; it is not a probability, and the floors are where this
       corpus's scores fell.</li>
-    <li><strong>one server</strong> — the best path needs the local Ollama and both models resident; without it every
-      pull is the lexical cut, .12 less must-recall (<a class="link" href="#needs">needs</a>).</li>
+    <li><strong>one child</strong> — the best path needs <code class="code">sandman-infer</code> with both models
+      resident; without it every pull is the lexical cut, .12 less must-recall (<a class="link" href="#needs">needs</a>).</li>
   </ul>
 </section>
 
@@ -568,15 +569,20 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <header>
     <h2 class="h2">What must be running</h2>
   </header>
-  <p>One Ollama at <code class="code">$SANDMAN_OLLAMA</code> (<code class="code">http://127.0.0.1:11434</code>) holding
-    <code class="code">qwen3-embedding:0.6b</code> (Q8_0) and <code class="code">pplx-decider-flash:4b</code>, a System One
-    decision model, about 6 GiB resident together; Kev on <code class="code">127.0.0.1:1703</code> is the next scorer,
-    hosted Jev the last. Without Ollama, recall answers from BM25 alone and says so; without the cache, a pull embeds 8
-    and the tick fills the rest.</p>
-  <p class="docs-note"><span class="badge">next</span> Native inference, without Ollama: llama-cpp-2 matches it over 98
-    cues (precision .650 against .648, must-recall .620 against .611) at the same speed; candle has no
-    Qwen3.5 / Gated-DeltaNet model as of 0.11.1. The shape is a supervised <code class="code">sandman-infer</code> child
-    binary behind the same scorer seam, about 3–4 days, after the mod wiring; until then Ollama is the shipped path.</p>
+  <p><code class="code">sandman-infer</code>, the daemon's child (<code class="code">serve</code> starts it beside
+    itself and restarts it when it exits), runs both models in process over llama.cpp on Metal and answers on
+    <code class="code">&lt;root&gt;/run/infer.sock</code>: <code class="code">qwen3-embedding-0.6b-q8_0.gguf</code> (639 MB)
+    and <code class="code">decider-flash-v1.2-q8_0.gguf</code>, the pplx System One decision model (5.2 GB), both
+    in <code class="code">&lt;root&gt;/models</code>, which <code class="code">sandman setup</code> creates and names the
+    sources for; about 8 GB resident, both loaded at start. It reports <code class="code">booting</code> for the first
+    seconds, about 13 s on the first start after an install while Metal compiles its shaders, and recall falls back
+    meanwhile and says so (<code class="code">embed: booting</code>); Kev on <code class="code">127.0.0.1:1703</code> is
+    the next scorer, hosted Jev the last. Without the child, recall answers from BM25 alone and says so; without the
+    cache, a pull embeds 8 and the tick fills the rest.</p>
+  <p>Parity with what it replaced (measured 2026-11-22, M4 Max · <code class="code">infer/tests/infer.rs</code>
+    <code class="code">parity</code>): the decision prompt tokenises to the official encoder's ids, nouls within
+    1.5e-7 of the prototype's native run; embeddings at cosine .99999955 or more against Ollama's over 50 texts.
+    Ten questions decide in about 415 ms, 16 embeddings in about 124 ms.</p>
 </section>
 
 <section class="docs-section" id="open">
