@@ -413,7 +413,7 @@ fn main() -> ExitCode {
                             (id.clone(), json!({"noul": noul, "type": "noul"}))
                         })
                         .collect();
-                    Ok(json!({"answers": answers, "ok": true, "usage": {"input_tokens": tokens.len()}}))
+                    Ok(json!({"answers": answers, "ok": true, "usage": {"input_tokens": tokens.len()}, "version": VERSION}))
                 }))
             },
         );

@@ -381,7 +381,8 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p>Each stage drops out within the same bound and the rest answer, never an error to the agent: the embeddings down,
     the decision runs on BM25's order; a decision model down, the next in <code class="code">$SANDMAN_SCORERS</code>
     (<code class="code">pplx,kev,jev</code>), each sent the same request; none, the hybrid cut; nothing, the lexical cut.
-    The header names the path and what failed (<code class="code">· pplx</code>,
+    The header names the path and what failed (<code class="code">· pplx (infer &lt;version&gt;)</code>, the build
+    that answered, plain <code class="code">· pplx</code> from an older child,
     <code class="code">· kev: pplx failed</code>, <code class="code">· hybrid, no decision model</code>,
     <code class="code">· lexical: embed and pplx and kev and jev failed</code>) and the ledger line keeps each cause.</p>
   <ul class="stack claims" role="list">
@@ -416,7 +417,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     </tbody>
   </table>
 </div>
-  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"embedded":true,"error"?,"kind":"recall","machine":…,"ms":n,"scorer":"pplx","seed"?:true,"sent":[{"file":"&lt;path&gt;","id":"&lt;its id&gt;","score":0.97}],"session":…,"tokens":n}
+  <pre class="snippet">{"about"?:"&lt;owner/repo&gt;","always"?:["&lt;path&gt;"],"ask":true,"at":…,"considered":n,"cue":"&lt;200&gt;","cut":n,"embedded":true,"engine":"&lt;version&gt;","error"?,"kind":"recall","machine":…,"ms":n,"scorer":"pplx","seed"?:true,"sent":[{"file":"&lt;path&gt;","id":"&lt;its id&gt;","score":0.97}],"session":…,"tokens":n}
 {"at":…,"file":"&lt;path&gt;","id":"&lt;its id&gt;","kind":"show","machine":…,"session":…}
 {"at":…,"file":"traces/&lt;bank&gt;/&lt;file&gt;","id":"&lt;its id&gt;","kind":"remember","machine":…,"session":…,"type":"feedback"}</pre>
   <p class="docs-note"><strong>Proposed:</strong> sent, then read, then pinned or muted is the whole feedback loop, and two of its three parts exist already.</p>
@@ -504,7 +505,9 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <header>
     <h2 class="h2">The pane</h2>
     <p class="docs-note"><span class="badge">not built</span> Today the mod's pane shows one row per injected block,
-      <code class="code">▸ hh:mm · sandman recall · &lt;n&gt; chars</code>, expanding to the whole text dimmed. The
+      <code class="code">▸ hh:mm · sandman recall · &lt;n&gt; chars</code>, expanding to the whole text dimmed; a pull's
+      row carries its header's path verbatim, so <code class="code">pplx (infer &lt;version&gt;)</code> names the engine
+      that answered. The
       engine allows a working list: the session's pulls, the newest open.</p>
   </header>
   <figure class="figure">

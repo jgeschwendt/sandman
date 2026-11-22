@@ -238,8 +238,9 @@ mod tests {
 
     /// Each op over the tiny models, and each of its typed errors: decide renders the official
     /// prompt (escapes and the default instructions seen in the token count), answers per question
-    /// in key order, the same request the same nouls; a prompt over 8,192 tokens is refused whole;
-    /// embed cuts a text at 1,023 tokens, batches 16 a decode, and L2-normalises.
+    /// in key order, the same request the same nouls, the build's version beside them; a prompt
+    /// over 8,192 tokens is refused whole; embed cuts a text at 1,023 tokens, batches 16 a decode,
+    /// and L2-normalises.
     #[test]
     fn ops() -> Outcome {
         let root = root(
@@ -285,15 +286,17 @@ mod tests {
         let answers = first["answers"].as_object().ok_or("answers")?;
         same(
             &format!(
-                "{:?} {} {}",
+                "{:?} {} {} {:?} {}",
                 answers.keys().collect::<Vec<_>>(),
                 answers.values().all(|answer| answer["type"] == "noul"
                     && answer["noul"]
                         .as_f64()
                         .is_some_and(|value| value > 0.0f64 && value < 1.0f64)),
-                first["ok"]
+                first["ok"],
+                first.as_object().ok_or("reply")?.keys().collect::<Vec<_>>(),
+                first["version"]
             ),
-            r#"["a", "b"] true true"#,
+            &format!(r#"["a", "b"] true true ["answers", "ok", "usage", "version"] "{VERSION}""#),
         )?;
         let shape = r#"decide takes {"questions":{"<id>":{"instructions"?:str,"type":"noul"}},"state":str}"#;
         let bad = [
