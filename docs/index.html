@@ -159,7 +159,7 @@
       <tr><td>no start mark for the session in the ledger</td><td>nothing written</td></tr>
       <tr><td><code class="code">reason</code> is <code class="code">resume</code>: the end fires on the session a resume adopts</td><td>nothing written</td></tr>
       <tr><td><code class="code">$SANDMAN_NO_TAKE</code> set, or <code class="code">CLAUDE_MEMORY_PIPELINE=1</code></td><td><code class="code">skipped</code></td></tr>
-      <tr><td>a job's <code class="code">state.json</code> under <code class="code">&lt;claude&gt;/jobs/</code> names it, by <code class="code">resumeSessionId</code>, else <code class="code">sessionId</code>, its <code class="code">state</code> neither <code class="code">done</code> nor <code class="code">stopped</code> (Claude Code keeps a finished job's file), and <code class="code">reason</code> is not <code class="code">clear</code></td><td><code class="code">held</code>, with <code class="code">job</code></td></tr>
+      <tr><td>a job's <code class="code">state.json</code> under <code class="code">&lt;claude&gt;/jobs/</code> names it, by <code class="code">resumeSessionId</code>, else <code class="code">sessionId</code>, whatever its <code class="code">state</code> (the agents view lists a finished job until the person removes it), and <code class="code">reason</code> is not <code class="code">clear</code></td><td><code class="code">held</code>, with <code class="code">job</code></td></tr>
       <tr><td>no <code class="code">&lt;claude&gt;/projects/*/&lt;session&gt;.jsonl</code></td><td><code class="code">gone</code></td></tr>
       <tr><td>otherwise</td><td><code class="code">taken</code>, with <code class="code">archived</code></td></tr>
     </tbody>
@@ -366,7 +366,7 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
     <li><strong>reconcile</strong> — every 30 s (<code class="code">$SANDMAN_TICK_MS</code>), from disk,
       first: a session of this machine whose latest start mark is later than its
       latest end, or that has none, older than 10 min (<code class="code">$SANDMAN_GRACE_MS</code>; its
-      transcript may not exist yet), no unfinished job naming it: without a live transcript it ends
+      transcript may not exist yet), no job naming it: without a live transcript it ends
       <code class="code">gone</code>, reason <code class="code">no end recorded</code> (a crash, a kill, a
       session from before <code class="code">take</code>), at most 20 a tick; with one untouched for a
       week (<code class="code">$SANDMAN_IDLE_MS</code>) it is taken as <a class="link" href="#take">take</a>
@@ -379,7 +379,7 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       16 a request to <code class="code">sandman-infer</code> (about 124 ms each, measured 2026-11-22), so a
       first build of 635 lands within a few ticks. At a stop the child answers the request in hand.</li>
     <li><strong>settle</strong> — a session whose latest end is <code class="code">held</code> on this
-      machine with no start since, no unfinished job naming it any more, its transcript untouched for 120 s
+      machine with no start since, no job naming it any more, its transcript untouched for 120 s
       (<code class="code">$SANDMAN_QUIET_MS</code>), is taken as <a class="link" href="#take">take</a> does:
       <code class="code">taken</code> or <code class="code">gone</code>, reason
       <code class="code">job gone</code>. A take that fails is logged and stays held for the next tick.</li>
