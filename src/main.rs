@@ -1159,8 +1159,9 @@ fn intentions(root: &Path) -> Vec<Value> {
 }
 
 /// The background job under `<claude>/jobs/` that names `session`: its `resumeSessionId`, else
-/// its `sessionId` (a `/clear` moves a job on to a new id and leaves the old one in `sessionId`);
-/// a finished one (`state` `done` or `stopped`, which Claude Code keeps on disk) holds nothing.
+/// its `sessionId` (a `/clear` moves a job on to a new id and leaves the old one in `sessionId`),
+/// whatever its `state`: the agents view lists a `done` or `stopped` job until the person removes
+/// it, which deletes the file, and until then the session is theirs to open again.
 fn job(claude: &Path, session: &str) -> Option<String> {
     tree(&claude.join("jobs"), 1).into_iter().find_map(|dir| {
         let state: Value =
@@ -1168,8 +1169,7 @@ fn job(claude: &Path, session: &str) -> Option<String> {
         (state["resumeSessionId"]
             .as_str()
             .or_else(|| state["sessionId"].as_str())
-            == Some(session)
-            && !["done", "stopped"].contains(&text(&state["state"])))
+            == Some(session))
         .then(|| name(&dir).to_owned())
     })
 }

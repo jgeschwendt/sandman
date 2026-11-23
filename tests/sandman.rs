@@ -7516,19 +7516,14 @@ bootstrap {gui} {file}
                 ("projects/-work-alpha/@e.jsonl", bare),
                 ("projects/-work-alpha/@0.jsonl", bare),
                 ("projects/-work-locked/@f.jsonl", bare),
-                // a finished job holds nothing: a's and e's end past theirs
-                ("jobs/j0/state.json", r#"{"sessionId":"@e","state":"done"}"#),
+                // a finished job holds as a working one does: the agents view still lists it
                 (
                     "jobs/j1/state.json",
-                    r#"{"sessionId":"@b","state":"working"}"#,
+                    r#"{"resumeSessionId":"@b","sessionId":"@8","state":"done"}"#,
                 ),
                 (
                     "jobs/j2/state.json",
                     r#"{"resumeSessionId":"@9","sessionId":"@c","state":"running"}"#,
-                ),
-                (
-                    "jobs/j3/state.json",
-                    r#"{"resumeSessionId":"@a","state":"stopped"}"#,
                 ),
                 ("jobs/pins.json", "[]"),
             ],
