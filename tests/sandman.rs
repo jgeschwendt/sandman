@@ -654,7 +654,7 @@ printf '%s\n' "$body" | awk '{{ s = $0; sub(/^\{{"op":"embed","texts":\["/, "", 
         // a knob moves it: the labels page's used verdict weighs nothing
         same(
             &chart(("SANDMAN_USED_WEIGHT", "0"))?["knowledge"][0]["strength"].to_string(),
-            "0.955",
+            "0.906",
         )
     }
 
@@ -3583,7 +3583,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             .collect();
         same(
             &pruned.join("\n"),
-            "\"prune\" \"-w/feedback_old.md\" \"decay: strength 0.02 under 0.1\" null\n\"prune\" \"knowledge/k/knowledge_old.md\" \"decay: strength 0.02 under 0.1\" null",
+            "\"prune\" \"-w/feedback_old.md\" \"decay: strength 0 under 0.1\" null\n\"prune\" \"knowledge/k/knowledge_old.md\" \"decay: strength 0 under 0.1\" null",
         )?;
         let stamp = date(&["+%Y/%m/%d"])?;
         let mut aside: Vec<String> = fs::read_dir(format!("{root}/.pruned/{stamp}"))?

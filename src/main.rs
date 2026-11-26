@@ -2588,7 +2588,7 @@ fn strength(lines: &[Value], note: &Value, now: u64) -> f64 {
         ("SANDMAN_USED_WEIGHT", 3.0f64),
         ("SANDMAN_SHOWN_WEIGHT", 1.0f64),
         ("SANDMAN_JUDGED_WEIGHT", 4.0f64),
-        ("SANDMAN_HALF_LIFE_DAYS", 30.0f64),
+        ("SANDMAN_HALF_LIFE_DAYS", 14.0f64),
     ]
     .map(|(key, default)| setting(key, default));
     let about: Vec<&Value> = lines
