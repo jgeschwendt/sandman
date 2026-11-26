@@ -5375,13 +5375,15 @@ fn main() -> ExitCode {
                         )
                     } else if due {
                         // decay first, with no model run: each note under the floor but one about
-                        // the person, pinned or muted, or with a verdict consolidate still answers
-                        let decay = || -> io::Result<Vec<(PathBuf, PathBuf)>> {
+                        // the person, pinned or muted, or with a verdict consolidate still answers;
+                        // each retirement is kept only while the measure holds, one note at a time
+                        let decay = |before: &Value| -> io::Result<(usize, bool)> {
                             let (floor, now) = (
                                 setting("SANDMAN_DECAY_FLOOR", 0.1f64),
                                 day(&today()).unwrap_or_default(),
                             );
-                            let mut moved = Vec::new();
+                            let (mut current, mut moved, mut back) =
+                                (before.clone(), 0usize, false);
                             for note in
                                 [notes(&data, "memories"), notes(&data, "knowledge")].concat()
                             {
@@ -5395,10 +5397,21 @@ fn main() -> ExitCode {
                                         json!(format!("decay: strength {force} under {floor}"));
                                     let aside =
                                         retire(&data, &note, "prune", &cause, &Value::Null)?;
-                                    moved.push((located(&data, &note), aside));
+                                    let measured = measure(&data, None, &label);
+                                    if worse(&current, &measured) {
+                                        let reason = json!(format!(
+                                            "order: eval {} \u{2192} {}",
+                                            current["eval"], measured["eval"]
+                                        ));
+                                        let put = (located(&data, &note), aside);
+                                        unwind(&data, &[(None, vec![put])], &reason)?;
+                                        back = true;
+                                    } else {
+                                        (current, moved) = (measured, moved.saturating_add(1));
+                                    }
                                 }
                             }
-                            Ok(moved)
+                            Ok((moved, back))
                         };
                         let review = || -> io::Result<Value> {
                             let mine = |kind: &str| -> Vec<&Value> {
@@ -5932,26 +5945,17 @@ fn main() -> ExitCode {
                             }))
                         };
                         // the review's line carries the store's order before decay and after the pass;
-                        // a decay that lowers the recall evaluation's score is put back first
+                        // a decay retirement that lowers the recall evaluation's score is put back
                         let reflect = || -> io::Result<Value> {
                             let before = measure(&data, None, &label);
-                            let moved = decay()?;
-                            let decayed = measure(&data, None, &label);
-                            let back = !moved.is_empty() && worse(&before, &decayed);
-                            let cause = json!(format!(
-                                "order: eval {} \u{2192} {}",
-                                before["eval"], decayed["eval"]
-                            ));
-                            let _: Option<()> = back
-                                .then(|| unwind(&data, &[(None, moved.clone())], &cause))
-                                .transpose()?;
+                            let (moved, back) = decay(&before)?;
                             let mut line = review().or_else(|error| match STOP.get() {
                                 Some(_) => Err(error),
                                 None => Ok(json!({"error": one_line(&error.to_string(), 400), "history": {}, "outcome": "failed"})),
                             })?;
                             (line["order"], line["pruned"]) = (
                                 json!({"after": measure(&data, None, &label), "before": before, "merges": 0u8}),
-                                moved.len().into(),
+                                moved.into(),
                             );
                             let _: Option<()> = back.then(|| line["reverted"] = true.into());
                             Ok(line)

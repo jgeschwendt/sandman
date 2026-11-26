@@ -4403,8 +4403,8 @@ printf '{"ops":[],"under":"%s"}\n' $u
     /// The recall evaluation: each order block carries `eval`, the share of `eval/recall.jsonl`'s
     /// examples recall's lexical rank gets right. A consolidate whose merge of notes lowers it is
     /// reverted (the merge's note removed, its parents put back, `revert` lines, the intake kept);
-    /// one that lowers notes and keeps the score stands. A decay that lowers it is put back before
-    /// the review's model run. A selection question the review proposes is scored with the one in
+    /// one that lowers notes and keeps the score stands. A decay retirement that lowers it is put
+    /// back on its own, the harmless ones standing, before the review's model run. A selection question the review proposes is scored with the one in
     /// force over the examples by the decision model, adopted when no worse, and recall asks it;
     /// a scorer that answers nothing fails the review.
     #[test]
@@ -4580,7 +4580,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             &sandman(&verbs, &["check"], "")?,
             "0\ncheck: 3 notes, 0 held, 0 released: clean\n",
         )?;
-        // the weekly review: a decay that loses an example is put back; a question no worse is
+        // the weekly review: a retirement that loses an example is put back; a question no worse is
         // adopted, a worse one kept out, a scorer's silence fails the review
         let weekly = temp("evaluation-weekly")?;
         let vpn = note(
@@ -4590,6 +4590,7 @@ printf '{"ops":[],"under":"%s"}\n' $u
             "",
         )
         .replace("2026-11-10", "2026-06-01");
+        let dull = note("f00000000003", "Dull", "nothing", "").replace("2026-11-10", "2026-06-01");
         let reflector = r#"c=$(head -n 1 "$0.cases"); tail -n +2 "$0.cases" > "$0.rest"; mv "$0.rest" "$0.cases"
 cat > "$0.$c"
 case $c in '') q=null;; *) q="\"sample: $c question?\"";; esac
@@ -4625,6 +4626,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                     "memories/-q/feedback_notes.md",
                     &note("f00000000002", "Beta release notes", "cut weekly", ""),
                 ),
+                ("memories/-q/feedback_dull.md", &dull),
                 ("memories/-q/feedback_vpn.md", &vpn),
                 (
                     "pplx.fail",
@@ -4677,10 +4679,35 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             &seen.join("\n"),
             &[
                 "\"adopted\" 1 true {\"new\":1.0,\"old\":1.0} 1 null",
-                "\"kept\" 1 true {\"new\":0.5,\"old\":1.0} 0 null",
-                "\"failed\" 1 true null 0 \"question: pplx: output: EOF while parsing a value at line 1 column 0\"",
+                "\"kept\" 0 true {\"new\":0.5,\"old\":1.0} 0 null",
+                "\"failed\" 0 true null 0 \"question: pplx: output: EOF while parsing a value at line 1 column 0\"",
             ]
             .join("\n"),
+        )?;
+        // the first decay: the harmless note stays retired, the one that loses the example is put
+        // back with its own revert line
+        let decays: Vec<String> = fs::read_to_string(format!("{weekly}/{today}"))?
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|line| line["kind"] == "rewrite")
+            .take(3)
+            .map(|line| {
+                format!(
+                    "{} {} {}",
+                    line["op"],
+                    line["from"][0]["path"].as_str().unwrap_or_default(),
+                    line["reason"]
+                )
+            })
+            .collect();
+        same(
+            &format!(
+                "{} {} {}",
+                decays.join("\n"),
+                fs::exists(format!("{weekly}/memories/-q/feedback_dull.md"))?,
+                fs::exists(format!("{weekly}/memories/-q/feedback_vpn.md"))?
+            ),
+            "\"prune\" -q/feedback_dull.md \"decay: strength 0 under 0.1\"\n\"prune\" -q/feedback_vpn.md \"decay: strength 0 under 0.1\"\n\"revert\"  \"order: eval 1.0 \u{2192} 0.5\" false true",
         )?;
         let pulled = [
             ("PATH", path.as_str()),
