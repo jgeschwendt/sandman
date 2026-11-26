@@ -955,11 +955,11 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
       <code class="code">idle</code> the days since the latest of its <code class="code">created</code>,
       <code class="code">updated</code>, used verdicts and shows. <code class="code">$SANDMAN_USED_WEIGHT</code> (3),
       <code class="code">$SANDMAN_SHOWN_WEIGHT</code> (1), <code class="code">$SANDMAN_JUDGED_WEIGHT</code> (4),
-      <code class="code">$SANDMAN_HALF_LIFE_DAYS</code> (30). <code class="code">idle</code> counts whole days to the local
+      <code class="code">$SANDMAN_HALF_LIFE_DAYS</code> (14). <code class="code">idle</code> counts whole days to the local
       today (<code class="code">$SANDMAN_TODAY</code>, as <a class="link" href="intentions.html">intentions</a> date), 0 for a note
       with none of those dates; chart rounds to 3 places, and a judged note can go below 0.</li>
-    <li><strong>floor</strong> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 100
-      days idle (30 · log₂ 10), shown once 130, used once 160, used five times 220.</li>
+    <li><strong>floor</strong> — <code class="code">$SANDMAN_DECAY_FLOOR</code> (0.1): a note never used reaches it after 47
+      days idle (14 · log₂ 10), shown once 61, used once 75, used five times 103.</li>
     <li><strong>decay</strong> — the weekly review first prunes, with no model run, each active note under the floor but a
       <code class="code">type: user</code> note, a <code class="code">recall: pin</code> or <code class="code">mute</code> one,
       one with a judged verdict outstanding (consolidate's to revise or prune), and a trace (consolidate's): moved to
