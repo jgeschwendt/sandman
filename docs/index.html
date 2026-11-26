@@ -887,7 +887,7 @@ updated: &lt;now&gt;                   as today
       lowers the score, has its order ops reverted: each one's written note removed (a <code class="code">revert</code>
       line ending it), its copies back from <code class="code">.pruned/</code> (a <code class="code">revert</code> line
       each whose <code class="code">to</code> is the note, which no earlier end then counts), outcome
-      <code class="code">reverted</code> (the review's line: <code class="code">reverted: true</code>, before its model run).
+      <code class="code">reverted</code> (a decay's retirements are judged one at a time instead, <a class="link" href="#cycle-strength">above</a>; the review's line: <code class="code">reverted: true</code> when any was put back).
       A trace's intake and a verdict's revise are never reverted for order. Each order op ends more notes than it
       writes, so only the score fails a pass.</li>
   </ul>
@@ -964,7 +964,10 @@ rethink {"path":string, "verdict":string, "why"?:string, "session"?:string}     
       <code class="code">type: user</code> note, a <code class="code">recall: pin</code> or <code class="code">mute</code> one,
       one with a judged verdict outstanding (consolidate's to revise or prune), and a trace (consolidate's): moved to
       <code class="code">.pruned/</code> as consolidate's prune, its rewrite line <code class="code">model</code> null and
-      <code class="code">reason</code> <code class="code">decay: strength &lt;s&gt; under &lt;floor&gt;</code>.</li>
+      <code class="code">reason</code> <code class="code">decay: strength &lt;s&gt; under &lt;floor&gt;</code>. Each retirement is
+      judged on its own, in order, against the store's measure after the one before: one that fails the measure as
+      consolidate's pass does (<a class="link" href="#cycle-rewrite">order</a>) is put back at once, a
+      <code class="code">revert</code> line ending it, and the rest stand.</li>
   </ul>
 
   <h3 class="h3" id="cycle-graduate">Graduation</h3>
