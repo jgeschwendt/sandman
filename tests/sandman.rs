@@ -123,7 +123,7 @@ mod tests {
     }
 
     /// `sandman args` with `envs` in place of `HOME` and the `SANDMAN_*` vars; no `sandman-infer`
-    /// child, and no socket answers unless a test fakes one (`stub`); Kev and Jev are curl, and the
+    /// child, and no socket answers unless a test fakes one (`stub`); Jev is curl, and the
     /// first on `PATH` refuses (exit 7) unless a test names its own (`stub`).
     fn command(envs: &[(&str, &str)], args: &[&str]) -> Command {
         static REFUSE: OnceLock<String> = OnceLock::new();
@@ -282,8 +282,8 @@ mod tests {
     }
 
     /// A stub `curl` in `<root>/bin`, and `PATH` with it first, and a fake `sandman-infer` on
-    /// `<root>/run/infer.sock`: each request appended to `<root>/<name>.in` (`kev` or `jev` by its
-    /// URL, `embed` or `pplx` by its op), curl's argv to `<name>.argv`, the key variable to
+    /// `<root>/run/infer.sock`: each request appended to `<root>/<name>.in` (`jev`, `embed` or
+    /// `pplx` by its op), curl's argv to `<name>.argv`, the key variable to
     /// `<name>.env` and Jev's config to `jev.config`; `<root>/<name>.fail`, when present, is sourced
     /// first, the request in `$body`; an embedding is `[clock, deploy, beta, 1]`, each 1 when the
     /// text holds the word, a decision `<root>/answers`. The fake replies with what its script
@@ -295,13 +295,11 @@ mod tests {
             format!("{bin}/curl"),
             format!(
                 r#"#!/bin/sh
-for arg; do url=$arg; done
-case $url in *1703*) n=kev;; *) n=jev;; esac
-printf '%s\n' "$@" > {root}/$n.argv
-printf '[%s]' "$SANDMAN_SYSTEMONE_KEY" > {root}/$n.env
+printf '%s\n' "$@" > {root}/jev.argv
+printf '[%s]' "$SANDMAN_SYSTEMONE_KEY" > {root}/jev.env
 case "$*" in *-K*) cat > {root}/jev.config; body=$(cat <&3);; *) body=$(cat);; esac
-printf '%s\n' "$body" >> {root}/$n.in
-[ -f {root}/$n.fail ] && . {root}/$n.fail
+printf '%s\n' "$body" >> {root}/jev.in
+[ -f {root}/jev.fail ] && . {root}/jev.fail
 exec cat {root}/answers
 "#
             ),
@@ -5615,7 +5613,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         let root = temp("seed")?;
         plant(&root, &CORPUS)?;
         let path = stub(&root)?;
-        for name in ["embed", "pplx", "kev"] {
+        for name in ["embed", "pplx"] {
             fs::write(format!("{root}/{name}.fail"), "sleep 5\n")?;
         }
         // the sample seed's instructions and always-set, for another session
@@ -5627,8 +5625,8 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
                 .replace(&format!("{ID}a"), &format!("{ID}{letter}"))
         };
         let foot = "read one in full: sandman show <path>\n";
-        let lexical = "recall \u{b7} fix it \u{b7} 5 of 6 \u{b7} lexical: embed and pplx and kev and jev failed\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\n.00 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.00 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n";
-        let error = "embed: timed out after 300 ms; pplx: timed out after 300 ms; kev: timed out after 300 ms; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key";
+        let lexical = "recall \u{b7} fix it \u{b7} 5 of 6 \u{b7} lexical: embed and pplx and jev failed\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\n.00 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.00 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n";
+        let error = "embed: timed out after 300 ms; pplx: timed out after 300 ms; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key";
         let mut want = Vec::new();
         for (letter, prompt, ranked, sent) in [
             ("b", "", "", ""),
@@ -5723,7 +5721,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
 
     /// `recall` refuses a seed's bad stdin and a bad session id (exit 2). Each stage degrades in
     /// the same bound, never an error to the agent, every failure on stderr and in the ledger: the
-    /// embeddings down, the decision on the lexical order; pplx down, Kev; Kev down too, Jev with
+    /// embeddings down, the decision on the lexical order; pplx down, Jev with
     /// the key as curl config on its stdin (from the key file, then the environment over it), the
     /// request on fd 3, its argv and environment never holding the key; Jev out of credit, held down
     /// for 6 hours, 60 s past any other failure, skipped while it holds; no decision model, the
@@ -5782,27 +5780,22 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} pplx: embed failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.98 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.97 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.96 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.94 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\n.92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: embed: no_model: not loaded\nrecall: scorer=\"pplx\" embedded=false ask=true about=null",
         )?;
         mend("embed")?;
-        // pplx booting: Kev, the same request but its model
+        // pplx booting: Jev, the same request but its model, the key never in an argv or the
+        // environment curl sees
         fail("pplx", "echo '{\"code\":\"booting\",\"ok\":false}'; exit\n")?;
+        plant(&root, &[(".config/typesafe/api_key", "file-key\n")])?;
         same(
             &head(&pull(&envs(&[]), &clocked)?),
-            "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} kev: pplx failed",
+            "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} jev: pplx failed",
         )?;
         same(
-            read("kev.in").lines().last().unwrap_or_default(),
+            read("jev.in").lines().last().unwrap_or_default(),
             &read("pplx.in")
                 .lines()
                 .last()
                 .unwrap_or_default()
-                .replace(r#""op":"decide""#, r#""model":"kev-latest""#),
+                .replace(r#""op":"decide""#, r#""model":"jev-latest""#),
         )?;
-        same(
-            &format!("{}{}", read("kev.argv"), read("kev.env")),
-            "-q\n-sS\n--fail-with-body\n--max-time\n2\n-H\nContent-Type: application/json\n--data-binary\n@-\nhttp://127.0.0.1:1703/v1/systemone\n[]",
-        )?;
-        // Kev down too: Jev, the key never in an argv or the environment curl sees
-        fail("kev", "exit 7\n")?;
-        plant(&root, &[(".config/typesafe/api_key", "file-key\n")])?;
         for (key, want) in [(None, "file-key"), (Some("env-key"), "env-key")] {
             let keyed = envs(
                 &key.map(|set| ("TYPESAFE_API_KEY", set))
@@ -5811,7 +5804,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             );
             same(
                 &head(&pull(&keyed, &clocked)?),
-                "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} jev: pplx and kev failed",
+                "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} jev: pplx failed",
             )?;
             same(
                 &read("jev.config"),
@@ -5850,7 +5843,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         )?;
         same(
             &pull(&envs(&[]), &clocked)?,
-            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} hybrid, no decision model: pplx and kev and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.98 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.98 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.95 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.94 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\n.92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: pplx: booting; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\nrecall: scorer=null embedded=true ask=true about=null",
+            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} hybrid, no decision model: pplx and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.98 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.98 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.95 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\n.94 Beta pins its node version (project \u{b7} -work-beta/project_node.md) \u{2014} node 22 from mise\n.92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: pplx: booting; jev: exit status: 22: curl: (22) The requested URL returned error: 402\nrecall: scorer=null embedded=true ask=true about=null",
         )?;
         downed(
             21_600_000,
@@ -5859,7 +5852,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         let asked = read("jev.in").lines().count();
         same(
             &head(&pull(&envs(&[]), &clocked)?),
-            "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} hybrid, no decision model: pplx and kev failed",
+            "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} hybrid, no decision model: pplx failed",
         )?;
         same(
             &read("jev.in").lines().count().to_string(),
@@ -5876,7 +5869,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
         fail("embed", "exec echo '{\"embeddings\":[]}'\n")?;
         same(
             &pull(&envs(&[]), &clocked)?,
-            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed and pplx and kev and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\nread one in full: sandman show <path>\nsandman recall: embed: reply: not one embedding per text; pplx: booting; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\nrecall: scorer=null embedded=false ask=true about=null",
+            "0\nrecall \u{b7} add a clock to the alpha tests \u{b7} 5 of 6 \u{b7} lexical: embed and pplx and jev failed\n1.00 Pass a clock in (feedback \u{b7} -work-alpha/feedback_clock.md) \u{2014} Tests take time from an injected clock, never a mocked one: a mock hides the drift a real clock shows within a day, and every fixture pins its dates \u{2014} na\u{ef}ve caf\n.25 Alpha deploys need the vpn (project \u{b7} -work-alpha/project_vpn.md) \u{2014} the deploy host is private\n.19 The grammar lives in one file (reference \u{b7} -work-alpha/reference_grammar.md) \u{2014} src/grammar.pest\n.00 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\n.00 Beta ties break by date (feedback \u{b7} -work-beta/feedback_tie.md) \u{2014} newer first\nread one in full: sandman show <path>\nsandman recall: embed: reply: not one embedding per text; pplx: booting; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\nrecall: scorer=null embedded=false ask=true about=null",
         )?;
         mend("embed")?;
         // the order is one setting: none, the hybrid; an unknown name skipped
@@ -5884,14 +5877,18 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             &head(&pull(&envs(&[("SANDMAN_SCORERS", "")]), &clocked)?),
             "recall \u{b7} add a clock to the alpha tests \u{b7} 6 of 6 \u{b7} hybrid, no decision model",
         )?;
-        fail("kev", "exec echo '{}'\n")?;
+        fs::remove_file(format!("{root}/jev-down.json"))?;
+        fail("jev", "exec echo '{}'\n")?;
         same(
-            &pull(&envs(&[("SANDMAN_SCORERS", "x,kev")]), &clocked)?
-                .lines()
-                .skip(7)
-                .collect::<Vec<_>>()
-                .join("\n"),
-            ".92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: kev: reply: no noul for question 0\nrecall: scorer=null embedded=true ask=true about=null",
+            &pull(
+                &envs(&[("SANDMAN_SCORERS", "x,jev"), ("TYPESAFE_API_KEY", "k")]),
+                &clocked,
+            )?
+            .lines()
+            .skip(7)
+            .collect::<Vec<_>>()
+            .join("\n"),
+            ".92 ~Beta retries back off twice (feedback \u{b7} traces/-work-beta/feedback_retry.md) \u{2014} a failed beta deploy retries twice, then stops\nread one in full: sandman show <path>\nsandman recall: jev: reply: no noul for question 0\nrecall: scorer=null embedded=true ask=true about=null",
         )?;
         // no listener: not running, nothing retried
         fs::remove_file(format!("{root}/run/infer.sock"))?;
@@ -5915,7 +5912,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
             .collect::<Result<_, Box<dyn Error>>>()?;
         same(
             &errors.join("\n"),
-            "\"pplx\" false \"embed: no_model: not loaded\"\n\"kev\" true \"pplx: booting\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\n\"jev\" true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 22: curl: (22) The requested URL returned error: 402\"\nnull true \"pplx: booting; kev: exit status: 7:\"\nnull true \"pplx: booting; kev: exit status: 7:; jev: exit status: 7:\"\nnull false \"embed: reply: not one embedding per text; pplx: booting; kev: exit status: 7:; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\"\nnull true null\nnull true \"kev: reply: no noul for question 0\"\nnull false \"embed: infer: not running; pplx: infer: not running\"",
+            "\"pplx\" false \"embed: no_model: not loaded\"\n\"jev\" true \"pplx: booting\"\n\"jev\" true \"pplx: booting\"\n\"jev\" true \"pplx: booting\"\nnull true \"pplx: booting; jev: exit status: 22: curl: (22) The requested URL returned error: 402\"\nnull true \"pplx: booting\"\nnull true \"pplx: booting; jev: exit status: 7:\"\nnull false \"embed: reply: not one embedding per text; pplx: booting; jev: no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key\"\nnull true null\nnull true \"jev: reply: no noul for question 0\"\nnull false \"embed: infer: not running; pplx: infer: not running\"",
         )?;
         // a listener that never accepts and a request past macOS's socket buffer: the write times
         // out as the read does, inside the bound (Linux buffers it and the read times out; the
@@ -7215,7 +7212,7 @@ esac
                     "home/Library/LaunchAgents/dev.gigantic.sandman.report.plist",
                     "",
                 ),
-                ("home/Library/LaunchAgents/io.jlg.kev.plist", ""),
+                ("home/Library/LaunchAgents/io.jlg.other.plist", ""),
                 ("loaded/dev.gigantic.sandman.report", ""),
             ],
         )?;
@@ -7301,7 +7298,7 @@ bootstrap {gui} {file}
                 fs::read_link(&link)?.display()
             ),
             &format!(
-                r#"{{"dev.gigantic.sandman.plist", "dev.gigantic.sandman.upgrade.plist", "io.jlg.kev.plist"}}true{layout}/current/sandman"#
+                r#"{{"dev.gigantic.sandman.plist", "dev.gigantic.sandman.upgrade.plist", "io.jlg.other.plist"}}true{layout}/current/sandman"#
             ),
         )?;
         // both models in place: no models line from here on

@@ -1332,7 +1332,7 @@ fn lineage<'note, I: IntoIterator<Item = &'note Value>>(notes: I) -> BTreeSet<&'
 }
 
 /// `questions` (keyed by rank) and `state` to each of `$SANDMAN_SCORERS` until one answers a noul
-/// per question, `pplx` on `sandman-infer`'s socket, Kev and Jev by curl, Jev skipped while
+/// per question, `pplx` on `sandman-infer`'s socket, Jev by curl, Jev skipped while
 /// `<root>/jev-down.json` holds it down: the scorer, its nouls, its input tokens and, for `pplx`,
 /// the reply's `version`; and each failure, `(scorer, cause)` (AGENTS.md `### sandman recall`).
 fn decide(
@@ -1356,14 +1356,13 @@ fn decide(
     };
     let (down, tried, mut errors) = (
         root.join("jev-down.json"),
-        setting("SANDMAN_SCORERS", "pplx,kev,jev".to_owned()),
+        setting("SANDMAN_SCORERS", "pplx,jev".to_owned()),
         Vec::new(),
     );
     let held_down = serde_json::from_str::<Value>(&fs::read_to_string(&down).unwrap_or_default())
         .ok()
         .and_then(|stamp| stamp["until"].as_u64())
         .is_some_and(|until| until > now());
-    let request = |model: &str| json!({"model": model, "questions": questions, "state": state});
     let decided = tried
         .split(',')
         .filter(|scorer| !(*scorer == "jev" && held_down))
@@ -1379,13 +1378,6 @@ fn decide(
                     ),
                     String::new(),
                 ),
-                "kev" => post(
-                    "http://127.0.0.1:1703/v1/systemone",
-                    &request("kev-latest").to_string(),
-                    "",
-                    begun,
-                    limit,
-                ),
                 "jev" if secret.is_empty() => (
                     Err(io::Error::other(
                         "no API key: set TYPESAFE_API_KEY or write it to ~/.config/typesafe/api_key",
@@ -1394,7 +1386,8 @@ fn decide(
                 ),
                 "jev" => post(
                     "https://api.typesafe.ai/v1/systemone",
-                    &request("jev-latest").to_string(),
+                    &json!({"model": "jev-latest", "questions": questions, "state": state})
+                        .to_string(),
                     &secret,
                     begun,
                     limit,
@@ -1897,8 +1890,12 @@ fn pool(root: &Path) -> (Vec<Value>, Vec<Value>) {
 
 /// `request` posted to `url` by curl through `sh -c` in its own process group, fed and drained
 /// beside the wait, the group killed when `limit` past `begun` runs out: the reply, and what curl
-/// printed on both streams. A `key` goes to curl as config on its stdin and the request on fd 3,
+/// printed on both streams. The `key` goes to curl as config on its stdin and the request on fd 3,
 /// curl run with the key's variable emptied, so it is never in an argv.
+#[expect(
+    clippy::single_call_fn,
+    reason = "Jev's request, kept apart from `decide`'s scorer match"
+)]
 fn post(
     url: &str,
     request: &str,
@@ -1906,20 +1903,10 @@ fn post(
     begun: Instant,
     limit: Duration,
 ) -> (io::Result<Value>, String) {
-    let curl = |config: &str, data: &str| {
-        format!(
-            "curl -q {config}-sS --fail-with-body --max-time {} -H 'Content-Type: application/json' --data-binary @{data} {url}",
-            limit.as_secs_f64()
-        )
-    };
-    let command = if key.is_empty() {
-        curl("", "-")
-    } else {
-        format!(
-            r#"{{ printf 'header = "Authorization: Bearer %s"\n' "$SANDMAN_SYSTEMONE_KEY" | SANDMAN_SYSTEMONE_KEY= {}; }} 3<&0"#,
-            curl("-K - ", "/dev/fd/3")
-        )
-    };
+    let command = format!(
+        r#"{{ printf 'header = "Authorization: Bearer %s"\n' "$SANDMAN_SYSTEMONE_KEY" | SANDMAN_SYSTEMONE_KEY= curl -q -K - -sS --fail-with-body --max-time {} -H 'Content-Type: application/json' --data-binary @/dev/fd/3 {url}; }} 3<&0"#,
+        limit.as_secs_f64()
+    );
     let mut pipes = (String::new(), String::new());
     let answer = (|| {
         let (input, mut feed) = io::pipe()?;

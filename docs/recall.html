@@ -135,7 +135,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </header>
   <figure class="figure">
     <div class="chart-frame" id="flow">
-      <svg width="964" height="460" viewBox="0 0 964 460" role="img" aria-label="recall's flow: the seed and the agent's pull bring a cue to the lexical gate, which ends a cue of steering words with nothing recalled; BM25 over every memory and trace and the cosine of its cached embedding against the embedded query are fused by reciprocal rank; the fused top 10 go in one request to pplx, else Kev, else Jev; the decision's order and the fused one are fused again and cut at 6 lines; with no decision model the hybrid cut, with no embeddings either the lexical cut; the digest goes to the caller and one recall line to the ledger">
+      <svg width="964" height="460" viewBox="0 0 964 460" role="img" aria-label="recall's flow: the seed and the agent's pull bring a cue to the lexical gate, which ends a cue of steering words with nothing recalled; BM25 over every memory and trace and the cosine of its cached embedding against the embedded query are fused by reciprocal rank; the fused top 10 go in one request to pplx, else Jev; the decision's order and the fused one are fused again and cut at 6 lines; with no decision model the hybrid cut, with no embeddings either the lexical cut; the digest goes to the caller and one recall line to the ledger">
         <defs>
           <marker id="flow-head" viewBox="0 0 8 8" refX="8" refY="4" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L8,4L0,8Z" /></marker>
         </defs>
@@ -146,7 +146,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
         <g transform="translate(392,168)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">③ cosine</text><text class="flow-note" x="12" y="46">cached vectors, the</text><text class="flow-note" x="12" y="64">query embedded</text></g>
         <g transform="translate(588,28)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">④ fuse</text><text class="flow-note" x="12" y="46">reciprocal rank,</text><text class="flow-note" x="12" y="64">a tie bm25's order</text></g>
         <g transform="translate(784,28)"><rect class="flow-box is-accent" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑤ pplx decides</text><text class="flow-note" x="12" y="46">the top 10, one</text><text class="flow-note" x="12" y="64">request, a noul each</text></g>
-        <g transform="translate(784,168)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">kev, then jev</text><text class="flow-note" x="12" y="46">the same request,</text><text class="flow-note" x="12" y="64">their model's name</text></g>
+        <g transform="translate(784,168)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">else jev</text><text class="flow-note" x="12" y="46">the same request,</text><text class="flow-note" x="12" y="64">its model's name</text></g>
         <g transform="translate(0,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑧ recall line</text><text class="flow-note" x="12" y="46">to the ledger: path,</text><text class="flow-note" x="12" y="64">sent, any error</text></g>
         <g transform="translate(196,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">⑦ digest</text><text class="flow-note" x="12" y="46">to the caller; the</text><text class="flow-note" x="12" y="64">seed's is injected</text></g>
         <g transform="translate(392,308)"><rect class="flow-box" width="148" height="84" rx="8" /><text class="flow-name" x="12" y="24">lexical cut</text><text class="flow-note" x="12" y="46">no vectors, no</text><text class="flow-note" x="12" y="64">model: bm25's top 5</text></g>
@@ -199,7 +199,6 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <table data-table>
     <thead><tr><th>pipeline</th><th>lines</th><th>precision</th><th>must-recall</th><th>no-ask empty</th><th>time or cost</th></tr></thead>
     <tbody>
-      <tr><td>lexical top 39 → Kev-4B, blended</td><td>4.65</td><td>.592</td><td>.601</td><td>1.0</td><td>~3–5 s</td></tr>
       <tr><td>lexical top 39 → hosted Jev, blended</td><td>5.81</td><td>.603</td><td>.663</td><td>1.0</td><td>~1 s, 7.5k tokens</td></tr>
       <tr><td>lexical only <span class="badge badge-ok">built, the last fallback</span></td><td>4.34</td><td>.584</td><td>.510</td><td>1.0</td><td>2 ms</td></tr>
       <tr><td>lexical ⊕ embeddings, no decision model <span class="badge badge-ok">built, the fallback</span></td><td>4.45</td><td>.622</td><td>.582</td><td>1.0</td><td>~30 ms</td></tr>
@@ -214,8 +213,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   <p class="docs-note">98 cues over the real corpus; one gold of 7,523 Opus-judged labels, 208 of them must-haves;
     rules fit on a dev half, confirmed on the held-out half (measured 2026-11-13 · the recall evaluation's
     union-final table). Embeddings add about 3 points of must-recall once the decision model is there, 7 without it.</p>
-  <p>Kev-4B as a second stage ranked worse than the free first stage alone, and rerankers and larger embedding
-    models did not beat the two-model pipeline. Hosted Jev over every memory is no better than it at 121.5k tokens a
+  <p>Rerankers and larger embedding models did not beat the two-model pipeline. Hosted Jev over every memory is no better than it at 121.5k tokens a
     pull.</p>
   <p>The ten candidates go in one request. The decision model's card calls one question a request the safer
     default; here it scored lower on every measure and took 1.8 times as long, since the local server answers one
@@ -380,11 +378,11 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
   </header>
   <p>Each stage drops out within the same bound and the rest answer, never an error to the agent: the embeddings down,
     the decision runs on BM25's order; a decision model down, the next in <code class="code">$SANDMAN_SCORERS</code>
-    (<code class="code">pplx,kev,jev</code>), each sent the same request; none, the hybrid cut; nothing, the lexical cut.
+    (<code class="code">pplx,jev</code>), each sent the same request; none, the hybrid cut; nothing, the lexical cut.
     The header names the path and what failed (<code class="code">· pplx (infer &lt;version&gt;)</code>, the build
     that answered, plain <code class="code">· pplx</code> from an older child,
-    <code class="code">· kev: pplx failed</code>, <code class="code">· hybrid, no decision model</code>,
-    <code class="code">· lexical: embed and pplx and kev and jev failed</code>) and the ledger line keeps each cause.</p>
+    <code class="code">· jev: pplx failed</code>, <code class="code">· hybrid, no decision model</code>,
+    <code class="code">· lexical: embed and pplx and jev failed</code>) and the ledger line keeps each cause.</p>
   <ul class="stack claims" role="list">
     <li>Down is no socket or a refused connection, a timeout, an HTTP error or a refusal
       (<code class="code">booting</code>, <code class="code">no_model</code>), a reply without a noul or an embedding per
@@ -399,7 +397,7 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     <h2 class="h2">Hosted or local?</h2><span class="badge badge-ok">settled</span>
   </header>
   <p>Local: both models run on this machine, and nothing leaves it unless hosted Jev is placed in the scorer order
-    and reached, which today needs pplx and Kev to fail first. Then the cue and ten names, descriptions and repository
+    and reached, which today needs pplx to fail first. Then the cue and ten names, descriptions and repository
     labels go to <code class="code">api.typesafe.ai</code>; bodies never do. The <code class="code">user</code> memories
     and pinned ones are never candidates: they ride the seed unscored.</p>
 </section>
@@ -579,11 +577,49 @@ tr.is-proposed td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
     in <code class="code">&lt;root&gt;/models</code>, which <code class="code">sandman setup</code> creates and names the
     sources for; about 8 GB resident, both loaded at start. It reports <code class="code">booting</code> for the first
     seconds, about 13 s on the first start after an install while Metal compiles its shaders, and recall falls back
-    meanwhile and says so (<code class="code">embed: booting</code>); Kev on <code class="code">127.0.0.1:1703</code> is
-    the next scorer, hosted Jev the last. Without the child, recall loses its cosine rank and the pplx scorer and says
-    so: Kev or Jev still decide over the BM25 order, and only with no scorer answering either does it answer from BM25
-    alone; without the cache, a pull embeds 8 and the tick fills the rest.</p>
-  <p>Parity with what it replaced (measured 2026-11-22, M4 Max · <code class="code">infer/tests/infer.rs</code>
+    meanwhile and says so (<code class="code">embed: booting</code>); hosted Jev is the next scorer. Without the child, recall loses its cosine
+    rank and the pplx scorer and says so: Jev still decides over the BM25 order, and only with no scorer answering does
+    it answer from BM25 alone; without the cache, a pull embeds 8 and the tick fills the rest.</p>
+</section>
+
+<section class="docs-section" id="infer">
+  <header>
+    <h2 class="h2">The infer socket</h2>
+  </header>
+  <p>One JSON request line, one JSON reply line, a connection each, on
+    <code class="code">&lt;root&gt;/run/infer.sock</code> (<code class="code">&lt;root&gt;</code> is
+    <code class="code">$SANDMAN_ROOT</code>, else <code class="code">~/.sandman</code>). A client has 1 s from its accept to send the
+    whole line (at most 1 MiB), and 1 s to take the reply.</p>
+  <pre class="snippet">{"op":"decide","questions":{"&lt;id&gt;":{"instructions"?:"&lt;text&gt;","type":"noul"}},"state":"&lt;text&gt;"}
+  → {"answers":{"&lt;id&gt;":{"noul":&lt;0..1&gt;,"type":"noul"}},"ok":true,"usage":{"input_tokens":n},"version":"&lt;build&gt;"}
+
+refused  → {"code":"&lt;code&gt;","ok":false,"reason"?:"&lt;text&gt;"}</pre>
+  <ul class="stack claims" role="list">
+    <li><strong>request</strong> — <code class="code">questions</code> is a non-empty object of non-empty ids, each
+      <code class="code">{"type":"noul"}</code> with an optional string <code class="code">instructions</code> and no other field;
+      <code class="code">state</code> is a string. A noul is the model's probability that the answer is yes, one per id, and the
+      prompt holds at most 8,192 tokens.</li>
+    <li><strong>refusals</strong> — <code class="code">bad_request</code> (a malformed line, or a <code class="code">decide</code> not
+      shaped as above, the reason naming the shape), <code class="code">too_long</code> (over 8,192 tokens, the reason the count),
+      <code class="code">no_model</code> (the decision model failed to load, the reason its cause),
+      <code class="code">unknown_op</code>, <code class="code">booting</code> (the models are still loading: retry later) and
+      <code class="code">stopping</code>.</li>
+    <li><strong>readiness</strong> — <code class="code">{"op":"health"}</code> answers at once, even while booting, with
+      <code class="code">"state"</code> <code class="code">booting</code>, <code class="code">ready</code>,
+      <code class="code">degraded</code> or <code class="code">stopping</code> and <code class="code">"models"</code>
+      <code class="code">{"decide":bool,"embed":bool}</code>; <code class="code">decide</code> answers only once
+      <code class="code">booting</code> has passed.</li>
+    <li><strong>one at a time</strong> — the accept loop reads each connection in turn and one worker runs the model ops in the
+      order they arrive, <code class="code">decide</code> and <code class="code">embed</code> alike, so a second request waits behind
+      the first; a stop answers the queued ones <code class="code">stopping</code>.</li>
+  </ul>
+</section>
+
+<section class="docs-section" id="parity">
+  <header>
+    <h2 class="h2">Parity with what it replaced</h2>
+  </header>
+  <p>Measured 2026-11-22 ( M4 Max · <code class="code">infer/tests/infer.rs</code>
     <code class="code">parity</code>): the decision prompt tokenises to the official encoder's ids, nouls within
     1.5e-7 of the prototype's native run; embeddings at cosine .99999955 or more against Ollama's over 50 texts.
     Ten questions decide in about 415 ms, 16 embeddings in about 124 ms. Side by side with the installed Ollama path
