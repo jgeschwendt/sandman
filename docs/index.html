@@ -432,7 +432,9 @@ anything else     → {"code":"bad_request"|"unknown_op","ok":false}</pre>
       sandman's manifest, its exit code hotswap's (0 green or settled, 1 red, 2 unable to try). A release is newer when
       <code class="code">releases/latest</code> names a newer tag; packslip installs it beside the running version,
       <code class="code">current</code> moves, then <code class="code">sandman setup</code>, one <code class="code">kickstart -k</code> of
-      <code class="code">dev.gigantic.sandman</code> and the smoke: <code class="code">sandman version</code>, then
+      <code class="code">dev.gigantic.sandman</code> (when launchd shows it loaded at login with a managed launch constraint
+      and not disabled, hotswap instead boots it out, waits for the job to go and bootstraps it from its plist, since a
+      kickstart keeps the constraint a swapped binary trips) and the smoke: <code class="code">sandman version</code>, then
       <code class="code">sandman status</code> once a second until the restarted daemon answers with that same version, 30 s at most.
       A failed step rolls back to the previous version and holds the red one off until a newer release. No drain step: the
       kickstart's SIGTERM is the daemon's own 2 s drain, and a separate stop would race KeepAlive's respawn.

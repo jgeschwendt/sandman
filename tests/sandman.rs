@@ -7200,7 +7200,7 @@ printf '{"encode":null,"consolidate":null,"question":%s,"reason":"sample"}\n' "$
 printf '%s\n' "$*" >> {root}/launchctl.log
 job=${{2##*/}}
 case $1 in
-print) [ -f {root}/loaded/$job.going ] && {{ rm {root}/loaded/$job.going; exit 0; }}; [ -f {root}/loaded/$job ] || exit 113;;
+print) [ -f {root}/loaded/$job.going ] && {{ rm {root}/loaded/$job.going; exit 0; }}; [ -f {root}/loaded/$job ] || exit 113; cat {root}/lwcr/$job 2>/dev/null; :;;
 bootout) [ -f {root}/stuck ] || mv {root}/loaded/$job {root}/loaded/$job.going;;
 bootstrap) [ -f {root}/fail ] && {{ echo 'Bootstrap failed: 5: Input/output error' >&2; exit 5; }}; touch {root}/loaded/$(basename $3 .plist);;
 esac
@@ -7328,9 +7328,27 @@ bootstrap {gui} {file}
         same(
             &format!("{}{}", run(&stubbed, "30000", &["upgrade"])?, calls()?),
             &format!(
-                "0\nsandman 1: green, 2 smoke probes\n{retired}{swapped}print {label}\nbootout {label}\nprint {label}\nprint {label}\nbootstrap {gui} {file}\nkickstart -k {label}\n"
+                "0\nsandman 1: green, 2 smoke probes\n{retired}{swapped}print {label}\nbootout {label}\nprint {label}\nprint {label}\nbootstrap {gui} {file}\nprint {label}\nkickstart -k {label}\n"
             ),
         )?;
+        // a daemon loaded at login (its print says "managed LWCR") is booted out and bootstrapped
+        // afresh by hotswap after setup, never kickstarted
+        drop((setup(&stubbed, "30000", &[])?, calls()?));
+        fs::remove_file(format!("{home}/.local/state/hotswap/sandman.json"))?;
+        plant(
+            &root,
+            &[(
+                "lwcr/dev.gigantic.sandman",
+                &format!("path = {file}\nproperties = managed LWCR | has LWCR\n"),
+            )],
+        )?;
+        same(
+            &format!("{}{}", run(&stubbed, "30000", &["upgrade"])?, calls()?),
+            &format!(
+                "0\nsandman 1: green, 2 smoke probes\n{retired}{swapped}print {label}\nbootout {label}\nprint {label}\nprint {label}\nbootstrap {gui} {file}\nprint {label}\nprint-disabled {gui}\nbootout {label}\nprint {label}\nprint {label}\nbootstrap {gui} {file}\n"
+            ),
+        )?;
+        fs::remove_dir_all(format!("{root}/lwcr"))?;
         same(
             &run(&stubbed, "0", &["upgrade", "--x"])?,
             "2\nusage: sandman upgrade [--check | --back | --retry]\n",
