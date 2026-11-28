@@ -8,11 +8,13 @@ hk = "2.5.0"
 rust = "1.94.0"
 
 [tasks.check]
-description = "the gate hk's pre-push runs over the workspace: fmt, clippy, 100 % line coverage"
+description = "the gate hk's pre-push runs over the workspace: fmt, clippy, 100 % line coverage, the stele graph"
 run = [
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets -- -D warnings",
   { task = "cover" },
+  "stele check",
+  "stele emit --check",
 ]
 
 [tasks.cover]

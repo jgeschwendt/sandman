@@ -269,6 +269,7 @@ fn amend<'text>(fields: &mut Vec<(&'text str, &'text str)>, changes: &[(&'text s
     }
 }
 
+// ※ locked-append
 /// Appends `text` to `path` (created) in one `O_APPEND` write under a shared `flock`; a file
 /// `forget` replaced while this waited on the lock is opened again, so no line lands in an unlinked
 /// one.
@@ -1494,6 +1495,7 @@ fn located(root: &Path, note: &Value) -> PathBuf {
     }
 }
 
+// ※ machine-id
 /// This machine's id: `$SANDMAN_MACHINE`, else `<root>/machine`, created on first use by a hard
 /// link from a temp file, so concurrent first runs agree on one id.
 fn machine(root: &Path) -> String {

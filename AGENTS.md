@@ -2,13 +2,38 @@
 
 ```stele
 kind: system
-purpose: sandman, rewritten from scratch one part at a time — `mark` appends a session's start or end, or a denied tool call (a guard), to the day's ledger file, `take` ends a marked session (archiving its transcript) with one more, `chart` prints what the data root holds as one JSON object, `check` holds every note to the memory cycle's invariants (`--fix` repairs what is mechanical, `--release` prints what release would delete), `recall` seeds a session's start and serves the agent's pulls over the memories (episodic, by repository) and the knowledge store (knowledge pages and playbooks, by topic): a lexical gate, BM25 and cached embeddings fused, a local decision model on the top 10, fused again, `show` prints one, `remember` writes a trace at once, `rethink` records the agent's verdict on a recalled note (and the recall evaluation's example), `defer` keeps work the person puts off as an intention (prospective memory, due a date or after an event) that the seed surfaces when due, `due` lists them, `done` and `drop` close one, `mcp` serves those to an agent as MCP tools, `serve` is the daemon under launchd, whose tick ends sessions that never ended, fills recall's embedding cache, settles held takes, releases transcripts no note names past a week, encodes episodes into traces, a memory's by repository and a knowledge or playbook's by topic, consolidates a bank's traces into the bank and a topic's into its pages and, weekly, reflects: rewrites those two jobs' guidance from evidence, adopted after a judged replay, and recall's selection question once the recall evaluation scores it no worse, unattended, `status` asks it for its health, `setup` installs the release through hotswap (its layout, the `~/.local/bin/sandman` link, the upgrade agent), the daemon under launchd on that link, and retires the old sandman's agents, `upgrade` is hotswap's swap onto a newer release, `forget` erases one session from every store for good, `version` prints the release and build; `sandman-infer`, the workspace's second binary, serves the embedding and decision models in process over llama.cpp on its socket, `serve`'s child, which `recall` (its embeddings and the `pplx` scorer) and the tick's embed ask. Releases come from `.github/workflows/release.yaml`, one per merge to main; `mise run install` builds a checkout as `sandman-next` and `sandman-infer-next`.
+purpose: sandman — session ledger, memory cycle, recall and the launchd daemon (`serve`), plus `sandman-infer`, its local model server; docs/index.html is the design
 commands:
   check: mise run check
   cover: mise run cover
   install: mise run install
   test: cargo test --workspace
+invariants:
+  - claim: every ledger, log and embedding-cache append is one O_APPEND write under a shared flock, opened again when forget replaced the file while it waited — no line lands in an unlinked file
+    anchor: ※ locked-append
+  - claim: the machine id is minted by a hard link from a temp file, so racing first runs agree on one id
+    anchor: ※ machine-id
 ```
+
+<!-- @stele -->
+
+## Hazards (0 active)
+
+
+## Map
+
+| node | kind | purpose | unfold |
+| ---- | ---- | ------- | ------ |
+
+## Indexes
+
+All invariants: `.stele/index/invariants.md` · all hazards: `.stele/index/hazards.md`
+
+## Engine
+
+`stele` CLI available → `stele root | unfold <id> | invariants --touching <path> | hazards | nodes --kind <k>`. MCP: `stele serve`.
+No engine → everything above is complete; nested AGENTS.md files carry the detail (nearest file wins).
+<!-- @end -->
 
 ## Map
 
