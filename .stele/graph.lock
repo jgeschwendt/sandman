@@ -1,0 +1,65 @@
+{
+  "adrs": {},
+  "landmarks": {
+    "locked-append": {
+      "file": "src/main.rs",
+      "line": 272,
+      "node": "/"
+    },
+    "machine-id": {
+      "file": "src/main.rs",
+      "line": 1498,
+      "node": "/"
+    }
+  },
+  "nodes": {
+    "/": {
+      "budget": null,
+      "claims": [
+        {
+          "anchor": "※ locked-append",
+          "enforced_by": null,
+          "id": "locked-append",
+          "kind": "invariant",
+          "resolved": "src/main.rs:272",
+          "text": "every ledger, log and embedding-cache append is one O_APPEND write under a shared flock, opened again when forget replaced the file while it waited — no line lands in an unlinked file",
+          "verified": {
+            "digest": "1034eac8c2915badd53d22887ae3e9a580a2db542a4158cf14f75fd753d8da35",
+            "sha": "70d3459f30dc847a3aaa326f61b453f61386f7e5"
+          }
+        },
+        {
+          "anchor": "※ machine-id",
+          "enforced_by": null,
+          "id": "machine-id",
+          "kind": "invariant",
+          "resolved": "src/main.rs:1498",
+          "text": "the machine id is minted by a hard link from a temp file, so racing first runs agree on one id",
+          "verified": {
+            "digest": "25c95b302722a8fa37d5432d6f911d4701c54929605383df0b78ef1dec6800b9",
+            "sha": "70d3459f30dc847a3aaa326f61b453f61386f7e5"
+          }
+        }
+      ],
+      "commands": {
+        "check": "mise run check",
+        "cover": "mise run cover",
+        "install": "mise run install",
+        "test": "cargo test --workspace"
+      },
+      "contains": [],
+      "declared": {
+        "allow": [],
+        "decided_by": [],
+        "depends": []
+      },
+      "extracted": {
+        "imports": []
+      },
+      "id": "/",
+      "kind": "system",
+      "purpose": "sandman — session ledger, memory cycle, recall and the launchd daemon (`serve`), plus `sandman-infer`, its local model server; docs/index.html is the design"
+    }
+  },
+  "version": 2
+}

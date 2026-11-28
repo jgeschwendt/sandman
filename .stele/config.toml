@@ -1,0 +1,13 @@
+# stele check/emit-time settings (not an input to `build`/the lock).
+#
+# One root node: the Map table below its stele block routes every top-level directory, so each is
+# excluded from exhaustiveness rather than split into nodes that would only restate it.
+[exhaustiveness]
+exclude = [".github", "docs", "infer", "src", "target", "tests"]
+
+# The root AGENTS.md is the contract for every verb (Contracts), loaded whole: 24,213 cl100k tokens
+# and 83.7 KiB (measured 2026-11-28 · stele check), far past the 2,000-token and 32 KiB defaults.
+# The ceilings sit just over that; a split into nested nodes is the way back under them.
+[budget]
+claude_root = 25000
+codex_cap = 90000
